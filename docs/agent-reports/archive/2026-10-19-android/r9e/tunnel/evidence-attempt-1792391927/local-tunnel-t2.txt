@@ -1,0 +1,14 @@
+landscape: keyboard up in portrait before turning: true
+landscape: code field after turning holds "246"
+landscape: keyboard up, 578px; code field Rect(1349, 291 - 2315, 480), keyboard top at 502px
+mark on landscape Home: present
+landscape (90°) Home: display cutout [Rect(0, 470 - 128, 588)], display 2400×1080
+landscape Home: under the camera cutout: [nothing]
+landscape (90°) Details: display cutout [Rect(0, 470 - 128, 588)], display 2400×1080
+landscape Details: under the camera cutout: [nothing]
+landscape (270°) Home: display cutout [Rect(2272, 492 - 2400, 610)], display 2400×1080
+landscape 270° Home: under the camera cutout: [nothing]
+landscape (270°) Details: display cutout [Rect(2272, 492 - 2400, 610)], display 2400×1080
+landscape 270° Details: under the camera cutout: [nothing]
+consent explanation after turning back to portrait: still open
+sign-out: back to the sign-in screen

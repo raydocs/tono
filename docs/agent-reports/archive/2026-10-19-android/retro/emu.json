@@ -1,0 +1,3690 @@
+[
+ {
+  "run": "39209120069",
+  "att": "1",
+  "job": "117919884961",
+  "name": "emulator (tunnel)",
+  "concl": "success",
+  "start": "2026-10-19T06:23:25Z",
+  "end": "2026-10-19T06:51:22Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T06:24:35.3726798Z",
+    "booted": "2026-10-19T06:25:11.9938342Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen",
+     "PASS t6_engineDiesInDozeAndTogetherWithItsWatch"
+    ],
+    "term": "2026-10-19T06:37:51.3288918Z"
+   },
+   {
+    "start": "2026-10-19T06:38:12.5717432Z",
+    "booted": "2026-10-19T06:38:47.0360960Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen",
+     "PASS t6_engineDiesInDozeAndTogetherWithItsWatch"
+    ],
+    "term": "2026-10-19T06:51:11.8213658Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39209120069",
+  "att": "1",
+  "job": "117919884989",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T06:23:25Z",
+  "end": "2026-10-19T06:34:18Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T06:24:34.1894655Z",
+    "booted": "2026-10-19T06:25:10.8678695Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T06:34:08.4016790Z"
+   }
+  ]
+ },
+ {
+  "run": "39209120069",
+  "att": "1",
+  "job": "117919885010",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T06:23:25Z",
+  "end": "2026-10-19T06:28:58Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T06:24:33.8553460Z",
+    "booted": "2026-10-19T06:25:00.1914334Z",
+    "health": [
+     "350"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T06:28:49.3454926Z"
+   }
+  ]
+ },
+ {
+  "run": "39202302351",
+  "att": "1",
+  "job": "117898877592",
+  "name": "emulator (tunnel)",
+  "concl": "success",
+  "start": "2026-10-19T05:05:08Z",
+  "end": "2026-10-19T05:23:17Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T05:06:19.2878197Z",
+    "booted": "2026-10-19T05:07:04.2769433Z",
+    "health": [
+     "1050"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 1050 ms > 1000 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-19T05:08:44.8369606Z"
+   },
+   {
+    "start": "2026-10-19T05:09:04.2370442Z",
+    "booted": "2026-10-19T05:09:48.9415417Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen",
+     "PASS t6_engineDiesInDozeAndTogetherWithItsWatch"
+    ],
+    "term": "2026-10-19T05:23:08.1365508Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39202302351",
+  "att": "1",
+  "job": "117898877622",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T05:05:08Z",
+  "end": "2026-10-19T05:18:06Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T05:06:22.7452602Z",
+    "booted": "2026-10-19T05:06:59.3711165Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "FAIL a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T05:12:17.6804344Z"
+   },
+   {
+    "start": "2026-10-19T05:12:38.6856058Z",
+    "booted": "2026-10-19T05:13:15.2772784Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T05:17:56.4773147Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39202302351",
+  "att": "1",
+  "job": "117898877635",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T05:05:08Z",
+  "end": "2026-10-19T05:15:57Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T05:06:27.1454136Z",
+    "booted": "2026-10-19T05:07:03.7113872Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T05:15:48.2511922Z"
+   }
+  ]
+ },
+ {
+  "run": "39197246583",
+  "att": "1",
+  "job": "117883509919",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T04:03:14Z",
+  "end": "2026-10-19T04:14:09Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T04:04:22.2304557Z",
+    "booted": "2026-10-19T04:04:58.9583413Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T04:14:01.3738662Z"
+   }
+  ]
+ },
+ {
+  "run": "39197246583",
+  "att": "1",
+  "job": "117883509925",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-19T04:03:14Z",
+  "end": "2026-10-19T04:48:50Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T04:04:51.4632281Z",
+    "booted": "2026-10-19T04:05:36.0933840Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "FAIL t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen",
+     "FAIL t6_engineDiesInDozeAndTogetherWithItsWatch",
+     "HANG: t3_realAppStatesAndSkyOnMainActivity stopped after 600 s"
+    ],
+    "term": "2026-10-19T04:25:37.0549848Z"
+   },
+   {
+    "start": "2026-10-19T04:25:58.6166151Z",
+    "booted": "2026-10-19T04:26:43.5590424Z",
+    "health": [
+     "1000"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen",
+     "FAIL t6_engineDiesInDozeAndTogetherWithItsWatch",
+     "HANG: b2_fixtureMotionRecordedOnDevice stopped after 600 s"
+    ],
+    "term": "2026-10-19T04:48:40.4782549Z"
+   }
+  ]
+ },
+ {
+  "run": "39197246583",
+  "att": "1",
+  "job": "117883509966",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T04:03:14Z",
+  "end": "2026-10-19T04:13:41Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T04:04:24.6622274Z",
+    "booted": "2026-10-19T04:04:50.9918035Z",
+    "health": [
+     "350"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T04:09:01.6929837Z"
+   },
+   {
+    "start": "2026-10-19T04:09:19.8511225Z",
+    "booted": "2026-10-19T04:09:46.1144971Z",
+    "health": [
+     "350"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T04:13:31.3602496Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39193223160",
+  "att": "1",
+  "job": "117871509791",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-19T03:12:55Z",
+  "end": "2026-10-19T03:53:22Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T03:13:55.5001967Z",
+    "booted": "2026-10-19T03:14:30.1277329Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen",
+     "FAIL t6_engineDiesInDozeAndTogetherWithItsWatch"
+    ],
+    "term": "2026-10-19T03:30:18.4159723Z"
+   },
+   {
+    "start": "2026-10-19T03:30:39.8270409Z",
+    "booted": "2026-10-19T03:31:14.5659577Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "FAIL t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen",
+     "FAIL t6_engineDiesInDozeAndTogetherWithItsWatch",
+     "HANG: b2_fixtureMotionRecordedOnDevice stopped after 600 s"
+    ],
+    "term": "2026-10-19T03:53:12.4942934Z"
+   }
+  ]
+ },
+ {
+  "run": "39193223160",
+  "att": "1",
+  "job": "117871509797",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T03:12:55Z",
+  "end": "2026-10-19T03:23:46Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T03:13:52.1584487Z",
+    "booted": "2026-10-19T03:14:28.9402364Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T03:23:38.4975145Z"
+   }
+  ]
+ },
+ {
+  "run": "39193223160",
+  "att": "1",
+  "job": "117871509830",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T03:12:55Z",
+  "end": "2026-10-19T03:25:41Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T03:13:55.1982957Z",
+    "booted": "2026-10-19T03:14:31.6741135Z",
+    "health": [
+     "750"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "FAIL a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T03:19:19.1301276Z"
+   },
+   {
+    "start": "2026-10-19T03:19:39.6595368Z",
+    "booted": "2026-10-19T03:20:16.1456277Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T03:25:32.3550620Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39190910753",
+  "att": "1",
+  "job": "117864513208",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-19T02:43:35Z",
+  "end": "2026-10-19T02:51:01Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T02:45:55.2248807Z",
+    "booted": "2026-10-19T02:46:40.0703521Z",
+    "health": [
+     "1050"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 1050 ms > 1000 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-19T02:48:12.8409095Z"
+   },
+   {
+    "start": "2026-10-19T02:48:33.0949664Z",
+    "booted": "2026-10-19T02:49:15.9423067Z",
+    "health": [
+     "1200"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 1200 ms > 1000 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-19T02:50:53.1047695Z"
+   }
+  ]
+ },
+ {
+  "run": "39190910753",
+  "att": "1",
+  "job": "117864513232",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T02:43:35Z",
+  "end": "2026-10-19T02:49:23Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T02:44:45.1635409Z",
+    "booted": "2026-10-19T02:45:11.6871807Z",
+    "health": [
+     "450"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T02:49:12.8468687Z"
+   }
+  ]
+ },
+ {
+  "run": "39190910753",
+  "att": "1",
+  "job": "117864513280",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T02:43:35Z",
+  "end": "2026-10-19T02:54:39Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T02:44:51.7143289Z",
+    "booted": "2026-10-19T02:45:30.4662329Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T02:54:29.4320612Z"
+   }
+  ]
+ },
+ {
+  "run": "39184008733",
+  "att": "1",
+  "job": "117843760490",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T01:14:23Z",
+  "end": "2026-10-19T01:20:31Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T01:15:58.0739320Z",
+    "booted": "2026-10-19T01:16:26.5352991Z",
+    "health": [
+     "400"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T01:20:19.5906928Z"
+   }
+  ]
+ },
+ {
+  "run": "39184008733",
+  "att": "1",
+  "job": "117843760532",
+  "name": "emulator (tunnel)",
+  "concl": "success",
+  "start": "2026-10-19T01:14:24Z",
+  "end": "2026-10-19T01:44:02Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T01:15:31.8785320Z",
+    "booted": "2026-10-19T01:16:08.7180687Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen"
+    ],
+    "term": "2026-10-19T01:29:45.8832560Z"
+   },
+   {
+    "start": "2026-10-19T01:30:07.2893917Z",
+    "booted": "2026-10-19T01:30:43.9696944Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen"
+    ],
+    "term": "2026-10-19T01:43:52.3348594Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39184008733",
+  "att": "1",
+  "job": "117843760544",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T01:14:24Z",
+  "end": "2026-10-19T01:23:08Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T01:15:48.6215603Z",
+    "booted": "2026-10-19T01:16:18.9402665Z",
+    "health": [
+     "600"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T01:22:57.5528401Z"
+   }
+  ]
+ },
+ {
+  "run": "39181991820",
+  "att": "1",
+  "job": "117837677530",
+  "name": "emulator (tunnel)",
+  "concl": "success",
+  "start": "2026-10-19T00:47:49Z",
+  "end": "2026-10-19T01:01:05Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T00:48:55.0303047Z",
+    "booted": "2026-10-19T00:49:31.8554915Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText",
+     "PASS t5_engineDiesWithNoAppOpen"
+    ],
+    "term": "2026-10-19T01:00:56.3655992Z"
+   }
+  ]
+ },
+ {
+  "run": "39181991820",
+  "att": "1",
+  "job": "117837677624",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T00:47:49Z",
+  "end": "2026-10-19T00:55:01Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T00:49:10.0902428Z",
+    "booted": "2026-10-19T00:49:44.7478519Z",
+    "health": [
+     "550"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T00:54:50.3551931Z"
+   }
+  ]
+ },
+ {
+  "run": "39181991820",
+  "att": "1",
+  "job": "117837677708",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T00:47:49Z",
+  "end": "2026-10-19T00:58:14Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T00:49:18.9738881Z",
+    "booted": "2026-10-19T00:49:55.6173352Z",
+    "health": [
+     "750"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T00:58:04.2935357Z"
+   }
+  ]
+ },
+ {
+  "run": "39180203368",
+  "att": "1",
+  "job": "117832271982",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-19T00:23:51Z",
+  "end": "2026-10-19T00:39:29Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T00:25:53.8247438Z",
+    "booted": "2026-10-19T00:26:30.3423387Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "FAIL a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T00:33:09.2795773Z"
+   },
+   {
+    "start": "2026-10-19T00:33:30.3305100Z",
+    "booted": "2026-10-19T00:34:07.1733189Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-19T00:39:19.7914446Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39180203368",
+  "att": "1",
+  "job": "117832272020",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-19T00:23:50Z",
+  "end": "2026-10-19T00:33:09Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T00:25:08.6777321Z",
+    "booted": "2026-10-19T00:25:41.4567784Z",
+    "health": [
+     "650"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-19T00:32:59.6654349Z"
+   }
+  ]
+ },
+ {
+  "run": "39180203368",
+  "att": "1",
+  "job": "117832272021",
+  "name": "emulator (tunnel)",
+  "concl": "success",
+  "start": "2026-10-19T00:23:50Z",
+  "end": "2026-10-19T00:33:24Z",
+  "sessions": [
+   {
+    "start": "2026-10-19T00:26:00.2359133Z",
+    "booted": "2026-10-19T00:26:30.6667207Z",
+    "health": [
+     "450"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-19T00:33:13.5806342Z"
+   }
+  ]
+ },
+ {
+  "run": "39176556620",
+  "att": "1",
+  "job": "117821286651",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T23:31:40Z",
+  "end": "2026-10-18T23:39:58Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T23:34:06.5541225Z",
+    "booted": "2026-10-18T23:34:33.1051700Z",
+    "health": [
+     "300"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T23:39:47.5023281Z"
+   }
+  ]
+ },
+ {
+  "run": "39176556620",
+  "att": "1",
+  "job": "117821286663",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T23:31:40Z",
+  "end": "2026-10-18T23:46:38Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T23:32:44.7487087Z",
+    "booted": "2026-10-18T23:33:19.4205149Z",
+    "health": [
+     "750"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-18T23:38:06.4955857Z"
+   },
+   {
+    "start": "2026-10-18T23:38:26.4883656Z",
+    "booted": "2026-10-18T23:39:00.8940777Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-18T23:46:30.3673841Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39176556620",
+  "att": "1",
+  "job": "117821286672",
+  "name": "emulator (tunnel)",
+  "concl": "success",
+  "start": "2026-10-18T23:31:41Z",
+  "end": "2026-10-18T23:44:54Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T23:32:48.4762445Z",
+    "booted": "2026-10-18T23:33:25.1520123Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T23:44:43.8902800Z"
+   }
+  ]
+ },
+ {
+  "run": "39173982324",
+  "att": "1",
+  "job": "117813716014",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T22:55:27Z",
+  "end": "2026-10-18T23:01:11Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T22:56:43.3751361Z",
+    "booted": "2026-10-18T22:57:11.8072355Z",
+    "health": [
+     "450"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-18T23:01:01.2511793Z"
+   }
+  ]
+ },
+ {
+  "run": "39173982324",
+  "att": "1",
+  "job": "117813716027",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T22:55:27Z",
+  "end": "2026-10-18T23:16:21Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T22:56:48.0337323Z",
+    "booted": "2026-10-18T22:57:18.5946114Z",
+    "health": [
+     "600"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T23:06:30.4774186Z"
+   },
+   {
+    "start": "2026-10-18T23:06:51.0701311Z",
+    "booted": "2026-10-18T23:07:21.3906665Z",
+    "health": [
+     "550"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T23:16:09.3490768Z"
+   }
+  ]
+ },
+ {
+  "run": "39173982324",
+  "att": "1",
+  "job": "117813716131",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T22:55:27Z",
+  "end": "2026-10-18T23:06:33Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T22:56:34.5599874Z",
+    "booted": "2026-10-18T22:57:13.1934844Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T23:06:25.1537455Z"
+   }
+  ]
+ },
+ {
+  "run": "39170392763",
+  "att": "1",
+  "job": "117803020105",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T22:05:55Z",
+  "end": "2026-10-18T22:35:21Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T22:07:01.5364921Z",
+    "booted": "2026-10-18T22:07:38.2265697Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "PASS t3_realAppStatesAndSkyOnMainActivity",
+     "FAIL t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T22:20:25.6757514Z"
+   },
+   {
+    "start": "2026-10-18T22:20:46.7831342Z",
+    "booted": "2026-10-18T22:21:23.3402057Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs",
+     "FAIL t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T22:35:11.7222343Z"
+   }
+  ]
+ },
+ {
+  "run": "39170392763",
+  "att": "1",
+  "job": "117803020127",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T22:05:54Z",
+  "end": "2026-10-18T22:26:29Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T22:07:00.2744357Z",
+    "booted": "2026-10-18T22:07:37.1699940Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "FAIL u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T22:16:23.9938909Z"
+   },
+   {
+    "start": "2026-10-18T22:16:45.4122145Z",
+    "booted": "2026-10-18T22:17:22.1884009Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T22:26:19.7271644Z"
+   }
+  ],
+  "flaky": true
+ },
+ {
+  "run": "39170392763",
+  "att": "1",
+  "job": "117803020192",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T22:05:54Z",
+  "end": "2026-10-18T22:12:51Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T22:07:10.6408564Z",
+    "booted": "2026-10-18T22:07:41.2253115Z",
+    "health": [
+     "600"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-18T22:12:40.7499413Z"
+   }
+  ]
+ },
+ {
+  "run": "39167725741",
+  "att": "1",
+  "job": "117795187648",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T21:29:53Z",
+  "end": "2026-10-18T21:48:32Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T21:31:13.3040784Z",
+    "booted": "2026-10-18T21:31:44.0067760Z",
+    "health": [
+     "600"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-18T21:48:22.2292740Z"
+   }
+  ]
+ },
+ {
+  "run": "39167725741",
+  "att": "1",
+  "job": "117795187663",
+  "name": "emulator (ui)",
+  "concl": "failure",
+  "start": "2026-10-18T21:29:54Z",
+  "end": "2026-10-18T21:36:17Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T21:31:01.7508415Z",
+    "booted": "2026-10-18T21:31:48.5230538Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 900 ms > 775 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T21:33:22.4291857Z"
+   },
+   {
+    "start": "2026-10-18T21:33:42.4094356Z",
+    "booted": "2026-10-18T21:34:27.2224881Z",
+    "health": [
+     "1000"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 1000 ms > 775 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T21:36:08.9520889Z"
+   }
+  ]
+ },
+ {
+  "run": "39167725741",
+  "att": "1",
+  "job": "117795187813",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T21:29:54Z",
+  "end": "2026-10-18T21:36:44Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T21:31:45.0418579Z",
+    "booted": "2026-10-18T21:32:21.6513109Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 850 ms > 775 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T21:33:59.0263957Z"
+   },
+   {
+    "start": "2026-10-18T21:34:19.7517750Z",
+    "booted": "2026-10-18T21:34:56.3365078Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 900 ms > 775 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T21:36:29.8685560Z"
+   }
+  ]
+ },
+ {
+  "run": "39167725741",
+  "att": "2",
+  "job": "117799408384",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T21:49:06Z",
+  "end": "2026-10-18T21:58:43Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T21:56:29.6681433Z",
+    "booted": "2026-10-18T21:57:06.4416324Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 850 ms > 775 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T21:58:36.0850245Z"
+   }
+  ]
+ },
+ {
+  "run": "39167725741",
+  "att": "2",
+  "job": "117799408559",
+  "name": "emulator (ui)",
+  "concl": "failure",
+  "start": "2026-10-18T21:49:07Z",
+  "end": "2026-10-18T21:55:06Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T21:50:08.0201001Z",
+    "booted": "2026-10-18T21:50:42.5684734Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 950 ms > 775 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T21:52:14.4578623Z"
+   },
+   {
+    "start": "2026-10-18T21:52:41.0358684Z",
+    "booted": "2026-10-18T21:53:17.6994371Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 950 ms > 775 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T21:54:56.6030808Z"
+   }
+  ]
+ },
+ {
+  "run": "39167725741",
+  "att": "2",
+  "job": "117799442457",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T21:29:53Z",
+  "end": "2026-10-18T21:48:32Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T21:31:13.3040784Z",
+    "booted": "2026-10-18T21:31:44.0067760Z",
+    "health": [
+     "600"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-18T21:48:22.2292740Z"
+   }
+  ]
+ },
+ {
+  "run": "39163947970",
+  "att": "1",
+  "job": "117783964846",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T20:39:44Z",
+  "end": "2026-10-18T20:49:16Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T20:40:53.9644989Z",
+    "booted": "2026-10-18T20:41:26.3676608Z",
+    "health": [
+     "650"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T20:49:05.5293069Z"
+   }
+  ]
+ },
+ {
+  "run": "39163947970",
+  "att": "1",
+  "job": "117783964856",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T20:39:44Z",
+  "end": "2026-10-18T21:10:18Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T20:41:02.4153324Z",
+    "booted": "2026-10-18T20:41:32.8128983Z",
+    "health": [
+     "550"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs",
+     "FAIL t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T20:53:42.1626328Z"
+   },
+   {
+    "start": "2026-10-18T20:54:03.6934986Z",
+    "booted": "2026-10-18T20:54:34.0971693Z",
+    "health": [
+     "550"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs",
+     "FAIL t3_realAppStatesAndSkyOnMainActivity",
+     "PASS t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T21:10:06.5613699Z"
+   }
+  ]
+ },
+ {
+  "run": "39163947970",
+  "att": "1",
+  "job": "117783964858",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T20:39:44Z",
+  "end": "2026-10-18T21:23:26Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T20:40:46.8838198Z",
+    "booted": "2026-10-18T20:41:23.5260496Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 900 ms > 850 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T20:42:55.7504973Z"
+   },
+   {
+    "start": "2026-10-18T20:43:16.3669617Z",
+    "booted": "2026-10-18T20:43:50.9751102Z",
+    "health": [
+     "850"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "FAIL a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "HANG: a5_realAppHonoursRemoveAnimations stopped after 600 s"
+    ],
+    "term": "2026-10-18T21:23:17.7625551Z"
+   }
+  ]
+ },
+ {
+  "run": "39159687608",
+  "att": "1",
+  "job": "117771323851",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T19:43:34Z",
+  "end": "2026-10-18T20:20:15Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T19:44:48.8870557Z",
+    "booted": "2026-10-18T19:45:25.5048495Z",
+    "health": [
+     "750"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs",
+     "FAIL t3_realAppStatesAndSkyOnMainActivity",
+     "FAIL t4_realAppAtLargestSystemText"
+    ],
+    "term": "2026-10-18T19:56:30.8783933Z"
+   },
+   {
+    "start": "2026-10-18T19:56:51.5433179Z",
+    "booted": "2026-10-18T19:57:28.1425171Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "FAIL b3_fixtureAtLargeFontScale",
+     "FAIL t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs",
+     "FAIL t3_realAppStatesAndSkyOnMainActivity",
+     "FAIL t4_realAppAtLargestSystemText",
+     "HANG: b3_fixtureAtLargeFontScale stopped after 600 s"
+    ],
+    "term": "2026-10-18T20:20:07.1190487Z"
+   }
+  ]
+ },
+ {
+  "run": "39159687608",
+  "att": "1",
+  "job": "117771323943",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T19:43:35Z",
+  "end": "2026-10-18T20:24:08Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T19:44:39.0394245Z",
+    "booted": "2026-10-18T19:45:17.9929937Z",
+    "health": [
+     "1000"
+    ],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 1000 ms > 850 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T19:46:48.7462436Z"
+   },
+   {
+    "start": "2026-10-18T19:47:09.8776888Z",
+    "booted": "2026-10-18T19:47:46.4763662Z",
+    "health": [
+     "800"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "FAIL a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "HANG: a3_realEngineRefusesToConnectWithoutAccount stopped after 600 s"
+    ],
+    "term": "2026-10-18T20:23:59.7889408Z"
+   }
+  ]
+ },
+ {
+  "run": "39159687608",
+  "att": "1",
+  "job": "117771324511",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T19:43:35Z",
+  "end": "2026-10-18T19:51:18Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T19:44:44.4300009Z",
+    "booted": "2026-10-18T19:45:10.7495689Z",
+    "health": [
+     "300"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T19:51:07.2323338Z"
+   }
+  ]
+ },
+ {
+  "run": "39153105611",
+  "att": "1",
+  "job": "117751888274",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T18:18:06Z",
+  "end": "2026-10-18T18:29:47Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T18:19:07.2297080Z",
+    "booted": "2026-10-18T18:19:43.8732809Z",
+    "health": [
+     "750"
+    ],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T18:29:37.6124032Z"
+   }
+  ]
+ },
+ {
+  "run": "39153105611",
+  "att": "1",
+  "job": "117751888310",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T18:18:10Z",
+  "end": "2026-10-18T19:32:23Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T18:19:14.2536056Z",
+    "booted": "2026-10-18T18:19:50.9874888Z",
+    "health": [
+     "950"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "FAIL b3_fixtureAtLargeFontScale",
+     "FAIL t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs",
+     "HANG: b3_fixtureAtLargeFontScale stopped after 600 s",
+     "HANG: t2_realAppTurnsWithKeyboardAndConsentOpen stopped after 600 s",
+     "HANG: t1_realTunnelThroughLocalFixtureServers stopped after 600 s"
+    ],
+    "term": "2026-10-18T19:00:09.2694464Z"
+   },
+   {
+    "start": "2026-10-18T19:00:30.6690370Z",
+    "booted": "2026-10-18T19:01:07.3255815Z",
+    "health": [
+     "900"
+    ],
+    "results": [
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t2_realAppTurnsWithKeyboardAndConsentOpen",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs",
+     "HANG: t2_realAppTurnsWithKeyboardAndConsentOpen stopped after 600 s"
+    ],
+    "term": "2026-10-18T19:32:14.9916450Z"
+   }
+  ]
+ },
+ {
+  "run": "39153105611",
+  "att": "1",
+  "job": "117751888778",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T18:18:06Z",
+  "end": "2026-10-18T18:35:40Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T18:20:34.9184293Z",
+    "booted": "2026-10-18T18:21:07.5745071Z",
+    "health": [
+     "500"
+    ],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates"
+    ],
+    "term": "2026-10-18T18:35:29.8746084Z"
+   }
+  ]
+ },
+ {
+  "run": "39151329824",
+  "att": "1",
+  "job": "117746593911",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T17:54:42Z",
+  "end": "2026-10-18T18:00:29Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T17:55:39.8512133Z",
+    "booted": "2026-10-18T17:56:16.3931465Z",
+    "health": [],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 850 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T17:57:45.5238995Z"
+   },
+   {
+    "start": "2026-10-18T17:58:06.1947148Z",
+    "booted": "2026-10-18T17:58:40.6231905Z",
+    "health": [],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 1000 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T18:00:22.3971644Z"
+   }
+  ]
+ },
+ {
+  "run": "39151329824",
+  "att": "1",
+  "job": "117746593947",
+  "name": "emulator (ui)",
+  "concl": "failure",
+  "start": "2026-10-18T17:54:42Z",
+  "end": "2026-10-18T18:08:37Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T17:56:13.4308460Z",
+    "booted": "2026-10-18T17:56:50.1532731Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "FAIL l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T18:05:54.6208790Z"
+   },
+   {
+    "start": "2026-10-18T18:06:14.3235859Z",
+    "booted": "2026-10-18T18:06:52.8632123Z",
+    "health": [],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 850 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T18:08:28.5147465Z"
+   }
+  ]
+ },
+ {
+  "run": "39151329824",
+  "att": "1",
+  "job": "117746594002",
+  "name": "emulator (tunnel)",
+  "concl": "failure",
+  "start": "2026-10-18T17:54:43Z",
+  "end": "2026-10-18T18:00:33Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T17:55:48.3183517Z",
+    "booted": "2026-10-18T17:56:24.9379578Z",
+    "health": [],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 900 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T17:57:53.9590899Z"
+   },
+   {
+    "start": "2026-10-18T17:58:14.7032021Z",
+    "booted": "2026-10-18T17:58:51.4321223Z",
+    "health": [],
+    "results": [
+     "HEALTH-GATE: emulator renders too slowly (median frame 800 ms); no tests run in this attempt"
+    ],
+    "term": "2026-10-18T18:00:24.7409991Z"
+   }
+  ]
+ },
+ {
+  "run": "39148942470",
+  "att": "1",
+  "job": "117739546343",
+  "name": "emulator (system)",
+  "concl": "cancelled",
+  "start": "2026-10-18T17:23:02Z",
+  "end": "2026-10-18T17:49:26Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T17:24:03.9389631Z",
+    "booted": "2026-10-18T17:24:40.5238827Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations"
+    ],
+    "term": null
+   }
+  ]
+ },
+ {
+  "run": "39148942470",
+  "att": "1",
+  "job": "117739546349",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T17:23:02Z",
+  "end": "2026-10-18T17:34:17Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T17:24:00.7672644Z",
+    "booted": "2026-10-18T17:24:37.3316590Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T17:34:09.9171445Z"
+   }
+  ]
+ },
+ {
+  "run": "39138009249",
+  "att": "1",
+  "job": "117707505287",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T14:58:41Z",
+  "end": "2026-10-18T15:08:16Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T15:00:08.9794204Z",
+    "booted": "2026-10-18T15:00:39.4437331Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T15:08:06.6684849Z"
+   }
+  ]
+ },
+ {
+  "run": "39138009249",
+  "att": "1",
+  "job": "117707505292",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T14:58:41Z",
+  "end": "2026-10-18T16:22:34Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T14:59:51.8015808Z",
+    "booted": "2026-10-18T15:00:30.8297397Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "FAIL a2_realSystemVpnConsentDialog",
+     "FAIL a3_realEngineRefusesToConnectWithoutAccount"
+    ],
+    "term": "2026-10-18T15:37:51.4759674Z"
+   },
+   {
+    "start": "2026-10-18T15:38:18.0892120Z",
+    "booted": "2026-10-18T15:38:54.6457276Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice"
+    ],
+    "term": "2026-10-18T16:22:24.3712396Z"
+   }
+  ]
+ },
+ {
+  "run": "39138009249",
+  "att": "2",
+  "job": "117726395167",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T16:24:00Z",
+  "end": "2026-10-18T16:37:28Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T16:25:19.5704270Z",
+    "booted": "2026-10-18T16:25:46.1138290Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T16:37:16.6769898Z"
+   }
+  ]
+ },
+ {
+  "run": "39138009249",
+  "att": "2",
+  "job": "117726419077",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T14:58:41Z",
+  "end": "2026-10-18T15:08:16Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T15:00:08.9794204Z",
+    "booted": "2026-10-18T15:00:39.4437331Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "PASS l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T15:08:06.6684849Z"
+   }
+  ]
+ },
+ {
+  "run": "39135197245",
+  "att": "1",
+  "job": "117699273366",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T14:20:50Z",
+  "end": "2026-10-18T14:51:15Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T14:21:59.8873686Z",
+    "booted": "2026-10-18T14:22:32.4872126Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T14:51:04.2115017Z"
+   }
+  ]
+ },
+ {
+  "run": "39135197245",
+  "att": "1",
+  "job": "117699273427",
+  "name": "emulator (ui)",
+  "concl": "failure",
+  "start": "2026-10-18T14:20:50Z",
+  "end": "2026-10-18T14:43:04Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T14:21:47.3434575Z",
+    "booted": "2026-10-18T14:22:23.8905521Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "FAIL l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T14:32:14.6159581Z"
+   },
+   {
+    "start": "2026-10-18T14:32:35.4139980Z",
+    "booted": "2026-10-18T14:33:12.0556641Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "FAIL l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T14:42:55.5599618Z"
+   }
+  ]
+ },
+ {
+  "run": "39126740818",
+  "att": "1",
+  "job": "117674356761",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T12:23:34Z",
+  "end": "2026-10-18T14:14:05Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T12:24:41.4786657Z",
+    "booted": "2026-10-18T12:25:18.1210932Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "FAIL a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "FAIL a5_realAppHonoursRemoveAnimations",
+     "FAIL a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "FAIL s2_realWidgetInAndroidsWidgetHost",
+     "FAIL s3_fixtureWidgetAndNotificationStates",
+     "FAIL b1_fixtureStatesRenderedOnDevice"
+    ],
+    "term": null
+   },
+   {
+    "start": "2026-10-18T13:19:19.2871343Z",
+    "booted": "2026-10-18T13:19:30.4021444Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "FAIL a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "FAIL b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale"
+    ],
+    "term": null
+   }
+  ]
+ },
+ {
+  "run": "39126740818",
+  "att": "1",
+  "job": "117674356772",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T12:23:35Z",
+  "end": "2026-10-18T12:34:22Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T12:25:14.5847743Z",
+    "booted": "2026-10-18T12:25:57.3569076Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T12:34:10.7586736Z"
+   }
+  ]
+ },
+ {
+  "run": "39125188504",
+  "att": "1",
+  "job": "117669547671",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T11:59:59Z",
+  "end": "2026-10-18T12:15:14Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T12:01:19.8644583Z",
+    "booted": "2026-10-18T12:01:46.1695840Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T12:15:02.7823624Z"
+   }
+  ]
+ },
+ {
+  "run": "39125188504",
+  "att": "1",
+  "job": "117669548247",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T12:00:00Z",
+  "end": "2026-10-18T12:09:22Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T12:01:35.0946875Z",
+    "booted": "2026-10-18T12:02:05.7372217Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T12:09:09.6560985Z"
+   }
+  ]
+ },
+ {
+  "run": "39125018322",
+  "att": "1",
+  "job": "117668759425",
+  "name": "emulator",
+  "concl": "cancelled",
+  "start": "2026-10-18T11:55:55Z",
+  "end": "2026-10-18T11:55:55Z",
+  "sessions": []
+ },
+ {
+  "run": "39120135343",
+  "att": "1",
+  "job": "117654644152",
+  "name": "emulator (ui)",
+  "concl": "failure",
+  "start": "2026-10-18T10:43:46Z",
+  "end": "2026-10-18T11:07:45Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T10:44:52.0660506Z",
+    "booted": "2026-10-18T10:45:36.8798344Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "FAIL u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "FAIL l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T10:55:55.5224493Z"
+   },
+   {
+    "start": "2026-10-18T10:56:09.0132579Z",
+    "booted": "2026-10-18T10:56:53.8641474Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "FAIL u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "FAIL l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T11:07:34.4080310Z"
+   }
+  ]
+ },
+ {
+  "run": "39120135343",
+  "att": "1",
+  "job": "117654644173",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T10:43:46Z",
+  "end": "2026-10-18T11:44:44Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T10:45:07.0307014Z",
+    "booted": "2026-10-18T10:45:41.5641276Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T11:17:56.3345022Z"
+   },
+   {
+    "start": "2026-10-18T11:18:18.4262356Z",
+    "booted": "2026-10-18T11:18:52.7863826Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "PASS t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T11:44:32.8756259Z"
+   }
+  ]
+ },
+ {
+  "run": "39115256726",
+  "att": "1",
+  "job": "117640550602",
+  "name": "emulator (ui)",
+  "concl": "failure",
+  "start": "2026-10-18T09:30:04Z",
+  "end": "2026-10-18T09:46:38Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T09:31:31.5633354Z",
+    "booted": "2026-10-18T09:32:01.9105402Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "FAIL u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "FAIL l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T09:38:42.0476610Z"
+   },
+   {
+    "start": "2026-10-18T09:38:55.2884194Z",
+    "booted": "2026-10-18T09:39:25.7502439Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "FAIL u9_keyboardFocusIsVisibleAndAccessibilityActionsWork",
+     "PASS l1_largestSystemTextIsNeverCutOff",
+     "PASS l2_smallPhoneKeepsEverythingReadableAndReachable",
+     "FAIL l3_landscapeKeepsEverythingReadableAndReachable"
+    ],
+    "term": "2026-10-18T09:46:26.2045127Z"
+   }
+  ]
+ },
+ {
+  "run": "39115256726",
+  "att": "1",
+  "job": "117640550640",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T09:30:04Z",
+  "end": "2026-10-18T10:25:52Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T09:31:34.5597594Z",
+    "booted": "2026-10-18T09:32:05.0951723Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T09:57:03.2916378Z"
+   },
+   {
+    "start": "2026-10-18T09:57:17.2653271Z",
+    "booted": "2026-10-18T09:57:47.8334865Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "FAIL a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T10:25:39.0240988Z"
+   }
+  ]
+ },
+ {
+  "run": "39113297176",
+  "att": "1",
+  "job": "117634768955",
+  "name": "emulator (ui)",
+  "concl": "failure",
+  "start": "2026-10-18T09:00:18Z",
+  "end": "2026-10-18T09:11:23Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T09:01:25.3967492Z",
+    "booted": "2026-10-18T09:02:02.0309902Z",
+    "health": [],
+    "results": [
+     "FAIL u1_accessibilityContractAndAtfOnEveryScreen",
+     "DEVICE-OFFLINE after u1_accessibilityContractAndAtfOnEveryScreen; later tests not run in this attempt"
+    ],
+    "term": "2026-10-18T09:05:22.7395598Z"
+   },
+   {
+    "start": "2026-10-18T09:05:29.3137369Z",
+    "booted": "2026-10-18T09:06:05.7976877Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "FAIL u8_motionFrameByFrameAt60fps",
+     "DEVICE-OFFLINE after u8_motionFrameByFrameAt60fps; later tests not run in this attempt"
+    ],
+    "term": "2026-10-18T09:11:19.9355511Z"
+   }
+  ]
+ },
+ {
+  "run": "39113297176",
+  "att": "1",
+  "job": "117634769075",
+  "name": "emulator (system)",
+  "concl": "failure",
+  "start": "2026-10-18T09:00:19Z",
+  "end": "2026-10-18T09:19:27Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T09:01:32.6358136Z",
+    "booted": "2026-10-18T09:02:07.1675052Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "DEVICE-OFFLINE after b2_fixtureMotionRecordedOnDevice; later tests not run in this attempt"
+    ],
+    "term": "2026-10-18T09:10:19.3369965Z"
+   },
+   {
+    "start": "2026-10-18T09:10:25.2665534Z",
+    "booted": "2026-10-18T09:10:59.7386780Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL t1_realTunnelThroughLocalFixtureServers",
+     "FAIL t1-routing-matches-exit-logs"
+    ],
+    "term": "2026-10-18T09:19:14.5453494Z"
+   }
+  ]
+ },
+ {
+  "run": "39113180638",
+  "att": "1",
+  "job": "117633855714",
+  "name": "emulator",
+  "concl": "cancelled",
+  "start": "2026-10-18T08:55:22Z",
+  "end": "2026-10-18T08:55:22Z",
+  "sessions": []
+ },
+ {
+  "run": "39108918669",
+  "att": "1",
+  "job": "117621380942",
+  "name": "emulator (system)",
+  "concl": "success",
+  "start": "2026-10-18T07:50:27Z",
+  "end": "2026-10-18T07:57:25Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T07:51:25.9514323Z",
+    "booted": "2026-10-18T07:51:52.2336394Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale"
+    ],
+    "term": "2026-10-18T07:57:14.8282519Z"
+   }
+  ]
+ },
+ {
+  "run": "39108918669",
+  "att": "1",
+  "job": "117621380994",
+  "name": "emulator (ui)",
+  "concl": "success",
+  "start": "2026-10-18T07:50:28Z",
+  "end": "2026-10-18T08:02:33Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T07:51:57.2497575Z",
+    "booted": "2026-10-18T07:52:37.9973485Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "FAIL u2_primaryControlActsThroughRealTaps",
+     "DEVICE-OFFLINE after u2_primaryControlActsThroughRealTaps; later tests not run in this attempt"
+    ],
+    "term": "2026-10-18T07:56:20.4331856Z"
+   },
+   {
+    "start": "2026-10-18T07:56:28.6257909Z",
+    "booted": "2026-10-18T07:57:07.1118362Z",
+    "health": [],
+    "results": [
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T08:02:24.2935576Z"
+   }
+  ]
+ },
+ {
+  "run": "39107701498",
+  "att": "1",
+  "job": "117618008795",
+  "name": "emulator",
+  "concl": "success",
+  "start": "2026-10-18T07:32:14Z",
+  "end": "2026-10-18T07:44:35Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T07:33:14.9253624Z",
+    "booted": "2026-10-18T07:33:47.5918223Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T07:44:23.7720415Z"
+   }
+  ]
+ },
+ {
+  "run": "39107244599",
+  "att": "1",
+  "job": "117616370313",
+  "name": "emulator",
+  "concl": "cancelled",
+  "start": "2026-10-18T07:23:33Z",
+  "end": "2026-10-18T07:27:09Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T07:24:24.6261294Z",
+    "booted": "2026-10-18T07:25:03.4732853Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation"
+    ],
+    "term": null
+   }
+  ]
+ },
+ {
+  "run": "39105266597",
+  "att": "1",
+  "job": "117610519150",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T06:52:06Z",
+  "end": "2026-10-18T07:17:46Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T06:52:51.1672907Z",
+    "booted": "2026-10-18T06:53:31.9337560Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "FAIL u2_primaryControlActsThroughRealTaps",
+     "DEVICE-OFFLINE after u2_primaryControlActsThroughRealTaps; later tests not run in this attempt"
+    ],
+    "term": "2026-10-18T07:04:33.6229028Z"
+   },
+   {
+    "start": "2026-10-18T07:04:42.1781083Z",
+    "booted": "2026-10-18T07:05:20.6526021Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "FAIL u8_motionFrameByFrameAt60fps",
+     "DEVICE-OFFLINE after u8_motionFrameByFrameAt60fps; later tests not run in this attempt"
+    ],
+    "term": "2026-10-18T07:17:43.3382504Z"
+   }
+  ]
+ },
+ {
+  "run": "39103789541",
+  "att": "1",
+  "job": "117605920040",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T06:26:02Z",
+  "end": "2026-10-18T06:44:24Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T06:26:54.8632247Z",
+    "booted": "2026-10-18T06:27:21.2330455Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T06:35:27.0773149Z"
+   },
+   {
+    "start": "2026-10-18T06:35:38.7147202Z",
+    "booted": "2026-10-18T06:36:04.9634922Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T06:44:12.3013900Z"
+   }
+  ]
+ },
+ {
+  "run": "39100236753",
+  "att": "1",
+  "job": "117595599179",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T05:25:32Z",
+  "end": "2026-10-18T05:47:06Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T05:26:31.2885123Z",
+    "booted": "2026-10-18T05:27:12.1700303Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "FAIL s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "FAIL b3_fixtureAtLargeFontScale",
+     "FAIL u1_accessibilityContractAndAtfOnEveryScreen",
+     "FAIL u2_primaryControlActsThroughRealTaps",
+     "FAIL u3_swipeUpOnTheDockOpensDetails",
+     "FAIL u4_glassBlursTheSceneBehindIt",
+     "FAIL u5_consentExplainedBeforeTheSystemDialog",
+     "FAIL u6_screenReaderOrderAndLabelsOnHome",
+     "FAIL u7_simplifiedChineseCopyFitsEveryScreen",
+     "FAIL u8_motionFrameByFrameAt60fps",
+     "FAIL l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T05:37:18.0953981Z"
+   },
+   {
+    "start": "2026-10-18T05:37:26.9142974Z",
+    "booted": "2026-10-18T05:38:07.5708165Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "FAIL s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "FAIL b3_fixtureAtLargeFontScale",
+     "FAIL u1_accessibilityContractAndAtfOnEveryScreen",
+     "FAIL u2_primaryControlActsThroughRealTaps",
+     "FAIL u3_swipeUpOnTheDockOpensDetails",
+     "FAIL u4_glassBlursTheSceneBehindIt",
+     "FAIL u5_consentExplainedBeforeTheSystemDialog",
+     "FAIL u6_screenReaderOrderAndLabelsOnHome",
+     "FAIL u7_simplifiedChineseCopyFitsEveryScreen",
+     "FAIL u8_motionFrameByFrameAt60fps",
+     "FAIL l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T05:47:02.3173004Z"
+   }
+  ]
+ },
+ {
+  "run": "39100236753",
+  "att": "2",
+  "job": "117599602801",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T05:49:16Z",
+  "end": "2026-10-18T06:14:11Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T05:50:12.1097904Z",
+    "booted": "2026-10-18T05:50:50.8976717Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "FAIL s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "FAIL b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "FAIL u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T06:01:53.4387064Z"
+   },
+   {
+    "start": "2026-10-18T06:02:08.1721991Z",
+    "booted": "2026-10-18T06:02:46.8913471Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "FAIL s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "FAIL b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "FAIL u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T06:14:01.8157615Z"
+   }
+  ]
+ },
+ {
+  "run": "39098920328",
+  "att": "1",
+  "job": "117591666144",
+  "name": "emulator",
+  "concl": "success",
+  "start": "2026-10-18T05:02:19Z",
+  "end": "2026-10-18T05:15:01Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T05:03:54.1525791Z",
+    "booted": "2026-10-18T05:04:29.1903553Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T05:14:50.8285840Z"
+   }
+  ]
+ },
+ {
+  "run": "39097660644",
+  "att": "1",
+  "job": "117588189989",
+  "name": "emulator",
+  "concl": "success",
+  "start": "2026-10-18T04:41:17Z",
+  "end": "2026-10-18T04:51:10Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T04:42:19.8464211Z",
+    "booted": "2026-10-18T04:42:46.3408617Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS u7_simplifiedChineseCopyFitsEveryScreen",
+     "PASS u8_motionFrameByFrameAt60fps",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T04:51:00.3310478Z"
+   }
+  ]
+ },
+ {
+  "run": "39096335793",
+  "att": "1",
+  "job": "117584281078",
+  "name": "emulator",
+  "concl": "success",
+  "start": "2026-10-18T04:18:07Z",
+  "end": "2026-10-18T04:32:56Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T04:19:39.9573741Z",
+    "booted": "2026-10-18T04:20:29.1230575Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T04:32:46.9429230Z"
+   }
+  ]
+ },
+ {
+  "run": "39095195211",
+  "att": "1",
+  "job": "117580891554",
+  "name": "emulator",
+  "concl": "success",
+  "start": "2026-10-18T03:58:28Z",
+  "end": "2026-10-18T04:09:40Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T03:59:34.1326628Z",
+    "booted": "2026-10-18T04:00:08.7773856Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T04:09:27.5383441Z"
+   }
+  ]
+ },
+ {
+  "run": "39093079011",
+  "att": "1",
+  "job": "117574602570",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T03:22:05Z",
+  "end": "2026-10-18T03:38:29Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T03:23:09.7629068Z",
+    "booted": "2026-10-18T03:23:38.2537950Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "FAIL b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "FAIL b3_fixtureAtLargeFontScale",
+     "FAIL u1_accessibilityContractAndAtfOnEveryScreen",
+     "FAIL u2_primaryControlActsThroughRealTaps",
+     "FAIL u3_swipeUpOnTheDockOpensDetails",
+     "FAIL u4_glassBlursTheSceneBehindIt",
+     "FAIL u5_consentExplainedBeforeTheSystemDialog",
+     "FAIL u6_screenReaderOrderAndLabelsOnHome",
+     "FAIL l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T03:30:18.3325024Z"
+   },
+   {
+    "start": "2026-10-18T03:30:23.3100796Z",
+    "booted": "2026-10-18T03:30:53.6471006Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "PASS u6_screenReaderOrderAndLabelsOnHome",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T03:38:18.7962133Z"
+   }
+  ]
+ },
+ {
+  "run": "39091119944",
+  "att": "1",
+  "job": "117568760996",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T02:48:48Z",
+  "end": "2026-10-18T03:12:08Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T02:49:35.3757175Z",
+    "booted": "2026-10-18T02:50:13.9265482Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "FAIL u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "FAIL u6_screenReaderOrderAndLabelsOnHome",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T03:01:29.3013153Z"
+   },
+   {
+    "start": "2026-10-18T03:01:43.3354423Z",
+    "booted": "2026-10-18T03:02:21.9068777Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "FAIL u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "FAIL u6_screenReaderOrderAndLabelsOnHome",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T03:12:00.5643786Z"
+   }
+  ]
+ },
+ {
+  "run": "39088253119",
+  "att": "1",
+  "job": "117560115122",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T02:00:50Z",
+  "end": "2026-10-18T02:32:46Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T02:01:48.8885210Z",
+    "booted": "2026-10-18T02:02:17.2237777Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "FAIL u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "FAIL u6_screenReaderOrderAndLabelsOnHome",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T02:17:14.0437861Z"
+   },
+   {
+    "start": "2026-10-18T02:17:26.3657778Z",
+    "booted": "2026-10-18T02:17:54.6972028Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS a6_realAppUnderSystemLightAndDarkTheme",
+     "FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp",
+     "PASS s2_realWidgetInAndroidsWidgetHost",
+     "PASS s3_fixtureWidgetAndNotificationStates",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "PASS u1_accessibilityContractAndAtfOnEveryScreen",
+     "PASS u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "FAIL u4_glassBlursTheSceneBehindIt",
+     "PASS u5_consentExplainedBeforeTheSystemDialog",
+     "FAIL u6_screenReaderOrderAndLabelsOnHome",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T02:32:36.0415509Z"
+   }
+  ]
+ },
+ {
+  "run": "39084210779",
+  "att": "1",
+  "job": "117548047178",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-18T00:54:04Z",
+  "end": "2026-10-18T01:44:46Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T00:54:58.7753730Z",
+    "booted": "2026-10-18T00:55:25.0948777Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL u1_accessibilityContractAndAtfOnEveryScreen",
+     "FAIL u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T01:18:22.3201936Z"
+   },
+   {
+    "start": "2026-10-18T01:18:34.2916058Z",
+    "booted": "2026-10-18T01:19:02.5545392Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS a5_realAppHonoursRemoveAnimations",
+     "FAIL b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale",
+     "FAIL u1_accessibilityContractAndAtfOnEveryScreen",
+     "FAIL u2_primaryControlActsThroughRealTaps",
+     "PASS u3_swipeUpOnTheDockOpensDetails",
+     "PASS l1_largestSystemTextIsNeverCutOff"
+    ],
+    "term": "2026-10-18T01:44:36.4358069Z"
+   }
+  ]
+ },
+ {
+  "run": "39081051696",
+  "att": "1",
+  "job": "117538559546",
+  "name": "emulator",
+  "concl": "success",
+  "start": "2026-10-18T00:02:35Z",
+  "end": "2026-10-18T00:28:58Z",
+  "sessions": [
+   {
+    "start": "2026-10-18T00:03:32.8571905Z",
+    "booted": "2026-10-18T00:04:05.3759581Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "PASS b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale"
+    ],
+    "term": "2026-10-18T00:28:48.5753312Z"
+   }
+  ]
+ },
+ {
+  "run": "39076280350",
+  "att": "1",
+  "job": "117524704837",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-17T22:48:10Z",
+  "end": "2026-10-17T23:57:06Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T22:48:59.8932762Z",
+    "booted": "2026-10-17T22:49:46.7198499Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale"
+    ],
+    "term": "2026-10-17T23:17:14.5924377Z"
+   },
+   {
+    "start": "2026-10-17T23:17:27.9085086Z",
+    "booted": "2026-10-17T23:18:14.5384477Z",
+    "health": [],
+    "results": [
+     "PASS a1_realSignInScreenAndLocalValidation",
+     "PASS a2_realSystemVpnConsentDialog",
+     "PASS a3_realEngineRefusesToConnectWithoutAccount",
+     "PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig",
+     "PASS b1_fixtureStatesRenderedOnDevice",
+     "FAIL b2_fixtureMotionRecordedOnDevice",
+     "PASS b3_fixtureAtLargeFontScale"
+    ],
+    "term": "2026-10-17T23:56:57.1201295Z"
+   }
+  ]
+ },
+ {
+  "run": "39072500471",
+  "att": "1",
+  "job": "117513465641",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-17T21:52:01Z",
+  "end": "2026-10-17T22:42:32Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T21:52:42.6095998Z",
+    "booted": "2026-10-17T21:53:13.0557177Z",
+    "health": [],
+    "results": [],
+    "term": "2026-10-17T22:20:42.3239920Z"
+   },
+   {
+    "start": "2026-10-17T22:20:50.8545768Z",
+    "booted": "2026-10-17T22:21:21.2105456Z",
+    "health": [],
+    "results": [],
+    "term": "2026-10-17T22:42:29.4342430Z"
+   }
+  ]
+ },
+ {
+  "run": "39071385293",
+  "att": "1",
+  "job": "117510438241",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-17T21:36:57Z",
+  "end": "2026-10-17T21:47:10Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T21:37:45.2356467Z",
+    "booted": "2026-10-17T21:38:24.0003614Z",
+    "health": [],
+    "results": [],
+    "term": "2026-10-17T21:47:08.5070972Z"
+   }
+  ]
+ },
+ {
+  "run": "39070167582",
+  "att": "1",
+  "job": "117506582093",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-17T21:18:34Z",
+  "end": "2026-10-17T21:30:44Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T21:19:38.3233581Z",
+    "booted": "2026-10-17T21:20:06.6840662Z",
+    "health": [],
+    "results": [],
+    "term": "2026-10-17T21:30:35.3753893Z",
+    "junit": [
+     "Tests run: 7,  Failures: 1"
+    ]
+   }
+  ]
+ },
+ {
+  "run": "39067869043",
+  "att": "1",
+  "job": "117500089032",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-17T20:47:12Z",
+  "end": "2026-10-17T21:10:07Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T20:48:01.3449996Z",
+    "booted": "2026-10-17T20:48:41.8009943Z",
+    "health": [],
+    "results": [],
+    "term": "2026-10-17T21:09:59.9306610Z"
+   }
+  ]
+ },
+ {
+  "run": "39064087305",
+  "att": "1",
+  "job": "117488781793",
+  "name": "emulator",
+  "concl": "cancelled",
+  "start": "2026-10-17T19:53:11Z",
+  "end": "2026-10-17T20:38:14Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T19:54:42.1114760Z",
+    "booted": "2026-10-17T19:55:10.4712728Z",
+    "health": [],
+    "results": [],
+    "term": null
+   }
+  ]
+ },
+ {
+  "run": "39062471656",
+  "att": "1",
+  "job": "117484040457",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-17T19:30:58Z",
+  "end": "2026-10-17T19:47:00Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T19:32:28.8268953Z",
+    "booted": "2026-10-17T19:33:05.4123793Z",
+    "health": [],
+    "results": [],
+    "term": "2026-10-17T19:46:57.7477578Z"
+   }
+  ]
+ },
+ {
+  "run": "39060855116",
+  "att": "1",
+  "job": "117479978726",
+  "name": "emulator",
+  "concl": "failure",
+  "start": "2026-10-17T19:11:59Z",
+  "end": "2026-10-17T19:19:13Z",
+  "sessions": [
+   {
+    "start": "2026-10-17T19:12:58.7400533Z",
+    "booted": "2026-10-17T19:13:25.0600530Z",
+    "health": [],
+    "results": [],
+    "term": "2026-10-17T19:19:05.9898401Z",
+    "junit": [
+     "Tests run: 6,  Failures: 4"
+    ]
+   }
+  ]
+ },
+ {
+  "run": "39059785843",
+  "att": "1",
+  "job": "117476256561",
+  "name": "emulator",
+  "concl": "skipped",
+  "start": "2026-10-17T18:54:28Z",
+  "end": "2026-10-17T18:54:28Z",
+  "sessions": []
+ },
+ {
+  "run": "39059188204",
+  "att": "1",
+  "job": "117474204965",
+  "name": "emulator",
+  "concl": "skipped",
+  "start": "2026-10-17T18:44:46Z",
+  "end": "2026-10-17T18:44:45Z",
+  "sessions": []
+ },
+ {
+  "run": "39058787871",
+  "att": "1",
+  "job": "117472355516",
+  "name": "emulator",
+  "concl": "skipped",
+  "start": "2026-10-17T18:36:20Z",
+  "end": "2026-10-17T18:36:19Z",
+  "sessions": []
+ }
+]

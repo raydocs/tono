@@ -1,0 +1,1194 @@
+emulator (ui)	Set up job	﻿2026-10-19T02:43:35.9154606Z Current runner version: '2.337.0'
+emulator (ui)	Set up job	2026-10-19T02:43:35.9179944Z ##[group]Runner Image Provisioner
+emulator (ui)	Set up job	2026-10-19T02:43:35.9180864Z Hosted Compute Agent
+emulator (ui)	Set up job	2026-10-19T02:43:35.9181539Z Version: 20261012.601
+emulator (ui)	Set up job	2026-10-19T02:43:35.9182156Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+emulator (ui)	Set up job	2026-10-19T02:43:35.9182924Z Build Date: 2026-10-12T17:48:21Z
+emulator (ui)	Set up job	2026-10-19T02:43:35.9183628Z Worker ID: {967082b8-6dde-4200-8f17-f239538d7e74}
+emulator (ui)	Set up job	2026-10-19T02:43:35.9184318Z Region: centralus
+emulator (ui)	Set up job	2026-10-19T02:43:35.9184885Z Cloud: Azure
+emulator (ui)	Set up job	2026-10-19T02:43:35.9185405Z ##[endgroup]
+emulator (ui)	Set up job	2026-10-19T02:43:35.9187072Z ##[group]Operating System
+emulator (ui)	Set up job	2026-10-19T02:43:35.9187762Z Ubuntu
+emulator (ui)	Set up job	2026-10-19T02:43:35.9188267Z 24.04.5
+emulator (ui)	Set up job	2026-10-19T02:43:35.9188774Z LTS
+emulator (ui)	Set up job	2026-10-19T02:43:35.9189293Z ##[endgroup]
+emulator (ui)	Set up job	2026-10-19T02:43:35.9189828Z ##[group]Runner Image
+emulator (ui)	Set up job	2026-10-19T02:43:35.9190537Z Image: ubuntu-24.04
+emulator (ui)	Set up job	2026-10-19T02:43:35.9191092Z Version: 20261012.334.1
+emulator (ui)	Set up job	2026-10-19T02:43:35.9192108Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+emulator (ui)	Set up job	2026-10-19T02:43:35.9193805Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+emulator (ui)	Set up job	2026-10-19T02:43:35.9194778Z ##[endgroup]
+emulator (ui)	Set up job	2026-10-19T02:43:35.9195825Z ##[group]GITHUB_TOKEN Permissions
+emulator (ui)	Set up job	2026-10-19T02:43:35.9198494Z Contents: read
+emulator (ui)	Set up job	2026-10-19T02:43:35.9199089Z Metadata: read
+emulator (ui)	Set up job	2026-10-19T02:43:35.9199678Z ##[endgroup]
+emulator (ui)	Set up job	2026-10-19T02:43:35.9201783Z Secret source: Actions
+emulator (ui)	Set up job	2026-10-19T02:43:35.9202704Z Cache mode: write
+emulator (ui)	Set up job	2026-10-19T02:43:35.9203376Z Prepare workflow directory
+emulator (ui)	Set up job	2026-10-19T02:43:35.9630685Z Prepare all required actions
+emulator (ui)	Set up job	2026-10-19T02:43:35.9681717Z Getting action download info
+emulator (ui)	Set up job	2026-10-19T02:43:36.2523938Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+emulator (ui)	Set up job	2026-10-19T02:43:36.3726713Z Download action repository 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' (SHA:9000827ccba6bdab643e8b6fd33ac0654aef8333)
+emulator (ui)	Set up job	2026-10-19T02:43:36.8712798Z Download action repository 'reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d' (SHA:a421e43855164a8197daf9d8d40fe71c6996bb0d)
+emulator (ui)	Set up job	2026-10-19T02:43:37.2714337Z Download action repository 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' (SHA:cf430e030ddbb5b0abf93d22962f4752f3646cd9)
+emulator (ui)	Set up job	2026-10-19T02:43:38.0564505Z Complete job name: emulator (ui)
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	﻿2026-10-19T02:43:38.1447785Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1449412Z with:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1450222Z   fetch-depth: 1
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1451162Z   ref: aac04f327432f319833b0a35d1ce546148624d63
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1452692Z   sparse-checkout: apps/android/scripts/local-tunnel
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	apps/android/supply-chain/sing-box
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1454266Z   sparse-checkout-cone-mode: false
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1455310Z   repository: raydocs/tono
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1462100Z   token: ***
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1462955Z   ssh-strict: true
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1463875Z   ssh-user: git
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1464915Z   persist-credentials: true
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1466070Z   clean: true
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1467186Z   fetch-tags: false
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1468119Z   show-progress: true
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1469121Z   lfs: false
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1470085Z   submodules: false
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1471085Z   set-safe-directory: true
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1472146Z   allow-unsafe-pr-checkout: false
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.1473564Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2560467Z Syncing repository: raydocs/tono
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2565029Z ##[group]Getting Git version info
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2567206Z Working directory is '/home/runner/work/tono/tono'
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2570407Z [command]/usr/bin/git version
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2597991Z git version 2.55.0
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2619093Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2629445Z Temporarily overriding HOME='/home/runner/work/_temp/b44b57d2-2cf9-4a4f-b14e-68a1e225cb51' before making global git config changes
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2633685Z Adding repository directory to the temporary git global config as a safe directory
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2637292Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/tono/tono
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2685879Z Deleting the contents of '/home/runner/work/tono/tono'
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2692150Z ##[group]Determining repository object format
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2694599Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2696812Z ##[group]Initializing the repository
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2700944Z [command]/usr/bin/git init /home/runner/work/tono/tono
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2825920Z hint: Using 'master' as the name for the initial branch. This default branch name
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2829281Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2831896Z hint: to use in all of your new repositories, which will suppress this warning,
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2833926Z hint: call:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2835119Z hint:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2836817Z hint: 	git config --global init.defaultBranch <name>
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2838733Z hint:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2840391Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2842896Z hint: 'development'. The just-created branch can be renamed via this command:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2844843Z hint:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2846925Z hint: 	git branch -m <name>
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2848079Z hint:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2849359Z hint: Disable this message with "git config set advice.defaultBranchName false"
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2851190Z Initialized empty Git repository in /home/runner/work/tono/tono/.git/
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2854967Z [command]/usr/bin/git remote add origin https://github.com/raydocs/tono
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2905567Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2908226Z ##[group]Disabling automatic garbage collection
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2910440Z [command]/usr/bin/git config --local gc.auto 0
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2957066Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2959982Z ##[group]Setting up auth
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2962001Z Removing SSH command configuration
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2964560Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.2994455Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3362517Z Removing HTTP extra header
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3378156Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3408833Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3612700Z Removing includeIf entries pointing to credentials config files
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3616606Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3646422Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3837256Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3872991Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/tono/tono/.git.path /home/runner/work/_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3908317Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3946496Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.3979525Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.4042961Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.4044614Z ##[group]Fetching the repository
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.4049262Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin aac04f327432f319833b0a35d1ce546148624d63
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8109295Z From https://github.com/raydocs/tono
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8110581Z  * branch            aac04f327432f319833b0a35d1ce546148624d63 -> FETCH_HEAD
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8112999Z [command]/usr/bin/git rev-parse --verify --quiet aac04f327432f319833b0a35d1ce546148624d63^{object}
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8136663Z aac04f327432f319833b0a35d1ce546148624d63
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8139826Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8140710Z ##[group]Determining the checkout info
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8144504Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8145573Z ##[group]Setting up sparse checkout
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8146525Z [command]/usr/bin/git config core.sparseCheckout true
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8182078Z [command]/usr/bin/git rev-parse --git-path info/sparse-checkout
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8204441Z .git/info/sparse-checkout
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8211224Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8212307Z ##[group]Checking out the ref
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:38.8216860Z [command]/usr/bin/git checkout --progress --force aac04f327432f319833b0a35d1ce546148624d63
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1325683Z Note: switching to 'aac04f327432f319833b0a35d1ce546148624d63'.
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1326513Z 
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1326823Z You are in 'detached HEAD' state. You can look around, make experimental
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1327440Z changes and commit them, and you can discard any commits you make in this
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1328166Z state without impacting any branches by switching back to a branch.
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1328466Z 
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1328749Z If you want to create a new branch to retain commits you create, you may
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1329333Z do so (now or later) by using -c with the switch command. Example:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1329796Z 
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1329987Z   git switch -c <new-branch-name>
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1330243Z 
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1330408Z Or undo this operation with:
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1330660Z 
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1330822Z   git switch -
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1331041Z 
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1331348Z Turn off this advice by setting config variable advice.detachedHead to false
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1331937Z 
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1332405Z HEAD is now at aac04f3 Android: the engine's notification turns honest the moment the engine dies (watch process hears its binder die)
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1335309Z ##[endgroup]
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1383311Z [command]/usr/bin/git log -1 --format=%H
+emulator (ui)	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:43:39.1410276Z aac04f327432f319833b0a35d1ce546148624d63
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	﻿2026-10-19T02:43:39.1644159Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1644734Z with:
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1645136Z   name: tono-mobile-0.3.1-test-aac04f327
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1645616Z   path: apk
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1646022Z   merge-multiple: false
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1646540Z   repository: raydocs/tono
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1646910Z   run-id: 39190910753
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1647316Z   skip-decompress: false
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1647698Z   digest-mismatch: error
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.1648074Z ##[endgroup]
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.3009268Z Downloading single artifact
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.4752017Z Preparing to download the following artifacts:
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.4753444Z - tono-mobile-0.3.1-test-aac04f327 (ID: 12160575105, Size: 45023621, Expected Digest: sha256:2007654e5b7163a97a94f2e86e4ad4767c15d8f14968f729cd043adf54cd15c9)
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.8076407Z Redirecting to blob download url: https://productionresultssa16.blob.core.windows.net/actions-results/158e6ddf-aac0-8ba4-9d58-91f3421f5717/workflow-job-run-83b837c0-28c4-5bec-96c5-6376b765dc71/artifacts/68e7f8dd6f9863b00f6e0d67fe2ce0e0da21068b0a451cc046ab93dfb34eb286.zip
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:39.8079005Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:40.0416897Z (node:2259) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:40.0418537Z (Use `node --trace-deprecation ...` to show where the warning was created)
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.3877903Z SHA256 digest of downloaded artifact is 2007654e5b7163a97a94f2e86e4ad4767c15d8f14968f729cd043adf54cd15c9
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.3879240Z Artifact download completed successfully.
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.3889598Z Total of 1 artifact(s) downloaded
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.3890237Z Download artifact has finished successfully
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	﻿2026-10-19T02:43:41.4069815Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4070348Z with:
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4070654Z   name: instrumentation-apk
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4071033Z   path: apk
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4071361Z   merge-multiple: false
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4071684Z   repository: raydocs/tono
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4072102Z   run-id: 39190910753
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4072994Z   skip-decompress: false
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4073380Z   digest-mismatch: error
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.4073775Z ##[endgroup]
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.5437373Z Downloading single artifact
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.7219087Z Preparing to download the following artifacts:
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:41.7220177Z - instrumentation-apk (ID: 12159479948, Size: 4432652, Expected Digest: sha256:1f499fc3a54ec3187c63937bb9fcdd1033a5389292e1921781aa81b564fa0d64)
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.0669676Z Redirecting to blob download url: https://productionresultssa16.blob.core.windows.net/actions-results/158e6ddf-aac0-8ba4-9d58-91f3421f5717/workflow-job-run-83b837c0-28c4-5bec-96c5-6376b765dc71/artifacts/03fd2856d8c68c693f975f4c83352e888fec0e0068c92622a3d8b7afb7303369.zip
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.0677975Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.2837067Z (node:2274) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.2838416Z (Use `node --trace-deprecation ...` to show where the warning was created)
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.7626874Z SHA256 digest of downloaded artifact is 1f499fc3a54ec3187c63937bb9fcdd1033a5389292e1921781aa81b564fa0d64
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.7628004Z Artifact download completed successfully.
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.7628819Z Total of 1 artifact(s) downloaded
+emulator (ui)	Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333	2026-10-19T02:43:42.7631609Z Download artifact has finished successfully
+emulator (ui)	Enable KVM for the emulator	﻿2026-10-19T02:43:42.7854482Z ##[group]Run echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+emulator (ui)	Enable KVM for the emulator	2026-10-19T02:43:42.7855922Z ^[[36;1mecho 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules^[[0m
+emulator (ui)	Enable KVM for the emulator	2026-10-19T02:43:42.7857191Z ^[[36;1msudo udevadm control --reload-rules^[[0m
+emulator (ui)	Enable KVM for the emulator	2026-10-19T02:43:42.7858044Z ^[[36;1msudo udevadm trigger --name-match=kvm^[[0m
+emulator (ui)	Enable KVM for the emulator	2026-10-19T02:43:42.8479796Z shell: /usr/bin/bash -e {0}
+emulator (ui)	Enable KVM for the emulator	2026-10-19T02:43:42.8480507Z ##[endgroup]
+emulator (ui)	Enable KVM for the emulator	2026-10-19T02:43:42.8818682Z KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"
+emulator (ui)	Record how the emulator ends	﻿2026-10-19T02:43:42.9342276Z ##[group]Run mkdir -p host-watch
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9342892Z ^[[36;1mmkdir -p host-watch^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9343467Z ^[[36;1mcommand -v gdb > /dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb > /dev/null) || true^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9344149Z ^[[36;1msudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/host-watch/core.%e.%p"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9344737Z ^[[36;1mcat > wrap-emulator.sh <<'SH'^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9345092Z ^[[36;1mset -eu^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9345510Z ^[[36;1mE="$ANDROID_HOME/emulator"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9345932Z ^[[36;1mgrep -q emulator-exit "$E/emulator" 2>/dev/null && exit 0^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9346740Z ^[[36;1mmv -f "$E/emulator" "$E/emulator.real"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9347125Z ^[[36;1mcat > "$E/emulator" <<'W'^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9347675Z ^[[36;1m#!/bin/bash^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9348083Z ^[[36;1mW="$GITHUB_WORKSPACE/host-watch"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9348454Z ^[[36;1mulimit -c unlimited^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9349142Z ^[[36;1mecho 0x11 > /proc/self/coredump_filter^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9349611Z ^[[36;1m"$0.real" "$@"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9349975Z ^[[36;1mcode=$?^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9350411Z ^[[36;1mecho "$(date -u +%FT%TZ) emulator exited with status $code" >> "$W/emulator-exit.txt"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9350965Z ^[[36;1mfor core in "$W"/core.*; do^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9351324Z ^[[36;1m  [ -f "$core" ] || continue^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9351857Z ^[[36;1m  exe=$(find "$(dirname "$0")/qemu" -name 'qemu-system-x86_64*' -type f | head -1)^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9352769Z ^[[36;1m  { echo "== $core ($(du -h "$core" | cut -f1))"; timeout 300 gdb -batch -ex bt -ex 'info registers rip' -ex 'info sharedlibrary' "$exe" "$core" 2>&1 | grep -v '^\[New LWP' | head -200; } >> "$W/emulator-crash-stack.txt"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9353565Z ^[[36;1m  rm -f "$core"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9353911Z ^[[36;1mdone^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9354264Z ^[[36;1mexit $code^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9354574Z ^[[36;1mW^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9354868Z ^[[36;1mchmod +x "$E/emulator"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9355232Z ^[[36;1mSH^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9355545Z ^[[36;1mnohup bash -c 'while true; do^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9355970Z ^[[36;1m  p=$(pgrep -f "[q]emu-system-x86_64" | head -1)^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9357073Z ^[[36;1m  if [ -n "$p" ]; then echo "$(date -u +%T) pid $p rss_kb,stat,elapsed $(ps -o rss=,stat=,etime= -p "$p" | xargs) load $(cut -d" " -f1 /proc/loadavg) avail_kb $(awk "/MemAvailable/{print \$2}" /proc/meminfo)"^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9357883Z ^[[36;1m  else echo "$(date -u +%T) no emulator process"; fi^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9358332Z ^[[36;1m  sleep 5^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9358706Z ^[[36;1mdone' > host-watch/emulator-watch.txt 2>&1 &^[[0m
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9400149Z shell: /usr/bin/bash -e {0}
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:42.9400581Z ##[endgroup]
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3058591Z 
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3059889Z Running kernel seems to be up-to-date.
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3060654Z 
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3060859Z No services need to be restarted.
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3061198Z 
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3061468Z No containers need to be restarted.
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3061787Z 
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3062049Z No user sessions are running outdated binaries.
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3062448Z 
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:54.3063007Z No VM guests are running outdated hypervisor (qemu) binaries on this host.
+emulator (ui)	Record how the emulator ends	2026-10-19T02:43:55.3094699Z kernel.core_pattern = /home/runner/work/tono/tono/host-watch/core.%e.%p
+emulator (ui)	Write the on-device evidence script	﻿2026-10-19T02:43:55.3173663Z ##[group]Run cat > evidence.sh <<'SH'
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3175156Z ^[[36;1mcat > evidence.sh <<'SH'^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3175536Z ^[[36;1mset -euxo pipefail^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3175911Z ^[[36;1mAPP=com.raydocs.tono.mobile.test^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3176690Z ^[[36;1m# A retry keeps the first attempt's evidence next to the second's.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3177424Z ^[[36;1mif [ -d evidence ]; then mv evidence "evidence-attempt-$(date +%s)"; fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3178164Z ^[[36;1mmkdir -p evidence^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3178602Z ^[[36;1madb shell getprop ro.build.fingerprint | tee evidence/device.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3179164Z ^[[36;1madb shell getprop ro.product.cpu.abi | tee -a evidence/device.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3179718Z ^[[36;1madb shell wm size | tee -a evidence/device.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3180150Z ^[[36;1madb shell wm density | tee -a evidence/device.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3180658Z ^[[36;1madb shell settings put system screen_off_timeout 1800000^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3181452Z ^[[36;1madb shell svc power stayon true^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3182003Z ^[[36;1madb shell input keyevent 82 || true^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3182815Z ^[[36;1m# Let the launcher finish its first-boot work; on swiftshader it can otherwise raise an ANR^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3183639Z ^[[36;1m# dialog over the app. The test answers only foreign ANR dialogs and logs each one.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3184455Z ^[[36;1msleep 60^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3184908Z ^[[36;1madb shell input keyevent 3^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3185551Z ^[[36;1m# No -g: runtime permissions and VPN consent stay as on a fresh install.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3186462Z ^[[36;1madb install -r apk/*-test-*.apk^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3187023Z ^[[36;1madb install -r apk/instrumentation.apk^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3187862Z ^[[36;1m# Emulator health gate, measured before the tests: the median frame time of Tono's own^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3188934Z ^[[36;1m# animated sign-in screen over 8 s. Emulators at 300–750 ms ran every test at normal speed.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3189993Z ^[[36;1m# From 800 ms up, tests hung in waits for an idle main thread under the animated sea (runs^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3190993Z ^[[36;1m# 39153105611, 39159687608, 39163947970); those waits are gone or run with animations^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3191968Z ^[[36;1m# removed, and the motion tests start still. At 775 ms the gate stopped all four ui and^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3193129Z ^[[36;1m# tunnel emulators of run 39167725741 twice (850–1000 ms), so it now stops only emulators^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3194060Z ^[[36;1m# slower than the slowest seen so far: above 1000 ms. Above it this attempt stops^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3194943Z ^[[36;1m# before the tests and the fresh-emulator retry starts early.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3195569Z ^[[36;1mset +e^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3196340Z ^[[36;1madb shell am start -W -n $APP/com.raydocs.tono.mobile.ui.MainActivity > /dev/null^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3197136Z ^[[36;1msleep 3^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3197703Z ^[[36;1madb shell dumpsys gfxinfo $APP reset > /dev/null^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3198310Z ^[[36;1msleep 8^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3199096Z ^[[36;1mmedian=$(adb shell dumpsys gfxinfo $APP | sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p' | head -1)^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3199978Z ^[[36;1madb shell am force-stop $APP^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3200475Z ^[[36;1mset -e^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3201403Z ^[[36;1mecho "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 1000 ms)" | tee evidence/health.txt >> evidence/summary.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3202525Z ^[[36;1mif [ -n "$median" ] && [ "$median" -gt 1000 ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3203587Z ^[[36;1m  echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 1000 ms); no tests run in this attempt" >> evidence/summary.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3204677Z ^[[36;1m  timeout 60 adb logcat -d > evidence/logcat.txt || true^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3205253Z ^[[36;1m  exit 1^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3205721Z ^[[36;1mfi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3206632Z ^[[36;1m# The tunnel test's stand-in control plane, on the phone's loopback (the only address the^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3207734Z ^[[36;1m# debug build's LocalTestServer accepts).^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3208425Z ^[[36;1m[ "$SHARD" = tunnel ] && adb reverse tcp:28080 tcp:28080^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3209266Z ^[[36;1m# One instrumentation call per test, pulling evidence after each, so an emulator crash^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3210211Z ^[[36;1m# (seen on hosted runners) costs one test's evidence rather than all of it.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3210876Z ^[[36;1mset +e^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3211382Z ^[[36;1mfailed=""^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3212052Z ^[[36;1m# Streamed from the host, so an emulator that dies mid-run still leaves its last log lines.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3212955Z ^[[36;1madb logcat -v threadtime > evidence/logcat-live.txt 2>&1 &^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3213613Z ^[[36;1mlogcat=$!^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3214076Z ^[[36;1mcase "$SHARD" in^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3215066Z ^[[36;1m  system) tests="DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3216660Z ^[[36;1m  DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3218174Z ^[[36;1m  DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3219580Z ^[[36;1m  SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3220899Z ^[[36;1m  SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates" ;;^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3222383Z ^[[36;1m  tunnel) tests="DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3223803Z ^[[36;1m  DeviceEvidenceTest#b3_fixtureAtLargeFontScale LocalTunnelDeviceTest#t2_realAppTurnsWithKeyboardAndConsentOpen^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3225257Z ^[[36;1m  LocalTunnelDeviceTest#t1_realTunnelThroughLocalFixtureServers LocalTunnelDeviceTest#t3_realAppStatesAndSkyOnMainActivity^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3226739Z ^[[36;1m  LocalTunnelDeviceTest#t4_realAppAtLargestSystemText LocalTunnelDeviceTest#t5_engineDiesWithNoAppOpen^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3227825Z ^[[36;1m  LocalTunnelDeviceTest#t6_engineDiesInDozeAndTogetherWithItsWatch" ;;^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3229268Z ^[[36;1m  ui) tests="HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3230716Z ^[[36;1m  HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3232076Z ^[[36;1m  HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3233423Z ^[[36;1m  HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3234650Z ^[[36;1m  HorizonUiDeviceTest#u9_keyboardFocusIsVisibleAndAccessibilityActionsWork^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3235863Z ^[[36;1m  LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3237289Z ^[[36;1m  LandscapeDeviceTest#l3_landscapeKeepsEverythingReadableAndReachable" ;;^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3238080Z ^[[36;1m  *) echo "unknown shard $SHARD"; exit 1 ;;^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3238657Z ^[[36;1mesac^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3239132Z ^[[36;1mecho "shard $SHARD" > evidence/shard.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3239694Z ^[[36;1mfor c in $tests; do^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3240219Z ^[[36;1m  t="${c#*#}"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3240896Z ^[[36;1m  # A pathologically slow emulator (run 39126740818: a1 took 163 s instead of ~30 s) would^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3241920Z ^[[36;1m  # otherwise use the whole step; stop the attempt so the fresh-emulator retry has time.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3242663Z ^[[36;1m  if [ "$SECONDS" -gt 2100 ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3243840Z ^[[36;1m    echo "TIME-BUDGET: attempt stopped after ${SECONDS}s before $t; later tests not run in this attempt" >> evidence/summary.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3244756Z ^[[36;1m    failed="$failed time-budget"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3245283Z ^[[36;1m    break^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3245736Z ^[[36;1m  fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3246303Z ^[[36;1m  rec=""^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3246937Z ^[[36;1m  if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3247730Z ^[[36;1m    # Recorded from the host: a screenrecord started inside the test kept the run open.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3248811Z ^[[36;1m    adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3249623Z ^[[36;1m    rec=$!^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3250064Z ^[[36;1m  fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3250642Z ^[[36;1m  if [ "$t" = t3_realAppStatesAndSkyOnMainActivity ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3251505Z ^[[36;1m    # The real app's own motion through its states, at the emulator's real (software) frame rate.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3252644Z ^[[36;1m    adb shell screenrecord --time-limit 180 --bit-rate 6000000 /sdcard/Download/tono-real-motion.mp4 &^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3253443Z ^[[36;1m    rec=$!^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3253935Z ^[[36;1m  fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3254700Z ^[[36;1m  # On a software-GPU emulator the animated sea keeps the app's main thread busy, and every^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3255600Z ^[[36;1m  # wait for an idle main thread (ActivityScenario.launch among them) then takes minutes:^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3256714Z ^[[36;1m  # at 850 ms per frame, launching the app took 9 minutes (run 39163947970). Tests that are^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3257622Z ^[[36;1m  # not about motion run with Android's "Remove animations"; a5, b2, u8 and t3 are the^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3258464Z ^[[36;1m  # motion evidence and keep it on (a5 and t3 launch still and turn motion on themselves).^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3258938Z ^[[36;1m  case "$t" in^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3259460Z ^[[36;1m    a5_*|b2_*|u8_*|t3_*) motion=1 ;;^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3259945Z ^[[36;1m    *) motion=0 ;;^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3260388Z ^[[36;1m  esac^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3260993Z ^[[36;1m  adb shell settings put global animator_duration_scale $motion^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3261733Z ^[[36;1m  echo "$t: animator_duration_scale $motion" >> evidence/animations.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3262487Z ^[[36;1m  # The tunnel test is judged again from the stand-in exits' own logs, from this point on.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3263198Z ^[[36;1m  [ "$t" = t1_realTunnelThroughLocalFixtureServers ] && from=$(stat -c %s "$LOCAL_TUNNEL/sing-box.log")^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3263915Z ^[[36;1m  timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3264562Z ^[[36;1m    $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3265085Z ^[[36;1m  if [ $? -eq 124 ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3265609Z ^[[36;1m    # Hung: keep what was on screen and in front before stopping it (run 39138009249 had none).^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3266378Z ^[[36;1m    echo "HANG: $t stopped after 600 s" >> evidence/summary.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3267056Z ^[[36;1m    timeout 30 adb exec-out screencap -p > "evidence/hang-$t.png"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3267730Z ^[[36;1m    timeout 30 adb shell uiautomator dump /sdcard/hang.xml > /dev/null && timeout 30 adb pull /sdcard/hang.xml "evidence/hang-$t.xml"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3268507Z ^[[36;1m    timeout 30 adb shell dumpsys activity top | head -300 > "evidence/hang-$t-activity.txt"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3269272Z ^[[36;1m    timeout 30 adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|isn.t responding' > "evidence/hang-$t-window.txt"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3270260Z ^[[36;1m    timeout 30 adb shell am force-stop $APP^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3270773Z ^[[36;1m  fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3271255Z ^[[36;1m  # The real-app recording ends with the test (SIGINT lets screenrecord finish the file).^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3272514Z ^[[36;1m  [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 10 adb shell pkill -2 screenrecord^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3273416Z ^[[36;1m  [ -n "$rec" ] && { timeout 200 tail --pid="$rec" -f /dev/null || kill "$rec"; }^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3274540Z ^[[36;1m  grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3275611Z ^[[36;1m  timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3276633Z ^[[36;1m  [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3277623Z ^[[36;1m  [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 120 adb pull /sdcard/Download/tono-real-motion.mp4 evidence/local-real-motion.mp4^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3278375Z ^[[36;1m  if [ "$t" = t1_realTunnelThroughLocalFixtureServers ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3278853Z ^[[36;1m    mkdir -p evidence/local-tunnel^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3279392Z ^[[36;1m    tail -c +$((from + 1)) "$LOCAL_TUNNEL/sing-box.log" > evidence/local-tunnel/exits.log^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3279987Z ^[[36;1m    cp "$LOCAL_TUNNEL/control-plane.log" evidence/local-tunnel/^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3280788Z ^[[36;1m    if python3 apps/android/scripts/local-tunnel/fixture-servers.py check evidence/local-tunnel/exits.log \^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3281470Z ^[[36;1m        evidence/local-tunnel-requests.txt > evidence/local-tunnel-routing.txt; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3282142Z ^[[36;1m      echo "PASS t1-routing-matches-exit-logs" >> evidence/summary.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3282615Z ^[[36;1m    else^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3283107Z ^[[36;1m      echo "FAIL t1-routing-matches-exit-logs" >> evidence/summary.txt; failed="$failed t1-routing"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3283653Z ^[[36;1m    fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3284003Z ^[[36;1m    cat evidence/local-tunnel-routing.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3284419Z ^[[36;1m  fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3284860Z ^[[36;1m  # A dead emulator fails every later test with no output; say so once and stop, so the^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3285549Z ^[[36;1m  # fresh-emulator retry starts sooner. Every test must still pass in a single session.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3286288Z ^[[36;1m  if [ "$(timeout 30 adb get-state 2>/dev/null)" != device ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3286905Z ^[[36;1m    echo "DEVICE-OFFLINE after $t; later tests not run in this attempt" >> evidence/summary.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3287496Z ^[[36;1m    failed="$failed device-offline"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3287862Z ^[[36;1m    break^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3288216Z ^[[36;1m  fi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3288601Z ^[[36;1m  # Isolation: a shade a test left open would cover the next test's app.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3289156Z ^[[36;1m  timeout 30 adb shell cmd statusbar collapse^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3289556Z ^[[36;1mdone^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3289870Z ^[[36;1mkill $logcat^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3290345Z ^[[36;1mif [ "$SHARD" = system ] && [ "$(timeout 30 adb get-state 2>/dev/null)" = device ]; then^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3290977Z ^[[36;1m  # Measurements only, on an emulator with a software GPU: not a phone, not a pass/fail gate.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3291687Z ^[[36;1m  # Animations back on first: the last test ran with them removed, which left gfxinfo with no^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3292188Z ^[[36;1m  # frames to count (run 39176556620).^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3292683Z ^[[36;1m  adb shell settings put global animator_duration_scale 1^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3293097Z ^[[36;1m  { set +x; } 2>/dev/null^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3293442Z ^[[36;1m  {^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3293862Z ^[[36;1m    echo "emulator $(cat evidence/device.txt | tr '\n' ' ')"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3294337Z ^[[36;1m    echo "APK size: $(stat -c %s apk/*-test-*.apk) bytes"^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3294798Z ^[[36;1m    for i in 1 2 3 4 5; do^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3295365Z ^[[36;1m      adb shell am start -W -S -n $APP/com.raydocs.tono.mobile.ui.MainActivity | grep -E 'TotalTime|WaitTime' | tr '\n' ' '^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3296350Z ^[[36;1m      echo^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3296717Z ^[[36;1m      sleep 3^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3297053Z ^[[36;1m    done^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3297440Z ^[[36;1m    adb shell dumpsys gfxinfo $APP reset > /dev/null^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3297852Z ^[[36;1m    sleep 10^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3298328Z ^[[36;1m    adb shell dumpsys gfxinfo $APP | grep -E 'Total frames|Janky frames|percentile'^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3298942Z ^[[36;1m    adb shell dumpsys meminfo $APP | grep -E 'TOTAL PSS|TOTAL RSS'^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3299414Z ^[[36;1m  } > evidence/perf.txt 2>&1^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3299788Z ^[[36;1m  set -x^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3300143Z ^[[36;1m  adb shell am force-stop $APP^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3300517Z ^[[36;1mfi^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3300956Z ^[[36;1m# Leave the shared emulator settings as found, whatever a failed test left behind.^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3301486Z ^[[36;1madb shell settings put system font_scale 1.0^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3301961Z ^[[36;1madb shell settings put global animator_duration_scale 1^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3302443Z ^[[36;1madb shell cmd uimode night no^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3302830Z ^[[36;1madb shell wm size reset^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3303269Z ^[[36;1madb shell wm density reset^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3303744Z ^[[36;1madb shell settings put system user_rotation 0^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3304234Z ^[[36;1mtimeout 60 adb logcat -d > evidence/logcat.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3304638Z ^[[36;1mls -la evidence^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3304985Z ^[[36;1mcat evidence/summary.txt^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3305355Z ^[[36;1mset -e^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3305661Z ^[[36;1m[ -z "$failed" ]^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3306054Z ^[[36;1mSH^[[0m
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3347846Z shell: /usr/bin/bash -e {0}
+emulator (ui)	Write the on-device evidence script	2026-10-19T02:43:55.3348294Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	﻿2026-10-19T02:43:55.3530602Z ##[group]Run reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3531165Z with:
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3531518Z   api-level: 34
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3531819Z   target: google_apis
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3532531Z   arch: x86_64
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3532856Z   profile: pixel_6
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3533198Z   disable-animations: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3533816Z   emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3534493Z   pre-emulator-launch-script: bash wrap-emulator.sh
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3534914Z   script: SHARD=ui bash evidence.sh
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3535304Z   cores: 2
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3535607Z   avd-name: test
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3535931Z   force-avd-creation: true
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3536537Z   emulator-boot-timeout: 600
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3536889Z   emulator-port: 5554
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3537221Z   disable-spellchecker: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3537619Z   disable-linux-hw-accel: auto
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3538125Z   enable-hw-keyboard: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3538456Z   channel: stable
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.3538877Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4121941Z ##[group]Configure emulator
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4123240Z API level: 34
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4123799Z System image API level: 34
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4124360Z target: google_apis
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4124850Z CPU architecture: x86_64
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4125355Z Hardware profile: pixel_6
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4126533Z Cores: 2
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4126976Z RAM size: 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4127457Z Heap size: 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4127888Z SD card path or size: 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4128566Z Disk size: 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4129167Z AVD name: test
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4129773Z force avd creation: true
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4130464Z Emulator boot timeout: 600
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4131001Z emulator port: 5554
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4131932Z emulator options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4133052Z disable animations: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4133638Z disable spellchecker: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4134190Z disable Linux hardware acceleration: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4134751Z enable hardware keyboard: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4135305Z Channel: 0 (stable)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4135732Z Script:
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4136289Z SHARD=ui bash evidence.sh
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4136765Z Pre emulator launch script:
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4137164Z bash wrap-emulator.sh
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4138076Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4138895Z ##[group]Install Android SDK
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:55.4209778Z [command]/usr/bin/sh -c \yes | sdkmanager --licenses > /dev/null
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:58.4033366Z Installing latest build tools, platform tools, and platform.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:58.4044947Z [command]/usr/bin/sh -c \sdkmanager --install 'build-tools;37.0.0' platform-tools 'platforms;android-34'> /dev/null
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:59.8183933Z Installing latest emulator.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:43:59.8195688Z [command]/usr/bin/sh -c \sdkmanager --install emulator --channel=0 > /dev/null
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:09.7427122Z Installing system images.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:09.7437191Z [command]/usr/bin/sh -c \sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:50.3631836Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:50.3632756Z ##[group]Create AVD
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:50.3633215Z Creating AVD.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:50.3654401Z [command]/usr/bin/sh -c \echo no | avdmanager create avd --force -n test --package 'system-images;android-34;google_apis;x86_64' --device 'pixel_6'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.0904215Z Loading local repository...                                                     
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.0910435Z [=========                              ] 25% Loading local repository...       
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.0917855Z [=========                              ] 25% Fetch remote repository...        
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.0919076Z [=======================================] 100% Fetch remote repository...       
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.3003285Z Auto-selecting single ABI x86_64
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.6925542Z [command]/usr/bin/sh -c \printf 'hw.cpu.ncore=2\n' >> /home/runner/.android/avd/test.avd/config.ini
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.6945054Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.6945972Z ##[group]Run pre emulator launch script
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.6957061Z [command]/usr/bin/sh -c bash wrap-emulator.sh
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7141545Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7142777Z ##[group]Launch Emulator
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7143285Z Starting emulator.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7159398Z [command]/usr/bin/sh -c \/usr/local/lib/android/sdk/emulator/emulator -port 5554 -avd test -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none &
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7278174Z INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7278845Z INFO         | Graphics backend: gfxstream
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7279404Z INFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7695178Z INFO         | Saving last run QEMU version for the AVD to 2
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7696855Z INFO         | Increasing RAM size to 2560MB
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7697758Z ##############################################################################
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7698913Z ##                        WARNING - ACTION REQUIRED                         ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7699931Z ##  Consider using the '-metrics-collection' flag to help improve the       ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7701420Z ##  emulator by sending anonymized usage data. Or use the '-no-metrics'     ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7702514Z ##  flag to bypass this warning and turn off the metrics collection.        ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7703665Z ##  In a future release this warning will turn into a one-time blocking     ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7704842Z ##  prompt to ask for explicit user input regarding metrics collection.     ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7705888Z ##                                                                          ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7706983Z ##  Please see '-help-metrics-collection' for more details. You can use     ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7708171Z ##  '-metrics-to-file' or '-metrics-to-console' flags to see what type of   ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7709164Z ##  data is being collected by emulator as part of usage statistics.        ##
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7710268Z ##############################################################################
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7711094Z INFO         | Guest GLES Driver: Auto (ext controls)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7712038Z INFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swangle
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7712963Z INFO         | Checking system compatibility:
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7713774Z INFO         |   Checking: hasSufficientDiskSpace
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7714668Z INFO         |      Ok: Disk space requirements to run avd: `test` are met
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7715528Z INFO         |   Checking: hasSufficientHwGpu
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7716430Z INFO         |      Ok: Hardware GPU compatibility checks are not required
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7717353Z INFO         |   Checking: hasSufficientSystem
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7718262Z INFO         |      Ok: System requirements to run avd: `test` are met
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:51.7719678Z WARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4539971Z ERROR        | Unable to connect to adb daemon on port: 5037
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4557898Z INFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.2.12.db, detection is enabled for process: 3178
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4559241Z INFO         | Initializing gfxstream backend
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4569736Z INFO         | startOpenglesRendererImpl: gpu info
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4570280Z INFO         | 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4572791Z INFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4574030Z INFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4580139Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4581233Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4582150Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4582950Z INFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4624620Z INFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4625460Z INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4865528Z INFO         | Format VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16 does not support YCbCr sampler conversion
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4913750Z INFO         | SharedLibrary::open for [libX11]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4915890Z WARNING      | Could not open libX11.so, try libX11.so.6
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4916653Z INFO         | SharedLibrary::open for [libX11.so.6]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4917502Z INFO         | SharedLibrary::open for [libX11-xcb]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4918207Z WARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4918699Z INFO         | SharedLibrary::open for [libX11-xcb.so.1]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4972100Z INFO         | Initializing VkEmulation features:
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4972810Z INFO         |     glInteropSupported: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4973640Z INFO         |     useDeferredCommands: true
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4974175Z INFO         |     createResourceWithRequirements: true
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4974843Z INFO         |     useVulkanComposition: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4975295Z INFO         |     useVulkanNativeSwapchain: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4975682Z INFO         |     enable guestRenderDoc: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4976471Z INFO         |     ASTC LDR emulation mode: Gpu
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4976862Z INFO         |     enable ETC2 emulation: true
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4977304Z INFO         |     enable Ycbcr emulation: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4977683Z INFO         |     guestVulkanOnly: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4978067Z INFO         |     useDedicatedAllocations: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4978544Z INFO         |     guestVulkanMaxApiVersion: 1.3.0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.4978962Z INFO         |     enableProtectedMemoryEmulation: false
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5011850Z INFO         | Graphics Adapter Vendor Google (Google Inc. (Google))
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5013268Z INFO         | Graphics Adapter Android Emulator OpenGL ES Translator (ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver-5.0.0))
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5014695Z INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.1.0 (ANGLE 2.1.17841 git hash: 5fa2e61da947))
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5018370Z INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_OVR_multiview2 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 GL_EXT_draw_buffers_indexed GL_EXT_clip_cull_distance 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5021094Z INFO         | Graphics Device Extensions N/A
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5021816Z INFO         | Disabling sparse binding feature support
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5037232Z ERROR        | Setting read-only feature 'GLAsyncSwap' to '0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5044723Z INFO         | Feature 'GLAsyncSwap' (50) is overridden to 'disabled'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5049188Z INFO         | Sending adb public key [QAAAAG/bOf1xHOrOrBsxgDiSkd8ZCGqJnzOvhttl98hs0eqcVqs9VbHG/yft7/f/kPU/Tx/bLlC2pxEFNY8ITSlPyVvPpWGYSjt67Va9voa9ALzHxLcBoaKYbksH6Ztfy28s7gTPkLUqyDY51gtRGoIvD5dZLQdctYqGLEUvsBYaWQPf5G7X+HKAkNsf3fhitz8rl3cxe3YHnOhuRUy2NPm5m5qa03Gx3jCu+XsnAFi21opKlKLda5QR3W6AfgEXXavQerbSGRX2AYcFdHUFH3SQcoj5R86TfaSKnXVDYjLKKw+VvZ21OulHTb4R+0IVF3e4PHT0mvuUY5dmN02xYqKsca7fw0nY3HpA1Qy/KEM0QCLSNu8CcaD6CPes++ovhQs5Ya62xlJ+owl6U+VxP4jd+bwIcxp5BjHZJIhT5tvzPqVN+7JmGAHd+6kCgVbOIya7zPtcVF9Ef63B3msOBhQparaqII/S9K8BArEdUCxec/WzYT48Qql3ocedYS2ixTqZJv+SyqKWnMu1SSZLsGk0u9nI/jP6YiAermZSHknj94MDhAziIChlBQERmuSQ6p9GkII14MR8wsczo278H7JS3C2LiRaoQrfmEA621mYEIlsXB2xixUvWuQyXbV2aPBv4gme0g0lnAlkisdwXApCQ8I2VFqJyETuLA+xk0i6/QVHkKHwvZwEAAQA= runner@unknown]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5052720Z INFO         | Userspace boot properties:
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5053238Z INFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5053761Z INFO         |   androidboot.dalvik.vm.heapsize=576m
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5054218Z INFO         |   androidboot.debug.hwui.renderer=skiagl
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5054712Z INFO         |   androidboot.debug.sf.nobootanimation=1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5055161Z INFO         |   androidboot.hardware=ranchu
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5055586Z INFO         |   androidboot.hardware.gltransport=pipe
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5056000Z INFO         |   androidboot.hardware.vulkan=ranchu
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5056615Z INFO         |   androidboot.logcat=*:V
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5057050Z INFO         |   androidboot.opengles.version=196609
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5057467Z INFO         |   androidboot.qemu=1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5060909Z INFO         |   androidboot.qemu.adb.pubkey=QAAAAG/bOf1xHOrOrBsxgDiSkd8ZCGqJnzOvhttl98hs0eqcVqs9VbHG/yft7/f/kPU/Tx/bLlC2pxEFNY8ITSlPyVvPpWGYSjt67Va9voa9ALzHxLcBoaKYbksH6Ztfy28s7gTPkLUqyDY51gtRGoIvD5dZLQdctYqGLEUvsBYaWQPf5G7X+HKAkNsf3fhitz8rl3cxe3YHnOhuRUy2NPm5m5qa03Gx3jCu+XsnAFi21opKlKLda5QR3W6AfgEXXavQerbSGRX2AYcFdHUFH3SQcoj5R86TfaSKnXVDYjLKKw+VvZ21OulHTb4R+0IVF3e4PHT0mvuUY5dmN02xYqKsca7fw0nY3HpA1Qy/KEM0QCLSNu8CcaD6CPes++ovhQs5Ya62xlJ+owl6U+VxP4jd+bwIcxp5BjHZJIhT5tvzPqVN+7JmGAHd+6kCgVbOIya7zPtcVF9Ef63B3msOBhQparaqII/S9K8BArEdUCxec/WzYT48Qql3ocedYS2ixTqZJv+SyqKWnMu1SSZLsGk0u9nI/jP6YiAermZSHknj94MDhAziIChlBQERmuSQ6p9GkII14MR8wsczo278H7JS3C2LiRaoQrfmEA621mYEIlsXB2xixUvWuQyXbV2aPBv4gme0g0lnAlkisdwXApCQ8I2VFqJyETuLA+xk0i6/QVHkKHwvZwEAAQA= runner@unknown
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5064594Z INFO         |   androidboot.qemu.avd_name=test
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5065093Z INFO         |   androidboot.qemu.camera_hq_edge_processing=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5065561Z INFO         |   androidboot.qemu.camera_protocol_ver=1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5065995Z INFO         |   androidboot.qemu.cpuvulkan.version=4206592
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5067031Z INFO         |   androidboot.qemu.gltransport.drawFlushInterval=800
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5067517Z INFO         |   androidboot.qemu.gltransport.name=pipe
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5068027Z INFO         |   androidboot.qemu.hwcodec.avcdec=2
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5068500Z INFO         |   androidboot.qemu.hwcodec.hevcdec=2
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5068927Z INFO         |   androidboot.qemu.hwcodec.vpxdec=2
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5069458Z INFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5069984Z INFO         |   androidboot.qemu.skin=1080x2400
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5070387Z INFO         |   androidboot.qemu.virtiowifi=1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5070789Z INFO         |   androidboot.qemu.vsync=60
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5071416Z INFO         |   androidboot.serialno=EMULATOR37X2X12X0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5072034Z INFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5072603Z INFO         |   androidboot.vbmeta.hash_alg=sha256
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5073024Z INFO         |   androidboot.vbmeta.size=6656
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5073410Z INFO         |   androidboot.veritymode=enforcing
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5250078Z WARNING: cannnot unmap ptr 0x7f879f201000 as it is in the protected range from 0x7f86ff200000 to 0x7f879f400000
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:52.5453980Z INFO         | Monitoring duration of emulator setup.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5379388Z INFO         | Activated packet streamer for bluetooth emulation
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5380525Z INFO         | Successfully initialized netsim WiFi
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5419799Z INFO         | Setting display: 0 configuration to: 1080x2400, dpi: 420x420 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5420488Z INFO         | setDisplayActiveConfig: id:0, 1080x2400
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5421103Z INFO         | emulatorSetupEnvironment: Environment scene is not required
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5500599Z INFO         | Loading snapshot 'default_boot'...
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5501703Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5624867Z WARNING      | Device 'cache' does not have the requested snapshot 'default_boot'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5625330Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5625538Z WARNING      | Failed to load snapshot 'default_boot'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.5626727Z USER_INFO    | The emulator is performing a cold boot without a saved state because there's no snapshot and you have configured it not to save on exit.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:44:53.7850452Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:01.7199719Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:01.7229574Z * daemon not running; starting now at tcp:5037
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:01.9720615Z * daemon started successfully
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:01.9721581Z adb: device offline
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:01.9729537Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:03.9787919Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:03.9826637Z adb: device offline
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:03.9829942Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:05.9865940Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:06.0164663Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:08.0218007Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:08.0433975Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:10.0479765Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:10.0633452Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:12.0675811Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:12.0841100Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:14.0881831Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:14.1073990Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:16.1129285Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:16.1447860Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:18.1518069Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:18.1853384Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:20.1888766Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:20.2132407Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:22.2178093Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:22.2619958Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:24.2671356Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:24.2905152Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:26.2969713Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:26.3296566Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:28.3350887Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:28.3761036Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.2565806Z INFO         | Boot completed in 38502 ms
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.2577903Z INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.3772779Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.4643782Z 1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.4662297Z Emulator booted.
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.4683101Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell input keyevent 82
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5512690Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5533029Z [command]/usr/bin/sh -c SHARD=ui bash evidence.sh
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5575222Z + APP=com.raydocs.tono.mobile.test
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5576366Z + '[' -d evidence ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5577090Z + mkdir -p evidence
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5617313Z + tee evidence/device.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5617988Z + adb shell getprop ro.build.fingerprint
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.5983421Z google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6002086Z + adb shell getprop ro.product.cpu.abi
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6002773Z + tee -a evidence/device.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6377460Z x86_64
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6407543Z + tee -a evidence/device.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6408541Z + adb shell wm size
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6868899Z Physical size: 1080x2400
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6927839Z + adb shell wm density
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.6938951Z + tee -a evidence/device.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.9118920Z Physical density: 420
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.9160247Z + adb shell settings put system screen_off_timeout 1800000
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:30.9837638Z + adb shell svc power stayon true
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:32.3137520Z + adb shell input keyevent 82
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:45:38.8217840Z + sleep 60
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:38.8251063Z + adb shell input keyevent 3
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:39.0198438Z + adb install -r apk/tono-mobile-0.3.1-test-aac04f327.apk
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:42.8071425Z Performing Streamed Install
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:42.8072636Z Success
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:42.8076493Z + adb install -r apk/instrumentation.apk
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:43.2904403Z Performing Streamed Install
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:43.2908798Z Success
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:43.2909790Z + set +e
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:43.2910928Z + adb shell am start -W -n com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.ui.MainActivity
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:46.4307537Z + sleep 3
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:49.4318759Z + adb shell dumpsys gfxinfo com.raydocs.tono.mobile.test reset
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:50.8267336Z + sleep 8
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:58.8254722Z ++ adb shell dumpsys gfxinfo com.raydocs.tono.mobile.test
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:58.8327369Z ++ head -1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:46:58.8338231Z ++ sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.1813552Z + median=950
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.1877478Z + adb shell am force-stop com.raydocs.tono.mobile.test
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5435670Z + set -e
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5436600Z + tee evidence/health.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5437581Z + echo 'health: sign-in screen median frame 950 ms before the tests (limit 1000 ms)'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5458179Z + '[' -n 950 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5460381Z + '[' 950 -gt 1000 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5461226Z + '[' ui = tunnel ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5461810Z + set +e
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5462398Z + failed=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5478396Z + logcat=3925
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5479069Z + adb logcat -v threadtime
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5479674Z + case "$SHARD" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5480613Z + tests='HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5482369Z   HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5483680Z   HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5484967Z   HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5486279Z   HorizonUiDeviceTest#u9_keyboardFocusIsVisibleAndAccessibilityActionsWork
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5488726Z   LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5490185Z   LandscapeDeviceTest#l3_landscapeKeepsEverythingReadableAndReachable'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5490838Z + echo 'shard ui'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5491302Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5491813Z + t=u1_accessibilityContractAndAtfOnEveryScreen
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5492428Z + '[' 90 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5492880Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5493536Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5494424Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5495356Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5495783Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.5496409Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.7144152Z + echo 'u1_accessibilityContractAndAtfOnEveryScreen: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.7145825Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:00.7147990Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:23.5158561Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:23.5159823Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:23.5160695Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.1677465Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.1702238Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.1703418Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.1704116Z + grep -q '^OK (' evidence/instrument-u1_accessibilityContractAndAtfOnEveryScreen.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.1704951Z + echo 'PASS u1_accessibilityContractAndAtfOnEveryScreen'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.1705706Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.2611869Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 4 files pulled, 0 skipped. 7.0 MB/s (636187 bytes in 0.086s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.2625552Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.2627186Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.2628663Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.2629588Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.2674462Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.2676963Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3185936Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3204041Z + t=u2_primaryControlActsThroughRealTaps
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3213963Z + '[' 122 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3214796Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3217969Z + '[' u2_primaryControlActsThroughRealTaps = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3219930Z + '[' u2_primaryControlActsThroughRealTaps = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3220781Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3221500Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3222530Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.3998289Z + echo 'u2_primaryControlActsThroughRealTaps: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.4007812Z + '[' u2_primaryControlActsThroughRealTaps = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:32.4010466Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:47.8547585Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:47.8568174Z + '[' u2_primaryControlActsThroughRealTaps = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:47.8576691Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:47.8577548Z + grep -q '^OK (' evidence/instrument-u2_primaryControlActsThroughRealTaps.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:47.8578425Z + echo 'PASS u2_primaryControlActsThroughRealTaps'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:47.8608152Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.0735801Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 5 files pulled, 0 skipped. 4.0 MB/s (636389 bytes in 0.150s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.0755897Z + '[' u2_primaryControlActsThroughRealTaps = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.0762400Z + '[' u2_primaryControlActsThroughRealTaps = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.0763622Z + '[' u2_primaryControlActsThroughRealTaps = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.0764610Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.0805463Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.0807553Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1505808Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1508810Z + t=u3_swipeUpOnTheDockOpensDetails
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1509884Z + '[' 138 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1510647Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1511415Z + '[' u3_swipeUpOnTheDockOpensDetails = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1512400Z + '[' u3_swipeUpOnTheDockOpensDetails = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1513309Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1513823Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.1514397Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.2018012Z + echo 'u3_swipeUpOnTheDockOpensDetails: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.2022266Z + '[' u3_swipeUpOnTheDockOpensDetails = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:48.2025726Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:57.9726541Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:57.9727540Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:47:57.9728828Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.4307598Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.4341266Z + '[' u3_swipeUpOnTheDockOpensDetails = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.4371375Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.4380595Z + grep -q '^OK (' evidence/instrument-u3_swipeUpOnTheDockOpensDetails.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.4433644Z + echo 'PASS u3_swipeUpOnTheDockOpensDetails'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.4486941Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.6645607Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 6 files pulled, 0 skipped. 5.2 MB/s (951347 bytes in 0.175s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.6666776Z + '[' u3_swipeUpOnTheDockOpensDetails = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.6667804Z + '[' u3_swipeUpOnTheDockOpensDetails = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.6668749Z + '[' u3_swipeUpOnTheDockOpensDetails = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.6669392Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.6702505Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.6703317Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7383392Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7384098Z + t=u4_glassBlursTheSceneBehindIt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7385818Z + '[' 153 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7386679Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7387440Z + '[' u4_glassBlursTheSceneBehindIt = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7388460Z + '[' u4_glassBlursTheSceneBehindIt = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7389305Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7389819Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7391656Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7723002Z + echo 'u4_glassBlursTheSceneBehindIt: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7726648Z + '[' u4_glassBlursTheSceneBehindIt = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:03.7727996Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.5127249Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.5128118Z + '[' u4_glassBlursTheSceneBehindIt = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.5128783Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.5129256Z + grep -q '^OK (' evidence/instrument-u4_glassBlursTheSceneBehindIt.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.5210746Z + echo 'PASS u4_glassBlursTheSceneBehindIt'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.5237911Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.9102204Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 8 files pulled, 0 skipped. 8.4 MB/s (1058617 bytes in 0.120s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.9193005Z + '[' u4_glassBlursTheSceneBehindIt = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.9254145Z + '[' u4_glassBlursTheSceneBehindIt = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.9286909Z + '[' u4_glassBlursTheSceneBehindIt = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.9308546Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.9346800Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:13.9376672Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.0897179Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.0978010Z + t=u5_consentExplainedBeforeTheSystemDialog
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.1007634Z + '[' 164 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.1036681Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.1039240Z + '[' u5_consentExplainedBeforeTheSystemDialog = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.1066820Z + '[' u5_consentExplainedBeforeTheSystemDialog = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.1089449Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.1096387Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.1136660Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.3197819Z + echo 'u5_consentExplainedBeforeTheSystemDialog: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.3214954Z + '[' u5_consentExplainedBeforeTheSystemDialog = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:14.3217031Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:20.4770554Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:20.4774425Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:20.4775242Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3207831Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3209245Z + '[' u5_consentExplainedBeforeTheSystemDialog = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3210534Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3211457Z + grep -q '^OK (' evidence/instrument-u5_consentExplainedBeforeTheSystemDialog.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3244769Z + echo 'PASS u5_consentExplainedBeforeTheSystemDialog'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3262079Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3962633Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 9 files pulled, 0 skipped. 21.8 MB/s (1293452 bytes in 0.056s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3977694Z + '[' u5_consentExplainedBeforeTheSystemDialog = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3978689Z + '[' u5_consentExplainedBeforeTheSystemDialog = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3979515Z + '[' u5_consentExplainedBeforeTheSystemDialog = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.3980206Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4014444Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4016736Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4264451Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4265425Z + t=u6_screenReaderOrderAndLabelsOnHome
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4265991Z + '[' 176 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4266855Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4267925Z + '[' u6_screenReaderOrderAndLabelsOnHome = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4268974Z + '[' u6_screenReaderOrderAndLabelsOnHome = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4269775Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4270291Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4270869Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4506999Z + echo 'u6_screenReaderOrderAndLabelsOnHome: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4508249Z + '[' u6_screenReaderOrderAndLabelsOnHome = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:26.4509824Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.2736037Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.2762762Z + '[' u6_screenReaderOrderAndLabelsOnHome = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.2807118Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.2836978Z + grep -q '^OK (' evidence/instrument-u6_screenReaderOrderAndLabelsOnHome.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.2838426Z + echo 'PASS u6_screenReaderOrderAndLabelsOnHome'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.2866936Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.4992512Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 11 files pulled, 0 skipped. 21.2 MB/s (1299221 bytes in 0.058s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5012236Z + '[' u6_screenReaderOrderAndLabelsOnHome = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5013226Z + '[' u6_screenReaderOrderAndLabelsOnHome = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5014143Z + '[' u6_screenReaderOrderAndLabelsOnHome = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5014920Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5046010Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5047182Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5242383Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5243154Z + t=u7_simplifiedChineseCopyFitsEveryScreen
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5243794Z + '[' 184 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5244237Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5244953Z + '[' u7_simplifiedChineseCopyFitsEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5245992Z + '[' u7_simplifiedChineseCopyFitsEveryScreen = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5247012Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5247454Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5248303Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5479986Z + echo 'u7_simplifiedChineseCopyFitsEveryScreen: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5481398Z + '[' u7_simplifiedChineseCopyFitsEveryScreen = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:34.5483222Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:39.0920620Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:39.0921949Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:39.0922980Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.6817296Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.6877413Z + '[' u7_simplifiedChineseCopyFitsEveryScreen = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.6906646Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.6936875Z + grep -q '^OK (' evidence/instrument-u7_simplifiedChineseCopyFitsEveryScreen.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.6986684Z + echo 'PASS u7_simplifiedChineseCopyFitsEveryScreen'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.7016943Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9079799Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 15 files pulled, 0 skipped. 12.1 MB/s (2532806 bytes in 0.200s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9095168Z + '[' u7_simplifiedChineseCopyFitsEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9098208Z + '[' u7_simplifiedChineseCopyFitsEveryScreen = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9099329Z + '[' u7_simplifiedChineseCopyFitsEveryScreen = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9105233Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9147939Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9152415Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9377391Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9378021Z + t=u8_motionFrameByFrameAt60fps
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9378493Z + '[' 200 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9378828Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9379268Z + '[' u8_motionFrameByFrameAt60fps = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9379890Z + '[' u8_motionFrameByFrameAt60fps = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9380414Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9380729Z + motion=1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9381124Z + adb shell settings put global animator_duration_scale 1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9623404Z + echo 'u8_motionFrameByFrameAt60fps: animator_duration_scale 1'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9625091Z + '[' u8_motionFrameByFrameAt60fps = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:48:50.9627024Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:47.3146671Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:47.3147977Z + '[' u8_motionFrameByFrameAt60fps = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:47.3148803Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:47.3149678Z + grep -q '^OK (' evidence/instrument-u8_motionFrameByFrameAt60fps.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:47.3166577Z + echo 'PASS u8_motionFrameByFrameAt60fps'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:47.3168795Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.4369378Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 408 files pulled, 0 skipped. 3.0 MB/s (15777992 bytes in 5.034s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.4427332Z + '[' u8_motionFrameByFrameAt60fps = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.4437191Z + '[' u8_motionFrameByFrameAt60fps = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.4529644Z + '[' u8_motionFrameByFrameAt60fps = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.4537389Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.4576925Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.4587008Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5203534Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5226674Z + t=u9_keyboardFocusIsVisibleAndAccessibilityActionsWork
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5256906Z + '[' 442 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5956729Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5957884Z + '[' u9_keyboardFocusIsVisibleAndAccessibilityActionsWork = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5959189Z + '[' u9_keyboardFocusIsVisibleAndAccessibilityActionsWork = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5960084Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5960946Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5961439Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5962417Z + echo 'u9_keyboardFocusIsVisibleAndAccessibilityActionsWork: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.5987171Z + '[' u9_keyboardFocusIsVisibleAndAccessibilityActionsWork = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:52.6020035Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u9_keyboardFocusIsVisibleAndAccessibilityActionsWork com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:57.4602623Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:57.4603463Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:52:57.4604239Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:15.9714167Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:15.9715594Z + '[' u9_keyboardFocusIsVisibleAndAccessibilityActionsWork = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:15.9717065Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:15.9718115Z + grep -q '^OK (' evidence/instrument-u9_keyboardFocusIsVisibleAndAccessibilityActionsWork.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:15.9735727Z + echo 'PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:15.9737138Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.4790580Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 410 files pulled, 0 skipped. 31.3 MB/s (16308811 bytes in 0.497s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.4810955Z + '[' u9_keyboardFocusIsVisibleAndAccessibilityActionsWork = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.4812187Z + '[' u9_keyboardFocusIsVisibleAndAccessibilityActionsWork = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.4813482Z + '[' u9_keyboardFocusIsVisibleAndAccessibilityActionsWork = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.4814075Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.4846196Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.4847264Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5041511Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5042844Z + t=l1_largestSystemTextIsNeverCutOff
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5043558Z + '[' 466 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5044199Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5046663Z + '[' l1_largestSystemTextIsNeverCutOff = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5047827Z + '[' l1_largestSystemTextIsNeverCutOff = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5048884Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5049458Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5050216Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5279002Z + echo 'l1_largestSystemTextIsNeverCutOff: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5280217Z + '[' l1_largestSystemTextIsNeverCutOff = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:16.5281665Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:26.8044341Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:26.8045370Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:26.8046717Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:35.6839666Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:35.6927410Z + '[' l1_largestSystemTextIsNeverCutOff = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:35.6956790Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:35.7017223Z + grep -q '^OK (' evidence/instrument-l1_largestSystemTextIsNeverCutOff.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:35.7046519Z + echo 'PASS l1_largestSystemTextIsNeverCutOff'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:35.7076605Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.2344122Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 414 files pulled, 0 skipped. 6.5 MB/s (17183495 bytes in 2.532s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.2377747Z + '[' l1_largestSystemTextIsNeverCutOff = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.2403652Z + '[' l1_largestSystemTextIsNeverCutOff = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.2421965Z + '[' l1_largestSystemTextIsNeverCutOff = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.2446754Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.2539749Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.2558213Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3501014Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3530644Z + t=l2_smallPhoneKeepsEverythingReadableAndReachable
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3552298Z + '[' 488 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3568872Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3596930Z + '[' l2_smallPhoneKeepsEverythingReadableAndReachable = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3624058Z + '[' l2_smallPhoneKeepsEverythingReadableAndReachable = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3658125Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3658747Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.3659320Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.4967673Z + echo 'l2_smallPhoneKeepsEverythingReadableAndReachable: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.4987287Z + '[' l2_smallPhoneKeepsEverythingReadableAndReachable = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:38.4998492Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:50.9087610Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:50.9088457Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:50.9088942Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:59.3043756Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:59.3046530Z + '[' l2_smallPhoneKeepsEverythingReadableAndReachable = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:59.3077648Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:59.3109761Z + grep -q '^OK (' evidence/instrument-l2_smallPhoneKeepsEverythingReadableAndReachable.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:59.3116989Z + echo 'PASS l2_smallPhoneKeepsEverythingReadableAndReachable'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:53:59.3138928Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.2457740Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 417 files pulled, 0 skipped. 5.7 MB/s (17505723 bytes in 2.917s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.2547610Z + '[' l2_smallPhoneKeepsEverythingReadableAndReachable = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.2585076Z + '[' l2_smallPhoneKeepsEverythingReadableAndReachable = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.2592029Z + '[' l2_smallPhoneKeepsEverythingReadableAndReachable = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.2593243Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.2627058Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.2628055Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.4887187Z + for c in $tests
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.4917068Z + t=l3_landscapeKeepsEverythingReadableAndReachable
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.4947307Z + '[' 512 -gt 2100 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.4966848Z + rec=
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5047102Z + '[' l3_landscapeKeepsEverythingReadableAndReachable = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5069513Z + '[' l3_landscapeKeepsEverythingReadableAndReachable = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5070652Z + case "$t" in
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5071163Z + motion=0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5073568Z + adb shell settings put global animator_duration_scale 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5547202Z + echo 'l3_landscapeKeepsEverythingReadableAndReachable: animator_duration_scale 0'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5578148Z + '[' l3_landscapeKeepsEverythingReadableAndReachable = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:02.5608343Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.LandscapeDeviceTest#l3_landscapeKeepsEverythingReadableAndReachable com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:17.0394426Z s_glBindAttribLocation: bind attrib 0 name position
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:17.0395463Z s_glBindAttribLocation: bind attrib 1 name color
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:17.0396378Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:26.7406945Z + '[' 0 -eq 124 ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:26.7435495Z + '[' l3_landscapeKeepsEverythingReadableAndReachable = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:26.7468438Z + '[' -n '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:26.7496820Z + grep -q '^OK (' evidence/instrument-l3_landscapeKeepsEverythingReadableAndReachable.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:26.7498090Z + echo 'PASS l3_landscapeKeepsEverythingReadableAndReachable'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:26.7507073Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7475960Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 420 files pulled, 0 skipped. 8.7 MB/s (18017248 bytes in 1.985s)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7495721Z + '[' l3_landscapeKeepsEverythingReadableAndReachable = b2_fixtureMotionRecordedOnDevice ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7497042Z + '[' l3_landscapeKeepsEverythingReadableAndReachable = t3_realAppStatesAndSkyOnMainActivity ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7498574Z + '[' l3_landscapeKeepsEverythingReadableAndReachable = t1_realTunnelThroughLocalFixtureServers ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7500027Z ++ timeout 30 adb get-state
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7532693Z + '[' device '!=' device ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7533510Z + timeout 30 adb shell cmd statusbar collapse
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7785105Z + kill 3925
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7785519Z + '[' ui = system ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.7786252Z + adb shell settings put system font_scale 1.0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.8024805Z + adb shell settings put global animator_duration_scale 1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.8242266Z + adb shell cmd uimode night no
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.8424004Z Night mode: no
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.8430692Z + adb shell wm size reset
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.8681200Z + adb shell wm density reset
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.8944419Z + adb shell settings put system user_rotation 0
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:28.9165776Z + timeout 60 adb logcat -d
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4255017Z + ls -la evidence
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4272150Z total 28280
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4274726Z drwxr-xr-x 3 runner runner     4096 Oct 19 02:54 .
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4275812Z drwxr-xr-x 7 runner runner     4096 Oct 19 02:45 ..
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4277002Z -rw-r--r-- 1 runner runner     4734 Oct 19 02:54 a11y-report.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4277730Z -rw-r--r-- 1 runner runner     5554 Oct 19 02:54 a11y-tree.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4278509Z -rw-r--r-- 1 runner runner      797 Oct 19 02:54 animations.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4279215Z -rw-r--r-- 1 runner runner      136 Oct 19 02:45 device.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4280100Z -rw-r--r-- 1 runner runner   314899 Oct 19 02:54 fixture-09-details-by-swipe.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4280948Z -rw-r--r-- 1 runner runner   248466 Oct 19 02:54 fixture-10-lines-sheet.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4281797Z -rw-r--r-- 1 runner runner   164931 Oct 19 02:54 fixture-11-settings.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4282452Z -rw-r--r-- 1 runner runner   218056 Oct 19 02:54 fixture-12-apps.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4282976Z -rw-r--r-- 1 runner runner   520950 Oct 19 02:54 fixture-13-font-2.0-home.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4283617Z -rw-r--r-- 1 runner runner   181212 Oct 19 02:54 fixture-14-font-2.0-details.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4284195Z -rw-r--r-- 1 runner runner   172429 Oct 19 02:54 fixture-15-font-2.0-settings.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4284847Z -rw-r--r-- 1 runner runner   106873 Oct 19 02:54 fixture-16-glass-blur.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4285588Z -rw-r--r-- 1 runner runner   234835 Oct 19 02:54 fixture-20-consent-explainer.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4286831Z -rw-r--r-- 1 runner runner   386532 Oct 19 02:54 fixture-21-zh-idle.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4287889Z -rw-r--r-- 1 runner runner   462002 Oct 19 02:54 fixture-22-zh-degraded.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4288754Z -rw-r--r-- 1 runner runner   204779 Oct 19 02:54 fixture-23-zh-details.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4289778Z -rw-r--r-- 1 runner runner   180272 Oct 19 02:54 fixture-24-zh-settings.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4290549Z -rw-r--r-- 1 runner runner   530376 Oct 19 02:54 fixture-25-keyboard-focus.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4291196Z -rw-r--r-- 1 runner runner    83331 Oct 19 02:54 fixture-26-small-phone-details.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4291792Z -rw-r--r-- 1 runner runner   238714 Oct 19 02:54 fixture-26-small-phone-home.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4292516Z -rw-r--r-- 1 runner runner   152235 Oct 19 02:54 fixture-27-landscape-details.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4293379Z -rw-r--r-- 1 runner runner   358385 Oct 19 02:54 fixture-27-landscape-home.png
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4293929Z -rw-r--r-- 1 runner runner       93 Oct 19 02:54 font-2.0-report.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4294830Z drwxr-xr-x 2 runner runner    20480 Oct 19 02:54 frames
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4295337Z -rw-r--r-- 1 runner runner      397 Oct 19 02:54 glass-report.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4296245Z -rw-r--r-- 1 runner runner       76 Oct 19 02:47 health.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4296949Z -rw-r--r-- 1 runner runner      761 Oct 19 02:53 instrument-l1_largestSystemTextIsNeverCutOff.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4297670Z -rw-r--r-- 1 runner runner      798 Oct 19 02:53 instrument-l2_smallPhoneKeepsEverythingReadableAndReachable.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4298456Z -rw-r--r-- 1 runner runner      790 Oct 19 02:54 instrument-l3_landscapeKeepsEverythingReadableAndReachable.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4299261Z -rw-r--r-- 1 runner runner      782 Oct 19 02:47 instrument-u1_accessibilityContractAndAtfOnEveryScreen.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4300005Z -rw-r--r-- 1 runner runner      768 Oct 19 02:47 instrument-u2_primaryControlActsThroughRealTaps.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4300654Z -rw-r--r-- 1 runner runner      757 Oct 19 02:48 instrument-u3_swipeUpOnTheDockOpensDetails.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4301463Z -rw-r--r-- 1 runner runner      753 Oct 19 02:48 instrument-u4_glassBlursTheSceneBehindIt.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4302116Z -rw-r--r-- 1 runner runner      776 Oct 19 02:48 instrument-u5_consentExplainedBeforeTheSystemDialog.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4302801Z -rw-r--r-- 1 runner runner      765 Oct 19 02:48 instrument-u6_screenReaderOrderAndLabelsOnHome.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4303664Z -rw-r--r-- 1 runner runner      774 Oct 19 02:48 instrument-u7_simplifiedChineseCopyFitsEveryScreen.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4304323Z -rw-r--r-- 1 runner runner      753 Oct 19 02:52 instrument-u8_motionFrameByFrameAt60fps.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4305265Z -rw-r--r-- 1 runner runner      799 Oct 19 02:53 instrument-u9_keyboardFocusIsVisibleAndAccessibilityActionsWork.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4306055Z -rw-r--r-- 1 runner runner      261 Oct 19 02:54 interaction-report.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4306824Z -rw-r--r-- 1 runner runner      443 Oct 19 02:54 keyboard-report.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4307482Z -rw-r--r-- 1 runner runner      905 Oct 19 02:54 landscape-report.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4308235Z -rw-r--r-- 1 runner runner 11998868 Oct 19 02:54 logcat-live.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4308695Z -rw-r--r-- 1 runner runner 12001379 Oct 19 02:54 logcat.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4309145Z -rw-r--r-- 1 runner runner      274 Oct 19 02:54 motion-frames.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4309708Z -rw-r--r-- 1 runner runner      215 Oct 19 02:54 screen-reader-order.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4310204Z -rw-r--r-- 1 runner runner        9 Oct 19 02:47 shard.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4310725Z -rw-r--r-- 1 runner runner      183 Oct 19 02:54 small-phone-report.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4311204Z -rw-r--r-- 1 runner runner      609 Oct 19 02:54 summary.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4311614Z + cat evidence/summary.txt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4312120Z health: sign-in screen median frame 950 ms before the tests (limit 1000 ms)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4312607Z PASS u1_accessibilityContractAndAtfOnEveryScreen
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4313120Z PASS u2_primaryControlActsThroughRealTaps
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4313674Z PASS u3_swipeUpOnTheDockOpensDetails
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4314072Z PASS u4_glassBlursTheSceneBehindIt
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4314544Z PASS u5_consentExplainedBeforeTheSystemDialog
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4314989Z PASS u6_screenReaderOrderAndLabelsOnHome
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4315647Z PASS u7_simplifiedChineseCopyFitsEveryScreen
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4316674Z PASS u8_motionFrameByFrameAt60fps
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4317395Z PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4318099Z PASS l1_largestSystemTextIsNeverCutOff
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4318661Z PASS l2_smallPhoneKeepsEverythingReadableAndReachable
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4319169Z PASS l3_landscapeKeepsEverythingReadableAndReachable
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4319603Z + set -e
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4319914Z + '[' -z '' ']'
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4320608Z ##[group]Terminate Emulator
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4321132Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 emu kill
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4338538Z OK: killing emulator, bye bye
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4339459Z OK
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4343525Z INFO         | Wait for emulator (pid 3178) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4344639Z 
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:29.4345096Z ##[endgroup]
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:33.2192339Z INFO         | Saving with gfxstream=1
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:33.3347468Z INFO         | Saving snapshot 'default_boot' took 3890 ms
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:33.9307427Z ERROR        | stop: Not implemented
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:33.9308273Z WARNING      | Emulator client has not yet been configured.. Call configure me first!
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:33.9535482Z INFO         | removeAll
+emulator (ui)	Install and run on an Android 14 x86_64 emulator	2026-10-19T02:54:34.1190862Z WARNING      | Netsim Wifi dns:///localhost:40511 is gone due to Stream removed (CANCELLED)
+emulator (ui)	Host diagnostics for emulator crashes	﻿2026-10-19T02:54:35.2104580Z ##[group]Run mkdir -p evidence/host
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2105083Z ^[[36;1mmkdir -p evidence/host^[[0m
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2105593Z ^[[36;1msudo dmesg -T 2>&1 | tail -300 > evidence/host/dmesg.txt || true^[[0m
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2106350Z ^[[36;1mfree -m > evidence/host/free.txt || true^[[0m
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2106873Z ^[[36;1mnproc >> evidence/host/free.txt || true^[[0m
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2107410Z ^[[36;1mcp -r /tmp/android-runner/emu-crash-*.db evidence/host/ 2>/dev/null || true^[[0m
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2107971Z ^[[36;1mcp host-watch/*.txt evidence/host/ 2>/dev/null || true^[[0m
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2108487Z ^[[36;1mls -laR evidence/host > evidence/host/listing.txt || true^[[0m
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2163177Z shell: /usr/bin/bash -e {0}
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2163655Z env:
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2164089Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+emulator (ui)	Host diagnostics for emulator crashes	2026-10-19T02:54:35.2164469Z ##[endgroup]
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	﻿2026-10-19T02:54:35.2497992Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2498506Z with:
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2498833Z   name: android-emulator-evidence-ui
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2499315Z   path: evidence/
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	evidence-attempt-*/
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2499698Z   retention-days: 90
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2500072Z   if-no-files-found: warn
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2500416Z   compression-level: 6
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2500737Z   overwrite: false
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2501128Z   include-hidden-files: false
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2501454Z   archive: true
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2501781Z env:
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2502135Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.2502549Z ##[endgroup]
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.4904770Z With the provided path, there will be 445 files uploaded
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.4905296Z Artifact name is valid!
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.4905550Z Root directory input is valid!
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.7447626Z Uploading artifact: android-emulator-evidence-ui.zip
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:35.7485321Z Beginning upload of artifact content to blob storage
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:36.6999664Z Uploaded bytes 8388608
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.0760739Z Uploaded bytes 16777216
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.1498814Z Uploaded bytes 19104139
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.1874913Z Finished uploading artifact content to blob storage!
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.1877141Z SHA256 digest of uploaded artifact is 4b7f2a506e89edf7480eaf9d817eca20beecf4440e56b5955fb53beaeae6c07a
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.1877882Z Finalizing artifact upload
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.5232980Z Artifact android-emulator-evidence-ui successfully finalized. Artifact ID 12160720968
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.5234267Z Artifact android-emulator-evidence-ui has been successfully uploaded! Final size is 19104139 bytes. Artifact ID is 12160720968
+emulator (ui)	Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9	2026-10-19T02:54:37.5243863Z Artifact download URL: https://github.com/raydocs/tono/actions/runs/39190910753/artifacts/12160720968
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	﻿2026-10-19T02:54:37.5987749Z Post job cleanup.
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.6865429Z [command]/usr/bin/git version
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.6910723Z git version 2.55.0
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.6950330Z Temporarily overriding HOME='/home/runner/work/_temp/1c6f5506-9323-439a-ac48-ad0914e34894' before making global git config changes
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.6951403Z Adding repository directory to the temporary git global config as a safe directory
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.6956621Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/tono/tono
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.6997825Z Removing SSH command configuration
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.6998525Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7032954Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7373479Z Removing HTTP extra header
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7379693Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7459758Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7716239Z Removing includeIf entries pointing to credentials config files
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7725243Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7755707Z includeif.gitdir:/home/runner/work/tono/tono/.git.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7756519Z includeif.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7757064Z includeif.gitdir:/github/workspace/.git.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7757585Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7765069Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/tono/tono/.git.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7789546Z /home/runner/work/_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7808261Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/tono/tono/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-393d3e44\-f516\-4765\-9d9a\-2fb270a67a7d\.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7854274Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7875900Z /home/runner/work/_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7883674Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-393d3e44\-f516\-4765\-9d9a\-2fb270a67a7d\.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7916737Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7937038Z /github/runner_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7943244Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-393d3e44\-f516\-4765\-9d9a\-2fb270a67a7d\.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7975824Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.7996709Z /github/runner_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.8002466Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-393d3e44\-f516\-4765\-9d9a\-2fb270a67a7d\.config
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.8036800Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+emulator (ui)	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-19T02:54:37.8229582Z Removing credentials config '/home/runner/work/_temp/git-credentials-393d3e44-f516-4765-9d9a-2fb270a67a7d.config'
+emulator (ui)	Complete job	﻿2026-10-19T02:54:37.8362990Z Cleaning up orphan processes
+emulator (ui)	Complete job	2026-10-19T02:54:37.8594641Z Terminate orphan process: pid (2797) (bash)
+emulator (ui)	Complete job	2026-10-19T02:54:37.8681796Z Terminate orphan process: pid (3363) (adb)
+emulator (ui)	Complete job	2026-10-19T02:54:37.8731166Z Terminate orphan process: pid (5407) (sleep)

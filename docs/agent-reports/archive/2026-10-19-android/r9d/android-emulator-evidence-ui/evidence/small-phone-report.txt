@@ -1,0 +1,2 @@
+26-small-phone: 360×582 dp, portrait, density 320
+no text cut off, every control ≥ 48 dp and labelled, every Home control reachable in 8 Home states, sign-in, Details and Settings

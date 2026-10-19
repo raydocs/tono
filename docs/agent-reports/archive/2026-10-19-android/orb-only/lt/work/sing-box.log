@@ -1,0 +1,14 @@
++0000 2026-10-18 08:30:17 INFO inbound/vless[cloud-in]: tcp server started at 198.20.0.10:24443
++0000 2026-10-18 08:30:17 INFO inbound/socks[home-in]: tcp server started at 198.20.0.11:21080
++0000 2026-10-18 08:30:17 INFO network: updated default interface eth0, index 3
++0000 2026-10-18 08:30:17 INFO network: updated network environment: gateway 169.254.0.22, gateway_mac 02:fc:00:00:00:06
++0000 2026-10-18 08:30:17 INFO sing-box started (0.01s)
++0000 2026-10-18 08:30:34 INFO [89331510 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:60576
++0000 2026-10-18 08:30:34 INFO [89331510 35ms] inbound/vless[cloud-in]: [0] inbound connection to www.youtube.com:443
++0000 2026-10-18 08:30:34 INFO [89331510 35ms] outbound/direct[direct]: outbound connection to www.youtube.com:443
++0000 2026-10-18 08:30:34 INFO [2329307875 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:60586
++0000 2026-10-18 08:30:34 INFO [2329307875 22ms] inbound/vless[cloud-in]: [0] inbound connection to 198.20.0.11:21080
++0000 2026-10-18 08:30:34 INFO [2329307875 22ms] outbound/direct[direct]: outbound connection to 198.20.0.11:21080
++0000 2026-10-18 08:30:34 INFO [2973706615 0ms] inbound/socks[home-in]: inbound connection from 198.20.0.11:36396
++0000 2026-10-18 08:30:34 INFO [2973706615 1ms] inbound/socks[home-in]: [home-1d58fb] inbound connection to api.anthropic.com:443
++0000 2026-10-18 08:30:34 INFO [2973706615 1ms] outbound/direct[direct]: outbound connection to api.anthropic.com:443

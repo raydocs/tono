@@ -1,0 +1,13 @@
+{
+  "component": "sing-box libbox",
+  "version": "1.15.0-alpha.12",
+  "sourceCommit": "25b0d5ea3e466d246c708ac0f20d0448110e566c",
+  "license": "GPL-3.0-or-later (with upstream name-use restriction)",
+  "go": "go1.26.8",
+  "gomobile": "github.com/sagernet/gomobile@v0.1.13",
+  "ndk": "28.0.13004108",
+  "androidApi": 24,
+  "targets": "android/arm64,android/amd64",
+  "tags": "with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0",
+  "aarSha256": "f75da79bc54f4c69e6023361c74d28953614f39046bb88e3f43e6305d07f58f8"
+}

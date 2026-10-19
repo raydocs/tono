@@ -1,0 +1,44 @@
+INSTRUMENTATION_STATUS: class=com.raydocs.tono.mobile.LocalTunnelDeviceTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stream=
+com.raydocs.tono.mobile.LocalTunnelDeviceTest:
+INSTRUMENTATION_STATUS: test=t1_realTunnelThroughLocalFixtureServers
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.raydocs.tono.mobile.LocalTunnelDeviceTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Home said "Status unknown" while the engine was gone
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.raydocs.tono.mobile.LocalTunnelDeviceTest.engineDeathWhileConnected(LocalTunnelDeviceTest.kt:170)
+	at com.raydocs.tono.mobile.LocalTunnelDeviceTest.t1_realTunnelThroughLocalFixtureServers(LocalTunnelDeviceTest.kt:369)
+
+INSTRUMENTATION_STATUS: stream=
+Error in t1_realTunnelThroughLocalFixtureServers(com.raydocs.tono.mobile.LocalTunnelDeviceTest):
+java.lang.AssertionError: Home said "Status unknown" while the engine was gone
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.raydocs.tono.mobile.LocalTunnelDeviceTest.engineDeathWhileConnected(LocalTunnelDeviceTest.kt:170)
+	at com.raydocs.tono.mobile.LocalTunnelDeviceTest.t1_realTunnelThroughLocalFixtureServers(LocalTunnelDeviceTest.kt:369)
+
+INSTRUMENTATION_STATUS: test=t1_realTunnelThroughLocalFixtureServers
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_RESULT: stream=
+
+Time: 51.589
+There was 1 failure:
+1) t1_realTunnelThroughLocalFixtureServers(com.raydocs.tono.mobile.LocalTunnelDeviceTest)
+java.lang.AssertionError: Home said "Status unknown" while the engine was gone
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.raydocs.tono.mobile.LocalTunnelDeviceTest.engineDeathWhileConnected(LocalTunnelDeviceTest.kt:170)
+	at com.raydocs.tono.mobile.LocalTunnelDeviceTest.t1_realTunnelThroughLocalFixtureServers(LocalTunnelDeviceTest.kt:369)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
+
+
+INSTRUMENTATION_CODE: -1

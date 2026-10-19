@@ -1,0 +1,6 @@
+ok   cloud  www.cloudflare.com           phone: engine-probe             cloud exit saw it: True  Home exit saw it: False
+ok   home   claude.ai                    phone: engine-probe             cloud exit saw it: False Home exit saw it: True 
+ok   cloud  www.youtube.com              phone: HTTP 302                 cloud exit saw it: True  Home exit saw it: False
+ok   home   api.anthropic.com            phone: HTTP 404                 cloud exit saw it: False Home exit saw it: True 
+ok   direct example.com                  phone: HTTP 200                 cloud exit saw it: False Home exit saw it: False
+ok   chain  cloud exit opened 198.20.0.11:21080 (Home reached through the cloud): True

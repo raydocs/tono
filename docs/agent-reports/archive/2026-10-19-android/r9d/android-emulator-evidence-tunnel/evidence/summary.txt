@@ -1,0 +1,12 @@
+health: sign-in screen median frame 950 ms before the tests (limit 1000 ms)
+PASS b1_fixtureStatesRenderedOnDevice
+PASS b2_fixtureMotionRecordedOnDevice
+PASS b3_fixtureAtLargeFontScale
+PASS t2_realAppTurnsWithKeyboardAndConsentOpen
+PASS t1_realTunnelThroughLocalFixtureServers
+PASS t1-routing-matches-exit-logs
+PASS t3_realAppStatesAndSkyOnMainActivity
+PASS t4_realAppAtLargestSystemText
+PASS t5_engineDiesWithNoAppOpen
+PASS t6_engineDiesInDozeAndTogetherWithItsWatch
+FLAKY: the first attempt failed (its evidence is in evidence-attempt-*/); this shard passed only on the fresh-emulator retry

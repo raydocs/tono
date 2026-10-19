@@ -1,0 +1,7 @@
+Tono
+Partly working, Home check failed · AI paused
+Disconnect, Tunnel up for 23:00 [actionable] (Partly working)
+Tokyo, 86 ms [actionable]
+↓ 2.34 MB/s · ↑ 81 KB/s
+Settings [actionable]
+Details [actionable]

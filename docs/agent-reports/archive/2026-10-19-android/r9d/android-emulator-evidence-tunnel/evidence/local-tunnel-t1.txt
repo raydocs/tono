@@ -1,0 +1,15 @@
+mark on sign-in: present
+mark on Home: present
+consent: Tono's explanation shown, Continue tapped
+consent: Android's VPN dialog answered OK
+notifications: Android's prompt answered Allow
+connect: tap → Connected in 12133 ms (includes consent taps; emulator, software GPU)
+request: cloud www.cloudflare.com engine-probe
+request: home claude.ai engine-probe
+request: cloud www.youtube.com HTTP 302
+request: home api.anthropic.com HTTP 404
+request: direct example.com HTTP 200
+memory while connected (PSS): app 76 MB, engine :vpn 73 MB
+engine killed: VPN network gone after 2252ms, Home stopped saying Connected after 0ms, "Status unknown" after 0ms, fresh Connected after 9490ms
+back from the home screen: Connected after 3097ms, "Status unknown" not seen
+sign-out: back to the sign-in screen

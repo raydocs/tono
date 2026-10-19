@@ -1,0 +1,63 @@
+signed in from an earlier run: signing out first
+sign-out: back to the sign-in screen
+consent: Android's VPN dialog answered OK
+t6-doze: MainActivity closed (no activity left, ViewModel cleared, no app binding to the engine); home screen in front
+t6-doze: Now forced in to deep idle mode
+t6-doze: deviceidle deep state before the kill: IDLE
+t6-doze: watch process before the kill: [8854]
+t6-doze: engine killed (pids [8807]); old process gone after 0ms; VPN network gone after 744ms; notification stopped claiming a tunnel after 198ms (-546ms after the VPN network went, sampled); Android restarted the engine: after 1428ms, reconnected after 6116ms
+t6-doze: watchdog log: 10-19 05:21:57.428  8854  8854 I TonoWatchdog: engine died: the watch heard its binder die (VPN network true)
+t6-doze: watchdog log: 10-19 05:21:58.738  8854  8854 I TonoWatchdog: engine restarting: replaced Android's re-posted CONNECTED notification (VPN network false)
+t6-doze: watchdog log: 10-19 05:22:03.446  8854  8854 I TonoWatchdog: engine restarting: replaced Android's re-posted CONNECTED notification (VPN network true)
+t6-doze: ActivityManager: 10-19 05:21:57.361   521  1657 I ActivityManager: Process com.raydocs.tono.mobile.test:vpn (pid 8807) has died: vis FGS
+t6-doze: ActivityManager: 10-19 05:21:57.363   521  1657 W ActivityManager: Scheduling restart of crashed service com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService in 1000ms for start-requested
+t6-doze: ActivityManager: 10-19 05:21:58.416   521   549 I ActivityManager: Start proc 8987:com.raydocs.tono.mobile.test:vpn/u0a192 for service {com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+t6-doze: 0ms vpn=true title=Connected phase=CONNECTED surface=CONNECTED engine=false watch=[8854]
+t6-doze: 198ms vpn=true title=null phase=null surface=CONNECTED engine=false watch=[8854]
+t6-doze: 744ms vpn=false title=null phase=null surface=UNKNOWN engine=false watch=[8854]
+t6-doze: 1428ms vpn=false title=Connected phase=CONNECTED surface=UNKNOWN engine=true watch=[8854]
+t6-doze: 1537ms vpn=false title=Tono stopped phase=null surface=UNKNOWN engine=true watch=[8854]
+t6-doze: 1963ms vpn=false title=Connecting phase=CONNECTING surface=UNKNOWN engine=true watch=[8854]
+t6-doze: 2075ms vpn=false title=Connecting phase=PREPARING surface=BUSY engine=true watch=[8854]
+t6-doze: 2181ms vpn=false title=Connecting phase=CONNECTING surface=BUSY engine=true watch=[8854]
+t6-doze: 3924ms vpn=true title=Connecting phase=CONNECTING surface=BUSY engine=true watch=[8854]
+t6-doze: 6116ms vpn=true title=Connected phase=CONNECTED surface=CONNECTED engine=true watch=[8854]
+t6-doze: Android removed the notification with the process (nothing left to replace)
+t6-doze: Android re-posted the dead engine's CONNECTED/DEGRADED notification for the restarted engine, without a VPN network: seen from 1428ms, gone by 1537ms (at most 109ms, sampled)
+t6-doze: deviceidle deep state after: IDLE
+t6-doze: the watch replaced Android's re-post (pid 8854)
+t6-doze: the watch replaced Android's re-post (pid 8854)
+signed in from an earlier run: signing out first
+sign-out: back to the sign-in screen
+t6-both: MainActivity closed (no activity left, ViewModel cleared, no app binding to the engine); home screen in front
+t6-both: pending alarm: tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: pending alarm: type=ELAPSED tag=*alarm*:com.raydocs.tono.mobile.NOTIFICATION_CHECK
+t6-both: watch process before the kill: [8854]
+t6-both: engine killed (pids [9112], watch pids [8854] killed first); old process gone after 317ms; VPN network gone after 431ms; notification stopped claiming a tunnel after 317ms (-114ms after the VPN network went, sampled); Android restarted the engine: after 1203ms, reconnected after 5260ms
+t6-both: watchdog log: 10-19 05:23:01.445  9313  9313 I TonoWatchdog: engine starting: replaced a leftover CONNECTED notification (VPN network false)
+t6-both: ActivityManager: 10-19 05:23:00.250   521  2499 I ActivityManager: Process com.raydocs.tono.mobile.test:vpn (pid 9112) has died: prcp FGS
+t6-both: ActivityManager: 10-19 05:23:00.251   521  2499 W ActivityManager: Scheduling restart of crashed service com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService in 1000ms for start-requested
+t6-both: ActivityManager: 10-19 05:23:00.474   521   596 I ActivityManager: Process com.raydocs.tono.mobile.test:watch (pid 8854) has died: fg  SVC
+t6-both: ActivityManager: 10-19 05:23:01.258   521   549 I ActivityManager: Start proc 9313:com.raydocs.tono.mobile.test:vpn/u0a192 for service {com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+t6-both: ActivityManager: 10-19 05:23:01.523   521   549 I ActivityManager: Start proc 9335:com.raydocs.tono.mobile.test:watch/u0a192 for service {com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService}
+t6-both: 317ms vpn=true title=null phase=null surface=CONNECTED engine=false watch=[8854]
+t6-both: 431ms vpn=false title=null phase=null surface=UNKNOWN engine=false watch=none
+t6-both: 1203ms vpn=false title=Connected phase=CONNECTED surface=UNKNOWN engine=true watch=none
+t6-both: 1307ms vpn=false title=Tono stopped phase=null surface=UNKNOWN engine=true watch=none
+t6-both: 1410ms vpn=false title=Connecting phase=PREPARING surface=BUSY engine=true watch=none
+t6-both: 1640ms vpn=false title=Connecting phase=CONNECTING surface=BUSY engine=true watch=none
+t6-both: 1755ms vpn=false title=Connecting phase=CONNECTING surface=BUSY engine=true watch=[9335]
+t6-both: 3187ms vpn=true title=Connecting phase=CONNECTING surface=BUSY engine=true watch=[9335]
+t6-both: 5260ms vpn=true title=Connected phase=CONNECTED surface=CONNECTED engine=true watch=[9335]
+t6-both: Android removed the notification with the process (nothing left to replace)
+t6-both: Android re-posted the dead engine's CONNECTED/DEGRADED notification for the restarted engine, without a VPN network: seen from 1203ms, gone by 1307ms (at most 104ms, sampled)
+t6-both: the alarm path was not needed: Android restarted the engine

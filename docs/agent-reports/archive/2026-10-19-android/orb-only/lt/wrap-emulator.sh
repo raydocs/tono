@@ -1,0 +1,21 @@
+set -eu
+E="$ANDROID_HOME/emulator"
+grep -q emulator-exit "$E/emulator" 2>/dev/null && exit 0
+mv -f "$E/emulator" "$E/emulator.real"
+cat > "$E/emulator" <<'W'
+#!/bin/bash
+W="$GITHUB_WORKSPACE/host-watch"
+ulimit -c unlimited
+echo 0x11 > /proc/self/coredump_filter
+"$0.real" "$@"
+code=$?
+echo "$(date -u +%FT%TZ) emulator exited with status $code" >> "$W/emulator-exit.txt"
+for core in "$W"/core.*; do
+  [ -f "$core" ] || continue
+  exe=$(find "$(dirname "$0")/qemu" -name 'qemu-system-x86_64*' -type f | head -1)
+  { echo "== $core ($(du -h "$core" | cut -f1))"; timeout 300 gdb -batch -ex bt -ex 'info registers rip' -ex 'info sharedlibrary' "$exe" "$core" 2>&1 | grep -v '^\[New LWP' | head -200; } >> "$W/emulator-crash-stack.txt"
+  rm -f "$core"
+done
+exit $code
+W
+chmod +x "$E/emulator"

@@ -1,0 +1,38 @@
+The message received from the daemon indicates that the daemon has disappeared.
+Build request sent: Build{id=5b8c9df0-570d-44e9-96b8-8312d662f368, currentDir=/home/user/workspace/repo/.amp/in/mono/apps/android}
+Attempting to read last messages from the daemon log...
+Daemon pid: 33531
+  log file: /home/user/workspace/repo/.amp/in/gh-fresh/daemon/9.5.1/daemon-33531.out.log
+----- Last 20 lines from daemon log file - daemon-33531.out.log -----
+2026-10-17T18:55:50.587+0000 [DEBUG] [org.gradle.launcher.daemon.server.DefaultIncomingConnectionHandler] Starting executing command: Build{id=5b8c9df0-570d-44e9-96b8-8312d662f368, currentDir=/home/user/workspace/repo/.amp/in/mono/apps/android} with connection: socket connection from /127.0.0.1:45675 to /127.0.0.1:43604.
+2026-10-17T18:55:50.590+0000 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Command execution: started DaemonCommandExecution[command = Build{id=5b8c9df0-570d-44e9-96b8-8312d662f368, currentDir=/home/user/workspace/repo/.amp/in/mono/apps/android}, connection = DefaultDaemonConnection: socket connection from /127.0.0.1:45675 to /127.0.0.1:43604] after 0.0023000000000000004 minutes of idle
+2026-10-17T18:55:50.591+0000 [INFO] [org.gradle.launcher.daemon.server.DaemonRegistryUpdater] Marking the daemon as busy, address: [9ec15317-532b-4a21-92fb-7c82d77acc5e port:45675, addresses:[localhost/127.0.0.1]]
+2026-10-17T18:55:50.591+0000 [DEBUG] [org.gradle.launcher.daemon.registry.PersistentDaemonRegistry] Marking busy by address: [9ec15317-532b-4a21-92fb-7c82d77acc5e port:45675, addresses:[localhost/127.0.0.1]]
+2026-10-17T18:55:50.591+0000 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Waiting to acquire exclusive lock on daemon addresses registry.
+2026-10-17T18:55:50.592+0000 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Lock acquired on daemon addresses registry.
+2026-10-17T18:55:50.595+0000 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Releasing lock on daemon addresses registry.
+2026-10-17T18:55:50.595+0000 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] resetting idle timer
+2026-10-17T18:55:50.596+0000 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] daemon is running. Sleeping until state changes.
+2026-10-17T18:55:50.596+0000 [INFO] [org.gradle.launcher.daemon.server.exec.StartBuildOrRespondWithBusy] Daemon is about to start building Build{id=5b8c9df0-570d-44e9-96b8-8312d662f368, currentDir=/home/user/workspace/repo/.amp/in/mono/apps/android}. Dispatching build started information...
+2026-10-17T18:55:50.597+0000 [DEBUG] [org.gradle.launcher.daemon.server.SynchronizedDispatchConnection] thread 21: dispatching org.gradle.launcher.daemon.protocol.BuildStarted@1e1a7d
+2026-10-17T18:55:50.601+0000 [DEBUG] [org.gradle.launcher.daemon.server.exec.EstablishBuildEnvironment] Configuring env variables: [PATH, INVOCATION_ID, AMP_ORB_PROVIDER, XDG_DATA_DIRS, AMP_BIN_DIR, AMP_PROJECT_ID, NIX_PROFILES, AMP_WORKING_DIRECTORY, ANDROID_HOME, PS1, SUDO_USER, COREPACK_ENABLE_AUTO_PIN, JOURNAL_STREAM, CLAUDE_CODE_ENTRYPOINT, TONO_ADMIN_API_TOKEN, CLAUDECODE, LOGNAME, AMP_API_KEY, PWD, CLAUDE_CODE_AUTO_CONNECT_IDE, CLAUDE_CODE_OAUTH_TOKEN, AMP_SECRET_ENV_NAMES, DISABLE_FEEDBACK_COMMAND, SHELL, AMP_ORB_WORKLOAD_SLICE, AMP_DIRECT_TERMINAL, AMP_EXECUTOR, DISABLE_ERROR_REPORTING, LINEAR_ORCHESTRATOR_ACTOR_ID, AMP_USER_EMAIL, CLAUDE_EFFORT, AMP_WORKLOAD_IDENTITY_REQUEST_TOKEN, NoDefaultCurrentDirectoryInExePath, AI_AGENT, OLDPWD, AMP_PORTAL_DOMAIN, NIX_SSL_CERT_FILE, SYSTEMD_EXEC_PID, SHLVL, CLAUDE_CODE_AUTO_COMPACT_WINDOW, JAVA_HOME, AMP_THREAD_IDENTITY_AUTH, AMP_ORB, GIT_EDITOR, AMP_WORKSPACE_ID, TERM, LANG, CLAUDE_CODE_MESSAGING_TOKEN, GH_HOST, DISABLE_TELEMETRY, SUDO_GID, GRADLE_USER_HOME, CLAUDE_CODE_SESSION_ID, AMP_USER_ID, CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY, AMP_URL, SUDO_UID, CLAUDE_CODE_SESSION_ATTENDED, CLAUDE_CODE_CHILD_SESSION, _, CLAUDE_CODE_EXECPATH, AMP_CLAUDE_AGENT_SDK_VERSION, CLAUDE_PID, linear, CLAUDE_CODE_MESSAGING_SOCKET, ANDROID_SDK_ROOT, AMP_DIRECT_DESKTOP, USER, SUDO_COMMAND, CLAUDE_AGENT_SDK_VERSION, AMP_THREAD_ID, DISABLE_AUTOUPDATER, CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL, OPENROUTER_API_KEY, HOME, LINEAR_ORCHESTRATOR_JOURNAL_SECRET, FishAudio, CLAUDE_CODE_DISABLE_AUTO_MEMORY]
+2026-10-17T18:55:50.607+0000 [DEBUG] [org.gradle.launcher.daemon.server.exec.LogToClient] About to start relaying all logs to the client via the connection.
+2026-10-17T18:55:50.608+0000 [INFO] [org.gradle.launcher.daemon.server.exec.LogToClient] The client will now receive all logging from the daemon (pid: 33531). The daemon log file: /home/user/workspace/repo/.amp/in/gh-fresh/daemon/9.5.1/daemon-33531.out.log
+2026-10-17T18:55:50.609+0000 [DEBUG] [org.gradle.launcher.daemon.server.exec.RequestStopIfSingleUsedDaemon] Requesting daemon stop after processing Build{id=5b8c9df0-570d-44e9-96b8-8312d662f368, currentDir=/home/user/workspace/repo/.amp/in/mono/apps/android}
+2026-10-17T18:55:50.610+0000 [LIFECYCLE] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Daemon will be stopped at the end of the build 
+2026-10-17T18:55:50.610+0000 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Stop as soon as idle requested. The daemon is busy
+2026-10-17T18:55:50.613+0000 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] daemon stop has been requested. Sleeping until state changes.
+2026-10-17T18:55:50.613+0000 [DEBUG] [org.gradle.launcher.daemon.server.exec.ExecuteBuild] The daemon has started executing the build.
+2026-10-17T18:55:50.613+0000 [DEBUG] [org.gradle.launcher.daemon.server.exec.ExecuteBuild] Executing build with daemon context: DefaultDaemonContext[uid=d0e8b6ba-7bb5-454f-a0e7-db9d637020fe,javaHome=/home/user/.tono-tools/jdk-17,javaVersion=17,javaVendor=Eclipse Adoptium,daemonRegistryDir=/home/user/workspace/repo/.amp/in/gh-fresh/daemon,pid=33531,idleTimeout=120000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=-Xmx1536m,-Dfile.encoding=UTF-8,-Duser.country,-Duser.language=en,-Duser.variant]----- End of the daemon log -----
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Gradle build daemon disappeared unexpectedly (it may have been killed or may have crashed)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.

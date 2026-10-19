@@ -1,0 +1,13 @@
+health: sign-in screen median frame 850 ms before the tests (limit 1000 ms)
+PASS u1_accessibilityContractAndAtfOnEveryScreen
+PASS u2_primaryControlActsThroughRealTaps
+PASS u3_swipeUpOnTheDockOpensDetails
+PASS u4_glassBlursTheSceneBehindIt
+PASS u5_consentExplainedBeforeTheSystemDialog
+PASS u6_screenReaderOrderAndLabelsOnHome
+PASS u7_simplifiedChineseCopyFitsEveryScreen
+PASS u8_motionFrameByFrameAt60fps
+PASS u9_keyboardFocusIsVisibleAndAccessibilityActionsWork
+PASS l1_largestSystemTextIsNeverCutOff
+PASS l2_smallPhoneKeepsEverythingReadableAndReachable
+PASS l3_landscapeKeepsEverythingReadableAndReachable

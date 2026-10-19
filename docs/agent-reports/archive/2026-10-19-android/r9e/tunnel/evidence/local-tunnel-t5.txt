@@ -1,0 +1,13 @@
+consent: Android's VPN dialog answered OK
+t5: MainActivity closed (no activity left, ViewModel cleared, no app binding to the engine); home screen in front
+t5: watch process before the kill: [8803]
+t5: engine killed (pids [8745]); old process gone after 120ms; VPN network gone after 120ms; notification stopped claiming a tunnel after 120ms (0ms after the VPN network went, sampled); Android restarted the engine: no (within the window)
+t5: watchdog log: 10-19 06:48:38.784  8803  8803 I TonoWatchdog: engine died: the watch heard its binder die (VPN network true)
+t5: watchdog log: 10-19 06:48:38.812  8803  8803 I TonoWatchdog: engine died: replaced its CONNECTED notification (VPN network true)
+t5: watchdog log: 10-19 06:48:39.857  8803  8803 I TonoWatchdog: engine died: no VPN network now, notification says Tono stopped
+t5: ActivityManager: 10-19 06:48:38.790   519   536 W ActivityManager: Exception when unbinding service com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService
+t5: ActivityManager: 10-19 06:48:38.792   519  1900 I ActivityManager: Process com.raydocs.tono.mobile.test:vpn (pid 8745) has died: prcp FGS
+t5: 0ms vpn=true title=Connected phase=CONNECTED surface=CONNECTED engine=false watch=[8803]
+t5: 120ms vpn=false title=Status unknown phase=null surface=UNKNOWN engine=false watch=[8803]
+t5: 1136ms vpn=false title=Tono stopped phase=null surface=UNKNOWN engine=false watch=[8803]
+t5: final title: Tono stopped

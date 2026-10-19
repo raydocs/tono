@@ -1,0 +1,1 @@
+health: sign-in screen median frame 800 ms before the tests (limit 1000 ms)

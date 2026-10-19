@@ -1,0 +1,93 @@
+
+		PR1672 第11轮独立盲审：84分，不通过
+					独立只读盲审 · raydocs/tono PR #1672 · 第11轮
+					PR1672 第11轮独立盲审：84分，不通过
+					未知路由仍显示确定的流量去向，触发严重状态误导否决。新对比度算法也会放过真实低对比度；CI 绿色不能代替设计与状态安全验收。
+					不通过 · 有否决项2026-10-19 · 固定源码与原始收据审查
+					84分；可访问性低于分项门槛，另有状态误导否决
+						Needs from you无待答问题。本报告供本次验收使用；尚不能据此宣称 ≥95 或发布就绪。
+						结论84/100，低于85；可访问性6.5/10＝65%，低于70%；F2单独触发严重状态误导否决。主操作未发现难找；低对比度没有夸大为“全局不可读”否决。
+						固定对象c2f8762977360d8f2c953bf787651b8c5ad825df。tip f63a947e0a4e2fe0a71115aa356a944b4e4e2973仅在一个changelog增加7行；两者apps/ios树相同。
+						独立性本人读取固定源码、指定原始CI和artifact；PR仅提取Rubric节。未读旧评分、评审/实施线程、密封自评、agent-reports或其余PR正文/评论；未建子线程、使用评审代理或联系实施方。产品未改、无commit/push/GitHub发帖。
+						证据边界PNG原图、录屏抽帧、测试执行日志与源码推论分别标注。未在本orb重跑iOS/Swift/真机；未注入真实NetworkExtension故障，不报告“实测泄漏”。
+					视觉完成度高，但真实性不能由fixture补足
+					维度得分比例判断依据
+						信息层级减字18/2090%首页状态→一句解释→主操作→线路，信息清楚。Details的未知提示与确定路由表互相冲突，不能只凭减字给满分。
+						交互连贯单手17/2085%主操作与选线靠下；sheet关闭、失败重试、输入后答案可见、选线pending有执行收据。AX5需滚动；连续失败恢复的状态义务仍有漏洞。
+						高级克制及最新桌面品牌一致14/1593.3%海平线、暖日、倒影与固定SHA的桌面SeaScene/SeaControls语汇一致，非旧紫色主题。大面积景观留白有辨识度；小字号副文案和状态色仍有可读性成本。未把源码比对冒充桌面同屏实测。
+						Liquid Glass材质13/1586.7%iOS26真实glassEffect API、互动玻璃控制与较实的内容卡分层；原图与sheet录屏采样可见边缘和背景变化。暖填充与白标签相冲突，静态/抽帧不证明全程折射或帧率。
+						状态动效12/1580%首连、网络重连、部分可用、失败及减少动态区分清楚；主动reload不设置reasserting。未知态未贯穿所有状态表述；动画主要为fixture演示，真实故障切换未运行。
+						可访问性适配6.5/1065%：不达标AX5重排、44pt目标和AX标签有进步；Cancel真实低对比度被算法放过，172次访问不能证明全覆盖；widget大字截断，真机VoiceOver听读未验证。
+						真实性性能3.5/570%真实编译、31项交互测试和69项单测有原始日志；gallery标注Preview诚实。无真实NE故障注入、共享磁盘跨进程链、实机功耗/FPS/VoiceOver；系统widget仍不可用。
+					总分84/100不通过不按目标95补分，也不改变4.5:1与44pt阈值。
+					未知状态与测量假阳性仍是验收阻塞
+						F1Cancel白字覆盖亮填充，新算法测到的不是glyph core
+高 · 原图＋数值复算
+							HomeView.swift:430–443给Cancel白字；背景升亮时不换墨色。TonoUITests.swift:621–648用整个元素的亮度中位数做背景，把任意方向差异≥1.5:1的像素都算“ink”，再取其90th百分位；未填充的暗背景也成为“文字”。
+							CI ui-tests.log:443把Cancel报为4.8:1、ink53.04%。原图同胶囊复算4.7835:1、ink52.993%，而英文白字局部背景估计的中位数为3.9258:1；Preparing为3.0345:1（全胶囊算法反而报7.7686）。前者99.72%、后者100%的所选字芯像素低于4.5:1。
+							独立方法只选择RGB接近(247,243,238)的1805/1863个字芯；以同x的无字扫描行y=2050/2115估计局部背景。两条扫描行单独算，Connecting中位数3.839/3.996，Preparing2.992/3.070，结论不依赖插值方向。它是原图复算，不冒充运行期像素或新合规检测器。
+							应补混合明暗/渐变胶囊负控，按实际文字与其局部背景测量；不能用元素中最有利的像素代表最不利文字。阈值仍4.5:1，不借17pt字号改用3:1。
+						F2双重无答已被识别，流量表仍断言旧模式正在生效
+高 · 严重状态误导否决
+							RouteApply.run对reload与status均无答正确返回unconfirmed，模式段不选中，域名查询也不答。但AppModel.swift:431–434,654–667没有把未知纳入连接状态事实；DetailsSheet.swift:89–103仍用旧mode、旧probe和phase.tunnelUp绘制当前流量去向。
+							原图details-mode-unconfirmed.png同时显示“无法确认哪些routes在用”和“WHERE TRAFFIC GOES / Other apps / Local direct”，AI与Video还带旧的绿色地区。此处是当前路由说明，不是标明“上次确认”的历史值。Stable与Three-tier影响直连/代理选择，两者都未知时不能只在picker和查询里承认未知。
+							这足以否决状态表述安全；不是已经实测出流量泄漏。指定XCUITest只断言两个段未选中和无routeAnswer，没有检查流量表，故能在矛盾画面上通过。所需结果：未知态贯穿首页/Details/Settings及对外状态，旧结果若保留必须明确标为历史、不得继续作当前健康证明。
+						F3一次恢复失败后，再一次保存失败会丢掉恢复义务
+中 · 源码推论，未注入
+							序列：A运行→请求B落盘→B被拒→恢复A写失败，unsavedRoutes=A。下次change先retryPutBack；若仍失败，记录保留。随后保存新请求再失败，RouteApply.swift:99–104返回默认unsaved=nil；AppModel.swift:415直接覆盖旧记录为nil。
+							磁盘仍可能是被拒的B，却不再显示/重试恢复A；后续On Demand可能读取B。现有单测只覆盖首次恢复失败，preview“putback”也未执行真实I/O。此处是明确的源码状态丢失路径，尚无本轮真实文件故障执行收据；不能称实测泄漏。新请求未成功保存时，不应清除尚未履行的恢复义务。
+						F4安全heartbeat仍可被未确认的app旧状态覆盖
+高影响风险 · 源码推论，未注入
+							AppModel.onForeground:180–184先publishStatus(force:true)，后readStatus；StatusStore.swift:29–36没有writer优先级。若NE已写ROUTES_STOPPED，而app仍持有旧connected且status消息无答，app会把旧phase重新写为新鲜状态；NE下次心跳才可能纠正。
+							新TunnelGraph单测仅证明“旧app状态→失败heartbeat”一个方向，不证明反向写入安全。本项是对特定跨进程序列的条件推论；尚未在真实NE/App Group上运行，不能给出现网发生频率、持续时间或网络泄漏结论。所需验证应包含失败heartbeat之后app前台无答与反向写入，而非再演示一次gallery。
+					稀疏行的旧误测解释成立，不能推出新算法普遍正确
+					Settings原图行[61,1828,1145,1984]复算：旧97th方法1.1887:1，新方法15.2681:1，ink2.347%。这支持“字占比不足3%时旧百分位读到背景”的机制；固定截图的颜色空间/边界可造成与声称2.1%的小差异。不需要借audit-race才能解释该行，旧race说法没有独立执行证据可认定。
+					校准确实执行：日志2638/2646/2654为3.3、4.4、16.2；测试断言前二低于4.5、primary通过。它们验证平坦稀疏短字行，不验证“亮填充＋暗未填充＋白标签”的胶囊，不能排除F1假阳性。
+					原图区域元素算法字芯局部背景中位数判断
+						Connecting Cancel4.7835:13.9258:1假阳性；99.72%所选字芯低于4.5
+						Preparing Cancel7.7686:13.0345:1假阳性；100%所选字芯低于4.5
+						Settings稀疏行15.2681:1未另作局部字芯估计旧97th仅1.1887，不支持旧低对比结论
+					AX5独立sweep原始汇总10+11+13+24+35+44+35＝172，属元素访问次数，不是172个唯一且全部可见的控件；有滚动后重复和sheet下面的Home元素。Lines的1.0:1非hittable结果被排除；排除有日志，但isHittable不是可见性的充分证明。扫描没有覆盖首连/Preparing胶囊；audit中Cancel已被同一算法判为4.8通过。
+					hit-area仍以44×44pt、contrast以4.5:1判断，没有发现代码直接下调这两个门槛。AX5的textClipped预测与固定widget的dynamicType/textClipped被人工豁免，因此“0失败”不等于Apple原始audit零问题。AX5原图普遍重排良好，但小widget标题可见“Connection dr…”/“Status unavail…”截断；不能据绿灯宣称全字号无截断或VoiceOver已听验。
+					材料与交互可见，图像只证明其所处的执行层
+					F2：未知路由却仍给出当前去向
+F1：Preparing白色Cancel位于亮填充上
+原artifact截图，未重画、未改字；点名的是状态语义和字芯局部对比，不把fixture当真实网络。
+					已逐张浏览全部79张PNG的contact sheet并放大关键原图。5段原MP4以抽帧检查：四段短片约每秒一帧，1062.922秒UI录屏约每10秒一帧；不是逐帧全程播放，不能证明无一帧闪烁、掉帧、实际触感或全程无重叠。原视频保留在media/，并由原始zip哈希约束。
+					观察：首连太阳上升与填充、网络重连保留暖边与计时、部分可用降低天空状态、失败收日与Retry，减少动态版本有相应收敛。sheet-zoom是preview自动打开，不含用户点按；UI测试视频/日志才是点击与关闭的执行层。选线pending原图保留Tokyo和spinner，执行测试确认随后才改为Los Angeles。
+					真玻璃API和减少透明度分支在固定源码可见；内容卡没有处处叠加玻璃。夜/晨/日暖色与固定SHA桌面海平线、倒影一致，首页景观强、控制克制。浅色系统外观图仍采用产品暗色场景；本轮没有把它当完整浅色主题覆盖。
+					31项交互、69项单测成立；真实NE与系统扩展故障链未成立
+					层级可确认不可推出
+						iOS CI 39184374749固定code SHA，attempt1，success；hosted Linux 69 tests/0 failures；macOS亦有69；XCUITest日志31个passed、0个skipped，1031.796秒。测试数量不证明设计合格；测试在fixture app中，不是31项真实VPN用例。
+						真实target编译CI构建固定Libbox、unsigned Release设备App/PacketTunnel/Widgets以及Debug模拟器。不是签名安装、实际NE运行、权限成功或故障注入；所谓stub typecheck更不能提升为运行收据。指定日志未包含单独stub/mutation-red执行证据。
+						纯逻辑heartbeatTunnelGraphTests:10–30注入新/旧start均拒；断言无running graph、内存“file”恢复A；编码解码后StatusWording为ROUTES_STOPPED/off/Retry。Linux原始日志354–355证实执行通过。“file”是局部变量，beat.encoded→decode也在内存；没有共享磁盘跨进程读写、真实libbox失败/恢复。没有本轮mutation-red原始收据，故不核准该声称。
+						真实Widget view的app galleryWidgetGallery:31–40构造graph并在内存序列化；StatusWidgetView实际渲染ROUTES_STOPPED/Retry。Control label也存在。View真实不等于extension运行；Control是gallery手工控件＋同一wording，不是实际ControlWidget provider/系统Control Center交互。
+						系统容器real-widget-home-screen.png确在模拟器系统Home Screen，显示Status unavailable；Dynamic Island为真实ActivityKit容器里的Preview内容。没有真实状态文件的system widget故障呈现；没有实际Control Center与Lock Screen交互验收。
+						gate 39184377684固定SHA成功；job metadata已保留。ios-ci.yml:3–8明确iOS尚不在ci-gate内；gate不是额外iOS覆盖，也不是设计裁决。
+						模拟器性能日志CPU Time平均7.228秒、Physical约59824kB、Peak约62708kB；perf.txt宿主进程RSS约210MB、动画CPU7–10.6%，reduce-motion约0.1–1%。不是iPhone功耗/热量/稳定FPS/NE的jetsam内存；视频600/1元数据不是屏幕实际600FPS。无真机VoiceOver听读与haptic验收。
+					主动reload在PacketTunnelProvider.swift:114–120不设置reasserting；网络/core reloadInPlace:250–264才设置。源码支持“不把主动切线冒充网络变化”，但这不是实际NE重载录屏或日志证明。
+					评分只使用Rubric原文与固定对象
+					统一100分：信息层级减字20、交互连贯单手20、高级克制及最新桌面品牌一致15、Liquid Glass材质15、状态动效15、可访问性适配10、真实性性能5；>=85且各项>=70%，严重状态误导/主操作难发现/不可读一票否决。
+					PR的指定节提取原文在raw/rubric-verbatim.md。不访问其中引用的旧报告。目标≥95不是给分要求。
+					关键可复核命令与决定性输出git diff --numstat c2f8762977360d8f2c953bf787651b8c5ad825df f63a947e0a4e2fe0a71115aa356a944b4e4e2973
+7  0  docs/changelog.d/2026-10-17-ios-singbox-horizon.md
+git rev-parse <code-or-tip>:apps/ios
+6934aafa6283c886a3f657895838c6b8aa8d885c (both)
+grep -c 'Test Case.*passed' media/ui-tests.log → 31
+grep -c 'Test Case.*skipped' media/ui-tests.log → 0
+uv run --with pillow --with numpy python analysis/contrast-reproduction.py
+Connecting: element4.7835, glyph-local median3.9258
+Preparing: element7.7686, glyph-local median3.0345
+sha256sum raw/artifact-12159295214.zip
+f765c76f21301c3cfc16a8b5c209aae3924578717281318c773f4bfe45b44e7f
+GitHub artifact digest matches; zip content: 79PNG + 5MP4 + 7 other files.
+					证据保存在本线程，不写入产品仓库历史
+					根目录：/home/user/workspace/repo/.amp/in/artifacts/pr1672-r11/。本报告为report.html，逐文件绝对路径与SHA256在SHA256SUMS；该清单不包含自身以避免循环哈希。报告与清单自身哈希另在最终回复提供。
+					raw/fixed-source.tar.gz：固定SHA的apps/ios、iOS/gate workflow、桌面Views/Resources；SHA256 e2cd11fdd513c138bb625ccb973d7ec7194536fa6eb23b2a5a454de116636f31。
+raw/ios-39184374749.zip：原始CI日志；SHA256 2b4d61cb4055d92d88d5099ec2c457afb849dfc271d082199a425ccfd6d1fb86。
+raw/gate-39184377684.zip：原始gate日志；SHA256 b24272e934a2ec759e59463dc6c31d20317fe72e54f7b1b9d9f7151008c956f0。
+raw/artifact-12159295214.zip：原始79PNG/5MP4 artifact；SHA256 f765c76f21301c3cfc16a8b5c209aae3924578717281318c773f4bfe45b44e7f。
+raw/*jobs.json、raw/run-*.json、raw/artifact-12159295214.json：GitHub元数据；raw/tip-delta.numstat、raw/ios-tree-identity.txt：tip边界。
+media/：91个原artifact提取文件，原PNG/MP4/日志/README/perf/provenance均保留。
+analysis/contrast-reproduction.py、analysis/contrast-results.json：可重放数值分析；analysis/log-excerpts.txt：带行号的原始日志摘录，不代替完整zip。
+					所有源码行号均指固定SHA的文件；可从source tar解出。复算仅依赖原PNG；没有修改产品、降低检测阈值、删除测试或重跑CI来制造绿灯。复核范围外的旧分数、他人报告和讨论不构成本结论依据。

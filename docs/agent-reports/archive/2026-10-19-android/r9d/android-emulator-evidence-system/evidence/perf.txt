@@ -1,0 +1,19 @@
+emulator google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys x86_64 Physical size: 1080x2400 Physical density: 420 
+APK size: 65101335 bytes
+TotalTime: 1918 WaitTime: 1925 
+TotalTime: 1499 WaitTime: 1502 
+TotalTime: 1472 WaitTime: 1581 
+TotalTime: 1622 WaitTime: 1629 
+TotalTime: 1759 WaitTime: 1938 
+Total frames rendered: 34
+Janky frames: 34 (100.00%)
+Janky frames (legacy): 34 (100.00%)
+50th percentile: 700ms
+90th percentile: 1100ms
+95th percentile: 1150ms
+99th percentile: 1250ms
+50th gpu percentile: 4950ms
+90th gpu percentile: 4950ms
+95th gpu percentile: 4950ms
+99th gpu percentile: 4950ms
+           TOTAL PSS:    52211            TOTAL RSS:   157928       TOTAL SWAP PSS:      247

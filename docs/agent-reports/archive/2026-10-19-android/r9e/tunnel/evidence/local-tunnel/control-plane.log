@@ -1,0 +1,72 @@
+06:23:37 "GET /healthz HTTP/1.1" 200 -
+06:28:25 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:28:42 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:28:42 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:29:11 "POST /api/v1/auth/logout HTTP/1.1" 200 -
+06:29:26 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:29:30 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:29:31 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:29:38 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:30:00 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:30:14 scenario normal
+06:30:14 "POST /fixture/scenario HTTP/1.1" 200 -
+06:30:50 "POST /api/v1/auth/logout HTTP/1.1" 200 -
+06:31:00 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:31:18 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:31:19 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:31:51 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:32:28 scenario home-down
+06:32:28 "POST /fixture/scenario HTTP/1.1" 200 -
+06:32:30 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:33:00 scenario catalog-unavailable
+06:33:00 "POST /fixture/scenario HTTP/1.1" 200 -
+06:33:02 "GET /api/v1/exit-catalog HTTP/1.1" 503 -
+06:33:09 scenario normal
+06:33:09 "POST /fixture/scenario HTTP/1.1" 200 -
+06:33:27 "POST /api/v1/auth/logout HTTP/1.1" 200 -
+06:33:30 scenario normal
+06:33:30 "POST /fixture/scenario HTTP/1.1" 200 -
+06:33:43 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:33:49 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:33:49 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:34:00 scenario normal
+06:34:00 "POST /fixture/scenario HTTP/1.1" 200 -
+06:34:03 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:34:11 scenario home-down
+06:34:11 "POST /fixture/scenario HTTP/1.1" 200 -
+06:34:11 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:34:17 scenario catalog-unavailable
+06:34:17 "POST /fixture/scenario HTTP/1.1" 200 -
+06:34:17 "GET /api/v1/exit-catalog HTTP/1.1" 503 -
+06:34:21 scenario normal
+06:34:21 "POST /fixture/scenario HTTP/1.1" 200 -
+06:34:22 "POST /api/v1/auth/logout HTTP/1.1" 200 -
+06:34:25 scenario normal
+06:34:25 "POST /fixture/scenario HTTP/1.1" 200 -
+06:34:35 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:34:40 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:34:40 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:34:45 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:35:54 "POST /api/v1/auth/logout HTTP/1.1" 200 -
+06:35:55 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:35:59 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:36:00 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:36:05 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:36:23 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:36:43 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:37:08 "POST /api/v1/auth/logout HTTP/1.1" 200 -
+06:37:10 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:37:14 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:37:14 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:37:17 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:37:34 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:41:51 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:42:11 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:42:11 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:42:47 "POST /api/v1/auth/logout HTTP/1.1" 200 -
+06:43:02 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+06:43:06 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+06:43:06 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:43:14 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:43:36 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+06:44:01 "POST /api/v1/auth/logout HTTP/1.1" 200 -

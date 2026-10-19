@@ -1,0 +1,3 @@
+shared status: SIGNED_OUT
+tile description: Tono, Sign in
+tile subtitle shown: true

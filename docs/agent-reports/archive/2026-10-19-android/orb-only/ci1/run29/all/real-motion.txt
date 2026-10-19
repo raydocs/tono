@@ -1,0 +1,1 @@
+scene pixels changed over 1.5 s (animator_duration_scale): 1 → 0.3942 %, 0 → 0.0000 %, back to 1 → 0.4399 %

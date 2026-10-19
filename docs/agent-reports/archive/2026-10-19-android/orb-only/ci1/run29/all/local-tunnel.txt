@@ -1,0 +1,10 @@
+mark on sign-in: present
+mark on Home: present
+connect: tap → Connected in 11291 ms (includes consent taps; emulator, software GPU)
+request: cloud www.cloudflare.com engine-probe
+request: home claude.ai engine-probe
+request: cloud www.youtube.com HTTP 302
+request: home api.anthropic.com HTTP 404
+request: direct example.com HTTP 200
+memory while connected (PSS): app 80 MB, engine :vpn 77 MB
+sign-out: back to the sign-in screen

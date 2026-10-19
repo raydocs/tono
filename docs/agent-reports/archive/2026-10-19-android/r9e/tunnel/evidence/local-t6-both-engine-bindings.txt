@@ -1,0 +1,71 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{a7f4fae u0 com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+    intent={act=com.raydocs.tono.mobile.BIND_ENGINE cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+    packageName=com.raydocs.tono.mobile.test
+    processName=com.raydocs.tono.mobile.test:vpn
+    permission=android.permission.BIND_VPN_SERVICE
+    baseDir=/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.apk
+    dataDir=/data/user/0/com.raydocs.tono.mobile.test
+    app=ProcessRecord{5aff41 9474:com.raydocs.tono.mobile.test:vpn/u0a192}
+    mAllowWhileInUsePermissionInFgsReason=PROC_STATE_TOP
+    allowUiJobScheduling=true
+    recentCallingPackage=android
+    recentCallingUid=10192
+    allowStartForeground=PROC_STATE_TOP
+    startForegroundCount=2
+    infoAllowStartForeground=[callingPackage: com.raydocs.tono.mobile.test; callingUid: 10192; uidState: TOP ; uidBFSL: [BFSL]; intent: Intent { act=com.raydocs.tono.mobile.CONNECT cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService }; code:PROC_STATE_TOP; tempAllowListReason:<null>; targetSdkVersion:36; callerTargetSdkVersion:36; startForegroundCount:1; bindFromPackage:null: isBindService:false]
+    isForeground=true foregroundId=7 types=40000000 foregroundNoti=Notification(channel=tunnel shortcut=null contentView=null vibrate=null sound=null defaults=0x0 flags=0x4a color=0xffffad74 category=service actions=1 vis=PRIVATE)
+    createTime=-1m59s316ms startingBgTimeout=--
+    lastActivity=-13s449ms restartTime=-49s996ms createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=false callStart=true lastStartId=3
+ startCommandResult=1
+    Bindings:
+    * IntentBindRecord{5943a9 CREATE}:
+      intent={act=android.net.VpnService cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+      binder=android.os.BinderProxy@6557d2e
+      requested=true received=true hasBound=false doRebind=false
+      * Client AppBindRecord{e1e80cf ProcessRecord{9d91bbc 519:system/1000}}
+        Per-process Connections:
+          ConnectionRecord{a39b62d u0 CR FGS com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:@bfcd544 flags=0x4000001}
+    * IntentBindRecord{d561a5c}:
+      intent={act=com.raydocs.tono.mobile.BIND_ENGINE cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+      binder=android.os.BinderProxy@8d97165
+      requested=true received=true hasBound=false doRebind=false
+    All Connections:
+      ConnectionRecord{a39b62d u0 CR FGS com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:@bfcd544 flags=0x4000001}
+
+  * ServiceRecord{6f0d10a u0 com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService}
+    intent={cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService}
+    packageName=com.raydocs.tono.mobile.test
+    processName=com.raydocs.tono.mobile.test:watch
+    baseDir=/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.apk
+    dataDir=/data/user/0/com.raydocs.tono.mobile.test
+    app=ProcessRecord{686a6c0 9227:com.raydocs.tono.mobile.test:watch/u0a192}
+    mAllowWhileInUsePermissionInFgsReason=PROC_STATE_TOP
+    allowUiJobScheduling=false
+    recentCallingPackage=com.raydocs.tono.mobile.test
+    recentCallingUid=10192
+    allowStartForeground=PROC_STATE_TOP
+    startForegroundCount=0
+    infoAllowStartForeground=[callingPackage: com.raydocs.tono.mobile.test; callingUid: 10192; uidState: TOP ; uidBFSL: [BFSL]; intent: Intent { cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService }; code:PROC_STATE_TOP; tempAllowListReason:<null>; targetSdkVersion:36; callerTargetSdkVersion:36; startForegroundCount:0; bindFromPackage:null: isBindService:true]
+    createTime=-15s649ms startingBgTimeout=--
+    lastActivity=-15s649ms restartTime=-15s649ms createdFromFg=true
+    Bindings:
+    * IntentBindRecord{e403e3a CREATE}:
+      intent={cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService}
+      binder=android.os.BinderProxy@f2c5aeb
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{6588048 ProcessRecord{5aff41 9474:com.raydocs.tono.mobile.test:vpn/u0a192}}
+        Per-process Connections:
+          ConnectionRecord{5984d75 u0 CR com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService:@359cac flags=0x1}
+    All Connections:
+      ConnectionRecord{5984d75 u0 CR com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService:@359cac flags=0x1}
+
+  Connection bindings to services:
+  * ConnectionRecord{5984d75 u0 CR com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService:@359cac flags=0x1}
+    binding=AppBindRecord{6588048 com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService:com.raydocs.tono.mobile.test:vpn}
+    conn=android.os.BinderProxy@359cac flags=0x1
+  * ConnectionRecord{a39b62d u0 CR FGS com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:@bfcd544 flags=0x4000001}
+    binding=AppBindRecord{e1e80cf com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:system}
+    conn=android.app.LoadedApk$ServiceDispatcher$InnerConnection@bfcd544 flags=0x4000001

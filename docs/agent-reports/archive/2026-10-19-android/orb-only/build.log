@@ -1,0 +1,98 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :android:mobile:verifyLibbox
+> Task :android:mobile:preBuild
+> Task :android:mobile:preDebugBuild
+> Task :android:mobile:compileDebugAidl UP-TO-DATE
+> Task :android:mobile:generateDebugBuildConfig UP-TO-DATE
+> Task :android:mobile:generateDebugResources UP-TO-DATE
+> Task :android:mobile:packageDebugResources UP-TO-DATE
+> Task :android:routing:preBuild UP-TO-DATE
+> Task :android:routing:preDebugBuild UP-TO-DATE
+> Task :android:routing:processDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:processDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:parseDebugLocalResources UP-TO-DATE
+> Task :android:mobile:generateDebugRFile UP-TO-DATE
+> Task :android:routing:generateDebugResources UP-TO-DATE
+> Task :android:routing:packageDebugResources UP-TO-DATE
+> Task :android:routing:parseDebugLocalResources UP-TO-DATE
+> Task :android:routing:generateDebugRFile UP-TO-DATE
+> Task :android:routing:compileDebugKotlin UP-TO-DATE
+> Task :android:routing:javaPreCompileDebug UP-TO-DATE
+> Task :android:routing:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:routing:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:mobile:compileDebugKotlin UP-TO-DATE
+> Task :android:mobile:javaPreCompileDebug UP-TO-DATE
+> Task :android:mobile:compileDebugJavaWithJavac UP-TO-DATE
+> Task :android:routing:writeDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:checkDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:mobile:compileDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:mergeDebugResources UP-TO-DATE
+> Task :android:mobile:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :android:mobile:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugMainManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifestForPackage UP-TO-DATE
+> Task :android:routing:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:routing:compileDebugLibraryResources UP-TO-DATE
+> Task :android:mobile:processDebugResources UP-TO-DATE
+> Task :android:mobile:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :android:mobile:preDebugAndroidTestBuild SKIPPED
+> Task :android:mobile:compileDebugAndroidTestAidl NO-SOURCE
+> Task :android:mobile:mergeDebugAndroidTestManifest UP-TO-DATE
+> Task :android:mobile:processDebugAndroidTestManifest UP-TO-DATE
+> Task :android:mobile:generateDebugAndroidTestBuildConfig UP-TO-DATE
+> Task :android:mobile:generateDebugAndroidTestResources UP-TO-DATE
+> Task :android:mobile:packageDebugAndroidTestResources UP-TO-DATE
+> Task :android:mobile:processDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :android:mobile:parseDebugAndroidTestLocalResources UP-TO-DATE
+> Task :android:mobile:generateDebugAndroidTestRFile UP-TO-DATE
+> Task :android:mobile:javaPreCompileDebugAndroidTest UP-TO-DATE
+> Task :android:mobile:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :android:routing:generateDebugAssets UP-TO-DATE
+> Task :android:routing:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:mergeDebugAndroidTestAssets UP-TO-DATE
+> Task :android:mobile:compressDebugAndroidTestAssets UP-TO-DATE
+> Task :android:mobile:generateDebugAndroidTestGlobalSynthetics UP-TO-DATE
+> Task :android:routing:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:checkDebugAndroidTestDuplicateClasses UP-TO-DATE
+> Task :android:mobile:desugarDebugAndroidTestFileDependencies UP-TO-DATE
+> Task :android:mobile:mergeExtDexDebugAndroidTest UP-TO-DATE
+> Task :android:routing:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :android:mobile:mergeLibDexDebugAndroidTest UP-TO-DATE
+> Task :android:mobile:checkDebugAndroidTestAarMetadata UP-TO-DATE
+> Task :android:mobile:mapDebugAndroidTestSourceSetPaths UP-TO-DATE
+> Task :android:mobile:compileDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :android:mobile:mergeDebugAndroidTestResources UP-TO-DATE
+> Task :android:mobile:processDebugAndroidTestResources UP-TO-DATE
+> Task :android:mobile:mergeDebugAndroidTestJniLibFolders UP-TO-DATE
+> Task :android:mobile:mergeDebugJniLibFolders UP-TO-DATE
+> Task :android:routing:mergeDebugJniLibFolders UP-TO-DATE
+> Task :android:routing:mergeDebugNativeLibs NO-SOURCE
+> Task :android:routing:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :android:mobile:mergeDebugNativeLibs UP-TO-DATE
+> Task :android:mobile:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :android:mobile:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :android:mobile:validateSigningDebugAndroidTest UP-TO-DATE
+> Task :android:mobile:writeDebugAndroidTestSigningConfigVersions UP-TO-DATE
+
+> Task :android:mobile:compileDebugAndroidTestKotlin
+w: file:///home/user/workspace/repo/android/mobile/src/androidTest/kotlin/com/raydocs/tono/mobile/DeviceEvidenceTest.kt:156:28 'val allNetworks: Array<(out) Network!>' is deprecated. Deprecated in Java.
+w: file:///home/user/workspace/repo/android/mobile/src/androidTest/kotlin/com/raydocs/tono/mobile/HorizonUiDeviceTest.kt:73:29 'fun <reified A : ComponentActivity> createAndroidComposeRule(effectContext: CoroutineContext = ...): AndroidComposeTestRule<ActivityScenarioRule<A>, A>' is deprecated. Use `androidx.compose.ui.test.junit4.v2.createAndroidComposeRule` instead. The v2 APIs use StandardTestDispatcher instead of UnconfinedTestDispatcher, which aligns with standard coroutine behavior by queuing tasks rather than executing them immediately. Tests relying on immediate execution may require explicit synchronization. Please refer to the migration guide for more details.
+w: file:///home/user/workspace/repo/android/mobile/src/androidTest/kotlin/com/raydocs/tono/mobile/LargeTextDeviceTest.kt:47:27 'fun <reified A : ComponentActivity> createAndroidComposeRule(effectContext: CoroutineContext = ...): AndroidComposeTestRule<ActivityScenarioRule<A>, A>' is deprecated. Use `androidx.compose.ui.test.junit4.v2.createAndroidComposeRule` instead. The v2 APIs use StandardTestDispatcher instead of UnconfinedTestDispatcher, which aligns with standard coroutine behavior by queuing tasks rather than executing them immediately. Tests relying on immediate execution may require explicit synchronization. Please refer to the migration guide for more details.
+
+> Task :android:mobile:compileDebugAndroidTestJavaWithJavac UP-TO-DATE
+> Task :android:mobile:processDebugAndroidTestJavaRes UP-TO-DATE
+> Task :android:mobile:mergeDebugAndroidTestJavaResource UP-TO-DATE
+> Task :android:mobile:dexBuilderDebugAndroidTest
+> Task :android:mobile:mergeProjectDexDebugAndroidTest
+> Task :android:mobile:packageDebugAndroidTest
+> Task :android:mobile:createDebugAndroidTestApkListingFileRedirect UP-TO-DATE
+> Task :android:mobile:assembleDebugAndroidTest
+
+BUILD SUCCESSFUL in 29s
+74 actionable tasks: 5 executed, 69 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.1/userguide/configuration_cache_enabling.html

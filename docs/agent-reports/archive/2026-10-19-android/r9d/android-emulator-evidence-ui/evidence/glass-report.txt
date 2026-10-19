@@ -1,0 +1,3 @@
+API 34, stripe amplitude (luminance, 16 dp period): bare 162.5; Tono glass 0.1; same glass without blur 82.8; platform blur alone 0.4.
+Blur leaves 0.2 % of the stripes under Tono glass; the platform's own blur leaves 0.3 % of bare stripes. A full Gaussian blur at this radius leaves under 0.1 %.
+3rd/1st harmonic (edge sharpness, square wave 33 %): bare 34 %, Tono glass 23 %, platform blur 34 %.

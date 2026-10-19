@@ -1,0 +1,6 @@
+16:24:10 "GET /healthz HTTP/1.1" 200 -
+16:35:23 "POST /api/v1/auth/email/start HTTP/1.1" 200 -
+16:35:27 "POST /api/v1/auth/email/verify HTTP/1.1" 200 -
+16:35:27 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+16:35:32 "GET /api/v1/exit-catalog HTTP/1.1" 200 -
+16:36:06 "POST /api/v1/auth/logout HTTP/1.1" 200 -

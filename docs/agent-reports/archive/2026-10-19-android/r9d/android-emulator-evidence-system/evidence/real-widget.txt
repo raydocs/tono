@@ -1,0 +1,1 @@
+shared status: SIGNED_OUT; widget bound through AppWidgetManager id=2

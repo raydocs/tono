@@ -1,0 +1,1369 @@
+﻿2026-10-18T02:00:51.4328688Z Current runner version: '2.337.0'
+2026-10-18T02:00:51.4347508Z ##[group]Runner Image Provisioner
+2026-10-18T02:00:51.4348104Z Hosted Compute Agent
+2026-10-18T02:00:51.4348454Z Version: 20261012.601
+2026-10-18T02:00:51.4348853Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+2026-10-18T02:00:51.4349321Z Build Date: 2026-10-12T17:48:21Z
+2026-10-18T02:00:51.4349713Z Worker ID: {4ff5ca31-edca-44b3-8d09-406376d47316}
+2026-10-18T02:00:51.4350168Z Region: centralus
+2026-10-18T02:00:51.4350530Z Cloud: Azure
+2026-10-18T02:00:51.4350993Z ##[endgroup]
+2026-10-18T02:00:51.4352027Z ##[group]Operating System
+2026-10-18T02:00:51.4352386Z Ubuntu
+2026-10-18T02:00:51.4352678Z 24.04.5
+2026-10-18T02:00:51.4353049Z LTS
+2026-10-18T02:00:51.4353350Z ##[endgroup]
+2026-10-18T02:00:51.4353700Z ##[group]Runner Image
+2026-10-18T02:00:51.4354073Z Image: ubuntu-24.04
+2026-10-18T02:00:51.4354419Z Version: 20261012.334.1
+2026-10-18T02:00:51.4355216Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-18T02:00:51.4356134Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+2026-10-18T02:00:51.4356713Z ##[endgroup]
+2026-10-18T02:00:51.4357367Z ##[group]GITHUB_TOKEN Permissions
+2026-10-18T02:00:51.4358855Z Contents: read
+2026-10-18T02:00:51.4359184Z Metadata: read
+2026-10-18T02:00:51.4359560Z ##[endgroup]
+2026-10-18T02:00:51.4361031Z Secret source: Actions
+2026-10-18T02:00:51.4361655Z Cache mode: write
+2026-10-18T02:00:51.4362100Z Prepare workflow directory
+2026-10-18T02:00:51.4652338Z Prepare all required actions
+2026-10-18T02:00:51.4693164Z Getting action download info
+2026-10-18T02:00:51.6956339Z Download action repository 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' (SHA:9000827ccba6bdab643e8b6fd33ac0654aef8333)
+2026-10-18T02:00:52.2854179Z Download action repository 'reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d' (SHA:a421e43855164a8197daf9d8d40fe71c6996bb0d)
+2026-10-18T02:00:52.7113308Z Download action repository 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' (SHA:cf430e030ddbb5b0abf93d22962f4752f3646cd9)
+2026-10-18T02:00:53.2515696Z Complete job name: emulator
+2026-10-18T02:00:53.2970278Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+2026-10-18T02:00:53.2970915Z with:
+2026-10-18T02:00:53.2971135Z   name: tono-mobile-0.3.1-test-b393e1961
+2026-10-18T02:00:53.2971386Z   path: apk
+2026-10-18T02:00:53.2971587Z   merge-multiple: false
+2026-10-18T02:00:53.2971808Z   repository: raydocs/tono
+2026-10-18T02:00:53.2972029Z   run-id: 39088253119
+2026-10-18T02:00:53.2972236Z   skip-decompress: false
+2026-10-18T02:00:53.2972455Z   digest-mismatch: error
+2026-10-18T02:00:53.2972740Z ##[endgroup]
+2026-10-18T02:00:53.3921332Z Downloading single artifact
+2026-10-18T02:00:53.5565381Z Preparing to download the following artifacts:
+2026-10-18T02:00:53.5574285Z - tono-mobile-0.3.1-test-b393e1961 (ID: 12121652867, Size: 44987583, Expected Digest: sha256:97716ae6b07692811bbdba51337542dcebfa32ec8fc4d30b79252f0fe349514e)
+2026-10-18T02:00:53.8348524Z Redirecting to blob download url: https://productionresultssa18.blob.core.windows.net/actions-results/b9363ed1-a9ee-8a80-98ee-ffc0b8edeb65/workflow-job-run-89d617ce-3dd8-5a08-a046-5ad3d77699dd/artifacts/05dd378d1990c2081f57106247924f3ecd501f1f0318c817b6f8ea7feb8d2325.zip
+2026-10-18T02:00:53.8349416Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+2026-10-18T02:00:54.0288758Z (node:1978) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-10-18T02:00:54.0290089Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-18T02:00:55.1102938Z SHA256 digest of downloaded artifact is 97716ae6b07692811bbdba51337542dcebfa32ec8fc4d30b79252f0fe349514e
+2026-10-18T02:00:55.1103568Z Artifact download completed successfully.
+2026-10-18T02:00:55.1104322Z Total of 1 artifact(s) downloaded
+2026-10-18T02:00:55.1106491Z Download artifact has finished successfully
+2026-10-18T02:00:55.1337048Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+2026-10-18T02:00:55.1337330Z with:
+2026-10-18T02:00:55.1337483Z   name: instrumentation-apk
+2026-10-18T02:00:55.1337649Z   path: apk
+2026-10-18T02:00:55.1337807Z   merge-multiple: false
+2026-10-18T02:00:55.1337974Z   repository: raydocs/tono
+2026-10-18T02:00:55.1338145Z   run-id: 39088253119
+2026-10-18T02:00:55.1338335Z   skip-decompress: false
+2026-10-18T02:00:55.1338502Z   digest-mismatch: error
+2026-10-18T02:00:55.1338667Z ##[endgroup]
+2026-10-18T02:00:55.2226243Z Downloading single artifact
+2026-10-18T02:00:55.4084598Z Preparing to download the following artifacts:
+2026-10-18T02:00:55.4085331Z - instrumentation-apk (ID: 12121717536, Size: 4368315, Expected Digest: sha256:870cdcdf02a92ea2d30c35405ecc8a2bcbdc1b63958db1b35cc7c8de0e89be55)
+2026-10-18T02:00:55.7621169Z Redirecting to blob download url: https://productionresultssa18.blob.core.windows.net/actions-results/b9363ed1-a9ee-8a80-98ee-ffc0b8edeb65/workflow-job-run-89d617ce-3dd8-5a08-a046-5ad3d77699dd/artifacts/03fd2856d8c68c693f975f4c83352e888fec0e0068c92622a3d8b7afb7303369.zip
+2026-10-18T02:00:55.7621926Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+2026-10-18T02:00:55.9537426Z (node:1992) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-10-18T02:00:55.9537994Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-18T02:00:56.3511332Z SHA256 digest of downloaded artifact is 870cdcdf02a92ea2d30c35405ecc8a2bcbdc1b63958db1b35cc7c8de0e89be55
+2026-10-18T02:00:56.3512027Z Artifact download completed successfully.
+2026-10-18T02:00:56.3512326Z Total of 1 artifact(s) downloaded
+2026-10-18T02:00:56.3513748Z Download artifact has finished successfully
+2026-10-18T02:00:56.3618305Z ##[group]Run echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+2026-10-18T02:00:56.3618836Z [36;1mecho 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules[0m
+2026-10-18T02:00:56.3619166Z [36;1msudo udevadm control --reload-rules[0m
+2026-10-18T02:00:56.3619357Z [36;1msudo udevadm trigger --name-match=kvm[0m
+2026-10-18T02:00:56.3818670Z shell: /usr/bin/bash -e {0}
+2026-10-18T02:00:56.3818879Z ##[endgroup]
+2026-10-18T02:00:56.3959028Z KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"
+2026-10-18T02:00:56.4235511Z ##[group]Run cat > evidence.sh <<'SH'
+2026-10-18T02:00:56.4235787Z [36;1mcat > evidence.sh <<'SH'[0m
+2026-10-18T02:00:56.4235953Z [36;1mset -euxo pipefail[0m
+2026-10-18T02:00:56.4236121Z [36;1mAPP=com.raydocs.tono.mobile.test[0m
+2026-10-18T02:00:56.4236352Z [36;1m# A retry keeps the first attempt's evidence next to the second's.[0m
+2026-10-18T02:00:56.4236660Z [36;1mif [ -d evidence ]; then mv evidence "evidence-attempt-$(date +%s)"; fi[0m
+2026-10-18T02:00:56.4236887Z [36;1mmkdir -p evidence[0m
+2026-10-18T02:00:56.4237095Z [36;1madb shell getprop ro.build.fingerprint | tee evidence/device.txt[0m
+2026-10-18T02:00:56.4237372Z [36;1madb shell getprop ro.product.cpu.abi | tee -a evidence/device.txt[0m
+2026-10-18T02:00:56.4237612Z [36;1madb shell wm size | tee -a evidence/device.txt[0m
+2026-10-18T02:00:56.4237831Z [36;1madb shell wm density | tee -a evidence/device.txt[0m
+2026-10-18T02:00:56.4238085Z [36;1madb shell settings put system screen_off_timeout 1800000[0m
+2026-10-18T02:00:56.4238288Z [36;1madb shell svc power stayon true[0m
+2026-10-18T02:00:56.4238466Z [36;1madb shell input keyevent 82 || true[0m
+2026-10-18T02:00:56.4238768Z [36;1m# Let the launcher finish its first-boot work; on swiftshader it can otherwise raise an ANR[0m
+2026-10-18T02:00:56.4239145Z [36;1m# dialog over the app. The test answers only foreign ANR dialogs and logs each one.[0m
+2026-10-18T02:00:56.4239530Z [36;1msleep 60[0m
+2026-10-18T02:00:56.4239665Z [36;1madb shell input keyevent 3[0m
+2026-10-18T02:00:56.4239895Z [36;1m# No -g: runtime permissions and VPN consent stay as on a fresh install.[0m
+2026-10-18T02:00:56.4240126Z [36;1madb install -r apk/*-test-*.apk[0m
+2026-10-18T02:00:56.4240305Z [36;1madb install -r apk/instrumentation.apk[0m
+2026-10-18T02:00:56.4240576Z [36;1m# One instrumentation call per test, pulling evidence after each, so an emulator crash[0m
+2026-10-18T02:00:56.4241082Z [36;1m# (seen on hosted runners) costs one test's evidence rather than all of it.[0m
+2026-10-18T02:00:56.4241306Z [36;1mset +e[0m
+2026-10-18T02:00:56.4241425Z [36;1mfailed=""[0m
+2026-10-18T02:00:56.4241722Z [36;1mfor c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog \[0m
+2026-10-18T02:00:56.4242317Z [36;1m         DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \[0m
+2026-10-18T02:00:56.4242892Z [36;1m         DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme \[0m
+2026-10-18T02:00:56.4243354Z [36;1m         SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp \[0m
+2026-10-18T02:00:56.4243821Z [36;1m         SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates \[0m
+2026-10-18T02:00:56.4244331Z [36;1m         DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice \[0m
+2026-10-18T02:00:56.4244694Z [36;1m         DeviceEvidenceTest#b3_fixtureAtLargeFontScale \[0m
+2026-10-18T02:00:56.4245094Z [36;1m         HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps \[0m
+2026-10-18T02:00:56.4245762Z [36;1m         HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt \[0m
+2026-10-18T02:00:56.4246366Z [36;1m         HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome \[0m
+2026-10-18T02:00:56.4246768Z [36;1m         LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff; do[0m
+2026-10-18T02:00:56.4246988Z [36;1m  t="${c#*#}"[0m
+2026-10-18T02:00:56.4247130Z [36;1m  rec=""[0m
+2026-10-18T02:00:56.4247308Z [36;1m  if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then[0m
+2026-10-18T02:00:56.4247747Z [36;1m    # Recorded from the host: a screenrecord started inside the test kept the run open.[0m
+2026-10-18T02:00:56.4248158Z [36;1m    adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &[0m
+2026-10-18T02:00:56.4248461Z [36;1m    rec=$![0m
+2026-10-18T02:00:56.4248602Z [36;1m  fi[0m
+2026-10-18T02:00:56.4248817Z [36;1m  timeout 900 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \[0m
+2026-10-18T02:00:56.4249177Z [36;1m    $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"[0m
+2026-10-18T02:00:56.4249471Z [36;1m  [ -n "$rec" ] && timeout 60 tail --pid="$rec" -f /dev/null[0m
+2026-10-18T02:00:56.4249851Z [36;1m  grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }[0m
+2026-10-18T02:00:56.4250269Z [36;1m  timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/[0m
+2026-10-18T02:00:56.4250874Z [36;1m  [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4[0m
+2026-10-18T02:00:56.4251229Z [36;1mdone[0m
+2026-10-18T02:00:56.4251450Z [36;1m# Leave the shared emulator settings as found, whatever a failed test left behind.[0m
+2026-10-18T02:00:56.4251726Z [36;1madb shell settings put system font_scale 1.0[0m
+2026-10-18T02:00:56.4252067Z [36;1madb shell settings put global animator_duration_scale 1[0m
+2026-10-18T02:00:56.4252276Z [36;1madb shell cmd uimode night no[0m
+2026-10-18T02:00:56.4252468Z [36;1mtimeout 60 adb logcat -d > evidence/logcat.txt[0m
+2026-10-18T02:00:56.4252658Z [36;1mls -la evidence[0m
+2026-10-18T02:00:56.4252804Z [36;1mcat evidence/summary.txt[0m
+2026-10-18T02:00:56.4252957Z [36;1mset -e[0m
+2026-10-18T02:00:56.4253081Z [36;1m[ -z "$failed" ][0m
+2026-10-18T02:00:56.4253221Z [36;1mSH[0m
+2026-10-18T02:00:56.4306584Z shell: /usr/bin/bash -e {0}
+2026-10-18T02:00:56.4306758Z ##[endgroup]
+2026-10-18T02:00:56.4455704Z ##[group]Run reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+2026-10-18T02:00:56.4455999Z with:
+2026-10-18T02:00:56.4456126Z   api-level: 34
+2026-10-18T02:00:56.4456252Z   target: google_apis
+2026-10-18T02:00:56.4456386Z   arch: x86_64
+2026-10-18T02:00:56.4456512Z   profile: pixel_6
+2026-10-18T02:00:56.4456650Z   disable-animations: false
+2026-10-18T02:00:56.4456927Z   emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T02:00:56.4457197Z   script: bash evidence.sh
+2026-10-18T02:00:56.4457333Z   cores: 2
+2026-10-18T02:00:56.4457452Z   avd-name: test
+2026-10-18T02:00:56.4457588Z   force-avd-creation: true
+2026-10-18T02:00:56.4457734Z   emulator-boot-timeout: 600
+2026-10-18T02:00:56.4457884Z   emulator-port: 5554
+2026-10-18T02:00:56.4458022Z   disable-spellchecker: false
+2026-10-18T02:00:56.4458179Z   disable-linux-hw-accel: auto
+2026-10-18T02:00:56.4458327Z   enable-hw-keyboard: false
+2026-10-18T02:00:56.4458493Z   channel: stable
+2026-10-18T02:00:56.4458616Z ##[endgroup]
+2026-10-18T02:00:56.4873927Z ##[group]Configure emulator
+2026-10-18T02:00:56.4874377Z API level: 34
+2026-10-18T02:00:56.4874639Z System image API level: 34
+2026-10-18T02:00:56.4874903Z target: google_apis
+2026-10-18T02:00:56.4875128Z CPU architecture: x86_64
+2026-10-18T02:00:56.4875370Z Hardware profile: pixel_6
+2026-10-18T02:00:56.4880122Z Cores: 2
+2026-10-18T02:00:56.4880328Z RAM size: 
+2026-10-18T02:00:56.4880516Z Heap size: 
+2026-10-18T02:00:56.4880849Z SD card path or size: 
+2026-10-18T02:00:56.4881000Z Disk size: 
+2026-10-18T02:00:56.4881301Z AVD name: test
+2026-10-18T02:00:56.4881454Z force avd creation: true
+2026-10-18T02:00:56.4881603Z Emulator boot timeout: 600
+2026-10-18T02:00:56.4881815Z emulator port: 5554
+2026-10-18T02:00:56.4882077Z emulator options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T02:00:56.4882393Z disable animations: false
+2026-10-18T02:00:56.4882565Z disable spellchecker: false
+2026-10-18T02:00:56.4882723Z disable Linux hardware acceleration: false
+2026-10-18T02:00:56.4882901Z enable hardware keyboard: false
+2026-10-18T02:00:56.4883053Z Channel: 0 (stable)
+2026-10-18T02:00:56.4883176Z Script:
+2026-10-18T02:00:56.4883296Z bash evidence.sh
+2026-10-18T02:00:56.4883433Z Pre emulator launch script:
+2026-10-18T02:00:56.4883881Z ##[endgroup]
+2026-10-18T02:00:56.4884132Z ##[group]Install Android SDK
+2026-10-18T02:00:56.4924108Z [command]/usr/bin/sh -c \yes | sdkmanager --licenses > /dev/null
+2026-10-18T02:01:00.5973886Z Installing latest build tools, platform tools, and platform.
+2026-10-18T02:01:00.5981957Z [command]/usr/bin/sh -c \sdkmanager --install 'build-tools;37.0.0' platform-tools 'platforms;android-34'> /dev/null
+2026-10-18T02:01:01.5379154Z Installing latest emulator.
+2026-10-18T02:01:01.5387069Z [command]/usr/bin/sh -c \sdkmanager --install emulator --channel=0 > /dev/null
+2026-10-18T02:01:11.7821318Z Installing system images.
+2026-10-18T02:01:11.7829469Z [command]/usr/bin/sh -c \sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null
+2026-10-18T02:01:47.2645674Z ##[endgroup]
+2026-10-18T02:01:47.2648229Z ##[group]Create AVD
+2026-10-18T02:01:47.2649311Z Creating AVD.
+2026-10-18T02:01:47.2664870Z [command]/usr/bin/sh -c \echo no | avdmanager create avd --force -n test --package 'system-images;android-34;google_apis;x86_64' --device 'pixel_6'
+2026-10-18T02:01:47.7662450Z Loading local repository...                                                     
+2026-10-18T02:01:47.7662927Z [=========                              ] 25% Loading local repository...       
+2026-10-18T02:01:47.7663270Z [=========                              ] 25% Fetch remote repository...        
+2026-10-18T02:01:47.7680841Z [=======================================] 100% Fetch remote repository...       
+2026-10-18T02:01:48.2595049Z Auto-selecting single ABI x86_64
+2026-10-18T02:01:48.8862652Z [command]/usr/bin/sh -c \printf 'hw.cpu.ncore=2\n' >> /home/runner/.android/avd/test.avd/config.ini
+2026-10-18T02:01:48.8883435Z ##[endgroup]
+2026-10-18T02:01:48.8884848Z ##[group]Launch Emulator
+2026-10-18T02:01:48.8885210Z Starting emulator.
+2026-10-18T02:01:48.8893920Z [command]/usr/bin/sh -c \/usr/local/lib/android/sdk/emulator/emulator -port 5554 -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none &
+2026-10-18T02:01:48.8981382Z INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+2026-10-18T02:01:48.8981819Z INFO         | Graphics backend: gfxstream
+2026-10-18T02:01:48.8982263Z INFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/
+2026-10-18T02:01:49.1150363Z INFO         | Saving last run QEMU version for the AVD to 2
+2026-10-18T02:01:49.1151138Z INFO         | Increasing RAM size to 2560MB
+2026-10-18T02:01:49.1151509Z ##############################################################################
+2026-10-18T02:01:49.1152078Z ##                        WARNING - ACTION REQUIRED                         ##
+2026-10-18T02:01:49.1152487Z ##  Consider using the '-metrics-collection' flag to help improve the       ##
+2026-10-18T02:01:49.1152953Z ##  emulator by sending anonymized usage data. Or use the '-no-metrics'     ##
+2026-10-18T02:01:49.1154542Z ##  flag to bypass this warning and turn off the metrics collection.        ##
+2026-10-18T02:01:49.1155016Z ##  In a future release this warning will turn into a one-time blocking     ##
+2026-10-18T02:01:49.1155628Z ##  prompt to ask for explicit user input regarding metrics collection.     ##
+2026-10-18T02:01:49.1155983Z ##                                                                          ##
+2026-10-18T02:01:49.1156397Z ##  Please see '-help-metrics-collection' for more details. You can use     ##
+2026-10-18T02:01:49.1157505Z ##  '-metrics-to-file' or '-metrics-to-console' flags to see what type of   ##
+2026-10-18T02:01:49.1157932Z ##  data is being collected by emulator as part of usage statistics.        ##
+2026-10-18T02:01:49.1158308Z ##############################################################################
+2026-10-18T02:01:49.1158768Z INFO         | Guest GLES Driver: Auto (ext controls)
+2026-10-18T02:01:49.1162873Z INFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swiftshader
+2026-10-18T02:01:49.1163399Z INFO         | Checking system compatibility:
+2026-10-18T02:01:49.1163626Z INFO         |   Checking: hasSufficientDiskSpace
+2026-10-18T02:01:49.1163859Z INFO         |      Ok: Disk space requirements to run avd: `test` are met
+2026-10-18T02:01:49.1164075Z INFO         |   Checking: hasSufficientHwGpu
+2026-10-18T02:01:49.1164282Z INFO         |      Ok: Hardware GPU compatibility checks are not required
+2026-10-18T02:01:49.1164501Z INFO         |   Checking: hasSufficientSystem
+2026-10-18T02:01:49.1164723Z INFO         |      Ok: System requirements to run avd: `test` are met
+2026-10-18T02:01:49.1165186Z WARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1
+2026-10-18T02:01:49.1165635Z ERROR        | Unable to connect to adb daemon on port: 5037
+2026-10-18T02:01:49.1165982Z INFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.2.12.db, detection is enabled for process: 2330
+2026-10-18T02:01:49.1166287Z INFO         | Initializing gfxstream backend
+2026-10-18T02:01:49.1168209Z INFO         | startOpenglesRendererImpl: gpu info
+2026-10-18T02:01:49.1168397Z INFO         | 
+2026-10-18T02:01:49.1170450Z INFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD
+2026-10-18T02:01:49.1171121Z INFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json
+2026-10-18T02:01:49.1178534Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]
+2026-10-18T02:01:49.1179449Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]
+2026-10-18T02:01:49.1179993Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]
+2026-10-18T02:01:49.1180464Z INFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so
+2026-10-18T02:01:49.1213800Z INFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0
+2026-10-18T02:01:49.1214195Z INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
+2026-10-18T02:01:49.1349435Z INFO         | Format VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16 does not support YCbCr sampler conversion
+2026-10-18T02:01:49.1405855Z INFO         | SharedLibrary::open for [libX11]
+2026-10-18T02:01:49.1406272Z WARNING      | Could not open libX11.so, try libX11.so.6
+2026-10-18T02:01:49.1408558Z INFO         | SharedLibrary::open for [libX11.so.6]
+2026-10-18T02:01:49.1410062Z INFO         | SharedLibrary::open for [libX11-xcb]
+2026-10-18T02:01:49.1412022Z WARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1
+2026-10-18T02:01:49.1412496Z INFO         | SharedLibrary::open for [libX11-xcb.so.1]
+2026-10-18T02:01:49.1462605Z INFO         | Initializing VkEmulation features:
+2026-10-18T02:01:49.1463996Z INFO         |     glInteropSupported: false
+2026-10-18T02:01:49.1464249Z INFO         |     useDeferredCommands: true
+2026-10-18T02:01:49.1465893Z INFO         |     createResourceWithRequirements: true
+2026-10-18T02:01:49.1466330Z INFO         |     useVulkanComposition: false
+2026-10-18T02:01:49.1467832Z INFO         |     useVulkanNativeSwapchain: false
+2026-10-18T02:01:49.1468668Z INFO         |     enable guestRenderDoc: false
+2026-10-18T02:01:49.1469018Z INFO         |     ASTC LDR emulation mode: Gpu
+2026-10-18T02:01:49.1471905Z INFO         |     enable ETC2 emulation: true
+2026-10-18T02:01:49.1474118Z INFO         |     enable Ycbcr emulation: false
+2026-10-18T02:01:49.1474314Z INFO         |     guestVulkanOnly: false
+2026-10-18T02:01:49.1474497Z INFO         |     useDedicatedAllocations: false
+2026-10-18T02:01:49.1474711Z INFO         |     guestVulkanMaxApiVersion: 1.3.0
+2026-10-18T02:01:49.1474937Z INFO         |     enableProtectedMemoryEmulation: false
+2026-10-18T02:01:49.1475156Z INFO         | Graphics Adapter Vendor Google (Google Inc.)
+2026-10-18T02:01:49.1475431Z INFO         | Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)
+2026-10-18T02:01:49.1475749Z INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)
+2026-10-18T02:01:49.1476943Z INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 
+2026-10-18T02:01:49.1478507Z INFO         | Graphics Device Extensions N/A
+2026-10-18T02:01:49.1478702Z INFO         | Disabling sparse binding feature support
+2026-10-18T02:01:49.1534157Z INFO         | Sending adb public key [QAAAAKmuvcxnKi/w9DtyyTkirNNBi/GXRUxJEsCqLB4HOfW1l49gM7NYFZzLRNgDrlFmU0QAF+OdrznspvDZrtKA9x82nofb17qUpPCV+g8/bOYrJSH89WuX48xujnh76kNqC0pLJo80b3BVKGyjIRburEOLemgYoYzIxfb6zsas46jUQmJtGKVSNN7Bk//UB1ZHOmArQ1GSGWIM/424in2YDHVjtPhK/1vq4te5dqYjWcm2/81afsIvz+Tw50BRE8y9qaN3CPkcyq5EZ13+aiOPSZiuG+naGa8cU/ucbTB3TZ1mXht7ISIoHQwt6EkF9KgnDYiBnDFhmTbuKhJK/lmS4Ljj70bF96gsJosmt00VX4sEEdmJsr89raliYXz0F7hF6sWU5ejeYgiyYXQO7sbneWsbO5cw+F4A76DawZKntmJATd0vI3Y/P8braD71p3MMX33VXzxQGD6lVs8tg8fiv4yrBZHAdVqfoJU9R2t7rxQOcfagLysbWNz7Q9TEWwR2izZoHBRvUHY+Z3qWPUr/J+BED7EUtees3jcaaDC1Kb8ogKuMm+5qDKE1kz8+jUPRAPNLmV/2NU7AYdm3h7eRjuTevMXh0Op78P4IXdHQ+UWdm0xeZr8nUY5jL7W6YPmMF1GvtpVTgTO4WQGpdRRcRqrSd+1rtzDPsQwDGzSj5AmlPixggAEAAQA= runner@unknown]
+2026-10-18T02:01:49.1537589Z INFO         | Userspace boot properties:
+2026-10-18T02:01:49.1538090Z INFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0
+2026-10-18T02:01:49.1538500Z INFO         |   androidboot.dalvik.vm.heapsize=576m
+2026-10-18T02:01:49.1538874Z INFO         |   androidboot.debug.hwui.renderer=skiagl
+2026-10-18T02:01:49.1539512Z INFO         |   androidboot.debug.sf.nobootanimation=1
+2026-10-18T02:01:49.1539914Z INFO         |   androidboot.hardware=ranchu
+2026-10-18T02:01:49.1540227Z INFO         |   androidboot.hardware.gltransport=pipe
+2026-10-18T02:01:49.1540535Z INFO         |   androidboot.hardware.vulkan=ranchu
+2026-10-18T02:01:49.1540931Z INFO         |   androidboot.logcat=*:V
+2026-10-18T02:01:49.1541213Z INFO         |   androidboot.opengles.version=196608
+2026-10-18T02:01:49.1541495Z INFO         |   androidboot.qemu=1
+2026-10-18T02:01:49.1543680Z INFO         |   androidboot.qemu.adb.pubkey=QAAAAKmuvcxnKi/w9DtyyTkirNNBi/GXRUxJEsCqLB4HOfW1l49gM7NYFZzLRNgDrlFmU0QAF+OdrznspvDZrtKA9x82nofb17qUpPCV+g8/bOYrJSH89WuX48xujnh76kNqC0pLJo80b3BVKGyjIRburEOLemgYoYzIxfb6zsas46jUQmJtGKVSNN7Bk//UB1ZHOmArQ1GSGWIM/424in2YDHVjtPhK/1vq4te5dqYjWcm2/81afsIvz+Tw50BRE8y9qaN3CPkcyq5EZ13+aiOPSZiuG+naGa8cU/ucbTB3TZ1mXht7ISIoHQwt6EkF9KgnDYiBnDFhmTbuKhJK/lmS4Ljj70bF96gsJosmt00VX4sEEdmJsr89raliYXz0F7hF6sWU5ejeYgiyYXQO7sbneWsbO5cw+F4A76DawZKntmJATd0vI3Y/P8braD71p3MMX33VXzxQGD6lVs8tg8fiv4yrBZHAdVqfoJU9R2t7rxQOcfagLysbWNz7Q9TEWwR2izZoHBRvUHY+Z3qWPUr/J+BED7EUtees3jcaaDC1Kb8ogKuMm+5qDKE1kz8+jUPRAPNLmV/2NU7AYdm3h7eRjuTevMXh0Op78P4IXdHQ+UWdm0xeZr8nUY5jL7W6YPmMF1GvtpVTgTO4WQGpdRRcRqrSd+1rtzDPsQwDGzSj5AmlPixggAEAAQA= runner@unknown
+2026-10-18T02:01:49.1545439Z INFO         |   androidboot.qemu.avd_name=test
+2026-10-18T02:01:49.1545647Z INFO         |   androidboot.qemu.camera_hq_edge_processing=0
+2026-10-18T02:01:49.1545863Z INFO         |   androidboot.qemu.camera_protocol_ver=1
+2026-10-18T02:01:49.1546078Z INFO         |   androidboot.qemu.cpuvulkan.version=4206592
+2026-10-18T02:01:49.1546323Z INFO         |   androidboot.qemu.gltransport.drawFlushInterval=800
+2026-10-18T02:01:49.1546556Z INFO         |   androidboot.qemu.gltransport.name=pipe
+2026-10-18T02:01:49.1546759Z INFO         |   androidboot.qemu.hwcodec.avcdec=2
+2026-10-18T02:01:49.1546958Z INFO         |   androidboot.qemu.hwcodec.hevcdec=2
+2026-10-18T02:01:49.1547156Z INFO         |   androidboot.qemu.hwcodec.vpxdec=2
+2026-10-18T02:01:49.1547393Z INFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647
+2026-10-18T02:01:49.1547630Z INFO         |   androidboot.qemu.skin=1080x2400
+2026-10-18T02:01:49.1547815Z INFO         |   androidboot.qemu.virtiowifi=1
+2026-10-18T02:01:49.1548000Z INFO         |   androidboot.qemu.vsync=60
+2026-10-18T02:01:49.1548187Z INFO         |   androidboot.serialno=EMULATOR37X2X12X0
+2026-10-18T02:01:49.1548486Z INFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3
+2026-10-18T02:01:49.1548777Z INFO         |   androidboot.vbmeta.hash_alg=sha256
+2026-10-18T02:01:49.1548964Z INFO         |   androidboot.vbmeta.size=6656
+2026-10-18T02:01:49.1549150Z INFO         |   androidboot.veritymode=enforcing
+2026-10-18T02:01:49.1939441Z WARNING: cannnot unmap ptr 0x7f2981a01000 as it is in the protected range from 0x7f28e1a00000 to 0x7f2981c00000
+2026-10-18T02:01:49.2080416Z INFO         | Monitoring duration of emulator setup.
+2026-10-18T02:01:50.1949591Z INFO         | Successfully initialized netsim WiFi
+2026-10-18T02:01:50.1950298Z INFO         | Activated packet streamer for bluetooth emulation
+2026-10-18T02:01:50.1988903Z INFO         | Setting display: 0 configuration to: 1080x2400, dpi: 420x420 
+2026-10-18T02:01:50.1989340Z INFO         | setDisplayActiveConfig: id:0, 1080x2400
+2026-10-18T02:01:50.1989763Z INFO         | emulatorSetupEnvironment: Environment scene is not required
+2026-10-18T02:01:50.2037006Z INFO         | Loading snapshot 'default_boot'...
+2026-10-18T02:01:50.2037689Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+2026-10-18T02:01:50.2160567Z WARNING      | Device 'cache' does not have the requested snapshot 'default_boot'
+2026-10-18T02:01:50.2160915Z 
+2026-10-18T02:01:50.2161301Z WARNING      | Failed to load snapshot 'default_boot'
+2026-10-18T02:01:50.2161916Z USER_INFO    | The emulator is performing a cold boot without a saved state because there's no snapshot and you have configured it not to save on exit.
+2026-10-18T02:01:50.4435126Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+2026-10-18T02:01:58.8940341Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:01:58.8979884Z * daemon not running; starting now at tcp:5037
+2026-10-18T02:01:58.9043367Z * daemon started successfully
+2026-10-18T02:01:58.9046740Z adb: device offline
+2026-10-18T02:01:58.9055596Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+2026-10-18T02:02:00.9113608Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:00.9304536Z 
+2026-10-18T02:02:02.9380092Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:02.9619557Z 
+2026-10-18T02:02:04.9692142Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:04.9896190Z 
+2026-10-18T02:02:06.9953265Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:07.0233838Z 
+2026-10-18T02:02:09.0286343Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:09.0773285Z 
+2026-10-18T02:02:11.0798033Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:11.1143914Z 
+2026-10-18T02:02:13.1182786Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:13.1363600Z 
+2026-10-18T02:02:15.1395643Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:15.1561942Z 
+2026-10-18T02:02:17.1602002Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:02:17.2230215Z 1
+2026-10-18T02:02:17.2237777Z Emulator booted.
+2026-10-18T02:02:17.2245932Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell input keyevent 82
+2026-10-18T02:02:17.3159612Z ##[endgroup]
+2026-10-18T02:02:17.3199302Z [command]/usr/bin/sh -c bash evidence.sh
+2026-10-18T02:02:17.3228468Z + APP=com.raydocs.tono.mobile.test
+2026-10-18T02:02:17.3230342Z + '[' -d evidence ']'
+2026-10-18T02:02:17.3231083Z + mkdir -p evidence
+2026-10-18T02:02:17.3261397Z + adb shell getprop ro.build.fingerprint
+2026-10-18T02:02:17.3261837Z + tee evidence/device.txt
+2026-10-18T02:02:17.3383509Z INFO         | Boot completed in 28420 ms
+2026-10-18T02:02:17.3384396Z INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+2026-10-18T02:02:17.3732822Z google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+2026-10-18T02:02:17.3773117Z + adb shell getprop ro.product.cpu.abi
+2026-10-18T02:02:17.3776801Z + tee -a evidence/device.txt
+2026-10-18T02:02:17.4112331Z x86_64
+2026-10-18T02:02:17.4131456Z + adb shell wm size
+2026-10-18T02:02:17.4132193Z + tee -a evidence/device.txt
+2026-10-18T02:02:17.4537865Z Physical size: 1080x2400
+2026-10-18T02:02:17.4579420Z + adb shell wm density
+2026-10-18T02:02:17.4585863Z + tee -a evidence/device.txt
+2026-10-18T02:02:17.5034637Z Physical density: 420
+2026-10-18T02:02:17.5124472Z + adb shell settings put system screen_off_timeout 1800000
+2026-10-18T02:02:17.5980343Z + adb shell svc power stayon true
+2026-10-18T02:02:18.8383427Z + adb shell input keyevent 82
+2026-10-18T02:02:24.0838434Z + sleep 60
+2026-10-18T02:03:24.0862723Z + adb shell input keyevent 3
+2026-10-18T02:03:24.1179869Z + adb install -r apk/tono-mobile-0.3.1-test-b393e1961.apk
+2026-10-18T02:03:24.8049494Z Performing Streamed Install
+2026-10-18T02:03:24.8049962Z Success
+2026-10-18T02:03:24.8053877Z + adb install -r apk/instrumentation.apk
+2026-10-18T02:03:25.1201796Z Performing Streamed Install
+2026-10-18T02:03:25.1230581Z Success
+2026-10-18T02:03:25.1241970Z + set +e
+2026-10-18T02:03:25.1242336Z + failed=
+2026-10-18T02:03:25.1247093Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:03:25.1252956Z + t=a1_realSignInScreenAndLocalValidation
+2026-10-18T02:03:25.1253357Z + rec=
+2026-10-18T02:03:25.1253813Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:03:25.1254927Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:04:31.1784804Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:04:31.1792631Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:04:31.1832731Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:05:53.4963212Z + '[' -n '' ']'
+2026-10-18T02:05:53.4976615Z + grep -q '^OK (' evidence/instrument-a1_realSignInScreenAndLocalValidation.txt
+2026-10-18T02:05:53.5116437Z + echo 'PASS a1_realSignInScreenAndLocalValidation'
+2026-10-18T02:05:53.5241258Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:05:53.6671716Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 2 files pulled, 0 skipped. 7.1 MB/s (425666 bytes in 0.058s)
+2026-10-18T02:05:53.6701829Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:05:53.6761410Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:05:53.6766133Z + t=a2_realSystemVpnConsentDialog
+2026-10-18T02:05:53.6791052Z + rec=
+2026-10-18T02:05:53.6803864Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:05:53.6804822Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a2_realSystemVpnConsentDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:07:10.0165243Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:07:10.0173977Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:07:10.0176114Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:07:26.2444086Z + '[' -n '' ']'
+2026-10-18T02:07:26.2502407Z + grep -q '^OK (' evidence/instrument-a2_realSystemVpnConsentDialog.txt
+2026-10-18T02:07:26.2541564Z + echo 'PASS a2_realSystemVpnConsentDialog'
+2026-10-18T02:07:26.2601468Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:07:26.5054751Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 4 files pulled, 0 skipped. 19.3 MB/s (842523 bytes in 0.042s)
+2026-10-18T02:07:26.5716071Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:07:26.5773580Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:07:26.5777991Z + t=a3_realEngineRefusesToConnectWithoutAccount
+2026-10-18T02:07:26.5811018Z + rec=
+2026-10-18T02:07:26.5821575Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:07:26.5841711Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:08:51.1101816Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:08:51.1145060Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:08:51.1162029Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:09:04.6686274Z + '[' -n '' ']'
+2026-10-18T02:09:04.6711952Z + grep -q '^OK (' evidence/instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+2026-10-18T02:09:04.6726082Z + echo 'PASS a3_realEngineRefusesToConnectWithoutAccount'
+2026-10-18T02:09:04.6781374Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:09:04.8552048Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 6 files pulled, 0 skipped. 6.6 MB/s (1047416 bytes in 0.151s)
+2026-10-18T02:09:04.8625912Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:09:04.8653543Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:09:04.8659931Z + t=a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+2026-10-18T02:09:04.8661487Z + rec=
+2026-10-18T02:09:04.8663503Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:09:04.8664984Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:09:06.5342781Z + '[' -n '' ']'
+2026-10-18T02:09:06.5361423Z + grep -q '^OK (' evidence/instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+2026-10-18T02:09:06.5451933Z + echo 'PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig'
+2026-10-18T02:09:06.5461740Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:09:06.6075683Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 7 files pulled, 0 skipped. 20.4 MB/s (1047517 bytes in 0.049s)
+2026-10-18T02:09:06.6083748Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:09:06.6087964Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:09:06.6090566Z + t=a5_realAppHonoursRemoveAnimations
+2026-10-18T02:09:06.6090928Z + rec=
+2026-10-18T02:09:06.6091123Z + '[' a5_realAppHonoursRemoveAnimations = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:09:06.6091675Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:10:00.0253952Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:10:00.0259340Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:10:00.0259903Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:10:46.8122831Z + '[' -n '' ']'
+2026-10-18T02:10:46.8161920Z + grep -q '^OK (' evidence/instrument-a5_realAppHonoursRemoveAnimations.txt
+2026-10-18T02:10:46.8221342Z + echo 'PASS a5_realAppHonoursRemoveAnimations'
+2026-10-18T02:10:46.8251967Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:10:47.2499369Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 10 files pulled, 0 skipped. 4.1 MB/s (1452696 bytes in 0.341s)
+2026-10-18T02:10:47.2531827Z + '[' a5_realAppHonoursRemoveAnimations = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:10:47.2565037Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:10:47.2591310Z + t=a6_realAppUnderSystemLightAndDarkTheme
+2026-10-18T02:10:47.2620995Z + rec=
+2026-10-18T02:10:47.2621610Z + '[' a6_realAppUnderSystemLightAndDarkTheme = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:10:47.2651596Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:11:08.6239885Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:11:08.6249873Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:11:08.6281792Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:13:48.0059287Z + '[' -n '' ']'
+2026-10-18T02:13:48.0092456Z + grep -q '^OK (' evidence/instrument-a6_realAppUnderSystemLightAndDarkTheme.txt
+2026-10-18T02:13:48.0132118Z + echo 'PASS a6_realAppUnderSystemLightAndDarkTheme'
+2026-10-18T02:13:48.0141132Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:13:48.1093869Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 12 files pulled, 0 skipped. 27.5 MB/s (1856066 bytes in 0.064s)
+2026-10-18T02:13:48.1102738Z + '[' a6_realAppUnderSystemLightAndDarkTheme = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:13:48.1106035Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:13:48.1108844Z + t=s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+2026-10-18T02:13:48.1109183Z + rec=
+2026-10-18T02:13:48.1109434Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:13:48.1110100Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:14:03.7332007Z + '[' -n '' ']'
+2026-10-18T02:14:03.7342083Z + grep -q '^OK (' evidence/instrument-s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp.txt
+2026-10-18T02:14:03.7359436Z + echo 'FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp'
+2026-10-18T02:14:03.7360046Z + failed=' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp'
+2026-10-18T02:14:03.7360855Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:14:04.0609681Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 12 files pulled, 0 skipped. 5.7 MB/s (1856066 bytes in 0.312s)
+2026-10-18T02:14:04.0651808Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:04.0657006Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:14:04.0691491Z + t=s2_realWidgetInAndroidsWidgetHost
+2026-10-18T02:14:04.0709423Z + rec=
+2026-10-18T02:14:04.0721175Z + '[' s2_realWidgetInAndroidsWidgetHost = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:04.0752082Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:14:08.3803927Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:14:08.3804383Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:14:08.3804767Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:14:09.5047712Z + '[' -n '' ']'
+2026-10-18T02:14:09.5048186Z + grep -q '^OK (' evidence/instrument-s2_realWidgetInAndroidsWidgetHost.txt
+2026-10-18T02:14:09.5072374Z + echo 'PASS s2_realWidgetInAndroidsWidgetHost'
+2026-10-18T02:14:09.5102632Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:14:10.1892289Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 14 files pulled, 0 skipped. 3.1 MB/s (1896419 bytes in 0.580s)
+2026-10-18T02:14:10.2192232Z + '[' s2_realWidgetInAndroidsWidgetHost = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:10.2256587Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:14:10.2291233Z + t=s3_fixtureWidgetAndNotificationStates
+2026-10-18T02:14:10.2321239Z + rec=
+2026-10-18T02:14:10.2351192Z + '[' s3_fixtureWidgetAndNotificationStates = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:10.2381718Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:14:13.1376747Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:14:13.1377152Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:14:13.1377499Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:14:17.9753674Z + '[' -n '' ']'
+2026-10-18T02:14:17.9771559Z + grep -q '^OK (' evidence/instrument-s3_fixtureWidgetAndNotificationStates.txt
+2026-10-18T02:14:17.9801831Z + echo 'PASS s3_fixtureWidgetAndNotificationStates'
+2026-10-18T02:14:17.9881568Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:14:18.2603945Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 16 files pulled, 0 skipped. 10.3 MB/s (2208623 bytes in 0.205s)
+2026-10-18T02:14:18.2626610Z + '[' s3_fixtureWidgetAndNotificationStates = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:18.2644894Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:14:18.2658386Z + t=b1_fixtureStatesRenderedOnDevice
+2026-10-18T02:14:18.2691095Z + rec=
+2026-10-18T02:14:18.2701837Z + '[' b1_fixtureStatesRenderedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:18.2731604Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:14:27.7236488Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:14:27.7243928Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:14:27.7244684Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:14:56.7981739Z + '[' -n '' ']'
+2026-10-18T02:14:56.7982636Z + grep -q '^OK (' evidence/instrument-b1_fixtureStatesRenderedOnDevice.txt
+2026-10-18T02:14:56.8016676Z + echo 'PASS b1_fixtureStatesRenderedOnDevice'
+2026-10-18T02:14:56.8017862Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:14:57.2229375Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 22 files pulled, 0 skipped. 14.4 MB/s (3681008 bytes in 0.243s)
+2026-10-18T02:14:57.2314629Z + '[' b1_fixtureStatesRenderedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:57.2345350Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:14:57.2350284Z + t=b2_fixtureMotionRecordedOnDevice
+2026-10-18T02:14:57.2363378Z + rec=
+2026-10-18T02:14:57.2363805Z + '[' b2_fixtureMotionRecordedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:14:57.2364263Z + rec=3490
+2026-10-18T02:14:57.2365078Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:14:57.2366204Z + adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4
+2026-10-18T02:15:22.3260903Z + '[' -n 3490 ']'
+2026-10-18T02:15:22.3293847Z + timeout 60 tail --pid=3490 -f /dev/null
+2026-10-18T02:15:24.3325647Z + grep -q '^OK (' evidence/instrument-b2_fixtureMotionRecordedOnDevice.txt
+2026-10-18T02:15:24.3338083Z + echo 'PASS b2_fixtureMotionRecordedOnDevice'
+2026-10-18T02:15:24.3338805Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:15:24.5249990Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 22 files pulled, 0 skipped. 18.7 MB/s (3681008 bytes in 0.187s)
+2026-10-18T02:15:24.5259637Z + '[' b2_fixtureMotionRecordedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:15:24.5260256Z + timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+2026-10-18T02:15:24.5457053Z /sdcard/Download/tono-fixture-motion.mp4: 1 file pulled, 0 skipped. 241.5 MB/s (4044004 bytes in 0.016s)
+2026-10-18T02:15:24.5468741Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:15:24.5471931Z + t=b3_fixtureAtLargeFontScale
+2026-10-18T02:15:24.5472169Z + rec=
+2026-10-18T02:15:24.5472853Z + '[' b3_fixtureAtLargeFontScale = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:15:24.5473583Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b3_fixtureAtLargeFontScale com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:15:34.0224156Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:15:34.0285244Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:15:34.0345813Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:16:03.1007222Z + '[' -n '' ']'
+2026-10-18T02:16:03.1071663Z + grep -q '^OK (' evidence/instrument-b3_fixtureAtLargeFontScale.txt
+2026-10-18T02:16:03.1081253Z + echo 'PASS b3_fixtureAtLargeFontScale'
+2026-10-18T02:16:03.1102704Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:16:03.2227585Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 24 files pulled, 0 skipped. 38.1 MB/s (4123969 bytes in 0.103s)
+2026-10-18T02:16:03.2276735Z + '[' b3_fixtureAtLargeFontScale = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:03.2280921Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:03.2285084Z + t=u1_accessibilityContractAndAtfOnEveryScreen
+2026-10-18T02:16:03.2285667Z + rec=
+2026-10-18T02:16:03.2286214Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:03.2287287Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:16:15.8659183Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:16:15.8659623Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:16:15.8660017Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:16:21.3624120Z + '[' -n '' ']'
+2026-10-18T02:16:21.3633225Z + grep -q '^OK (' evidence/instrument-u1_accessibilityContractAndAtfOnEveryScreen.txt
+2026-10-18T02:16:21.3637747Z + echo 'PASS u1_accessibilityContractAndAtfOnEveryScreen'
+2026-10-18T02:16:21.3640840Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:16:22.1722016Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 28 files pulled, 0 skipped. 5.8 MB/s (4512262 bytes in 0.740s)
+2026-10-18T02:16:22.1791751Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:22.1826217Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:22.1848490Z + t=u2_primaryControlActsThroughRealTaps
+2026-10-18T02:16:22.1848914Z + rec=
+2026-10-18T02:16:22.1849417Z + '[' u2_primaryControlActsThroughRealTaps = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:22.1850474Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:16:29.9817869Z + '[' -n '' ']'
+2026-10-18T02:16:29.9854537Z + grep -q '^OK (' evidence/instrument-u2_primaryControlActsThroughRealTaps.txt
+2026-10-18T02:16:29.9881232Z + echo 'PASS u2_primaryControlActsThroughRealTaps'
+2026-10-18T02:16:29.9888676Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:16:30.4917127Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 29 files pulled, 0 skipped. 11.8 MB/s (4512464 bytes in 0.365s)
+2026-10-18T02:16:30.5168442Z + '[' u2_primaryControlActsThroughRealTaps = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:30.5190373Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:30.5221272Z + t=u3_swipeUpOnTheDockOpensDetails
+2026-10-18T02:16:30.5252385Z + rec=
+2026-10-18T02:16:30.5281177Z + '[' u3_swipeUpOnTheDockOpensDetails = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:30.5282314Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:16:37.2146803Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:16:37.2147312Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:16:37.2147679Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:16:38.8642001Z + '[' -n '' ']'
+2026-10-18T02:16:38.8696015Z + grep -q '^OK (' evidence/instrument-u3_swipeUpOnTheDockOpensDetails.txt
+2026-10-18T02:16:38.8701540Z + echo 'PASS u3_swipeUpOnTheDockOpensDetails'
+2026-10-18T02:16:38.8702468Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:16:39.4782410Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 30 files pulled, 0 skipped. 7.7 MB/s (4750445 bytes in 0.588s)
+2026-10-18T02:16:39.5154093Z + '[' u3_swipeUpOnTheDockOpensDetails = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:39.5187843Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:39.5192633Z + t=u4_glassBlursTheSceneBehindIt
+2026-10-18T02:16:39.5223894Z + rec=
+2026-10-18T02:16:39.5281055Z + '[' u4_glassBlursTheSceneBehindIt = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:39.5322116Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:16:44.3031032Z + '[' -n '' ']'
+2026-10-18T02:16:44.3041642Z + grep -q '^OK (' evidence/instrument-u4_glassBlursTheSceneBehindIt.txt
+2026-10-18T02:16:44.3089720Z + echo 'FAIL u4_glassBlursTheSceneBehindIt'
+2026-10-18T02:16:44.3090608Z + failed=' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp u4_glassBlursTheSceneBehindIt'
+2026-10-18T02:16:44.3091628Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:16:44.9479166Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 32 files pulled, 0 skipped. 8.4 MB/s (4801203 bytes in 0.547s)
+2026-10-18T02:16:44.9651788Z + '[' u4_glassBlursTheSceneBehindIt = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:44.9655961Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:44.9665958Z + t=u5_consentExplainedBeforeTheSystemDialog
+2026-10-18T02:16:44.9666299Z + rec=
+2026-10-18T02:16:44.9666699Z + '[' u5_consentExplainedBeforeTheSystemDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:44.9668155Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:16:47.7749038Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:16:47.7749518Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:16:47.7749894Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:16:50.1592161Z + '[' -n '' ']'
+2026-10-18T02:16:50.1612391Z + grep -q '^OK (' evidence/instrument-u5_consentExplainedBeforeTheSystemDialog.txt
+2026-10-18T02:16:50.1639739Z + echo 'PASS u5_consentExplainedBeforeTheSystemDialog'
+2026-10-18T02:16:50.1640566Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:16:50.7096277Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 33 files pulled, 0 skipped. 8.8 MB/s (4906666 bytes in 0.533s)
+2026-10-18T02:16:50.7441444Z + '[' u5_consentExplainedBeforeTheSystemDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:50.7506572Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:50.7511430Z + t=u6_screenReaderOrderAndLabelsOnHome
+2026-10-18T02:16:50.7511701Z + rec=
+2026-10-18T02:16:50.7512071Z + '[' u6_screenReaderOrderAndLabelsOnHome = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:50.7513180Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:16:56.5942594Z + '[' -n '' ']'
+2026-10-18T02:16:56.6042064Z + grep -q '^OK (' evidence/instrument-u6_screenReaderOrderAndLabelsOnHome.txt
+2026-10-18T02:16:56.6071406Z + echo 'FAIL u6_screenReaderOrderAndLabelsOnHome'
+2026-10-18T02:16:56.6091491Z + failed=' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp u4_glassBlursTheSceneBehindIt u6_screenReaderOrderAndLabelsOnHome'
+2026-10-18T02:16:56.6092308Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:16:57.0013725Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 34 files pulled, 0 skipped. 13.2 MB/s (4906714 bytes in 0.355s)
+2026-10-18T02:16:57.0055766Z + '[' u6_screenReaderOrderAndLabelsOnHome = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:57.0105899Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:57.0110571Z + t=l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:16:57.0111171Z + rec=
+2026-10-18T02:16:57.0161522Z + '[' l1_largestSystemTextIsNeverCutOff = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:16:57.0192124Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:17:05.4792176Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:17:05.4792611Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:17:05.4796890Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:17:13.0334202Z + '[' -n '' ']'
+2026-10-18T02:17:13.0357710Z + grep -q '^OK (' evidence/instrument-l1_largestSystemTextIsNeverCutOff.txt
+2026-10-18T02:17:13.0391388Z + echo 'PASS l1_largestSystemTextIsNeverCutOff'
+2026-10-18T02:17:13.0411674Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:17:13.2460847Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 38 files pulled, 0 skipped. 29.5 MB/s (5598245 bytes in 0.181s)
+2026-10-18T02:17:13.2498447Z + '[' l1_largestSystemTextIsNeverCutOff = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:17:13.2551284Z + adb shell settings put system font_scale 1.0
+2026-10-18T02:17:13.3311766Z + adb shell settings put global animator_duration_scale 1
+2026-10-18T02:17:13.4181632Z + adb shell cmd uimode night no
+2026-10-18T02:17:13.4538301Z Night mode: no
+2026-10-18T02:17:13.4574593Z + timeout 60 adb logcat -d
+2026-10-18T02:17:14.0012481Z + ls -la evidence
+2026-10-18T02:17:14.0101593Z total 22660
+2026-10-18T02:17:14.0151632Z drwxr-xr-x 2 runner runner     4096 Oct 18 02:17 .
+2026-10-18T02:17:14.0191459Z drwxr-xr-x 4 runner runner     4096 Oct 18 02:02 ..
+2026-10-18T02:17:14.0205701Z -rw-r--r-- 1 runner runner     4189 Oct 18 02:17 a11y-report.txt
+2026-10-18T02:17:14.0231505Z -rw-r--r-- 1 runner runner      136 Oct 18 02:02 device.txt
+2026-10-18T02:17:14.0261109Z -rw-r--r-- 1 runner runner   207331 Oct 18 02:17 fixture-01-idle.png
+2026-10-18T02:17:14.0272073Z -rw-r--r-- 1 runner runner   306806 Oct 18 02:17 fixture-02-connecting.png
+2026-10-18T02:17:14.0321134Z -rw-r--r-- 1 runner runner   314823 Oct 18 02:17 fixture-03-connected.png
+2026-10-18T02:17:14.0383018Z -rw-r--r-- 1 runner runner   280296 Oct 18 02:17 fixture-04-degraded.png
+2026-10-18T02:17:14.0391062Z -rw-r--r-- 1 runner runner   196524 Oct 18 02:17 fixture-05-failed.png
+2026-10-18T02:17:14.0391544Z -rw-r--r-- 1 runner runner   166605 Oct 18 02:17 fixture-06-details-sheet.png
+2026-10-18T02:17:14.0392012Z -rw-r--r-- 1 runner runner   292572 Oct 18 02:17 fixture-07-font-1.3-home.png
+2026-10-18T02:17:14.0392483Z -rw-r--r-- 1 runner runner   150389 Oct 18 02:17 fixture-08-font-1.3-details.png
+2026-10-18T02:17:14.0392964Z -rw-r--r-- 1 runner runner   237922 Oct 18 02:17 fixture-09-details-by-swipe.png
+2026-10-18T02:17:14.0393437Z -rw-r--r-- 1 runner runner   170147 Oct 18 02:17 fixture-10-lines-sheet.png
+2026-10-18T02:17:14.0394114Z -rw-r--r-- 1 runner runner   164275 Oct 18 02:17 fixture-11-settings.png
+2026-10-18T02:17:14.0394542Z -rw-r--r-- 1 runner runner    49682 Oct 18 02:17 fixture-12-apps.png
+2026-10-18T02:17:14.0394994Z -rw-r--r-- 1 runner runner   319647 Oct 18 02:17 fixture-13-font-2.0-home.png
+2026-10-18T02:17:14.0395465Z -rw-r--r-- 1 runner runner   185447 Oct 18 02:17 fixture-14-font-2.0-details.png
+2026-10-18T02:17:14.0395943Z -rw-r--r-- 1 runner runner   186344 Oct 18 02:17 fixture-15-font-2.0-settings.png
+2026-10-18T02:17:14.0396592Z -rw-r--r-- 1 runner runner    50680 Oct 18 02:17 fixture-16-glass-blur.png
+2026-10-18T02:17:14.0397064Z -rw-r--r-- 1 runner runner   183089 Oct 18 02:17 fixture-17-widget-states.png
+2026-10-18T02:17:14.0397538Z -rw-r--r-- 1 runner runner   129115 Oct 18 02:17 fixture-18-notifications.png
+2026-10-18T02:17:14.0398129Z -rw-r--r-- 1 runner runner   105463 Oct 18 02:17 fixture-19-consent-explainer.png
+2026-10-18T02:17:14.0398665Z -rw-r--r-- 1 runner runner  4044004 Oct 18 02:15 fixture-motion.mp4
+2026-10-18T02:17:14.0399104Z -rw-r--r-- 1 runner runner       93 Oct 18 02:17 font-2.0-report.txt
+2026-10-18T02:17:14.0399579Z -rw-r--r-- 1 runner runner       78 Oct 18 02:17 glass-report.txt
+2026-10-18T02:17:14.0400124Z -rw-r--r-- 1 runner runner      768 Oct 18 02:05 instrument-a1_realSignInScreenAndLocalValidation.txt
+2026-10-18T02:17:14.0400500Z -rw-r--r-- 1 runner runner      751 Oct 18 02:07 instrument-a2_realSystemVpnConsentDialog.txt
+2026-10-18T02:17:14.0400987Z -rw-r--r-- 1 runner runner      779 Oct 18 02:09 instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+2026-10-18T02:17:14.0401371Z -rw-r--r-- 1 runner runner      781 Oct 18 02:09 instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+2026-10-18T02:17:14.0401732Z -rw-r--r-- 1 runner runner      759 Oct 18 02:10 instrument-a5_realAppHonoursRemoveAnimations.txt
+2026-10-18T02:17:14.0402072Z -rw-r--r-- 1 runner runner      770 Oct 18 02:13 instrument-a6_realAppUnderSystemLightAndDarkTheme.txt
+2026-10-18T02:17:14.0402413Z -rw-r--r-- 1 runner runner      757 Oct 18 02:14 instrument-b1_fixtureStatesRenderedOnDevice.txt
+2026-10-18T02:17:14.0402737Z -rw-r--r-- 1 runner runner      757 Oct 18 02:15 instrument-b2_fixtureMotionRecordedOnDevice.txt
+2026-10-18T02:17:14.0403055Z -rw-r--r-- 1 runner runner      745 Oct 18 02:16 instrument-b3_fixtureAtLargeFontScale.txt
+2026-10-18T02:17:14.0403374Z -rw-r--r-- 1 runner runner      762 Oct 18 02:17 instrument-l1_largestSystemTextIsNeverCutOff.txt
+2026-10-18T02:17:14.0403761Z -rw-r--r-- 1 runner runner     2137 Oct 18 02:14 instrument-s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp.txt
+2026-10-18T02:17:14.0404150Z -rw-r--r-- 1 runner runner      776 Oct 18 02:14 instrument-s2_realWidgetInAndroidsWidgetHost.txt
+2026-10-18T02:17:14.0404489Z -rw-r--r-- 1 runner runner      784 Oct 18 02:14 instrument-s3_fixtureWidgetAndNotificationStates.txt
+2026-10-18T02:17:14.0404846Z -rw-r--r-- 1 runner runner      782 Oct 18 02:16 instrument-u1_accessibilityContractAndAtfOnEveryScreen.txt
+2026-10-18T02:17:14.0405208Z -rw-r--r-- 1 runner runner      767 Oct 18 02:16 instrument-u2_primaryControlActsThroughRealTaps.txt
+2026-10-18T02:17:14.0405537Z -rw-r--r-- 1 runner runner      753 Oct 18 02:16 instrument-u3_swipeUpOnTheDockOpensDetails.txt
+2026-10-18T02:17:14.0405859Z -rw-r--r-- 1 runner runner     1785 Oct 18 02:16 instrument-u4_glassBlursTheSceneBehindIt.txt
+2026-10-18T02:17:14.0406194Z -rw-r--r-- 1 runner runner      775 Oct 18 02:16 instrument-u5_consentExplainedBeforeTheSystemDialog.txt
+2026-10-18T02:17:14.0406538Z -rw-r--r-- 1 runner runner     2268 Oct 18 02:16 instrument-u6_screenReaderOrderAndLabelsOnHome.txt
+2026-10-18T02:17:14.0406840Z -rw-r--r-- 1 runner runner      261 Oct 18 02:17 interaction-report.txt
+2026-10-18T02:17:14.0407080Z -rw-r--r-- 1 runner runner 13366706 Oct 18 02:17 logcat.txt
+2026-10-18T02:17:14.0407310Z -rw-r--r-- 1 runner runner   202197 Oct 18 02:17 real-01-signin.png
+2026-10-18T02:17:14.0407783Z -rw-r--r-- 1 runner runner   223469 Oct 18 02:17 real-02-signin-invalid-email.png
+2026-10-18T02:17:14.0408070Z -rw-r--r-- 1 runner runner   214715 Oct 18 02:17 real-03-system-vpn-consent.png
+2026-10-18T02:17:14.0408339Z -rw-r--r-- 1 runner runner   202142 Oct 18 02:17 real-04-after-consent.png
+2026-10-18T02:17:14.0408651Z -rw-r--r-- 1 runner runner   202632 Oct 18 02:17 real-05-connect-without-account-stays-signed-out.png
+2026-10-18T02:17:14.0408955Z -rw-r--r-- 1 runner runner     2261 Oct 18 02:17 real-05-services.txt
+2026-10-18T02:17:14.0409299Z -rw-r--r-- 1 runner runner   202952 Oct 18 02:17 real-06-motion.png
+2026-10-18T02:17:14.0409555Z -rw-r--r-- 1 runner runner   202113 Oct 18 02:17 real-07-remove-animations.png
+2026-10-18T02:17:14.0409807Z -rw-r--r-- 1 runner runner    40283 Oct 18 02:17 real-10-widget.png
+2026-10-18T02:17:14.0410061Z -rw-r--r-- 1 runner runner   201414 Oct 18 02:17 real-11-system-light-theme.png
+2026-10-18T02:17:14.0410335Z -rw-r--r-- 1 runner runner   201956 Oct 18 02:17 real-12-system-dark-theme.png
+2026-10-18T02:17:14.0410586Z -rw-r--r-- 1 runner runner      101 Oct 18 02:17 real-core.txt
+2026-10-18T02:17:14.0410946Z -rw-r--r-- 1 runner runner      114 Oct 18 02:17 real-motion.txt
+2026-10-18T02:17:14.0411174Z -rw-r--r-- 1 runner runner       70 Oct 18 02:17 real-widget.txt
+2026-10-18T02:17:14.0411409Z -rw-r--r-- 1 runner runner       48 Oct 18 02:17 screen-reader-order.txt
+2026-10-18T02:17:14.0411717Z -rw-r--r-- 1 runner runner      801 Oct 18 02:17 summary.txt
+2026-10-18T02:17:14.0411995Z + cat evidence/summary.txt
+2026-10-18T02:17:14.0412164Z PASS a1_realSignInScreenAndLocalValidation
+2026-10-18T02:17:14.0412347Z PASS a2_realSystemVpnConsentDialog
+2026-10-18T02:17:14.0412533Z PASS a3_realEngineRefusesToConnectWithoutAccount
+2026-10-18T02:17:14.0412748Z PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+2026-10-18T02:17:14.0412945Z PASS a5_realAppHonoursRemoveAnimations
+2026-10-18T02:17:14.0413126Z PASS a6_realAppUnderSystemLightAndDarkTheme
+2026-10-18T02:17:14.0413351Z FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+2026-10-18T02:17:14.0413567Z PASS s2_realWidgetInAndroidsWidgetHost
+2026-10-18T02:17:14.0413743Z PASS s3_fixtureWidgetAndNotificationStates
+2026-10-18T02:17:14.0413922Z PASS b1_fixtureStatesRenderedOnDevice
+2026-10-18T02:17:14.0414089Z PASS b2_fixtureMotionRecordedOnDevice
+2026-10-18T02:17:14.0414257Z PASS b3_fixtureAtLargeFontScale
+2026-10-18T02:17:14.0414435Z PASS u1_accessibilityContractAndAtfOnEveryScreen
+2026-10-18T02:17:14.0414633Z PASS u2_primaryControlActsThroughRealTaps
+2026-10-18T02:17:14.0414817Z PASS u3_swipeUpOnTheDockOpensDetails
+2026-10-18T02:17:14.0414987Z FAIL u4_glassBlursTheSceneBehindIt
+2026-10-18T02:17:14.0415167Z PASS u5_consentExplainedBeforeTheSystemDialog
+2026-10-18T02:17:14.0415353Z FAIL u6_screenReaderOrderAndLabelsOnHome
+2026-10-18T02:17:14.0415526Z PASS l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:17:14.0415682Z + set -e
+2026-10-18T02:17:14.0415994Z + '[' -z ' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp u4_glassBlursTheSceneBehindIt u6_screenReaderOrderAndLabelsOnHome' ']'
+2026-10-18T02:17:14.0432909Z ##[error]The process '/usr/bin/sh' failed with exit code 1
+2026-10-18T02:17:14.0437861Z ##[group]Terminate Emulator
+2026-10-18T02:17:14.0438107Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 emu kill
+2026-10-18T02:17:14.0438347Z OK: killing emulator, bye bye
+2026-10-18T02:17:14.0438497Z OK
+2026-10-18T02:17:14.0438917Z INFO         | Wait for emulator (pid 2330) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+2026-10-18T02:17:14.0439308Z 
+2026-10-18T02:17:14.0439453Z ##[endgroup]
+2026-10-18T02:17:18.7809267Z INFO         | Saving with gfxstream=1
+2026-10-18T02:17:18.9457971Z INFO         | Saving snapshot 'default_boot' took 4888 ms
+2026-10-18T02:17:19.8181399Z ERROR        | stop: Not implemented
+2026-10-18T02:17:19.8182090Z WARNING      | Emulator client has not yet been configured.. Call configure me first!
+2026-10-18T02:17:19.8382929Z INFO         | removeAll
+2026-10-18T02:17:20.0467184Z WARNING      | Netsim Wifi dns:///localhost:40811 is gone due to Stream removed (CANCELLED)
+2026-10-18T02:17:20.6008727Z ##[group]Run reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+2026-10-18T02:17:20.6009002Z with:
+2026-10-18T02:17:20.6009123Z   api-level: 34
+2026-10-18T02:17:20.6009249Z   target: google_apis
+2026-10-18T02:17:20.6009378Z   arch: x86_64
+2026-10-18T02:17:20.6009497Z   profile: pixel_6
+2026-10-18T02:17:20.6009627Z   disable-animations: false
+2026-10-18T02:17:20.6009888Z   emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T02:17:20.6010157Z   script: bash evidence.sh
+2026-10-18T02:17:20.6010294Z   cores: 2
+2026-10-18T02:17:20.6010407Z   avd-name: test
+2026-10-18T02:17:20.6010536Z   force-avd-creation: true
+2026-10-18T02:17:20.6010902Z   emulator-boot-timeout: 600
+2026-10-18T02:17:20.6011072Z   emulator-port: 5554
+2026-10-18T02:17:20.6011209Z   disable-spellchecker: false
+2026-10-18T02:17:20.6011364Z   disable-linux-hw-accel: auto
+2026-10-18T02:17:20.6011514Z   enable-hw-keyboard: false
+2026-10-18T02:17:20.6011694Z   channel: stable
+2026-10-18T02:17:20.6011817Z env:
+2026-10-18T02:17:20.6011951Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+2026-10-18T02:17:20.6012114Z ##[endgroup]
+2026-10-18T02:17:20.7134678Z ##[group]Configure emulator
+2026-10-18T02:17:20.7135420Z API level: 34
+2026-10-18T02:17:20.7135912Z System image API level: 34
+2026-10-18T02:17:20.7136191Z target: google_apis
+2026-10-18T02:17:20.7136443Z CPU architecture: x86_64
+2026-10-18T02:17:20.7136699Z Hardware profile: pixel_6
+2026-10-18T02:17:20.7147103Z Cores: 2
+2026-10-18T02:17:20.7147385Z RAM size: 
+2026-10-18T02:17:20.7147618Z Heap size: 
+2026-10-18T02:17:20.7147841Z SD card path or size: 
+2026-10-18T02:17:20.7148098Z Disk size: 
+2026-10-18T02:17:20.7148316Z AVD name: test
+2026-10-18T02:17:20.7148577Z force avd creation: true
+2026-10-18T02:17:20.7148881Z Emulator boot timeout: 600
+2026-10-18T02:17:20.7149144Z emulator port: 5554
+2026-10-18T02:17:20.7149554Z emulator options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T02:17:20.7150095Z disable animations: false
+2026-10-18T02:17:20.7150345Z disable spellchecker: false
+2026-10-18T02:17:20.7150594Z disable Linux hardware acceleration: false
+2026-10-18T02:17:20.7151028Z enable hardware keyboard: false
+2026-10-18T02:17:20.7151287Z Channel: 0 (stable)
+2026-10-18T02:17:20.7151496Z Script:
+2026-10-18T02:17:20.7151661Z bash evidence.sh
+2026-10-18T02:17:20.7151841Z Pre emulator launch script:
+2026-10-18T02:17:20.7152337Z ##[endgroup]
+2026-10-18T02:17:20.7152681Z ##[group]Install Android SDK
+2026-10-18T02:17:20.7176701Z [command]/usr/bin/sh -c \yes | sdkmanager --licenses > /dev/null
+2026-10-18T02:17:22.3197485Z Installing latest build tools, platform tools, and platform.
+2026-10-18T02:17:22.3206749Z [command]/usr/bin/sh -c \sdkmanager --install 'build-tools;37.0.0' platform-tools 'platforms;android-34'> /dev/null
+2026-10-18T02:17:23.3103124Z Installing latest emulator.
+2026-10-18T02:17:23.3112192Z [command]/usr/bin/sh -c \sdkmanager --install emulator --channel=0 > /dev/null
+2026-10-18T02:17:24.3126412Z Installing system images.
+2026-10-18T02:17:24.3136360Z [command]/usr/bin/sh -c \sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null
+2026-10-18T02:17:25.3161916Z ##[endgroup]
+2026-10-18T02:17:25.3162713Z ##[group]Create AVD
+2026-10-18T02:17:25.3163083Z Creating AVD.
+2026-10-18T02:17:25.3174044Z [command]/usr/bin/sh -c \echo no | avdmanager create avd --force -n test --package 'system-images;android-34;google_apis;x86_64' --device 'pixel_6'
+2026-10-18T02:17:25.8038438Z Loading local repository...                                                     
+2026-10-18T02:17:25.8039203Z [=========                              ] 25% Loading local repository...       
+2026-10-18T02:17:25.8041620Z [=========                              ] 25% Fetch remote repository...        
+2026-10-18T02:17:25.8042647Z [=======================================] 100% Fetch remote repository...       
+2026-10-18T02:17:26.0512531Z Auto-selecting single ABI x86_64
+2026-10-18T02:17:26.3638066Z [command]/usr/bin/sh -c \printf 'hw.cpu.ncore=2\n' >> /home/runner/.android/avd/test.avd/config.ini
+2026-10-18T02:17:26.3656173Z ##[endgroup]
+2026-10-18T02:17:26.3657548Z ##[group]Launch Emulator
+2026-10-18T02:17:26.3657778Z Starting emulator.
+2026-10-18T02:17:26.3670390Z [command]/usr/bin/sh -c \/usr/local/lib/android/sdk/emulator/emulator -port 5554 -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none &
+2026-10-18T02:17:26.3800264Z INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+2026-10-18T02:17:26.3800626Z INFO         | Graphics backend: gfxstream
+2026-10-18T02:17:26.3801030Z INFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/
+2026-10-18T02:17:26.4268191Z INFO         | Saving last run QEMU version for the AVD to 2
+2026-10-18T02:17:26.4268769Z INFO         | Increasing RAM size to 2560MB
+2026-10-18T02:17:26.4269308Z ##############################################################################
+2026-10-18T02:17:26.4269868Z ##                        WARNING - ACTION REQUIRED                         ##
+2026-10-18T02:17:26.4270153Z ##  Consider using the '-metrics-collection' flag to help improve the       ##
+2026-10-18T02:17:26.4270430Z ##  emulator by sending anonymized usage data. Or use the '-no-metrics'     ##
+2026-10-18T02:17:26.4270884Z ##  flag to bypass this warning and turn off the metrics collection.        ##
+2026-10-18T02:17:26.4271172Z ##  In a future release this warning will turn into a one-time blocking     ##
+2026-10-18T02:17:26.4271442Z ##  prompt to ask for explicit user input regarding metrics collection.     ##
+2026-10-18T02:17:26.4271671Z ##                                                                          ##
+2026-10-18T02:17:26.4271921Z ##  Please see '-help-metrics-collection' for more details. You can use     ##
+2026-10-18T02:17:26.4272198Z ##  '-metrics-to-file' or '-metrics-to-console' flags to see what type of   ##
+2026-10-18T02:17:26.4272471Z ##  data is being collected by emulator as part of usage statistics.        ##
+2026-10-18T02:17:26.4272696Z ##############################################################################
+2026-10-18T02:17:26.4272921Z INFO         | Guest GLES Driver: Auto (ext controls)
+2026-10-18T02:17:26.4273190Z INFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swiftshader
+2026-10-18T02:17:26.4273451Z INFO         | Checking system compatibility:
+2026-10-18T02:17:26.4273637Z INFO         |   Checking: hasSufficientDiskSpace
+2026-10-18T02:17:26.4273849Z INFO         |      Ok: Disk space requirements to run avd: `test` are met
+2026-10-18T02:17:26.4274053Z INFO         |   Checking: hasSufficientHwGpu
+2026-10-18T02:17:26.4274257Z INFO         |      Ok: Hardware GPU compatibility checks are not required
+2026-10-18T02:17:26.4274466Z INFO         |   Checking: hasSufficientSystem
+2026-10-18T02:17:26.4274783Z INFO         |      Ok: System requirements to run avd: `test` are met
+2026-10-18T02:17:26.4285439Z WARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1
+2026-10-18T02:17:26.5952480Z INFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.2.12.db, detection is enabled for process: 4050
+2026-10-18T02:17:26.5953049Z INFO         | Initializing gfxstream backend
+2026-10-18T02:17:26.5968158Z INFO         | startOpenglesRendererImpl: gpu info
+2026-10-18T02:17:26.5968374Z INFO         | 
+2026-10-18T02:17:26.5970037Z INFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD
+2026-10-18T02:17:26.5970589Z INFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json
+2026-10-18T02:17:26.5971816Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]
+2026-10-18T02:17:26.5972517Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]
+2026-10-18T02:17:26.5973132Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]
+2026-10-18T02:17:26.5979612Z INFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so
+2026-10-18T02:17:26.6021608Z INFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0
+2026-10-18T02:17:26.6022128Z INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
+2026-10-18T02:17:26.6076583Z INFO         | Format VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16 does not support YCbCr sampler conversion
+2026-10-18T02:17:26.6119563Z INFO         | SharedLibrary::open for [libX11]
+2026-10-18T02:17:26.6119928Z WARNING      | Could not open libX11.so, try libX11.so.6
+2026-10-18T02:17:26.6120369Z INFO         | SharedLibrary::open for [libX11.so.6]
+2026-10-18T02:17:26.6120816Z INFO         | SharedLibrary::open for [libX11-xcb]
+2026-10-18T02:17:26.6134707Z WARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1
+2026-10-18T02:17:26.6134987Z INFO         | SharedLibrary::open for [libX11-xcb.so.1]
+2026-10-18T02:17:26.6161974Z INFO         | Initializing VkEmulation features:
+2026-10-18T02:17:26.6163306Z INFO         |     glInteropSupported: false
+2026-10-18T02:17:26.6163581Z INFO         |     useDeferredCommands: true
+2026-10-18T02:17:26.6164589Z INFO         |     createResourceWithRequirements: true
+2026-10-18T02:17:26.6165075Z INFO         |     useVulkanComposition: false
+2026-10-18T02:17:26.6165340Z INFO         |     useVulkanNativeSwapchain: false
+2026-10-18T02:17:26.6166708Z INFO         |     enable guestRenderDoc: false
+2026-10-18T02:17:26.6166889Z INFO         |     ASTC LDR emulation mode: Gpu
+2026-10-18T02:17:26.6167092Z INFO         |     enable ETC2 emulation: true
+2026-10-18T02:17:26.6168354Z INFO         |     enable Ycbcr emulation: false
+2026-10-18T02:17:26.6168548Z INFO         |     guestVulkanOnly: false
+2026-10-18T02:17:26.6168799Z INFO         |     useDedicatedAllocations: false
+2026-10-18T02:17:26.6170207Z INFO         |     guestVulkanMaxApiVersion: 1.3.0
+2026-10-18T02:17:26.6170513Z INFO         |     enableProtectedMemoryEmulation: false
+2026-10-18T02:17:26.6204949Z INFO         | Graphics Adapter Vendor Google (Google Inc.)
+2026-10-18T02:17:26.6205379Z INFO         | Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)
+2026-10-18T02:17:26.6205850Z INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)
+2026-10-18T02:17:26.6207217Z INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 
+2026-10-18T02:17:26.6209221Z INFO         | Graphics Device Extensions N/A
+2026-10-18T02:17:26.6209519Z INFO         | Disabling sparse binding feature support
+2026-10-18T02:17:26.6277730Z INFO         | Sending adb public key [QAAAAKmuvcxnKi/w9DtyyTkirNNBi/GXRUxJEsCqLB4HOfW1l49gM7NYFZzLRNgDrlFmU0QAF+OdrznspvDZrtKA9x82nofb17qUpPCV+g8/bOYrJSH89WuX48xujnh76kNqC0pLJo80b3BVKGyjIRburEOLemgYoYzIxfb6zsas46jUQmJtGKVSNN7Bk//UB1ZHOmArQ1GSGWIM/424in2YDHVjtPhK/1vq4te5dqYjWcm2/81afsIvz+Tw50BRE8y9qaN3CPkcyq5EZ13+aiOPSZiuG+naGa8cU/ucbTB3TZ1mXht7ISIoHQwt6EkF9KgnDYiBnDFhmTbuKhJK/lmS4Ljj70bF96gsJosmt00VX4sEEdmJsr89raliYXz0F7hF6sWU5ejeYgiyYXQO7sbneWsbO5cw+F4A76DawZKntmJATd0vI3Y/P8braD71p3MMX33VXzxQGD6lVs8tg8fiv4yrBZHAdVqfoJU9R2t7rxQOcfagLysbWNz7Q9TEWwR2izZoHBRvUHY+Z3qWPUr/J+BED7EUtees3jcaaDC1Kb8ogKuMm+5qDKE1kz8+jUPRAPNLmV/2NU7AYdm3h7eRjuTevMXh0Op78P4IXdHQ+UWdm0xeZr8nUY5jL7W6YPmMF1GvtpVTgTO4WQGpdRRcRqrSd+1rtzDPsQwDGzSj5AmlPixggAEAAQA= runner@unknown]
+2026-10-18T02:17:26.6279590Z INFO         | Userspace boot properties:
+2026-10-18T02:17:26.6279838Z INFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0
+2026-10-18T02:17:26.6280093Z INFO         |   androidboot.dalvik.vm.heapsize=576m
+2026-10-18T02:17:26.6280303Z INFO         |   androidboot.debug.hwui.renderer=skiagl
+2026-10-18T02:17:26.6280515Z INFO         |   androidboot.debug.sf.nobootanimation=1
+2026-10-18T02:17:26.6280842Z INFO         |   androidboot.hardware=ranchu
+2026-10-18T02:17:26.6281038Z INFO         |   androidboot.hardware.gltransport=pipe
+2026-10-18T02:17:26.6281236Z INFO         |   androidboot.hardware.vulkan=ranchu
+2026-10-18T02:17:26.6281431Z INFO         |   androidboot.logcat=*:V
+2026-10-18T02:17:26.6281610Z INFO         |   androidboot.opengles.version=196608
+2026-10-18T02:17:26.6281791Z INFO         |   androidboot.qemu=1
+2026-10-18T02:17:26.6283470Z INFO         |   androidboot.qemu.adb.pubkey=QAAAAKmuvcxnKi/w9DtyyTkirNNBi/GXRUxJEsCqLB4HOfW1l49gM7NYFZzLRNgDrlFmU0QAF+OdrznspvDZrtKA9x82nofb17qUpPCV+g8/bOYrJSH89WuX48xujnh76kNqC0pLJo80b3BVKGyjIRburEOLemgYoYzIxfb6zsas46jUQmJtGKVSNN7Bk//UB1ZHOmArQ1GSGWIM/424in2YDHVjtPhK/1vq4te5dqYjWcm2/81afsIvz+Tw50BRE8y9qaN3CPkcyq5EZ13+aiOPSZiuG+naGa8cU/ucbTB3TZ1mXht7ISIoHQwt6EkF9KgnDYiBnDFhmTbuKhJK/lmS4Ljj70bF96gsJosmt00VX4sEEdmJsr89raliYXz0F7hF6sWU5ejeYgiyYXQO7sbneWsbO5cw+F4A76DawZKntmJATd0vI3Y/P8braD71p3MMX33VXzxQGD6lVs8tg8fiv4yrBZHAdVqfoJU9R2t7rxQOcfagLysbWNz7Q9TEWwR2izZoHBRvUHY+Z3qWPUr/J+BED7EUtees3jcaaDC1Kb8ogKuMm+5qDKE1kz8+jUPRAPNLmV/2NU7AYdm3h7eRjuTevMXh0Op78P4IXdHQ+UWdm0xeZr8nUY5jL7W6YPmMF1GvtpVTgTO4WQGpdRRcRqrSd+1rtzDPsQwDGzSj5AmlPixggAEAAQA= runner@unknown
+2026-10-18T02:17:26.6285150Z INFO         |   androidboot.qemu.avd_name=test
+2026-10-18T02:17:26.6285360Z INFO         |   androidboot.qemu.camera_hq_edge_processing=0
+2026-10-18T02:17:26.6285579Z INFO         |   androidboot.qemu.camera_protocol_ver=1
+2026-10-18T02:17:26.6285786Z INFO         |   androidboot.qemu.cpuvulkan.version=4206592
+2026-10-18T02:17:26.6286018Z INFO         |   androidboot.qemu.gltransport.drawFlushInterval=800
+2026-10-18T02:17:26.6286242Z INFO         |   androidboot.qemu.gltransport.name=pipe
+2026-10-18T02:17:26.6286438Z INFO         |   androidboot.qemu.hwcodec.avcdec=2
+2026-10-18T02:17:26.6286635Z INFO         |   androidboot.qemu.hwcodec.hevcdec=2
+2026-10-18T02:17:26.6286827Z INFO         |   androidboot.qemu.hwcodec.vpxdec=2
+2026-10-18T02:17:26.6287059Z INFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647
+2026-10-18T02:17:26.6287291Z INFO         |   androidboot.qemu.skin=1080x2400
+2026-10-18T02:17:26.6287475Z INFO         |   androidboot.qemu.virtiowifi=1
+2026-10-18T02:17:26.6287655Z INFO         |   androidboot.qemu.vsync=60
+2026-10-18T02:17:26.6287845Z INFO         |   androidboot.serialno=EMULATOR37X2X12X0
+2026-10-18T02:17:26.6288133Z INFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3
+2026-10-18T02:17:26.6288420Z INFO         |   androidboot.vbmeta.hash_alg=sha256
+2026-10-18T02:17:26.6288603Z INFO         |   androidboot.vbmeta.size=6656
+2026-10-18T02:17:26.6289846Z INFO         |   androidboot.veritymode=enforcing
+2026-10-18T02:17:26.6464057Z WARNING: cannnot unmap ptr 0x7f932ea01000 as it is in the protected range from 0x7f928ea00000 to 0x7f932ec00000
+2026-10-18T02:17:26.6850164Z INFO         | Monitoring duration of emulator setup.
+2026-10-18T02:17:27.6650132Z INFO         | Successfully initialized netsim WiFi
+2026-10-18T02:17:27.6650870Z INFO         | Activated packet streamer for bluetooth emulation
+2026-10-18T02:17:27.6651673Z INFO         | Setting display: 0 configuration to: 1080x2400, dpi: 420x420 
+2026-10-18T02:17:27.6652624Z INFO         | setDisplayActiveConfig: id:0, 1080x2400
+2026-10-18T02:17:27.6653206Z INFO         | emulatorSetupEnvironment: Environment scene is not required
+2026-10-18T02:17:27.6730824Z INFO         | Loading snapshot 'default_boot'...
+2026-10-18T02:17:27.6856259Z WARNING      | Device 'cache' does not have the requested snapshot 'default_boot'
+2026-10-18T02:17:27.6856552Z 
+2026-10-18T02:17:27.6861289Z WARNING      | Failed to load snapshot 'default_boot'
+2026-10-18T02:17:27.6861919Z USER_INFO    | The emulator is performing a cold boot without a saved state because there's no snapshot and you have configured it not to save on exit.
+2026-10-18T02:17:36.3736058Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:36.3766194Z adb: device offline
+2026-10-18T02:17:36.3771445Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+2026-10-18T02:17:38.3833613Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:38.4144384Z 
+2026-10-18T02:17:40.4185477Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:40.4587150Z 
+2026-10-18T02:17:42.4670826Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:42.4838919Z 
+2026-10-18T02:17:44.4889892Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:44.5088990Z 
+2026-10-18T02:17:46.5134733Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:46.5530369Z 
+2026-10-18T02:17:48.5566284Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:48.5792946Z 
+2026-10-18T02:17:50.5832989Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:50.5981611Z 
+2026-10-18T02:17:52.6054882Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:52.6306169Z 
+2026-10-18T02:17:54.6435400Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T02:17:54.6941747Z 1
+2026-10-18T02:17:54.6972028Z Emulator booted.
+2026-10-18T02:17:54.6992872Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell input keyevent 82
+2026-10-18T02:17:54.8586165Z ##[endgroup]
+2026-10-18T02:17:54.8586988Z [command]/usr/bin/sh -c bash evidence.sh
+2026-10-18T02:17:54.8639454Z + APP=com.raydocs.tono.mobile.test
+2026-10-18T02:17:54.8643673Z + '[' -d evidence ']'
+2026-10-18T02:17:54.8644182Z ++ date +%s
+2026-10-18T02:17:54.8664396Z + mv evidence evidence-attempt-1792289874
+2026-10-18T02:17:54.8689913Z + mkdir -p evidence
+2026-10-18T02:17:54.8707594Z + adb shell getprop ro.build.fingerprint
+2026-10-18T02:17:54.8722809Z + tee evidence/device.txt
+2026-10-18T02:17:54.9632022Z google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+2026-10-18T02:17:54.9744886Z + adb shell getprop ro.product.cpu.abi
+2026-10-18T02:17:54.9771707Z + tee -a evidence/device.txt
+2026-10-18T02:17:55.0105099Z x86_64
+2026-10-18T02:17:55.0122883Z + adb shell wm size
+2026-10-18T02:17:55.0141629Z + tee -a evidence/device.txt
+2026-10-18T02:17:55.0614482Z Physical size: 1080x2400
+2026-10-18T02:17:55.0702123Z + adb shell wm density
+2026-10-18T02:17:55.0703093Z + tee -a evidence/device.txt
+2026-10-18T02:17:55.1455667Z Physical density: 420
+2026-10-18T02:17:55.1506517Z + adb shell settings put system screen_off_timeout 1800000
+2026-10-18T02:17:55.1871573Z INFO         | Boot completed in 28780 ms
+2026-10-18T02:17:55.1874140Z INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+2026-10-18T02:17:55.2595125Z + adb shell svc power stayon true
+2026-10-18T02:17:56.6971944Z + adb shell input keyevent 82
+2026-10-18T02:17:59.2979858Z + sleep 60
+2026-10-18T02:18:59.2998191Z + adb shell input keyevent 3
+2026-10-18T02:18:59.3375043Z + adb install -r apk/tono-mobile-0.3.1-test-b393e1961.apk
+2026-10-18T02:19:00.2822353Z Performing Streamed Install
+2026-10-18T02:19:00.2823425Z Success
+2026-10-18T02:19:00.2823961Z + adb install -r apk/instrumentation.apk
+2026-10-18T02:19:00.6950610Z Performing Streamed Install
+2026-10-18T02:19:00.6967806Z Success
+2026-10-18T02:19:00.7001152Z + set +e
+2026-10-18T02:19:00.7017067Z + failed=
+2026-10-18T02:19:00.7022217Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:19:00.7034311Z + t=a1_realSignInScreenAndLocalValidation
+2026-10-18T02:19:00.7034628Z + rec=
+2026-10-18T02:19:00.7035005Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:19:00.7036075Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:21:05.1521737Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:21:05.1551250Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:21:05.1611326Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:22:25.8121781Z + '[' -n '' ']'
+2026-10-18T02:22:25.8191484Z + grep -q '^OK (' evidence/instrument-a1_realSignInScreenAndLocalValidation.txt
+2026-10-18T02:22:25.8197656Z + echo 'PASS a1_realSignInScreenAndLocalValidation'
+2026-10-18T02:22:25.8206859Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:22:25.9528464Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 2 files pulled, 0 skipped. 6.8 MB/s (424049 bytes in 0.059s)
+2026-10-18T02:22:25.9559542Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:22:25.9570276Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:22:25.9575591Z + t=a2_realSystemVpnConsentDialog
+2026-10-18T02:22:25.9576021Z + rec=
+2026-10-18T02:22:25.9576729Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:22:25.9577787Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a2_realSystemVpnConsentDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:23:05.5027758Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:23:05.5045424Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:23:05.5048493Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:23:11.1673635Z + '[' -n '' ']'
+2026-10-18T02:23:11.1711616Z + grep -q '^OK (' evidence/instrument-a2_realSystemVpnConsentDialog.txt
+2026-10-18T02:23:11.1741257Z + echo 'PASS a2_realSystemVpnConsentDialog'
+2026-10-18T02:23:11.1771380Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:23:11.2468018Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 4 files pulled, 0 skipped. 66.2 MB/s (840562 bytes in 0.012s)
+2026-10-18T02:23:11.2512891Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:23:11.2555206Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:23:11.2560960Z + t=a3_realEngineRefusesToConnectWithoutAccount
+2026-10-18T02:23:11.2591264Z + rec=
+2026-10-18T02:23:11.2593447Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:23:11.2594609Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:23:38.7233839Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:23:38.7262564Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:23:38.7291495Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:24:50.5802242Z + '[' -n '' ']'
+2026-10-18T02:24:50.5850340Z + grep -q '^OK (' evidence/instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+2026-10-18T02:24:50.5861779Z + echo 'PASS a3_realEngineRefusesToConnectWithoutAccount'
+2026-10-18T02:24:50.5892270Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:24:50.9528168Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 6 files pulled, 0 skipped. 3.9 MB/s (1044515 bytes in 0.255s)
+2026-10-18T02:24:50.9624820Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:24:50.9629840Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:24:50.9661995Z + t=a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+2026-10-18T02:24:50.9691171Z + rec=
+2026-10-18T02:24:50.9721389Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:24:50.9722711Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:24:53.3134671Z + '[' -n '' ']'
+2026-10-18T02:24:53.3181029Z + grep -q '^OK (' evidence/instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+2026-10-18T02:24:53.3241580Z + echo 'PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig'
+2026-10-18T02:24:53.3242112Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:24:53.4374038Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 7 files pulled, 0 skipped. 10.0 MB/s (1044616 bytes in 0.100s)
+2026-10-18T02:24:53.4385579Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:24:53.4389434Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:24:53.4392035Z + t=a5_realAppHonoursRemoveAnimations
+2026-10-18T02:24:53.4392208Z + rec=
+2026-10-18T02:24:53.4392408Z + '[' a5_realAppHonoursRemoveAnimations = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:24:53.4393006Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:25:05.4978978Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:25:05.4979752Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:25:05.4980373Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:25:23.1112056Z + '[' -n '' ']'
+2026-10-18T02:25:23.1167464Z + grep -q '^OK (' evidence/instrument-a5_realAppHonoursRemoveAnimations.txt
+2026-10-18T02:25:23.1202105Z + echo 'PASS a5_realAppHonoursRemoveAnimations'
+2026-10-18T02:25:23.1220023Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:25:23.2242421Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 10 files pulled, 0 skipped. 27.2 MB/s (1448520 bytes in 0.051s)
+2026-10-18T02:25:23.2417409Z + '[' a5_realAppHonoursRemoveAnimations = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:25:23.2466052Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:25:23.2471625Z + t=a6_realAppUnderSystemLightAndDarkTheme
+2026-10-18T02:25:23.2475618Z + rec=
+2026-10-18T02:25:23.2476173Z + '[' a6_realAppUnderSystemLightAndDarkTheme = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:25:23.2502062Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:27:04.1591442Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:27:04.1613996Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:27:04.1643722Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:28:40.9586634Z + '[' -n '' ']'
+2026-10-18T02:28:40.9601316Z + grep -q '^OK (' evidence/instrument-a6_realAppUnderSystemLightAndDarkTheme.txt
+2026-10-18T02:28:40.9651994Z + echo 'PASS a6_realAppUnderSystemLightAndDarkTheme'
+2026-10-18T02:28:40.9657948Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:28:41.0322292Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 12 files pulled, 0 skipped. 34.1 MB/s (1851931 bytes in 0.052s)
+2026-10-18T02:28:41.0390298Z + '[' a6_realAppUnderSystemLightAndDarkTheme = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:41.0406631Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:28:41.0410251Z + t=s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+2026-10-18T02:28:41.0410566Z + rec=
+2026-10-18T02:28:41.0411062Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:41.0412630Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:28:43.9234732Z + '[' -n '' ']'
+2026-10-18T02:28:43.9272235Z + grep -q '^OK (' evidence/instrument-s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp.txt
+2026-10-18T02:28:43.9282385Z + echo 'FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp'
+2026-10-18T02:28:43.9300442Z + failed=' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp'
+2026-10-18T02:28:43.9301256Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:28:44.1362264Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 12 files pulled, 0 skipped. 9.0 MB/s (1851931 bytes in 0.196s)
+2026-10-18T02:28:44.1401803Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:44.1435299Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:28:44.1439777Z + t=s2_realWidgetInAndroidsWidgetHost
+2026-10-18T02:28:44.1472056Z + rec=
+2026-10-18T02:28:44.1501213Z + '[' s2_realWidgetInAndroidsWidgetHost = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:44.1514833Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:28:49.3221106Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:28:49.3221626Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:28:49.3222014Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:28:50.1731747Z + '[' -n '' ']'
+2026-10-18T02:28:50.1776402Z + grep -q '^OK (' evidence/instrument-s2_realWidgetInAndroidsWidgetHost.txt
+2026-10-18T02:28:50.1821557Z + echo 'PASS s2_realWidgetInAndroidsWidgetHost'
+2026-10-18T02:28:50.1881497Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:28:50.5814429Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 14 files pulled, 0 skipped. 5.2 MB/s (1892602 bytes in 0.344s)
+2026-10-18T02:28:50.7222940Z + '[' s2_realWidgetInAndroidsWidgetHost = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:50.7235433Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:28:50.7240242Z + t=s3_fixtureWidgetAndNotificationStates
+2026-10-18T02:28:50.7242190Z + rec=
+2026-10-18T02:28:50.7242592Z + '[' s3_fixtureWidgetAndNotificationStates = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:50.7243624Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:28:53.7974133Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:28:53.7978223Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:28:53.7978873Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:28:58.3585264Z + '[' -n '' ']'
+2026-10-18T02:28:58.3591358Z + grep -q '^OK (' evidence/instrument-s3_fixtureWidgetAndNotificationStates.txt
+2026-10-18T02:28:58.3666118Z + echo 'PASS s3_fixtureWidgetAndNotificationStates'
+2026-10-18T02:28:58.3681607Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:28:58.7238926Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 16 files pulled, 0 skipped. 7.1 MB/s (2040342 bytes in 0.275s)
+2026-10-18T02:28:58.7296404Z + '[' s3_fixtureWidgetAndNotificationStates = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:58.7302609Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:28:58.7307083Z + t=b1_fixtureStatesRenderedOnDevice
+2026-10-18T02:28:58.7307476Z + rec=
+2026-10-18T02:28:58.7307896Z + '[' b1_fixtureStatesRenderedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:28:58.7308929Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:29:07.3065513Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:29:07.3086300Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:29:07.3086540Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:29:33.6740385Z + '[' -n '' ']'
+2026-10-18T02:29:33.6791455Z + grep -q '^OK (' evidence/instrument-b1_fixtureStatesRenderedOnDevice.txt
+2026-10-18T02:29:33.6840897Z + echo 'PASS b1_fixtureStatesRenderedOnDevice'
+2026-10-18T02:29:33.6851235Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:29:34.3202020Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 22 files pulled, 0 skipped. 6.7 MB/s (3517869 bytes in 0.498s)
+2026-10-18T02:29:34.3472804Z + '[' b1_fixtureStatesRenderedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:29:34.3537945Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:29:34.3563373Z + t=b2_fixtureMotionRecordedOnDevice
+2026-10-18T02:29:34.3601248Z + rec=
+2026-10-18T02:29:34.3601827Z + '[' b2_fixtureMotionRecordedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:29:34.3631185Z + rec=5008
+2026-10-18T02:29:34.3652809Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:29:34.3654149Z + adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4
+2026-10-18T02:30:48.4421680Z + '[' -n 5008 ']'
+2026-10-18T02:30:48.4458062Z + timeout 60 tail --pid=5008 -f /dev/null
+2026-10-18T02:30:48.4464876Z + grep -q '^OK (' evidence/instrument-b2_fixtureMotionRecordedOnDevice.txt
+2026-10-18T02:30:48.4479461Z + echo 'PASS b2_fixtureMotionRecordedOnDevice'
+2026-10-18T02:30:48.4483152Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:30:48.7292355Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 22 files pulled, 0 skipped. 15.2 MB/s (3517869 bytes in 0.221s)
+2026-10-18T02:30:48.7309467Z + '[' b2_fixtureMotionRecordedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:30:48.7312732Z + timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+2026-10-18T02:30:48.7961703Z /sdcard/Download/tono-fixture-motion.mp4: 1 file pulled, 0 skipped. 77.8 MB/s (4606066 bytes in 0.056s)
+2026-10-18T02:30:48.8055324Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:30:48.8060192Z + t=b3_fixtureAtLargeFontScale
+2026-10-18T02:30:48.8060565Z + rec=
+2026-10-18T02:30:48.8076369Z + '[' b3_fixtureAtLargeFontScale = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:30:48.8082615Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b3_fixtureAtLargeFontScale com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:30:59.1389861Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:30:59.1390797Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:30:59.1391581Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:31:27.7933039Z + '[' -n '' ']'
+2026-10-18T02:31:27.7933785Z + grep -q '^OK (' evidence/instrument-b3_fixtureAtLargeFontScale.txt
+2026-10-18T02:31:27.7934392Z + echo 'PASS b3_fixtureAtLargeFontScale'
+2026-10-18T02:31:27.7934947Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:31:28.0128861Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 24 files pulled, 0 skipped. 20.4 MB/s (3961654 bytes in 0.185s)
+2026-10-18T02:31:28.0151975Z + '[' b3_fixtureAtLargeFontScale = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:31:28.0174229Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:31:28.0221416Z + t=u1_accessibilityContractAndAtfOnEveryScreen
+2026-10-18T02:31:28.0280935Z + rec=
+2026-10-18T02:31:28.0341295Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:31:28.0390147Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:31:40.4836556Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:31:40.4836950Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:31:40.4837264Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:31:45.5721743Z + '[' -n '' ']'
+2026-10-18T02:31:45.5751611Z + grep -q '^OK (' evidence/instrument-u1_accessibilityContractAndAtfOnEveryScreen.txt
+2026-10-18T02:31:45.5781149Z + echo 'PASS u1_accessibilityContractAndAtfOnEveryScreen'
+2026-10-18T02:31:45.5901344Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:31:45.9785023Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 28 files pulled, 0 skipped. 11.9 MB/s (4349616 bytes in 0.350s)
+2026-10-18T02:31:45.9841692Z + '[' u1_accessibilityContractAndAtfOnEveryScreen = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:31:45.9875318Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:31:45.9911142Z + t=u2_primaryControlActsThroughRealTaps
+2026-10-18T02:31:45.9911553Z + rec=
+2026-10-18T02:31:45.9912362Z + '[' u2_primaryControlActsThroughRealTaps = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:31:45.9941595Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:31:54.4047029Z + '[' -n '' ']'
+2026-10-18T02:31:54.4071700Z + grep -q '^OK (' evidence/instrument-u2_primaryControlActsThroughRealTaps.txt
+2026-10-18T02:31:54.4112738Z + echo 'PASS u2_primaryControlActsThroughRealTaps'
+2026-10-18T02:31:54.4113378Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:31:54.9232100Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 29 files pulled, 0 skipped. 8.7 MB/s (4349818 bytes in 0.479s)
+2026-10-18T02:31:54.9261394Z + '[' u2_primaryControlActsThroughRealTaps = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:31:54.9305908Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:31:54.9336824Z + t=u3_swipeUpOnTheDockOpensDetails
+2026-10-18T02:31:54.9341086Z + rec=
+2026-10-18T02:31:54.9371184Z + '[' u3_swipeUpOnTheDockOpensDetails = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:31:54.9401623Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:32:01.8874878Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:32:01.8875272Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:32:01.8875590Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:32:03.5481895Z + '[' -n '' ']'
+2026-10-18T02:32:03.5492381Z + grep -q '^OK (' evidence/instrument-u3_swipeUpOnTheDockOpensDetails.txt
+2026-10-18T02:32:03.5494789Z + echo 'PASS u3_swipeUpOnTheDockOpensDetails'
+2026-10-18T02:32:03.5495477Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:32:03.8113959Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 30 files pulled, 0 skipped. 18.4 MB/s (4587578 bytes in 0.238s)
+2026-10-18T02:32:03.8202157Z + '[' u3_swipeUpOnTheDockOpensDetails = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:03.8235193Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:32:03.8239786Z + t=u4_glassBlursTheSceneBehindIt
+2026-10-18T02:32:03.8271171Z + rec=
+2026-10-18T02:32:03.8301194Z + '[' u4_glassBlursTheSceneBehindIt = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:03.8302291Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:32:08.2561693Z + '[' -n '' ']'
+2026-10-18T02:32:08.2643645Z + grep -q '^OK (' evidence/instrument-u4_glassBlursTheSceneBehindIt.txt
+2026-10-18T02:32:08.2701218Z + echo 'FAIL u4_glassBlursTheSceneBehindIt'
+2026-10-18T02:32:08.2721288Z + failed=' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp u4_glassBlursTheSceneBehindIt'
+2026-10-18T02:32:08.2742006Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:32:08.8642068Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 32 files pulled, 0 skipped. 9.5 MB/s (4638336 bytes in 0.468s)
+2026-10-18T02:32:08.8701538Z + '[' u4_glassBlursTheSceneBehindIt = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:08.8705546Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:32:08.8709555Z + t=u5_consentExplainedBeforeTheSystemDialog
+2026-10-18T02:32:08.8709807Z + rec=
+2026-10-18T02:32:08.8710123Z + '[' u5_consentExplainedBeforeTheSystemDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:08.8711140Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:32:12.0540393Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:32:12.0541926Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:32:12.0542479Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:32:13.7793792Z + '[' -n '' ']'
+2026-10-18T02:32:13.7808049Z + grep -q '^OK (' evidence/instrument-u5_consentExplainedBeforeTheSystemDialog.txt
+2026-10-18T02:32:13.7861669Z + echo 'PASS u5_consentExplainedBeforeTheSystemDialog'
+2026-10-18T02:32:13.7953615Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:32:14.2682037Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 33 files pulled, 0 skipped. 12.8 MB/s (4743642 bytes in 0.354s)
+2026-10-18T02:32:14.2895853Z + '[' u5_consentExplainedBeforeTheSystemDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:14.2925633Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:32:14.2951792Z + t=u6_screenReaderOrderAndLabelsOnHome
+2026-10-18T02:32:14.2971084Z + rec=
+2026-10-18T02:32:14.2981164Z + '[' u6_screenReaderOrderAndLabelsOnHome = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:14.3011541Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:32:20.1570836Z + '[' -n '' ']'
+2026-10-18T02:32:20.1571419Z + grep -q '^OK (' evidence/instrument-u6_screenReaderOrderAndLabelsOnHome.txt
+2026-10-18T02:32:20.1671475Z + echo 'FAIL u6_screenReaderOrderAndLabelsOnHome'
+2026-10-18T02:32:20.1762017Z + failed=' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp u4_glassBlursTheSceneBehindIt u6_screenReaderOrderAndLabelsOnHome'
+2026-10-18T02:32:20.1902122Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:32:20.5583334Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 34 files pulled, 0 skipped. 13.8 MB/s (4743690 bytes in 0.328s)
+2026-10-18T02:32:20.5643026Z + '[' u6_screenReaderOrderAndLabelsOnHome = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:20.5685546Z + for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice DeviceEvidenceTest#b3_fixtureAtLargeFontScale HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:32:20.5690134Z + t=l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:32:20.5722248Z + rec=
+2026-10-18T02:32:20.5727930Z + '[' l1_largestSystemTextIsNeverCutOff = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:20.5742936Z + timeout 900 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T02:32:28.8493494Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T02:32:28.8493884Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T02:32:28.8494191Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T02:32:35.2308236Z + '[' -n '' ']'
+2026-10-18T02:32:35.2318035Z + grep -q '^OK (' evidence/instrument-l1_largestSystemTextIsNeverCutOff.txt
+2026-10-18T02:32:35.2322583Z + echo 'PASS l1_largestSystemTextIsNeverCutOff'
+2026-10-18T02:32:35.2323195Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T02:32:35.4484201Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 38 files pulled, 0 skipped. 26.8 MB/s (5437026 bytes in 0.193s)
+2026-10-18T02:32:35.4493890Z + '[' l1_largestSystemTextIsNeverCutOff = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T02:32:35.4494595Z + adb shell settings put system font_scale 1.0
+2026-10-18T02:32:35.5366339Z + adb shell settings put global animator_duration_scale 1
+2026-10-18T02:32:35.5821337Z + adb shell cmd uimode night no
+2026-10-18T02:32:35.6208655Z Night mode: no
+2026-10-18T02:32:35.6234883Z + timeout 60 adb logcat -d
+2026-10-18T02:32:36.0323101Z + ls -la evidence
+2026-10-18T02:32:36.0358512Z total 22932
+2026-10-18T02:32:36.0359201Z drwxr-xr-x 2 runner runner     4096 Oct 18 02:32 .
+2026-10-18T02:32:36.0359770Z drwxr-xr-x 5 runner runner     4096 Oct 18 02:17 ..
+2026-10-18T02:32:36.0360239Z -rw-r--r-- 1 runner runner     4189 Oct 18 02:32 a11y-report.txt
+2026-10-18T02:32:36.0360996Z -rw-r--r-- 1 runner runner      136 Oct 18 02:17 device.txt
+2026-10-18T02:32:36.0361462Z -rw-r--r-- 1 runner runner   207302 Oct 18 02:32 fixture-01-idle.png
+2026-10-18T02:32:36.0361956Z -rw-r--r-- 1 runner runner   310562 Oct 18 02:32 fixture-02-connecting.png
+2026-10-18T02:32:36.0362477Z -rw-r--r-- 1 runner runner   315098 Oct 18 02:32 fixture-03-connected.png
+2026-10-18T02:32:36.0362980Z -rw-r--r-- 1 runner runner   280909 Oct 18 02:32 fixture-04-degraded.png
+2026-10-18T02:32:36.0363466Z -rw-r--r-- 1 runner runner   196774 Oct 18 02:32 fixture-05-failed.png
+2026-10-18T02:32:36.0363981Z -rw-r--r-- 1 runner runner   166882 Oct 18 02:32 fixture-06-details-sheet.png
+2026-10-18T02:32:36.0364544Z -rw-r--r-- 1 runner runner   293326 Oct 18 02:32 fixture-07-font-1.3-home.png
+2026-10-18T02:32:36.0365148Z -rw-r--r-- 1 runner runner   150459 Oct 18 02:32 fixture-08-font-1.3-details.png
+2026-10-18T02:32:36.0365704Z -rw-r--r-- 1 runner runner   237701 Oct 18 02:32 fixture-09-details-by-swipe.png
+2026-10-18T02:32:36.0366261Z -rw-r--r-- 1 runner runner   170040 Oct 18 02:32 fixture-10-lines-sheet.png
+2026-10-18T02:32:36.0366779Z -rw-r--r-- 1 runner runner   164171 Oct 18 02:32 fixture-11-settings.png
+2026-10-18T02:32:36.0367298Z -rw-r--r-- 1 runner runner    49562 Oct 18 02:32 fixture-12-apps.png
+2026-10-18T02:32:36.0367805Z -rw-r--r-- 1 runner runner   320312 Oct 18 02:32 fixture-13-font-2.0-home.png
+2026-10-18T02:32:36.0368355Z -rw-r--r-- 1 runner runner   186086 Oct 18 02:32 fixture-14-font-2.0-details.png
+2026-10-18T02:32:36.0372905Z -rw-r--r-- 1 runner runner   186845 Oct 18 02:32 fixture-15-font-2.0-settings.png
+2026-10-18T02:32:36.0373475Z -rw-r--r-- 1 runner runner    50680 Oct 18 02:32 fixture-16-glass-blur.png
+2026-10-18T02:32:36.0374307Z -rw-r--r-- 1 runner runner    18629 Oct 18 02:32 fixture-17-widget-states.png
+2026-10-18T02:32:36.0374963Z -rw-r--r-- 1 runner runner   129111 Oct 18 02:32 fixture-18-notifications.png
+2026-10-18T02:32:36.0375482Z -rw-r--r-- 1 runner runner   105306 Oct 18 02:32 fixture-19-consent-explainer.png
+2026-10-18T02:32:36.0375978Z -rw-r--r-- 1 runner runner  4606066 Oct 18 02:30 fixture-motion.mp4
+2026-10-18T02:32:36.0376438Z -rw-r--r-- 1 runner runner       93 Oct 18 02:32 font-2.0-report.txt
+2026-10-18T02:32:36.0376903Z -rw-r--r-- 1 runner runner       78 Oct 18 02:32 glass-report.txt
+2026-10-18T02:32:36.0377438Z -rw-r--r-- 1 runner runner      768 Oct 18 02:22 instrument-a1_realSignInScreenAndLocalValidation.txt
+2026-10-18T02:32:36.0378068Z -rw-r--r-- 1 runner runner      751 Oct 18 02:23 instrument-a2_realSystemVpnConsentDialog.txt
+2026-10-18T02:32:36.0378734Z -rw-r--r-- 1 runner runner      778 Oct 18 02:24 instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+2026-10-18T02:32:36.0379467Z -rw-r--r-- 1 runner runner      782 Oct 18 02:24 instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+2026-10-18T02:32:36.0380163Z -rw-r--r-- 1 runner runner      759 Oct 18 02:25 instrument-a5_realAppHonoursRemoveAnimations.txt
+2026-10-18T02:32:36.0381000Z -rw-r--r-- 1 runner runner      770 Oct 18 02:28 instrument-a6_realAppUnderSystemLightAndDarkTheme.txt
+2026-10-18T02:32:36.0381644Z -rw-r--r-- 1 runner runner      757 Oct 18 02:29 instrument-b1_fixtureStatesRenderedOnDevice.txt
+2026-10-18T02:32:36.0382272Z -rw-r--r-- 1 runner runner      757 Oct 18 02:30 instrument-b2_fixtureMotionRecordedOnDevice.txt
+2026-10-18T02:32:36.0382906Z -rw-r--r-- 1 runner runner      745 Oct 18 02:31 instrument-b3_fixtureAtLargeFontScale.txt
+2026-10-18T02:32:36.0383499Z -rw-r--r-- 1 runner runner      762 Oct 18 02:32 instrument-l1_largestSystemTextIsNeverCutOff.txt
+2026-10-18T02:32:36.0384272Z -rw-r--r-- 1 runner runner     2192 Oct 18 02:28 instrument-s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp.txt
+2026-10-18T02:32:36.0384986Z -rw-r--r-- 1 runner runner      776 Oct 18 02:28 instrument-s2_realWidgetInAndroidsWidgetHost.txt
+2026-10-18T02:32:36.0385606Z -rw-r--r-- 1 runner runner      784 Oct 18 02:28 instrument-s3_fixtureWidgetAndNotificationStates.txt
+2026-10-18T02:32:36.0386245Z -rw-r--r-- 1 runner runner      782 Oct 18 02:31 instrument-u1_accessibilityContractAndAtfOnEveryScreen.txt
+2026-10-18T02:32:36.0386897Z -rw-r--r-- 1 runner runner      767 Oct 18 02:31 instrument-u2_primaryControlActsThroughRealTaps.txt
+2026-10-18T02:32:36.0387503Z -rw-r--r-- 1 runner runner      757 Oct 18 02:32 instrument-u3_swipeUpOnTheDockOpensDetails.txt
+2026-10-18T02:32:36.0388110Z -rw-r--r-- 1 runner runner     1785 Oct 18 02:32 instrument-u4_glassBlursTheSceneBehindIt.txt
+2026-10-18T02:32:36.0388730Z -rw-r--r-- 1 runner runner      775 Oct 18 02:32 instrument-u5_consentExplainedBeforeTheSystemDialog.txt
+2026-10-18T02:32:36.0389374Z -rw-r--r-- 1 runner runner     2268 Oct 18 02:32 instrument-u6_screenReaderOrderAndLabelsOnHome.txt
+2026-10-18T02:32:36.0389956Z -rw-r--r-- 1 runner runner      261 Oct 18 02:32 interaction-report.txt
+2026-10-18T02:32:36.0390441Z -rw-r--r-- 1 runner runner 13239488 Oct 18 02:32 logcat.txt
+2026-10-18T02:32:36.0391108Z -rw-r--r-- 1 runner runner   201440 Oct 18 02:32 real-01-signin.png
+2026-10-18T02:32:36.0391709Z -rw-r--r-- 1 runner runner   222609 Oct 18 02:32 real-02-signin-invalid-email.png
+2026-10-18T02:32:36.0392302Z -rw-r--r-- 1 runner runner   214407 Oct 18 02:32 real-03-system-vpn-consent.png
+2026-10-18T02:32:36.0392900Z -rw-r--r-- 1 runner runner   202106 Oct 18 02:32 real-04-after-consent.png
+2026-10-18T02:32:36.0393561Z -rw-r--r-- 1 runner runner   201693 Oct 18 02:32 real-05-connect-without-account-stays-signed-out.png
+2026-10-18T02:32:36.0394147Z -rw-r--r-- 1 runner runner     2260 Oct 18 02:32 real-05-services.txt
+2026-10-18T02:32:36.0394700Z -rw-r--r-- 1 runner runner   202028 Oct 18 02:32 real-06-motion.png
+2026-10-18T02:32:36.0395231Z -rw-r--r-- 1 runner runner   201762 Oct 18 02:32 real-07-remove-animations.png
+2026-10-18T02:32:36.0396015Z -rw-r--r-- 1 runner runner    40601 Oct 18 02:32 real-10-widget.png
+2026-10-18T02:32:36.0396646Z -rw-r--r-- 1 runner runner   201593 Oct 18 02:32 real-11-system-light-theme.png
+2026-10-18T02:32:36.0397289Z -rw-r--r-- 1 runner runner   201818 Oct 18 02:32 real-12-system-dark-theme.png
+2026-10-18T02:32:36.0397925Z -rw-r--r-- 1 runner runner      101 Oct 18 02:32 real-core.txt
+2026-10-18T02:32:36.0398371Z -rw-r--r-- 1 runner runner      114 Oct 18 02:32 real-motion.txt
+2026-10-18T02:32:36.0398834Z -rw-r--r-- 1 runner runner       70 Oct 18 02:32 real-widget.txt
+2026-10-18T02:32:36.0399304Z -rw-r--r-- 1 runner runner       48 Oct 18 02:32 screen-reader-order.txt
+2026-10-18T02:32:36.0399798Z -rw-r--r-- 1 runner runner      801 Oct 18 02:32 summary.txt
+2026-10-18T02:32:36.0400200Z + cat evidence/summary.txt
+2026-10-18T02:32:36.0401032Z PASS a1_realSignInScreenAndLocalValidation
+2026-10-18T02:32:36.0401496Z PASS a2_realSystemVpnConsentDialog
+2026-10-18T02:32:36.0401927Z PASS a3_realEngineRefusesToConnectWithoutAccount
+2026-10-18T02:32:36.0402366Z PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+2026-10-18T02:32:36.0402800Z PASS a5_realAppHonoursRemoveAnimations
+2026-10-18T02:32:36.0403199Z PASS a6_realAppUnderSystemLightAndDarkTheme
+2026-10-18T02:32:36.0403655Z FAIL s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+2026-10-18T02:32:36.0404109Z PASS s2_realWidgetInAndroidsWidgetHost
+2026-10-18T02:32:36.0404498Z PASS s3_fixtureWidgetAndNotificationStates
+2026-10-18T02:32:36.0404887Z PASS b1_fixtureStatesRenderedOnDevice
+2026-10-18T02:32:36.0405250Z PASS b2_fixtureMotionRecordedOnDevice
+2026-10-18T02:32:36.0405606Z PASS b3_fixtureAtLargeFontScale
+2026-10-18T02:32:36.0405970Z PASS u1_accessibilityContractAndAtfOnEveryScreen
+2026-10-18T02:32:36.0406385Z PASS u2_primaryControlActsThroughRealTaps
+2026-10-18T02:32:36.0406757Z PASS u3_swipeUpOnTheDockOpensDetails
+2026-10-18T02:32:36.0407116Z FAIL u4_glassBlursTheSceneBehindIt
+2026-10-18T02:32:36.0407505Z PASS u5_consentExplainedBeforeTheSystemDialog
+2026-10-18T02:32:36.0407895Z FAIL u6_screenReaderOrderAndLabelsOnHome
+2026-10-18T02:32:36.0408271Z PASS l1_largestSystemTextIsNeverCutOff
+2026-10-18T02:32:36.0408615Z + set -e
+2026-10-18T02:32:36.0409247Z + '[' -z ' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp u4_glassBlursTheSceneBehindIt u6_screenReaderOrderAndLabelsOnHome' ']'
+2026-10-18T02:32:36.0412078Z ##[error]The process '/usr/bin/sh' failed with exit code 1
+2026-10-18T02:32:36.0415509Z ##[group]Terminate Emulator
+2026-10-18T02:32:36.0441402Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 emu kill
+2026-10-18T02:32:36.0479037Z OK: killing emulator, bye bye
+2026-10-18T02:32:36.0479646Z OK
+2026-10-18T02:32:36.0480326Z ##[endgroup]
+2026-10-18T02:32:36.0481829Z INFO         | Wait for emulator (pid 4050) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+2026-10-18T02:32:36.0482750Z 
+2026-10-18T02:32:41.4060591Z INFO         | Saving with gfxstream=1
+2026-10-18T02:32:41.4941087Z INFO         | Saving snapshot 'default_boot' took 5428 ms
+2026-10-18T02:32:42.3172274Z ERROR        | stop: Not implemented
+2026-10-18T02:32:42.3173009Z WARNING      | Emulator client has not yet been configured.. Call configure me first!
+2026-10-18T02:32:42.3371709Z INFO         | removeAll
+2026-10-18T02:32:42.5954334Z WARNING      | Netsim Wifi dns:///localhost:36651 is gone due to Stream removed (CANCELLED)
+2026-10-18T02:32:43.0677577Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+2026-10-18T02:32:43.0677822Z with:
+2026-10-18T02:32:43.0677952Z   name: android-emulator-evidence
+2026-10-18T02:32:43.0678119Z   path: evidence/
+evidence-attempt-*/
+
+2026-10-18T02:32:43.0678279Z   retention-days: 90
+2026-10-18T02:32:43.0678411Z   if-no-files-found: warn
+2026-10-18T02:32:43.0678549Z   compression-level: 6
+2026-10-18T02:32:43.0678816Z   overwrite: false
+2026-10-18T02:32:43.0678946Z   include-hidden-files: false
+2026-10-18T02:32:43.0679087Z   archive: true
+2026-10-18T02:32:43.0679201Z env:
+2026-10-18T02:32:43.0679329Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+2026-10-18T02:32:43.0679494Z ##[endgroup]
+2026-10-18T02:32:43.4046864Z With the provided path, there will be 122 files uploaded
+2026-10-18T02:32:43.4049848Z Artifact name is valid!
+2026-10-18T02:32:43.4050224Z Root directory input is valid!
+2026-10-18T02:32:43.7738056Z Uploading artifact: android-emulator-evidence.zip
+2026-10-18T02:32:43.7772785Z Beginning upload of artifact content to blob storage
+2026-10-18T02:32:44.5255666Z Uploaded bytes 8388608
+2026-10-18T02:32:44.8306555Z Uploaded bytes 16777216
+2026-10-18T02:32:44.8915481Z Uploaded bytes 18744185
+2026-10-18T02:32:44.9269020Z Finished uploading artifact content to blob storage!
+2026-10-18T02:32:44.9271382Z SHA256 digest of uploaded artifact is 9a5d27e741c87867eb9dd1838586c984f54cb05d4e8f2fc6819c74e616e35373
+2026-10-18T02:32:44.9272442Z Finalizing artifact upload
+2026-10-18T02:32:45.2191573Z Artifact android-emulator-evidence successfully finalized. Artifact ID 12122034622
+2026-10-18T02:32:45.2192345Z Artifact android-emulator-evidence has been successfully uploaded! Final size is 18744185 bytes. Artifact ID is 12122034622
+2026-10-18T02:32:45.2193014Z Artifact download URL: https://github.com/raydocs/tono/actions/runs/39088253119/artifacts/12122034622
+2026-10-18T02:32:45.2344410Z Cleaning up orphan processes
+2026-10-18T02:32:45.2622643Z Terminate orphan process: pid (2434) (adb)

@@ -1,0 +1,6 @@
+Red (mutation of RouteApply to b36d07d's contract: try? save, nil reply = applied, refusal shows request; derive ignores stopped routes), swift test --filter RouteApplyTests on Linux:
+testNoReply...: ("applied(stable)") is not equal to ("notApplied(NO_REPLY, inEffect: threeTier)")
+testRefusedReloadReports...: inEffect stable != threeTier
+testRefusedReloadWithNoGraphLeft...: ("connected") is not equal to ("failed")
+testSaveRejected...: NOT_APPLIED != SAVE_FAILED; reloads 1 != 0
+Executed 5 tests, with 8 failures

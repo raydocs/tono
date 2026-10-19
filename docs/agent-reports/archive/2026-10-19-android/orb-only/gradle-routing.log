@@ -1,0 +1,62 @@
+Fetching distribution.
+Downloading https://services.gradle.org/distributions/gradle-9.5.1-bin.zip
+.............10%.............20%..............30%.............40%.............50%..............60%.............70%..............80%.............90%.............100%
+
+Welcome to Gradle 9.5.1!
+
+Here are the highlights of this release:
+ - Task provenance in reports and failure messages
+ - Type-safe accessors for precompiled Kotlin Settings plugins
+
+For more details see https://docs.gradle.org/9.5.1/release-notes.html
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :android:app
+w: file:///home/user/workspace/repo/android/app/build.gradle.kts:118:19: 'fun srcDir(srcDir: Any): Any' is deprecated. Use `directories` mutable set instead.
+w: file:///home/user/workspace/repo/android/app/build.gradle.kts:119:17: 'fun srcDir(srcDir: Any): Any' is deprecated. Use `directories` mutable set instead.
+w: file:///home/user/workspace/repo/android/app/build.gradle.kts:122:14: 'fun srcDir(srcDir: Any): Any' is deprecated. Use `directories` mutable set instead.
+w: file:///home/user/workspace/repo/android/app/build.gradle.kts:123:13: 'fun srcDir(srcDir: Any): Any' is deprecated. Use `directories` mutable set instead.
+
+> Task :android:routing:preBuild UP-TO-DATE
+> Task :android:routing:preDebugBuild UP-TO-DATE
+> Task :android:routing:generateDebugResources
+> Task :android:routing:packageDebugResources
+> Task :android:routing:processDebugNavigationResources
+> Task :android:routing:javaPreCompileDebug
+> Task :android:routing:preDebugUnitTestBuild UP-TO-DATE
+> Task :android:routing:javaPreCompileDebugUnitTest FROM-CACHE
+> Task :android:routing:parseDebugLocalResources
+> Task :android:routing:generateDebugRFile
+> Task :android:routing:generateDebugUnitTestStubRFile
+> Task :android:routing:compileDebugKotlin
+> Task :android:routing:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:routing:bundleLibRuntimeToJarDebug
+> Task :android:routing:bundleLibCompileToJarDebug
+> Task :android:routing:processDebugJavaRes
+> Task :android:routing:compileDebugUnitTestKotlin
+> Task :android:routing:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :android:routing:processDebugUnitTestJavaRes
+
+> Task :android:routing:testDebugUnitTest
+
+RoutingPolicyTest > configCarriesTunAndOutboundContract FAILED
+    java.lang.AssertionError at RoutingPolicyTest.kt:114
+
+16 tests completed, 1 failed
+
+> Task :android:routing:testDebugUnitTest FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':android:routing:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/user/workspace/repo/android/routing/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 1m 35s
+15 actionable tasks: 14 executed, 1 from cache
+exit=1

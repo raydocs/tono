@@ -1,0 +1,73 @@
+idle "ConnectConnect" visible 371×58 dp, touch 371×58 dp
+idle "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+idle "Settings" visible 48×48 dp, touch 48×48 dp
+idle "Details" visible 92×48 dp, touch 92×48 dp
+permission "Allow VPNAllow VPN" visible 371×58 dp, touch 371×58 dp
+permission "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+permission "Settings" visible 48×48 dp, touch 48×48 dp
+permission "Details" visible 92×48 dp, touch 92×48 dp
+preparing "CancelCancel connecting" visible 371×58 dp, touch 371×58 dp
+preparing "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+preparing "Settings" visible 48×48 dp, touch 48×48 dp
+preparing "Details" visible 92×48 dp, touch 92×48 dp
+connecting "CancelCancel connecting" visible 371×58 dp, touch 371×58 dp
+connecting "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+connecting "Settings" visible 48×48 dp, touch 48×48 dp
+connecting "Details" visible 92×48 dp, touch 92×48 dp
+connected "Tunnel up for 23:04DisconnectDisconnect" visible 371×58 dp, touch 371×58 dp
+connected "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+connected "Settings" visible 48×48 dp, touch 48×48 dp
+connected "Details" visible 92×48 dp, touch 92×48 dp
+degraded "Tunnel up for 23:04DisconnectDisconnect" visible 371×58 dp, touch 371×58 dp
+degraded "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+degraded "Settings" visible 48×48 dp, touch 48×48 dp
+degraded "Details" visible 105×48 dp, touch 105×48 dp
+disconnecting "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+disconnecting "Settings" visible 48×48 dp, touch 48×48 dp
+disconnecting "Details" visible 92×48 dp, touch 92×48 dp
+failed "RetryRetry" visible 371×58 dp, touch 371×58 dp
+failed "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+failed "Settings" visible 48×48 dp, touch 48×48 dp
+failed "Details" visible 92×48 dp, touch 92×48 dp
+signin "Email" visible 347×64 dp, touch 347×64 dp
+details "Tunnel up for 23:00DisconnectDisconnect" visible 371×58 dp, touch 371×58 dp
+details "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+details "Settings" visible 48×48 dp, touch 48×48 dp
+details "Details" visible 105×48 dp, touch 105×48 dp
+details "Close sheet" visible 411×914 dp, touch 411×914 dp
+details "Check again" visible 112×48 dp, touch 112×48 dp
+details "Routing mode Three-tier" visible 371×48 dp, touch 371×48 dp
+lines "Tunnel up for 23:08DisconnectDisconnect" visible 371×58 dp, touch 371×58 dp
+lines "Tokyo 86 msLines" visible 371×52 dp, touch 371×52 dp
+lines "Settings" visible 48×48 dp, touch 48×48 dp
+lines "Details" visible 105×48 dp, touch 105×48 dp
+lines "Close sheet" visible 411×914 dp, touch 411×914 dp
+lines "Test latency" visible 112×48 dp, touch 112×48 dp
+lines "Tokyo Dawn 86 ms In use" visible 371×56 dp, touch 371×56 dp
+lines "Los Angeles Grove 162 ms" visible 371×56 dp, touch 371×56 dp
+settings "Back" visible 48×48 dp, touch 48×48 dp
+settings "Three-tier (default) AI → Home · Video → cloud · the rest direct" visible 344×52 dp, touch 344×52 dp
+settings "Stable — everything via cloud" visible 344×48 dp, touch 344×48 dp
+settings "What Tono can and cannot recogniseWhat Tono can and cannot recognise" visible 344×48 dp, touch 344×48 dp
+settings "e.g. claude.ai" visible 258×56 dp, touch 258×56 dp
+settings "Check" visible 75×48 dp, touch 75×48 dp
+settings "None — every app uses Tono's rules" visible 344×48 dp, touch 344×48 dp
+settings "Open VPN settings" visible 154×48 dp, touch 154×48 dp
+settings "Sign out" visible 88×48 dp (partly scrolled out)
+settings "Licences and source" visible 164×48 dp (partly scrolled out)
+apps "Back" visible 48×48 dp, touch 48×48 dp
+apps "Search apps" visible 379×56 dp, touch 379×56 dp
+apps "Calendar com.google.android.calendar" visible 411×56 dp, touch 411×56 dp
+apps "Camera com.android.camera2" visible 411×56 dp, touch 411×56 dp
+apps "Chrome com.android.chrome" visible 411×56 dp, touch 411×56 dp
+apps "Clock com.google.android.deskclock" visible 411×56 dp, touch 411×56 dp
+apps "Contacts com.google.android.contacts" visible 411×56 dp, touch 411×56 dp
+apps "Drive com.google.android.apps.docs" visible 411×56 dp, touch 411×56 dp
+apps "Files com.google.android.documentsui" visible 411×56 dp, touch 411×56 dp
+apps "Gmail com.google.android.gm" visible 411×56 dp, touch 411×56 dp
+apps "Google com.google.android.googlequicksearchbox" visible 411×56 dp, touch 411×56 dp
+apps "Maps com.google.android.apps.maps" visible 411×56 dp, touch 411×56 dp
+apps "Messages com.google.android.apps.messaging" visible 411×56 dp (partly scrolled out)
+apps "Done" visible 379×52 dp, touch 379×52 dp
+
+violations: 0

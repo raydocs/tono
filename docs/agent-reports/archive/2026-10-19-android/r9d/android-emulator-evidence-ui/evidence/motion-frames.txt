@@ -1,0 +1,8 @@
+392 frames, 16 ms each, rendered on this device by the Compose test clock
+frame 0 (0 ms): IDLE
+frame 25 (400 ms): PREPARING
+frame 62 (992 ms): CONNECTING
+frame 112 (1792 ms): CONNECTED
+frame 224 (3584 ms): DISCONNECTING
+frame 255 (4080 ms): IDLE
+frame 317 (5072 ms): FAILED

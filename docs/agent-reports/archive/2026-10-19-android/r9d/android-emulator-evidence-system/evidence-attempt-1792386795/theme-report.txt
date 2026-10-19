@@ -1,0 +1,1 @@
+mean luminance below the status bar (0–255): system light theme 26.4, system dark theme 26.4

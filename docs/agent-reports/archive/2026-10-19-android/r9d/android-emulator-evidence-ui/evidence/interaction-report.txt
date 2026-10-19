@@ -1,0 +1,9 @@
+IDLE → connect
+NEEDS_PERMISSION → connect
+PREPARING → disconnect
+CONNECTING → disconnect
+CONNECTED → disconnect
+DEGRADED → disconnect
+FAILED → connect
+DISCONNECTING → (disabled, nothing)
+swipe up from the capsule → Details open, actions: none

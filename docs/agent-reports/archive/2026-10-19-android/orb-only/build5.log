@@ -1,0 +1,104 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :android:domain:preBuild UP-TO-DATE
+> Task :android:domain:preDebugBuild UP-TO-DATE
+> Task :android:domain:generateDebugResources UP-TO-DATE
+> Task :android:domain:packageDebugResources UP-TO-DATE
+> Task :android:domain:processDebugNavigationResources UP-TO-DATE
+> Task :android:domain:parseDebugLocalResources UP-TO-DATE
+> Task :android:domain:generateDebugRFile UP-TO-DATE
+> Task :android:domain:compileDebugKotlin UP-TO-DATE
+> Task :android:domain:javaPreCompileDebug UP-TO-DATE
+> Task :android:domain:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:domain:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :android:domain:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:verifyLibbox
+> Task :android:mobile:preBuild
+> Task :android:mobile:preDebugBuild
+> Task :android:mobile:compileDebugAidl UP-TO-DATE
+> Task :android:mobile:generateDebugBuildConfig UP-TO-DATE
+> Task :android:mobile:generateDebugResources UP-TO-DATE
+> Task :android:mobile:packageDebugResources UP-TO-DATE
+> Task :android:routing:preBuild UP-TO-DATE
+> Task :android:routing:preDebugBuild UP-TO-DATE
+> Task :android:routing:processDebugNavigationResources UP-TO-DATE
+> Task :android:security:preBuild UP-TO-DATE
+> Task :android:security:preDebugBuild UP-TO-DATE
+> Task :android:security:processDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:processDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:parseDebugLocalResources UP-TO-DATE
+> Task :android:mobile:generateDebugRFile UP-TO-DATE
+> Task :android:routing:generateDebugResources UP-TO-DATE
+> Task :android:routing:packageDebugResources UP-TO-DATE
+> Task :android:routing:parseDebugLocalResources UP-TO-DATE
+> Task :android:routing:generateDebugRFile UP-TO-DATE
+> Task :android:routing:compileDebugKotlin UP-TO-DATE
+> Task :android:routing:javaPreCompileDebug UP-TO-DATE
+> Task :android:routing:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:routing:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:domain:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:security:generateDebugResources UP-TO-DATE
+> Task :android:security:packageDebugResources UP-TO-DATE
+> Task :android:security:parseDebugLocalResources UP-TO-DATE
+> Task :android:security:generateDebugRFile UP-TO-DATE
+> Task :android:security:compileDebugKotlin UP-TO-DATE
+> Task :android:security:javaPreCompileDebug UP-TO-DATE
+> Task :android:security:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:security:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:mobile:compileDebugKotlin UP-TO-DATE
+> Task :android:mobile:javaPreCompileDebug UP-TO-DATE
+> Task :android:mobile:compileDebugJavaWithJavac UP-TO-DATE
+> Task :android:domain:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:domain:compileDebugLibraryResources UP-TO-DATE
+> Task :android:domain:writeDebugAarMetadata UP-TO-DATE
+> Task :android:routing:writeDebugAarMetadata UP-TO-DATE
+> Task :android:security:writeDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:checkDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:mobile:compileDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:mergeDebugResources UP-TO-DATE
+> Task :android:mobile:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :android:domain:extractDeepLinksDebug UP-TO-DATE
+> Task :android:domain:processDebugManifest UP-TO-DATE
+> Task :android:mobile:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:processDebugManifest UP-TO-DATE
+> Task :android:security:extractDeepLinksDebug UP-TO-DATE
+> Task :android:security:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugMainManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifestForPackage UP-TO-DATE
+> Task :android:routing:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:routing:compileDebugLibraryResources UP-TO-DATE
+> Task :android:security:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:security:compileDebugLibraryResources UP-TO-DATE
+> Task :android:mobile:processDebugResources UP-TO-DATE
+> Task :android:mobile:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :android:mobile:preDebugUnitTestBuild
+> Task :android:mobile:bundleDebugClassesToRuntimeJar
+> Task :android:mobile:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :android:mobile:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :android:mobile:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :android:domain:generateDebugAssets UP-TO-DATE
+> Task :android:domain:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:generateDebugAssets UP-TO-DATE
+> Task :android:routing:generateDebugAssets UP-TO-DATE
+> Task :android:routing:mergeDebugAssets UP-TO-DATE
+> Task :android:security:generateDebugAssets UP-TO-DATE
+> Task :android:security:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :android:mobile:mergeDebugUnitTestManifest
+> Task :android:mobile:processDebugUnitTestManifest
+> Task :android:mobile:generateDebugUnitTestConfig
+> Task :android:mobile:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:processDebugUnitTestJavaRes
+> Task :android:routing:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :android:routing:processDebugJavaRes UP-TO-DATE
+> Task :android:security:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :android:security:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:testDebugUnitTest
+
+BUILD SUCCESSFUL in 29s
+81 actionable tasks: 7 executed, 74 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.1/userguide/configuration_cache_enabling.html

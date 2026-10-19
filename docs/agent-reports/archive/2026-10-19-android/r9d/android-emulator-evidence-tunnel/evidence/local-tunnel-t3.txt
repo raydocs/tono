@@ -1,0 +1,9 @@
+stand-in scenario: normal
+consent: Android's VPN dialog answered OK
+real states: "Connecting" seen while connecting
+stand-in scenario: home-down
+stand-in scenario: catalog-unavailable
+stand-in scenario: normal
+sky luminance (0–255): not connected 27.3, connecting 54.7, connected 81.1, partly working 62.7, failed 47.7
+sign-out: back to the sign-in screen
+stand-in scenario: normal

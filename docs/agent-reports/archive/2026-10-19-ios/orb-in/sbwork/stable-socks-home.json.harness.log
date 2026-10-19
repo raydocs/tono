@@ -1,0 +1,18 @@
+== live stand-ins
+ok   claude.ai                              -> home                   (want home)
+ok   api.anthropic.com                      -> home                   (want home)
+ok   generativelanguage.googleapis.com      -> home                   (want home)
+ok   youtubei.googleapis.com                -> cloud                  (want cloud)
+ok   www.youtube.com                        -> cloud                  (want cloud)
+ok   www.cloudflare.com                     -> cloud                  (want cloud)
+ok   example.com                            -> cloud                  (want cloud)
+   home saw via cloud relay: ['claude.ai:80', 'api.anthropic.com:80', 'generativelanguage.googleapis.com:80'] … cloud saw: ['127.0.0.1:21081']
+== Home stand-in down
+ok   claude.ai                              -> empty                  (must fail, never direct)
+ok   chatgpt.com                            -> empty                  (must fail, never direct)
+ok   example.com                            -> cloud                  (want cloud)
+== cloud stand-in down
+ok   www.youtube.com                        -> empty                  (must fail, never direct)
+ok   claude.ai                              -> empty                  (must fail, never direct)
+ok   example.com                            -> empty                  (stable: cloud down must fail, never direct)
+all engine routing expectations passed

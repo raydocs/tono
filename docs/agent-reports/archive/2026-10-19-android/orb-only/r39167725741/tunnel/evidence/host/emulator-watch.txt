@@ -1,0 +1,77 @@
+21:30:16 no emulator process
+21:30:21 no emulator process
+21:30:26 no emulator process
+21:30:31 no emulator process
+21:30:36 no emulator process
+21:30:41 no emulator process
+21:30:46 no emulator process
+21:30:51 no emulator process
+21:30:56 no emulator process
+21:31:01 no emulator process
+21:31:06 no emulator process
+21:31:11 no emulator process
+21:31:16 no emulator process
+21:31:21 no emulator process
+21:31:26 no emulator process
+21:31:31 no emulator process
+21:31:36 no emulator process
+21:31:41 no emulator process
+21:31:46 pid 3347 rss_kb,stat,elapsed 414108 Sl 00:01 load 0.60 avail_kb 14484460
+21:31:51 pid 3347 rss_kb,stat,elapsed 581280 Sl 00:06 load 0.55 avail_kb 14377208
+21:31:56 pid 3347 rss_kb,stat,elapsed 1433476 Sl 00:11 load 0.58 avail_kb 13606652
+21:32:01 pid 3347 rss_kb,stat,elapsed 2311380 Sl 00:16 load 0.62 avail_kb 12823180
+21:32:06 pid 3347 rss_kb,stat,elapsed 3058980 Sl 00:21 load 0.73 avail_kb 12119504
+21:32:11 pid 3347 rss_kb,stat,elapsed 3058988 Sl 00:26 load 0.83 avail_kb 12185660
+21:32:16 pid 3347 rss_kb,stat,elapsed 3137624 Sl 00:31 load 1.09 avail_kb 12150812
+21:32:22 pid 3347 rss_kb,stat,elapsed 3275268 Sl 00:37 load 1.48 avail_kb 12021188
+21:32:27 pid 3347 rss_kb,stat,elapsed 3287316 Sl 00:42 load 1.52 avail_kb 12008928
+21:32:32 pid 3347 rss_kb,stat,elapsed 3355288 Sl 00:47 load 2.04 avail_kb 11941484
+21:32:37 pid 3347 rss_kb,stat,elapsed 3390244 Sl 00:52 load 2.36 avail_kb 11928160
+21:32:42 pid 3347 rss_kb,stat,elapsed 3391280 Sl 00:57 load 2.73 avail_kb 11919700
+21:32:47 pid 3347 rss_kb,stat,elapsed 3395312 Sl 01:02 load 2.99 avail_kb 11912212
+21:32:52 pid 3347 rss_kb,stat,elapsed 3408664 Sl 01:07 load 3.23 avail_kb 11892468
+21:32:57 pid 3347 rss_kb,stat,elapsed 3408852 Sl 01:12 load 3.13 avail_kb 11892836
+21:33:02 pid 3347 rss_kb,stat,elapsed 3408928 Sl 01:17 load 3.36 avail_kb 11892468
+21:33:07 pid 3347 rss_kb,stat,elapsed 3409272 Sl 01:22 load 3.74 avail_kb 11890328
+21:33:12 pid 3347 rss_kb,stat,elapsed 3410792 Sl 01:27 load 3.84 avail_kb 11894580
+21:33:17 pid 3347 rss_kb,stat,elapsed 3411240 Sl 01:32 load 3.69 avail_kb 11894836
+21:33:22 pid 3347 rss_kb,stat,elapsed 3411260 Sl 01:37 load 3.55 avail_kb 11892892
+21:33:27 pid 3347 rss_kb,stat,elapsed 3411620 Sl 01:42 load 3.43 avail_kb 11891988
+21:33:32 pid 3347 rss_kb,stat,elapsed 3412108 Sl 01:47 load 3.80 avail_kb 11891676
+21:33:38 pid 3347 rss_kb,stat,elapsed 3424088 Sl 01:53 load 3.49 avail_kb 11876244
+21:33:43 pid 3347 rss_kb,stat,elapsed 3521976 Sl 01:58 load 3.93 avail_kb 11769120
+21:33:48 pid 3347 rss_kb,stat,elapsed 3528592 Sl 02:03 load 4.42 avail_kb 11768788
+21:33:53 pid 3347 rss_kb,stat,elapsed 3529764 Sl 02:08 load 4.71 avail_kb 11769048
+21:33:58 pid 3347 rss_kb,stat,elapsed 3529764 Sl 02:13 load 5.13 avail_kb 11768452
+21:34:03 no emulator process
+21:34:08 no emulator process
+21:34:13 no emulator process
+21:34:18 no emulator process
+21:34:23 pid 4370 rss_kb,stat,elapsed 538812 Sl 00:03 load 3.79 avail_kb 14779580
+21:34:28 pid 4370 rss_kb,stat,elapsed 1068276 Sl 00:08 load 3.49 avail_kb 14259444
+21:34:33 pid 4370 rss_kb,stat,elapsed 1826244 Sl 00:13 load 3.29 avail_kb 13507124
+21:34:38 pid 4370 rss_kb,stat,elapsed 2536652 Sl 00:18 load 3.19 avail_kb 12801084
+21:34:43 pid 4370 rss_kb,stat,elapsed 3038468 Sl 00:23 load 3.17 avail_kb 12293260
+21:34:48 pid 4370 rss_kb,stat,elapsed 3038468 Sl 00:28 load 3.16 avail_kb 12286748
+21:34:53 pid 4370 rss_kb,stat,elapsed 3181900 Sl 00:33 load 3.06 avail_kb 12128908
+21:34:58 pid 4370 rss_kb,stat,elapsed 3281568 Sl 00:39 load 3.54 avail_kb 12042912
+21:35:03 pid 4370 rss_kb,stat,elapsed 3281852 Sl 00:44 load 3.42 avail_kb 12007376
+21:35:08 pid 4370 rss_kb,stat,elapsed 3346560 Sl 00:49 load 3.62 avail_kb 11975068
+21:35:13 pid 4370 rss_kb,stat,elapsed 3356876 Sl 00:54 load 3.49 avail_kb 11962660
+21:35:19 pid 4370 rss_kb,stat,elapsed 3369292 Sl 00:59 load 3.37 avail_kb 11953864
+21:35:24 pid 4370 rss_kb,stat,elapsed 3388480 Sl 01:04 load 3.26 avail_kb 11940280
+21:35:29 pid 4370 rss_kb,stat,elapsed 3388660 Sl 01:09 load 3.64 avail_kb 11941232
+21:35:34 pid 4370 rss_kb,stat,elapsed 3388876 Sl 01:14 load 3.51 avail_kb 11940688
+21:35:39 pid 4370 rss_kb,stat,elapsed 3388904 Sl 01:19 load 3.39 avail_kb 11940596
+21:35:44 pid 4370 rss_kb,stat,elapsed 3388924 Sl 01:24 load 3.28 avail_kb 11940016
+21:35:49 pid 4370 rss_kb,stat,elapsed 3389148 Sl 01:29 load 3.18 avail_kb 11940504
+21:35:54 pid 4370 rss_kb,stat,elapsed 3389148 Sl 01:34 load 3.48 avail_kb 11940100
+21:35:59 pid 4370 rss_kb,stat,elapsed 3389152 Sl 01:39 load 3.36 avail_kb 11938940
+21:36:04 pid 4370 rss_kb,stat,elapsed 3389116 Sl 01:44 load 3.25 avail_kb 11939236
+21:36:09 pid 4370 rss_kb,stat,elapsed 3389204 Sl 01:49 load 3.15 avail_kb 11919708
+21:36:14 pid 4370 rss_kb,stat,elapsed 3503200 Sl 01:54 load 3.46 avail_kb 11812932
+21:36:19 pid 4370 rss_kb,stat,elapsed 3514988 Sl 01:59 load 3.58 avail_kb 11800952
+21:36:24 pid 4370 rss_kb,stat,elapsed 3515828 Sl 02:04 load 3.78 avail_kb 11800104
+21:36:29 pid 4370 rss_kb,stat,elapsed 3516020 Sl 02:10 load 4.04 avail_kb 11800560
+21:36:34 pid 4370 rss_kb,stat,elapsed 3619476 Sl 02:15 load 3.95 avail_kb 11462628
+21:36:39 pid 4370 rss_kb,stat,elapsed 1202128 Sl 02:20 load 3.64 avail_kb 14086952

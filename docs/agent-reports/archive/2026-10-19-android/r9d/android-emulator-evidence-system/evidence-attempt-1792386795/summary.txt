@@ -1,0 +1,10 @@
+health: sign-in screen median frame 900 ms before the tests (limit 1000 ms)
+PASS a1_realSignInScreenAndLocalValidation
+PASS a2_realSystemVpnConsentDialog
+PASS a3_realEngineRefusesToConnectWithoutAccount
+PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+FAIL a5_realAppHonoursRemoveAnimations
+PASS a6_realAppUnderSystemLightAndDarkTheme
+PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+PASS s2_realWidgetInAndroidsWidgetHost
+PASS s3_fixtureWidgetAndNotificationStates

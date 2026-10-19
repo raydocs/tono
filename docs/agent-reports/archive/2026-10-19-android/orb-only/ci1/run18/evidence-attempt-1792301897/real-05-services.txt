@@ -1,0 +1,36 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{d397688 u0 com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+    intent={act=com.raydocs.tono.mobile.BIND_ENGINE cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+    packageName=com.raydocs.tono.mobile.test
+    processName=com.raydocs.tono.mobile.test:vpn
+    permission=android.permission.BIND_VPN_SERVICE
+    baseDir=/data/app/~~dqWaU_y5DU3woska48wfmQ==/com.raydocs.tono.mobile.test-TG3ilHLBoFaDs5uPhC5wgw==/base.apk
+    dataDir=/data/user/0/com.raydocs.tono.mobile.test
+    app=ProcessRecord{1afd43b 6411:com.raydocs.tono.mobile.test:vpn/u0a192}
+    mAllowWhileInUsePermissionInFgsReason=DENIED
+    allowUiJobScheduling=false
+    recentCallingPackage=com.raydocs.tono.mobile.test
+    recentCallingUid=10192
+    allowStartForeground=DENIED
+    startForegroundCount=1
+    infoAllowStartForeground=null
+    createTime=-30s844ms startingBgTimeout=--
+    lastActivity=-4s266ms restartTime=-30s360ms createdFromFg=true
+    startRequested=false delayedStop=false stopIfKilled=false callStart=false lastStartId=1
+ startCommandResult=1
+    Bindings:
+    * IntentBindRecord{efe6f9a CREATE}:
+      intent={act=com.raydocs.tono.mobile.BIND_ENGINE cmp=com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+      binder=android.os.BinderProxy@372a0cb
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{cce80a8 ProcessRecord{54743ba 6385:com.raydocs.tono.mobile.test/u0a192}}
+        Per-process Connections:
+          ConnectionRecord{74b8aca u0 CR com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:@da6d635 flags=0x1}
+    All Connections:
+      ConnectionRecord{74b8aca u0 CR com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:@da6d635 flags=0x1}
+
+  Connection bindings to services:
+  * ConnectionRecord{74b8aca u0 CR com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:@da6d635 flags=0x1}
+    binding=AppBindRecord{cce80a8 com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService:com.raydocs.tono.mobile.test}
+    conn=android.os.BinderProxy@da6d635 flags=0x1

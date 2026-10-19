@@ -1,0 +1,175 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :android:domain:preBuild UP-TO-DATE
+> Task :android:domain:preDebugBuild UP-TO-DATE
+> Task :android:domain:generateDebugResources UP-TO-DATE
+> Task :android:domain:packageDebugResources UP-TO-DATE
+> Task :android:domain:processDebugNavigationResources UP-TO-DATE
+> Task :android:domain:parseDebugLocalResources UP-TO-DATE
+> Task :android:domain:generateDebugRFile UP-TO-DATE
+> Task :android:domain:compileDebugKotlin UP-TO-DATE
+> Task :android:domain:javaPreCompileDebug UP-TO-DATE
+> Task :android:domain:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:domain:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :android:domain:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:verifyLibbox
+> Task :android:mobile:preBuild
+> Task :android:mobile:preDebugBuild
+> Task :android:mobile:compileDebugAidl UP-TO-DATE
+> Task :android:mobile:generateDebugBuildConfig UP-TO-DATE
+> Task :android:mobile:generateDebugResources
+> Task :android:mobile:packageDebugResources
+> Task :android:routing:preBuild UP-TO-DATE
+> Task :android:routing:preDebugBuild UP-TO-DATE
+> Task :android:routing:processDebugNavigationResources UP-TO-DATE
+> Task :android:security:preBuild UP-TO-DATE
+> Task :android:security:preDebugBuild UP-TO-DATE
+> Task :android:security:processDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:processDebugNavigationResources
+> Task :android:routing:generateDebugResources UP-TO-DATE
+> Task :android:routing:packageDebugResources UP-TO-DATE
+> Task :android:routing:parseDebugLocalResources UP-TO-DATE
+> Task :android:routing:generateDebugRFile UP-TO-DATE
+> Task :android:routing:compileDebugKotlin UP-TO-DATE
+> Task :android:routing:javaPreCompileDebug UP-TO-DATE
+> Task :android:routing:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:routing:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:domain:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:security:generateDebugResources UP-TO-DATE
+> Task :android:security:packageDebugResources UP-TO-DATE
+> Task :android:security:parseDebugLocalResources UP-TO-DATE
+> Task :android:security:generateDebugRFile UP-TO-DATE
+> Task :android:mobile:parseDebugLocalResources
+> Task :android:security:compileDebugKotlin UP-TO-DATE
+> Task :android:security:javaPreCompileDebug UP-TO-DATE
+> Task :android:security:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:security:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:mobile:javaPreCompileDebug UP-TO-DATE
+> Task :android:domain:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:domain:compileDebugLibraryResources UP-TO-DATE
+> Task :android:domain:writeDebugAarMetadata UP-TO-DATE
+> Task :android:routing:writeDebugAarMetadata UP-TO-DATE
+> Task :android:security:writeDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:generateDebugRFile
+> Task :android:mobile:checkDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:mapDebugSourceSetPaths
+> Task :android:mobile:compileDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:mergeDebugResources
+> Task :android:mobile:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :android:domain:extractDeepLinksDebug UP-TO-DATE
+> Task :android:domain:processDebugManifest UP-TO-DATE
+> Task :android:mobile:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:processDebugManifest UP-TO-DATE
+> Task :android:security:extractDeepLinksDebug UP-TO-DATE
+> Task :android:security:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugMainManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifestForPackage UP-TO-DATE
+> Task :android:routing:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:routing:compileDebugLibraryResources UP-TO-DATE
+> Task :android:security:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:security:compileDebugLibraryResources UP-TO-DATE
+> Task :android:mobile:processDebugResources
+> Task :android:mobile:preDebugUnitTestBuild
+> Task :android:mobile:javaPreCompileDebugUnitTest FROM-CACHE
+> Task :android:domain:generateDebugAssets UP-TO-DATE
+> Task :android:domain:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:generateDebugAssets UP-TO-DATE
+> Task :android:routing:generateDebugAssets UP-TO-DATE
+> Task :android:routing:mergeDebugAssets UP-TO-DATE
+> Task :android:security:generateDebugAssets UP-TO-DATE
+> Task :android:security:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:packageDebugUnitTestForUnitTest
+> Task :android:mobile:mergeDebugUnitTestManifest FAILED
+
+> Task :android:mobile:compileDebugKotlin
+w: file:///home/user/workspace/repo/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/engine/BoxPlatform.kt:130:38 'val allNetworks: Array<(out) Network!>' is deprecated. Deprecated in Java.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':android:mobile:mergeDebugUnitTestManifest' (registered by plugin 'com.android.internal.application').
+> Dependency verification failed for configuration ':android:mobile:debugUnitTestRuntimeClasspath'
+  68 artifacts failed verification:
+    - annotations-4.17.module (org.robolectric:annotations:4.17) from repository MavenRepo
+    - asm-9.10.1.pom (org.ow2.asm:asm:9.10.1) from repository MavenRepo
+    - asm-commons-9.10.1.pom (org.ow2.asm:asm-commons:9.10.1) from repository MavenRepo
+    - asm-tree-9.10.1.pom (org.ow2.asm:asm-tree:9.10.1) from repository MavenRepo
+    - auto-value-annotations-1.11.1.pom (com.google.auto.value:auto-value-annotations:1.11.1) from repository MavenRepo
+    - auto-value-parent-1.11.1.pom (com.google.auto.value:auto-value-parent:1.11.1) from repository MavenRepo
+    - bc-jdk18on-bom-1.85.module (org.bouncycastle:bc-jdk18on-bom:1.85) from repository MavenRepo
+    - bc-jdk18on-bom-1.85.pom (org.bouncycastle:bc-jdk18on-bom:1.85) from repository MavenRepo
+    - bcprov-jdk18on-1.85.pom (org.bouncycastle:bcprov-jdk18on:1.85) from repository MavenRepo
+    - conscrypt-openjdk-uber-2.6.2.pom (org.conscrypt:conscrypt-openjdk-uber:2.6.2) from repository MavenRepo
+    - core-1.5.0.aar (androidx.test:core:1.5.0) from repository Google
+    - core-1.5.0.pom (androidx.test:core:1.5.0) from repository Google
+    - differ-0.3.0.module (com.dropbox.differ:differ:0.3.0) from repository MavenRepo
+    - differ-jvm-0.3.0.module (com.dropbox.differ:differ-jvm:0.3.0) from repository MavenRepo
+    - error_prone_annotations-2.47.0.pom (com.google.errorprone:error_prone_annotations:2.47.0) from repository MavenRepo
+    - error_prone_parent-2.47.0.pom (com.google.errorprone:error_prone_parent:2.47.0) from repository MavenRepo
+    - espresso-core-3.5.1.aar (androidx.test.espresso:espresso-core:3.5.1) from repository Google
+    - espresso-core-3.5.1.pom (androidx.test.espresso:espresso-core:3.5.1) from repository Google
+    - espresso-idling-resource-3.7.0.aar (androidx.test.espresso:espresso-idling-resource:3.7.0) from repository Google
+    - espresso-idling-resource-3.7.0.pom (androidx.test.espresso:espresso-idling-resource:3.7.0) from repository Google
+    - failureaccess-1.0.3.pom (com.google.guava:failureaccess:1.0.3) from repository MavenRepo
+    - guava-33.6.0-jre.module (com.google.guava:guava:33.6.0-jre) from repository MavenRepo
+    - guava-parent-33.4.0-android.pom (com.google.guava:guava-parent:33.4.0-android) from repository MavenRepo
+    - guava-parent-33.6.0-jre.pom (com.google.guava:guava-parent:33.6.0-jre) from repository MavenRepo
+    - icu4j-78.3.pom (com.ibm.icu:icu4j:78.3) from repository MavenRepo
+    - j2objc-annotations-3.1.pom (com.google.j2objc:j2objc-annotations:3.1) from repository MavenRepo
+    - jsr305-2.0.2.pom (com.google.code.findbugs:jsr305:2.0.2) from repository MavenRepo
+    - junit-1.1.5.aar (androidx.test.ext:junit:1.1.5) from repository Google
+    - junit-1.1.5.pom (androidx.test.ext:junit:1.1.5) from repository Google
+    - junit-4.17.module (org.robolectric:junit:4.17) from repository MavenRepo
+    - kotlinx-io-bytestring-0.3.3.module (org.jetbrains.kotlinx:kotlinx-io-bytestring:0.3.3) from repository MavenRepo
+    - kotlinx-io-bytestring-jvm-0.3.3.module (org.jetbrains.kotlinx:kotlinx-io-bytestring-jvm:0.3.3) from repository MavenRepo
+    - kotlinx-io-core-0.3.3.module (org.jetbrains.kotlinx:kotlinx-io-core:0.3.3) from repository MavenRepo
+    - kotlinx-io-core-jvm-0.3.3.module (org.jetbrains.kotlinx:kotlinx-io-core-jvm:0.3.3) from repository MavenRepo
+    - kotlinx-serialization-bom-1.6.3.pom (org.jetbrains.kotlinx:kotlinx-serialization-bom:1.6.3) from repository MavenRepo
+    - kotlinx-serialization-json-1.6.3.module (org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3) from repository MavenRepo
+    - kotlinx-serialization-json-1.7.3.module (org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3) from repository MavenRepo
+    - kotlinx-serialization-json-jvm-1.6.3.module (org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.6.3) from repository MavenRepo
+    - kotlinx-serialization-json-jvm-1.7.3.module (org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.7.3) from repository MavenRepo
+    - nativeruntime-4.17.module (org.robolectric:nativeruntime:4.17) from repository MavenRepo
+    - nativeruntime-dist-compat-1.0.19.pom (org.robolectric:nativeruntime-dist-compat:1.0.19) from repository MavenRepo
+    - oss-parent-4.pom (org.sonatype.oss:oss-parent:4) from repository MavenRepo
+    - pluginapi-4.17.module (org.robolectric:pluginapi:4.17) from repository MavenRepo
+    - plugins-maven-dependency-resolver-4.17.pom (org.robolectric:plugins-maven-dependency-resolver:4.17) from repository MavenRepo
+    - resources-4.17.module (org.robolectric:resources:4.17) from repository MavenRepo
+    - robolectric-4.17.module (org.robolectric:robolectric:4.17) from repository MavenRepo
+    - roborazzi-1.76.0.aar (io.github.takahirom.roborazzi:roborazzi:1.76.0) from repository MavenRepo
+    - roborazzi-1.76.0.module (io.github.takahirom.roborazzi:roborazzi:1.76.0) from repository MavenRepo
+    - roborazzi-compose-1.76.0.aar (io.github.takahirom.roborazzi:roborazzi-compose:1.76.0) from repository MavenRepo
+    - roborazzi-compose-1.76.0.module (io.github.takahirom.roborazzi:roborazzi-compose:1.76.0) from repository MavenRepo
+    - roborazzi-core-1.76.0.module (io.github.takahirom.roborazzi:roborazzi-core:1.76.0) from repository MavenRepo
+    - roborazzi-core-android-1.76.0.module (io.github.takahirom.roborazzi:roborazzi-core-android:1.76.0) from repository MavenRepo
+    - roborazzi-core.aar (io.github.takahirom.roborazzi:roborazzi-core-android:1.76.0) from repository MavenRepo
+    - roborazzi-painter-1.76.0.module (io.github.takahirom.roborazzi:roborazzi-painter:1.76.0) from repository MavenRepo
+    - roborazzi-painter-jvm-1.76.0.module (io.github.takahirom.roborazzi:roborazzi-painter-jvm:1.76.0) from repository MavenRepo
+    - runner-1.5.2.aar (androidx.test:runner:1.5.2) from repository Google
+    - runner-1.5.2.pom (androidx.test:runner:1.5.2) from repository Google
+    - sandbox-4.17.module (org.robolectric:sandbox:4.17) from repository MavenRepo
+    - shadowapi-4.17.module (org.robolectric:shadowapi:4.17) from repository MavenRepo
+    - shadows-framework-4.17.module (org.robolectric:shadows-framework:4.17) from repository MavenRepo
+    - snakeyaml-2.6.pom (org.yaml:snakeyaml:2.6) from repository MavenRepo
+    - sqlite4java-1.0.392.pom (com.almworks.sqlite4java:sqlite4java:1.0.392) from repository MavenRepo
+    - storage-1.4.2.aar (androidx.test.services:storage:1.4.2) from repository Google
+    - storage-1.4.2.pom (androidx.test.services:storage:1.4.2) from repository Google
+    - test-parameter-injector-1.22.pom (com.google.testparameterinjector:test-parameter-injector:1.22) from repository MavenRepo
+    - test-parameter-injector-parent-1.22.pom (com.google.testparameterinjector:test-parameter-injector-parent:1.22) from repository MavenRepo
+    - utils-4.17.pom (org.robolectric:utils:4.17) from repository MavenRepo
+    - utils-reflector-4.17.module (org.robolectric:utils-reflector:4.17) from repository MavenRepo
+  If the artifacts are trustworthy, you will need to update the gradle/verification-metadata.xml file. For more on how to do this, please refer to https://docs.gradle.org/9.5.1/userguide/dependency_verification.html#sec:troubleshooting-verification in the Gradle documentation.
+  
+  Open this report for more details: file:///home/user/workspace/repo/build/reports/dependency-verification/at-1792253166655/dependency-verification-report.html
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 48s
+68 actionable tasks: 12 executed, 1 from cache, 55 up-to-date

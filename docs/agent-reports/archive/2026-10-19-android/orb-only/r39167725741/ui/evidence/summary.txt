@@ -1,0 +1,2 @@
+health: sign-in screen median frame 1000 ms before the tests (limit 775 ms)
+HEALTH-GATE: emulator renders too slowly (median frame 1000 ms > 775 ms); no tests run in this attempt

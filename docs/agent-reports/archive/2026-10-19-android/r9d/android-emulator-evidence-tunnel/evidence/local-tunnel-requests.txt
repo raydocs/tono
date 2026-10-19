@@ -1,0 +1,5 @@
+cloud www.cloudflare.com engine-probe
+home claude.ai engine-probe
+cloud www.youtube.com HTTP 302
+home api.anthropic.com HTTP 404
+direct example.com HTTP 200

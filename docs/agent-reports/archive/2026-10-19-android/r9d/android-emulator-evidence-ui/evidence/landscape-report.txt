@@ -1,0 +1,4 @@
+before: portrait; overrideConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h842dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 128 - 1080, 2337) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.3 s.1192 fontWeightAdjustment=0} | overrideConfig={0.0 ?mcc0mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBoun
+system rotation (UiAutomation.setRotation 90, Tono's window in front): display turned, window landscape
+27-landscape: 866×363 dp, landscape, density 420
+no text cut off, every control ≥ 48 dp and labelled, every Home control reachable in 8 Home states, sign-in, Details and Settings

@@ -1,0 +1,910 @@
+emulator	UNKNOWN STEP	﻿2026-10-17T22:48:11.5453965Z Current runner version: '2.337.0'
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5476574Z ##[group]Runner Image Provisioner
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5477367Z Hosted Compute Agent
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5477915Z Version: 20261012.601
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5478523Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5479234Z Build Date: 2026-10-12T17:48:21Z
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5479909Z Worker ID: {c59bae9a-afca-486d-a5eb-2c31b469a8c1}
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5480578Z Region: westus3
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5481071Z Cloud: Azure
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5481599Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5483215Z ##[group]Operating System
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5483948Z Ubuntu
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5484481Z 24.04.5
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5484940Z LTS
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5485410Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5485916Z ##[group]Runner Image
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5486502Z Image: ubuntu-24.04
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5487042Z Version: 20261012.334.1
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5488165Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5489617Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5490475Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5491543Z ##[group]GITHUB_TOKEN Permissions
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5493871Z Contents: read
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5494479Z Metadata: read
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5495004Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5497017Z Secret source: Actions
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5497883Z Cache mode: write
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5498527Z Prepare workflow directory
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5872071Z Prepare all required actions
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.5917983Z Getting action download info
+emulator	UNKNOWN STEP	2026-10-17T22:48:11.9029469Z Download action repository 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' (SHA:9000827ccba6bdab643e8b6fd33ac0654aef8333)
+emulator	UNKNOWN STEP	2026-10-17T22:48:12.6617523Z Download action repository 'reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d' (SHA:a421e43855164a8197daf9d8d40fe71c6996bb0d)
+emulator	UNKNOWN STEP	2026-10-17T22:48:13.2107109Z Download action repository 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' (SHA:cf430e030ddbb5b0abf93d22962f4752f3646cd9)
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.0901194Z Complete job name: emulator
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1513573Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1514650Z with:
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1514936Z   name: tono-mobile-0.3.1-test-9ae2e30ba
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1515267Z   path: apk
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1515518Z   merge-multiple: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1515795Z   repository: raydocs/tono
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1516074Z   run-id: 39076280350
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1516338Z   skip-decompress: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1516614Z   digest-mismatch: error
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.1517042Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.2889582Z Downloading single artifact
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.5333445Z Preparing to download the following artifacts:
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.5335456Z - tono-mobile-0.3.1-test-9ae2e30ba (ID: 12116889332, Size: 44953440, Expected Digest: sha256:5c5aac5ee481ef6427dd274f5b6e76ef1716a1b02072886cd520765152055c6a)
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.9569819Z Redirecting to blob download url: https://productionresultssa13.blob.core.windows.net/actions-results/44986f7b-3a75-828b-b1ac-a95b29f1d3b8/workflow-job-run-7fafab4c-f668-59e6-8f97-432f05beab05/artifacts/e38f649ca2b4f9dc4e50582d6d77ca1fbfd5dc66ae4ba361e23f5fb25c572bf9.zip
+emulator	UNKNOWN STEP	2026-10-17T22:48:14.9571741Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+emulator	UNKNOWN STEP	2026-10-17T22:48:15.2426884Z (node:2197) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+emulator	UNKNOWN STEP	2026-10-17T22:48:15.2428415Z (Use `node --trace-deprecation ...` to show where the warning was created)
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9317796Z SHA256 digest of downloaded artifact is 5c5aac5ee481ef6427dd274f5b6e76ef1716a1b02072886cd520765152055c6a
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9318774Z Artifact download completed successfully.
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9324242Z Total of 1 artifact(s) downloaded
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9324736Z Download artifact has finished successfully
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9510484Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9510925Z with:
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9511150Z   name: instrumentation-apk
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9511394Z   path: apk
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9511607Z   merge-multiple: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9511858Z   repository: raydocs/tono
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9512122Z   run-id: 39076280350
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9512351Z   skip-decompress: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9512580Z   digest-mismatch: error
+emulator	UNKNOWN STEP	2026-10-17T22:48:17.9512801Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:18.0773004Z Downloading single artifact
+emulator	UNKNOWN STEP	2026-10-17T22:48:18.2989313Z Preparing to download the following artifacts:
+emulator	UNKNOWN STEP	2026-10-17T22:48:18.2990516Z - instrumentation-apk (ID: 12117207242, Size: 436646, Expected Digest: sha256:ef4f2232e716f1b01c7d3dc45d37ce7cecbe7640e5444fe256e34929ab0c1e49)
+emulator	UNKNOWN STEP	2026-10-17T22:48:18.7188478Z Redirecting to blob download url: https://productionresultssa13.blob.core.windows.net/actions-results/44986f7b-3a75-828b-b1ac-a95b29f1d3b8/workflow-job-run-7fafab4c-f668-59e6-8f97-432f05beab05/artifacts/03fd2856d8c68c693f975f4c83352e888fec0e0068c92622a3d8b7afb7303369.zip
+emulator	UNKNOWN STEP	2026-10-17T22:48:18.7189990Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+emulator	UNKNOWN STEP	2026-10-17T22:48:18.9610976Z (node:2210) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+emulator	UNKNOWN STEP	2026-10-17T22:48:18.9612495Z (Use `node --trace-deprecation ...` to show where the warning was created)
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2523397Z SHA256 digest of downloaded artifact is ef4f2232e716f1b01c7d3dc45d37ce7cecbe7640e5444fe256e34929ab0c1e49
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2524762Z Artifact download completed successfully.
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2527482Z Total of 1 artifact(s) downloaded
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2530393Z Download artifact has finished successfully
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2621976Z ##[group]Run echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2622851Z ^[[36;1mecho 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2623410Z ^[[36;1msudo udevadm control --reload-rules^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2624012Z ^[[36;1msudo udevadm trigger --name-match=kvm^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2779841Z shell: /usr/bin/bash -e {0}
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2780133Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.2904813Z KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3159754Z ##[group]Run cat > evidence.sh <<'SH'
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3160132Z ^[[36;1mcat > evidence.sh <<'SH'^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3160414Z ^[[36;1mset -euxo pipefail^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3160700Z ^[[36;1mAPP=com.raydocs.tono.mobile.test^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3161098Z ^[[36;1m# A retry keeps the first attempt's evidence next to the second's.^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3161629Z ^[[36;1mif [ -d evidence ]; then mv evidence "evidence-attempt-$(date +%s)"; fi^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3162025Z ^[[36;1mmkdir -p evidence^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3162373Z ^[[36;1madb shell getprop ro.build.fingerprint | tee evidence/device.txt^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3162858Z ^[[36;1madb shell getprop ro.product.cpu.abi | tee -a evidence/device.txt^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3163276Z ^[[36;1madb shell wm size | tee -a evidence/device.txt^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3163984Z ^[[36;1madb shell wm density | tee -a evidence/device.txt^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3164560Z ^[[36;1madb shell settings put system screen_off_timeout 1800000^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3164916Z ^[[36;1madb shell svc power stayon true^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3165210Z ^[[36;1madb shell input keyevent 82 || true^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3165688Z ^[[36;1m# Let the launcher finish its first-boot work; on swiftshader it can otherwise raise an ANR^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3166304Z ^[[36;1m# dialog over the app. The test answers only foreign ANR dialogs and logs each one.^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3166861Z ^[[36;1msleep 60^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3167089Z ^[[36;1madb shell input keyevent 3^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3167467Z ^[[36;1m# No -g: runtime permissions and VPN consent stay as on a fresh install.^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3167874Z ^[[36;1madb install -r apk/*-test-*.apk^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3168185Z ^[[36;1madb install -r apk/instrumentation.apk^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3168651Z ^[[36;1m# One instrumentation call per test, pulling evidence after each, so an emulator crash^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3169300Z ^[[36;1m# (seen on hosted runners) costs one test's evidence rather than all of it.^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3169738Z ^[[36;1mset +e^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3169951Z ^[[36;1mfailed=""^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3170329Z ^[[36;1mfor t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog \^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3170990Z ^[[36;1m         a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3171730Z ^[[36;1m         b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale; do^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3172460Z ^[[36;1m  timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.DeviceEvidenceTest#$t" \^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3173111Z ^[[36;1m    $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3174110Z ^[[36;1m  grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3174830Z ^[[36;1m  timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3175555Z ^[[36;1m  [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3176139Z ^[[36;1mdone^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3176413Z ^[[36;1mtimeout 60 adb logcat -d > evidence/logcat.txt^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3176854Z ^[[36;1mls -la evidence^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3177107Z ^[[36;1mcat evidence/summary.txt^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3177384Z ^[[36;1mset -e^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3177637Z ^[[36;1m[ -z "$failed" ]^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3177876Z ^[[36;1mSH^[[0m
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3214863Z shell: /usr/bin/bash -e {0}
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3215158Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3363878Z ##[group]Run reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3364351Z with:
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3364551Z   api-level: 34
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3364771Z   target: google_apis
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3364999Z   arch: x86_64
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3365208Z   profile: pixel_6
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3365455Z   disable-animations: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3365901Z   emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3366364Z   script: bash evidence.sh
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3366606Z   cores: 2
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3366813Z   avd-name: test
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3367031Z   force-avd-creation: true
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3367289Z   emulator-boot-timeout: 600
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3367542Z   emulator-port: 5554
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3367772Z   disable-spellchecker: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3368040Z   disable-linux-hw-accel: auto
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3368297Z   enable-hw-keyboard: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3368577Z   channel: stable
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3368789Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3928573Z ##[group]Configure emulator
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3929122Z API level: 34
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3929504Z System image API level: 34
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3929923Z target: google_apis
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3930468Z CPU architecture: x86_64
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3930909Z Hardware profile: pixel_6
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3931310Z Cores: 2
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3940906Z RAM size: 
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3941314Z Heap size: 
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3941726Z SD card path or size: 
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3942053Z Disk size: 
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3942262Z AVD name: test
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3942847Z force avd creation: true
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3943280Z Emulator boot timeout: 600
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3943923Z emulator port: 5554
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3944424Z emulator options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3944897Z disable animations: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3945159Z disable spellchecker: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3945425Z disable Linux hardware acceleration: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3945729Z enable hardware keyboard: false
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3945975Z Channel: 0 (stable)
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3946186Z Script:
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3946378Z bash evidence.sh
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3946597Z Pre emulator launch script:
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3947136Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.3947538Z ##[group]Install Android SDK
+emulator	UNKNOWN STEP	2026-10-17T22:48:19.4000073Z [command]/usr/bin/sh -c \yes | sdkmanager --licenses > /dev/null
+emulator	UNKNOWN STEP	2026-10-17T22:48:21.8114072Z Installing latest build tools, platform tools, and platform.
+emulator	UNKNOWN STEP	2026-10-17T22:48:21.8127127Z [command]/usr/bin/sh -c \sdkmanager --install 'build-tools;37.0.0' platform-tools 'platforms;android-34'> /dev/null
+emulator	UNKNOWN STEP	2026-10-17T22:48:23.0736738Z Installing latest emulator.
+emulator	UNKNOWN STEP	2026-10-17T22:48:23.0749279Z [command]/usr/bin/sh -c \sdkmanager --install emulator --channel=0 > /dev/null
+emulator	UNKNOWN STEP	2026-10-17T22:48:31.2892784Z Installing system images.
+emulator	UNKNOWN STEP	2026-10-17T22:48:31.2907746Z [command]/usr/bin/sh -c \sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null
+emulator	UNKNOWN STEP	2026-10-17T22:48:58.7169746Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:58.7170379Z ##[group]Create AVD
+emulator	UNKNOWN STEP	2026-10-17T22:48:58.7170704Z Creating AVD.
+emulator	UNKNOWN STEP	2026-10-17T22:48:58.7193416Z [command]/usr/bin/sh -c \echo no | avdmanager create avd --force -n test --package 'system-images;android-34;google_apis;x86_64' --device 'pixel_6'
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.4522751Z Loading local repository...                                                     
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.4523752Z [=========                              ] 25% Loading local repository...       
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.4524471Z [=========                              ] 25% Fetch remote repository...        
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.4525168Z [=======================================] 100% Fetch remote repository...       
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.4928408Z Auto-selecting single ABI x86_64
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.8912312Z [command]/usr/bin/sh -c \printf 'hw.cpu.ncore=2\n' >> /home/runner/.android/avd/test.avd/config.ini
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.8931097Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.8932499Z ##[group]Launch Emulator
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.8932762Z Starting emulator.
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.8945861Z [command]/usr/bin/sh -c \/usr/local/lib/android/sdk/emulator/emulator -port 5554 -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none &
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9046497Z INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9046971Z INFO         | Graphics backend: gfxstream
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9047457Z INFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9455010Z INFO         | Saving last run QEMU version for the AVD to 2
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9456280Z INFO         | Increasing RAM size to 2560MB
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9456894Z ##############################################################################
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9457618Z ##                        WARNING - ACTION REQUIRED                         ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9458432Z ##  Consider using the '-metrics-collection' flag to help improve the       ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9459327Z ##  emulator by sending anonymized usage data. Or use the '-no-metrics'     ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9460233Z ##  flag to bypass this warning and turn off the metrics collection.        ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9461089Z ##  In a future release this warning will turn into a one-time blocking     ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9462173Z ##  prompt to ask for explicit user input regarding metrics collection.     ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9462924Z ##                                                                          ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9467904Z ##  Please see '-help-metrics-collection' for more details. You can use     ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9468848Z ##  '-metrics-to-file' or '-metrics-to-console' flags to see what type of   ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9469805Z ##  data is being collected by emulator as part of usage statistics.        ##
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9470642Z ##############################################################################
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9560510Z INFO         | Guest GLES Driver: Auto (ext controls)
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9561690Z INFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swiftshader
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9562712Z INFO         | Checking system compatibility:
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9563368Z INFO         |   Checking: hasSufficientDiskSpace
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9564297Z INFO         |      Ok: Disk space requirements to run avd: `test` are met
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9565018Z INFO         |   Checking: hasSufficientHwGpu
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9565734Z INFO         |      Ok: Hardware GPU compatibility checks are not required
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9566472Z INFO         |   Checking: hasSufficientSystem
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9567169Z INFO         |      Ok: System requirements to run avd: `test` are met
+emulator	UNKNOWN STEP	2026-10-17T22:48:59.9568805Z WARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6605190Z ERROR        | Unable to connect to adb daemon on port: 5037
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6622098Z INFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.2.12.db, detection is enabled for process: 2546
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6622937Z INFO         | Initializing gfxstream backend
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6631112Z INFO         | startOpenglesRendererImpl: gpu info
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6631471Z INFO         | 
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6634144Z INFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6635185Z INFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6640653Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6641987Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6642950Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6643836Z INFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6679877Z INFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6680365Z INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6921433Z INFO         | Format VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16 does not support YCbCr sampler conversion
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6947069Z INFO         | SharedLibrary::open for [libX11]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6947660Z WARNING      | Could not open libX11.so, try libX11.so.6
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6948145Z INFO         | SharedLibrary::open for [libX11.so.6]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6948669Z INFO         | SharedLibrary::open for [libX11-xcb]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6949318Z WARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.6949851Z INFO         | SharedLibrary::open for [libX11-xcb.so.1]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7004393Z INFO         | Initializing VkEmulation features:
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7005154Z INFO         |     glInteropSupported: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7006104Z INFO         |     useDeferredCommands: true
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7006491Z INFO         |     createResourceWithRequirements: true
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7006837Z INFO         |     useVulkanComposition: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7007161Z INFO         |     useVulkanNativeSwapchain: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7008014Z INFO         |     enable guestRenderDoc: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7008481Z INFO         |     ASTC LDR emulation mode: Gpu
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7008947Z INFO         |     enable ETC2 emulation: true
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7009448Z INFO         |     enable Ycbcr emulation: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7009974Z INFO         |     guestVulkanOnly: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7010473Z INFO         |     useDedicatedAllocations: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7010982Z INFO         |     guestVulkanMaxApiVersion: 1.3.0
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7011514Z INFO         |     enableProtectedMemoryEmulation: false
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7011908Z INFO         | Graphics Adapter Vendor Google (Google Inc.)
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7012661Z INFO         | Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7013296Z INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7015612Z INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7017908Z INFO         | Graphics Device Extensions N/A
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7018247Z INFO         | Disabling sparse binding feature support
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7093386Z INFO         | Sending adb public key [QAAAAI1nAuG7zCLYs4ahoZ9tavPiBysQnQM62ngJwTbWANuaonuU/PzX+Zpy7Wxvan5yhydvHeR3bOpIECmYm8aOCQ16pLet7k8Yczss/nJIGMadRxf/vzZR+g5sM71FEoNXpboN3LADmbB5h6CPeMr06M48GjYnt+7v53ouyNN0NwlofZytLhbG+tx7EUI/6GzW7QtQqZODQx+bNbhpD3hsJImeSIxX4D378Z2CtjmeCHRNBPjMgDQGWRs5UTBpHXNlpqXwmYStK+n+MtY2jg8CdUaO9yqyo2Dk1qSdQzpxkkK93wGUbQuamlKH8//sEl7rflVIZ8oElUduEJHbRoFN7Udmm73NhAoHwpEc2k/268WZEwVI59LZoRwky5gRRVLyhYQ75u1eNjES9IuHiX2N29GMuMo84x4s5NogB3OSuEMpLYv9Y3eBHAgmSBHuiCpKfDoqoFJUZnNNUqIh/2IihQTS8i1eYok6ocp9UMcbxoARY17QPVw/3YYN/U7ZfAsEbQdUYdRxOer8fbZsMP6LI/ubw4j0eY1hs5srDy9TotaijMb6IhzhlvEh9kQbB6DPU+0Qeqn2PsPl0VnSyz5Zde6D4iK6BIVMx3k/x3raJUq5QY5b2iVj3pB6qMX/KzWmV6OXDrJs53WI5F6TB8EQx82+HPdrLH0t5XXFkSCimxG8AVKOJAEAAQA= runner@unknown]
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7099435Z INFO         | Userspace boot properties:
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7100137Z INFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7100766Z INFO         |   androidboot.dalvik.vm.heapsize=576m
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7101342Z INFO         |   androidboot.debug.hwui.renderer=skiagl
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7101705Z INFO         |   androidboot.debug.sf.nobootanimation=1
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7102049Z INFO         |   androidboot.hardware=ranchu
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7102382Z INFO         |   androidboot.hardware.gltransport=pipe
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7102748Z INFO         |   androidboot.hardware.vulkan=ranchu
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7103053Z INFO         |   androidboot.logcat=*:V
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7103359Z INFO         |   androidboot.opengles.version=196608
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7103834Z INFO         |   androidboot.qemu=1
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7106967Z INFO         |   androidboot.qemu.adb.pubkey=QAAAAI1nAuG7zCLYs4ahoZ9tavPiBysQnQM62ngJwTbWANuaonuU/PzX+Zpy7Wxvan5yhydvHeR3bOpIECmYm8aOCQ16pLet7k8Yczss/nJIGMadRxf/vzZR+g5sM71FEoNXpboN3LADmbB5h6CPeMr06M48GjYnt+7v53ouyNN0NwlofZytLhbG+tx7EUI/6GzW7QtQqZODQx+bNbhpD3hsJImeSIxX4D378Z2CtjmeCHRNBPjMgDQGWRs5UTBpHXNlpqXwmYStK+n+MtY2jg8CdUaO9yqyo2Dk1qSdQzpxkkK93wGUbQuamlKH8//sEl7rflVIZ8oElUduEJHbRoFN7Udmm73NhAoHwpEc2k/268WZEwVI59LZoRwky5gRRVLyhYQ75u1eNjES9IuHiX2N29GMuMo84x4s5NogB3OSuEMpLYv9Y3eBHAgmSBHuiCpKfDoqoFJUZnNNUqIh/2IihQTS8i1eYok6ocp9UMcbxoARY17QPVw/3YYN/U7ZfAsEbQdUYdRxOer8fbZsMP6LI/ubw4j0eY1hs5srDy9TotaijMb6IhzhlvEh9kQbB6DPU+0Qeqn2PsPl0VnSyz5Zde6D4iK6BIVMx3k/x3raJUq5QY5b2iVj3pB6qMX/KzWmV6OXDrJs53WI5F6TB8EQx82+HPdrLH0t5XXFkSCimxG8AVKOJAEAAQA= runner@unknown
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7110190Z INFO         |   androidboot.qemu.avd_name=test
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7110536Z INFO         |   androidboot.qemu.camera_hq_edge_processing=0
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7110904Z INFO         |   androidboot.qemu.camera_protocol_ver=1
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7111272Z INFO         |   androidboot.qemu.cpuvulkan.version=4206592
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7111688Z INFO         |   androidboot.qemu.gltransport.drawFlushInterval=800
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7112083Z INFO         |   androidboot.qemu.gltransport.name=pipe
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7112434Z INFO         |   androidboot.qemu.hwcodec.avcdec=2
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7112781Z INFO         |   androidboot.qemu.hwcodec.hevcdec=2
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7113120Z INFO         |   androidboot.qemu.hwcodec.vpxdec=2
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7113542Z INFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7114176Z INFO         |   androidboot.qemu.skin=1080x2400
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7114502Z INFO         |   androidboot.qemu.virtiowifi=1
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7114970Z INFO         |   androidboot.qemu.vsync=60
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7115290Z INFO         |   androidboot.serialno=EMULATOR37X2X12X0
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7115807Z INFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7116312Z INFO         |   androidboot.vbmeta.hash_alg=sha256
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7116651Z INFO         |   androidboot.vbmeta.size=6656
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7116971Z INFO         |   androidboot.veritymode=enforcing
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7294786Z WARNING: cannnot unmap ptr 0x7fa5e8801000 as it is in the protected range from 0x7fa548800000 to 0x7fa5e8a00000
+emulator	UNKNOWN STEP	2026-10-17T22:49:00.7506892Z INFO         | Monitoring duration of emulator setup.
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7380913Z INFO         | Activated packet streamer for bluetooth emulation
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7381669Z INFO         | Successfully initialized netsim WiFi
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7434431Z INFO         | Setting display: 0 configuration to: 1080x2400, dpi: 420x420 
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7435124Z INFO         | setDisplayActiveConfig: id:0, 1080x2400
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7435630Z INFO         | emulatorSetupEnvironment: Environment scene is not required
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7514464Z INFO         | Loading snapshot 'default_boot'...
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7515778Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7628577Z WARNING      | Device 'cache' does not have the requested snapshot 'default_boot'
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7629073Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7629245Z WARNING      | Failed to load snapshot 'default_boot'
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.7629902Z USER_INFO    | The emulator is performing a cold boot without a saved state because there's no snapshot and you have configured it not to save on exit.
+emulator	UNKNOWN STEP	2026-10-17T22:49:01.9233457Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+emulator	UNKNOWN STEP	2026-10-17T22:49:09.8996685Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:09.9035140Z * daemon not running; starting now at tcp:5037
+emulator	UNKNOWN STEP	2026-10-17T22:49:10.0215874Z * daemon started successfully
+emulator	UNKNOWN STEP	2026-10-17T22:49:10.0216679Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T22:49:10.0221255Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T22:49:12.0261044Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:12.0292179Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T22:49:12.0298109Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T22:49:14.0340837Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:14.0383392Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T22:49:14.0387580Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T22:49:16.0421524Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:16.0448106Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T22:49:16.0453476Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T22:49:18.0516360Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:18.0981181Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:20.1032322Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:20.1275730Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:22.1410829Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:22.1620822Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:24.1725306Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:24.2048121Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:26.2105354Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:26.2385812Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:28.2435421Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:28.2728350Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:30.2786073Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:30.3034245Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:32.3064825Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:32.3369088Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:34.3410482Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:34.3883062Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:36.3955699Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:36.4387749Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:38.4419901Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:38.5158134Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:40.5178517Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:40.5464309Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:42.5655910Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:42.6248914Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:44.6294948Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:44.6950283Z 
+emulator	UNKNOWN STEP	2026-10-17T22:49:45.5154633Z INFO         | Boot completed in 45586 ms
+emulator	UNKNOWN STEP	2026-10-17T22:49:45.5195137Z INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+emulator	UNKNOWN STEP	2026-10-17T22:49:46.6995413Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T22:49:46.7187038Z 1
+emulator	UNKNOWN STEP	2026-10-17T22:49:46.7198499Z Emulator booted.
+emulator	UNKNOWN STEP	2026-10-17T22:49:46.7206640Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell input keyevent 82
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.6795478Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.6854948Z [command]/usr/bin/sh -c bash evidence.sh
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.6912722Z + APP=com.raydocs.tono.mobile.test
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.6934784Z + '[' -d evidence ']'
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.6935716Z + mkdir -p evidence
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.6937473Z + adb shell getprop ro.build.fingerprint
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.6947748Z + tee evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.7687665Z google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.7738117Z + adb shell getprop ro.product.cpu.abi
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.7750589Z + tee -a evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.8347194Z x86_64
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.8407439Z + adb shell wm size
+emulator	UNKNOWN STEP	2026-10-17T22:49:55.8424686Z + tee -a evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T22:49:56.4541294Z Physical size: 1080x2400
+emulator	UNKNOWN STEP	2026-10-17T22:49:56.4586249Z + adb shell wm density
+emulator	UNKNOWN STEP	2026-10-17T22:49:56.4590907Z + tee -a evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T22:49:56.8594724Z Physical density: 420
+emulator	UNKNOWN STEP	2026-10-17T22:49:56.8705009Z + adb shell settings put system screen_off_timeout 1800000
+emulator	UNKNOWN STEP	2026-10-17T22:49:57.1085287Z + adb shell svc power stayon true
+emulator	UNKNOWN STEP	2026-10-17T22:49:58.0791244Z + adb shell input keyevent 82
+emulator	UNKNOWN STEP	2026-10-17T22:49:59.3672990Z + sleep 60
+emulator	UNKNOWN STEP	2026-10-17T22:50:59.3698315Z + adb shell input keyevent 3
+emulator	UNKNOWN STEP	2026-10-17T22:50:59.4217903Z + adb install -r apk/tono-mobile-0.3.1-test-9ae2e30ba.apk
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.5664805Z Performing Streamed Install
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.5686902Z Success
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.5714544Z + adb install -r apk/instrumentation.apk
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.9600435Z Performing Streamed Install
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.9603398Z Success
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.9604433Z + set +e
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.9604959Z + failed=
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.9616094Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T22:51:01.9635596Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T22:52:49.7951875Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T22:52:49.7953192Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T22:52:49.7953570Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T22:54:55.0484542Z + grep -q '^OK (' evidence/instrument-a1_realSignInScreenAndLocalValidation.txt
+emulator	UNKNOWN STEP	2026-10-17T22:54:55.0530724Z + echo 'PASS a1_realSignInScreenAndLocalValidation'
+emulator	UNKNOWN STEP	2026-10-17T22:54:55.0532198Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T22:54:55.1175107Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 2 files pulled, 0 skipped. 53.2 MB/s (426073 bytes in 0.008s)
+emulator	UNKNOWN STEP	2026-10-17T22:54:55.1441679Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T22:54:55.1457394Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T22:54:55.1465096Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a2_realSystemVpnConsentDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T22:58:27.3385067Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T22:58:27.3444806Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T22:58:27.3504584Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T22:58:59.4189711Z + grep -q '^OK (' evidence/instrument-a2_realSystemVpnConsentDialog.txt
+emulator	UNKNOWN STEP	2026-10-17T22:58:59.4254081Z + echo 'PASS a2_realSystemVpnConsentDialog'
+emulator	UNKNOWN STEP	2026-10-17T22:58:59.4290291Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T22:58:59.9010796Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 4 files pulled, 0 skipped. 3.0 MB/s (842821 bytes in 0.272s)
+emulator	UNKNOWN STEP	2026-10-17T22:58:59.9489147Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T22:58:59.9536035Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T22:58:59.9540439Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:01:40.7359446Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:01:40.7394675Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:01:40.7454556Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:02:08.0671848Z + grep -q '^OK (' evidence/instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+emulator	UNKNOWN STEP	2026-10-17T23:02:08.0689757Z + echo 'PASS a3_realEngineRefusesToConnectWithoutAccount'
+emulator	UNKNOWN STEP	2026-10-17T23:02:08.0707271Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:02:08.1337625Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 6 files pulled, 0 skipped. 41.8 MB/s (1046243 bytes in 0.024s)
+emulator	UNKNOWN STEP	2026-10-17T23:02:08.1373729Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:02:08.1396501Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:02:08.1425981Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:02:12.9515367Z + grep -q '^OK (' evidence/instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+emulator	UNKNOWN STEP	2026-10-17T23:02:12.9529422Z + echo 'PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig'
+emulator	UNKNOWN STEP	2026-10-17T23:02:12.9530732Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:02:13.0314995Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 7 files pulled, 0 skipped. 14.8 MB/s (1046344 bytes in 0.067s)
+emulator	UNKNOWN STEP	2026-10-17T23:02:13.0409420Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:02:13.0435372Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:02:13.0465558Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:02:25.1099499Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:02:25.1102131Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:02:25.1114534Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:04:10.5215149Z + grep -q '^OK (' evidence/instrument-b1_fixtureStatesRenderedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:04:10.5304587Z + echo 'PASS b1_fixtureStatesRenderedOnDevice'
+emulator	UNKNOWN STEP	2026-10-17T23:04:10.5364818Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:04:10.6553074Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 13 files pulled, 0 skipped. 32.7 MB/s (2520553 bytes in 0.073s)
+emulator	UNKNOWN STEP	2026-10-17T23:04:10.6624908Z + '[' b1_fixtureStatesRenderedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:04:10.6655942Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:04:10.6659647Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:14:10.6684839Z + grep -q '^OK (' evidence/instrument-b2_fixtureMotionRecordedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:14:10.6705764Z + echo 'FAIL b2_fixtureMotionRecordedOnDevice'
+emulator	UNKNOWN STEP	2026-10-17T23:14:10.6734718Z + failed=' b2_fixtureMotionRecordedOnDevice'
+emulator	UNKNOWN STEP	2026-10-17T23:14:10.6741455Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:14:10.9428907Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 13 files pulled, 0 skipped. 9.5 MB/s (2520553 bytes in 0.253s)
+emulator	UNKNOWN STEP	2026-10-17T23:14:10.9466153Z + '[' b2_fixtureMotionRecordedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:14:10.9494648Z + timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+emulator	UNKNOWN STEP	2026-10-17T23:14:11.0299308Z /sdcard/Download/tono-fixture-motion.mp4: 1 file pulled, 0 skipped. 34.3 MB/s (2277570 bytes in 0.063s)
+emulator	UNKNOWN STEP	2026-10-17T23:14:11.0427928Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:14:11.0445921Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b3_fixtureAtLargeFontScale com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:14:26.4524901Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:14:26.4534847Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:14:26.4536406Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:17:13.2205234Z + grep -q '^OK (' evidence/instrument-b3_fixtureAtLargeFontScale.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:13.2255040Z + echo 'PASS b3_fixtureAtLargeFontScale'
+emulator	UNKNOWN STEP	2026-10-17T23:17:13.2315068Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:17:13.3620124Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 15 files pulled, 0 skipped. 22.8 MB/s (2959953 bytes in 0.124s)
+emulator	UNKNOWN STEP	2026-10-17T23:17:13.3664878Z + '[' b3_fixtureAtLargeFontScale = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:17:13.3692758Z + timeout 60 adb logcat -d
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5799623Z + ls -la evidence
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5800439Z total 15704
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5800968Z drwxr-xr-x 2 runner runner     4096 Oct 17 23:17 .
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5801527Z drwxr-xr-x 4 runner runner     4096 Oct 17 22:49 ..
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5802126Z -rw-r--r-- 1 runner runner      136 Oct 17 22:49 device.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5802820Z -rw-r--r-- 1 runner runner   206160 Oct 17 23:17 fixture-01-idle.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5804194Z -rw-r--r-- 1 runner runner   310486 Oct 17 23:17 fixture-02-connecting.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5805084Z -rw-r--r-- 1 runner runner   314226 Oct 17 23:17 fixture-03-connected.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5805933Z -rw-r--r-- 1 runner runner   279104 Oct 17 23:17 fixture-04-degraded.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5806757Z -rw-r--r-- 1 runner runner   196032 Oct 17 23:17 fixture-05-failed.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5807607Z -rw-r--r-- 1 runner runner   168201 Oct 17 23:17 fixture-06-details-sheet.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5808502Z -rw-r--r-- 1 runner runner   290878 Oct 17 23:17 fixture-07-font-1.3-home.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5809388Z -rw-r--r-- 1 runner runner   148522 Oct 17 23:17 fixture-08-font-1.3-details.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5810233Z -rw-r--r-- 1 runner runner  2277570 Oct 17 23:14 fixture-motion.mp4
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5811172Z -rw-r--r-- 1 runner runner      768 Oct 17 22:54 instrument-a1_realSignInScreenAndLocalValidation.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5812112Z -rw-r--r-- 1 runner runner      752 Oct 17 22:58 instrument-a2_realSystemVpnConsentDialog.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5813146Z -rw-r--r-- 1 runner runner      780 Oct 17 23:02 instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5814449Z -rw-r--r-- 1 runner runner      782 Oct 17 23:02 instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5815453Z -rw-r--r-- 1 runner runner      758 Oct 17 23:04 instrument-b1_fixtureStatesRenderedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5816353Z -rw-r--r-- 1 runner runner      357 Oct 17 23:04 instrument-b2_fixtureMotionRecordedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5817327Z -rw-r--r-- 1 runner runner      746 Oct 17 23:17 instrument-b3_fixtureAtLargeFontScale.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5818449Z -rw-r--r-- 1 runner runner 10755430 Oct 17 23:17 logcat.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5819130Z -rw-r--r-- 1 runner runner   201985 Oct 17 23:17 real-01-signin.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5819933Z -rw-r--r-- 1 runner runner   224088 Oct 17 23:17 real-02-signin-invalid-email.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5820746Z -rw-r--r-- 1 runner runner   214337 Oct 17 23:17 real-03-system-vpn-consent.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5821533Z -rw-r--r-- 1 runner runner   202411 Oct 17 23:17 real-04-after-consent.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5822425Z -rw-r--r-- 1 runner runner   201161 Oct 17 23:17 real-05-connect-without-account-stays-signed-out.png
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5823363Z -rw-r--r-- 1 runner runner     2261 Oct 17 23:17 real-05-services.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5824280Z -rw-r--r-- 1 runner runner      101 Oct 17 23:17 real-core.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5825008Z -rw-r--r-- 1 runner runner      286 Oct 17 23:17 summary.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5825744Z + cat evidence/summary.txt
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5826306Z PASS a1_realSignInScreenAndLocalValidation
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5826917Z PASS a2_realSystemVpnConsentDialog
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5827456Z PASS a3_realEngineRefusesToConnectWithoutAccount
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5828161Z PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5828728Z PASS b1_fixtureStatesRenderedOnDevice
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5829229Z FAIL b2_fixtureMotionRecordedOnDevice
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5829755Z PASS b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5830233Z + set -e
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5830697Z + '[' -z ' b2_fixtureMotionRecordedOnDevice' ']'
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5914018Z ##[error]The process '/usr/bin/sh' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5924377Z ##[group]Terminate Emulator
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5925151Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 emu kill
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5934832Z OK: killing emulator, bye bye
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5935458Z OK
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5936272Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5937896Z INFO         | Wait for emulator (pid 2546) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+emulator	UNKNOWN STEP	2026-10-17T23:17:14.5939507Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:18.1389290Z INFO         | Saving with gfxstream=1
+emulator	UNKNOWN STEP	2026-10-17T23:17:18.2590037Z INFO         | Saving snapshot 'default_boot' took 3648 ms
+emulator	UNKNOWN STEP	2026-10-17T23:17:18.8252356Z ERROR        | stop: Not implemented
+emulator	UNKNOWN STEP	2026-10-17T23:17:18.8253120Z WARNING      | Emulator client has not yet been configured.. Call configure me first!
+emulator	UNKNOWN STEP	2026-10-17T23:17:18.8442878Z INFO         | removeAll
+emulator	UNKNOWN STEP	2026-10-17T23:17:18.9048699Z WARNING      | Netsim Wifi dns:///localhost:37115 is gone due to Stream removed (CANCELLED)
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9334745Z ##[group]Run reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9335210Z with:
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9335423Z   api-level: 34
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9335637Z   target: google_apis
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9335854Z   arch: x86_64
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9336079Z   profile: pixel_6
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9336296Z   disable-animations: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9336742Z   emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9337200Z   script: bash evidence.sh
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9337429Z   cores: 2
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9337626Z   avd-name: test
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9337840Z   force-avd-creation: true
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9338091Z   emulator-boot-timeout: 600
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9338342Z   emulator-port: 5554
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9338573Z   disable-spellchecker: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9338842Z   disable-linux-hw-accel: auto
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9339101Z   enable-hw-keyboard: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9339381Z   channel: stable
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9339584Z env:
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9339804Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9340089Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9878828Z ##[group]Configure emulator
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9880895Z API level: 34
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9881647Z System image API level: 34
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9882011Z target: google_apis
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9882408Z CPU architecture: x86_64
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9882782Z Hardware profile: pixel_6
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9883124Z Cores: 2
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9883462Z RAM size: 
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9884090Z Heap size: 
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9884531Z SD card path or size: 
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9885996Z Disk size: 
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9886355Z AVD name: test
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9886745Z force avd creation: true
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9887119Z Emulator boot timeout: 600
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9887516Z emulator port: 5554
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9888271Z emulator options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9889112Z disable animations: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9889531Z disable spellchecker: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9894548Z disable Linux hardware acceleration: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9895053Z enable hardware keyboard: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9895342Z Channel: 0 (stable)
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9895582Z Script:
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9895785Z bash evidence.sh
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9896029Z Pre emulator launch script:
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9896523Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9896918Z ##[group]Install Android SDK
+emulator	UNKNOWN STEP	2026-10-17T23:17:19.9939122Z [command]/usr/bin/sh -c \yes | sdkmanager --licenses > /dev/null
+emulator	UNKNOWN STEP	2026-10-17T23:17:22.0230455Z Installing latest build tools, platform tools, and platform.
+emulator	UNKNOWN STEP	2026-10-17T23:17:22.0245253Z [command]/usr/bin/sh -c \sdkmanager --install 'build-tools;37.0.0' platform-tools 'platforms;android-34'> /dev/null
+emulator	UNKNOWN STEP	2026-10-17T23:17:23.5944569Z Installing latest emulator.
+emulator	UNKNOWN STEP	2026-10-17T23:17:23.5958967Z [command]/usr/bin/sh -c \sdkmanager --install emulator --channel=0 > /dev/null
+emulator	UNKNOWN STEP	2026-10-17T23:17:25.0808864Z Installing system images.
+emulator	UNKNOWN STEP	2026-10-17T23:17:25.0822126Z [command]/usr/bin/sh -c \sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null
+emulator	UNKNOWN STEP	2026-10-17T23:17:26.5700039Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:17:26.5700774Z ##[group]Create AVD
+emulator	UNKNOWN STEP	2026-10-17T23:17:26.5701386Z Creating AVD.
+emulator	UNKNOWN STEP	2026-10-17T23:17:26.5718816Z [command]/usr/bin/sh -c \echo no | avdmanager create avd --force -n test --package 'system-images;android-34;google_apis;x86_64' --device 'pixel_6'
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.3147000Z Loading local repository...                                                     
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.3171971Z [=========                              ] 25% Loading local repository...       
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.3172954Z [=========                              ] 25% Fetch remote repository...        
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.3173969Z [=======================================] 100% Fetch remote repository...       
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.6371551Z Auto-selecting single ABI x86_64
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9064652Z [command]/usr/bin/sh -c \printf 'hw.cpu.ncore=2\n' >> /home/runner/.android/avd/test.avd/config.ini
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9082962Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9084825Z ##[group]Launch Emulator
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9085086Z Starting emulator.
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9101884Z [command]/usr/bin/sh -c \/usr/local/lib/android/sdk/emulator/emulator -port 5554 -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none &
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9204242Z INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9204820Z INFO         | Graphics backend: gfxstream
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9205321Z INFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9593446Z INFO         | Saving last run QEMU version for the AVD to 2
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9594199Z INFO         | Increasing RAM size to 2560MB
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9594790Z ##############################################################################
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9595467Z ##                        WARNING - ACTION REQUIRED                         ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9595908Z ##  Consider using the '-metrics-collection' flag to help improve the       ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9596395Z ##  emulator by sending anonymized usage data. Or use the '-no-metrics'     ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9597065Z ##  flag to bypass this warning and turn off the metrics collection.        ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9597529Z ##  In a future release this warning will turn into a one-time blocking     ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9598005Z ##  prompt to ask for explicit user input regarding metrics collection.     ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9598403Z ##                                                                          ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9598827Z ##  Please see '-help-metrics-collection' for more details. You can use     ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9599315Z ##  '-metrics-to-file' or '-metrics-to-console' flags to see what type of   ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9599799Z ##  data is being collected by emulator as part of usage statistics.        ##
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9600201Z ##############################################################################
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9600566Z INFO         | Guest GLES Driver: Auto (ext controls)
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9601037Z INFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swiftshader
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9601494Z INFO         | Checking system compatibility:
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9601810Z INFO         |   Checking: hasSufficientDiskSpace
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9602185Z INFO         |      Ok: Disk space requirements to run avd: `test` are met
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9602543Z INFO         |   Checking: hasSufficientHwGpu
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9602908Z INFO         |      Ok: Hardware GPU compatibility checks are not required
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9603274Z INFO         |   Checking: hasSufficientSystem
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9603800Z INFO         |      Ok: System requirements to run avd: `test` are met
+emulator	UNKNOWN STEP	2026-10-17T23:17:27.9604647Z WARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1316481Z INFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.2.12.db, detection is enabled for process: 4235
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1317282Z INFO         | Initializing gfxstream backend
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1324447Z INFO         | startOpenglesRendererImpl: gpu info
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1324958Z INFO         | 
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1326778Z INFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1328234Z INFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1329028Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1329984Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1330945Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1331697Z INFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1356227Z INFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1357004Z INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1524318Z INFO         | Format VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16 does not support YCbCr sampler conversion
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1546791Z INFO         | SharedLibrary::open for [libX11]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1547358Z WARNING      | Could not open libX11.so, try libX11.so.6
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1547939Z INFO         | SharedLibrary::open for [libX11.so.6]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1548609Z INFO         | SharedLibrary::open for [libX11-xcb]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1549244Z WARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1549788Z INFO         | SharedLibrary::open for [libX11-xcb.so.1]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1611076Z INFO         | Initializing VkEmulation features:
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1611793Z INFO         |     glInteropSupported: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1655980Z INFO         |     useDeferredCommands: true
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1656459Z INFO         |     createResourceWithRequirements: true
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1656931Z INFO         |     useVulkanComposition: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1657443Z INFO         |     useVulkanNativeSwapchain: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1657988Z INFO         |     enable guestRenderDoc: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1658491Z INFO         |     ASTC LDR emulation mode: Gpu
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1659051Z INFO         |     enable ETC2 emulation: true
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1659620Z INFO         |     enable Ycbcr emulation: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1660138Z INFO         |     guestVulkanOnly: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1660635Z INFO         |     useDedicatedAllocations: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1661187Z INFO         |     guestVulkanMaxApiVersion: 1.3.0
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1661749Z INFO         |     enableProtectedMemoryEmulation: false
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1662365Z INFO         | Graphics Adapter Vendor Google (Google Inc.)
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1663105Z INFO         | Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1664174Z INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1668128Z INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1671618Z INFO         | Graphics Device Extensions N/A
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1672259Z INFO         | Disabling sparse binding feature support
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1741627Z INFO         | Sending adb public key [QAAAAI1nAuG7zCLYs4ahoZ9tavPiBysQnQM62ngJwTbWANuaonuU/PzX+Zpy7Wxvan5yhydvHeR3bOpIECmYm8aOCQ16pLet7k8Yczss/nJIGMadRxf/vzZR+g5sM71FEoNXpboN3LADmbB5h6CPeMr06M48GjYnt+7v53ouyNN0NwlofZytLhbG+tx7EUI/6GzW7QtQqZODQx+bNbhpD3hsJImeSIxX4D378Z2CtjmeCHRNBPjMgDQGWRs5UTBpHXNlpqXwmYStK+n+MtY2jg8CdUaO9yqyo2Dk1qSdQzpxkkK93wGUbQuamlKH8//sEl7rflVIZ8oElUduEJHbRoFN7Udmm73NhAoHwpEc2k/268WZEwVI59LZoRwky5gRRVLyhYQ75u1eNjES9IuHiX2N29GMuMo84x4s5NogB3OSuEMpLYv9Y3eBHAgmSBHuiCpKfDoqoFJUZnNNUqIh/2IihQTS8i1eYok6ocp9UMcbxoARY17QPVw/3YYN/U7ZfAsEbQdUYdRxOer8fbZsMP6LI/ubw4j0eY1hs5srDy9TotaijMb6IhzhlvEh9kQbB6DPU+0Qeqn2PsPl0VnSyz5Zde6D4iK6BIVMx3k/x3raJUq5QY5b2iVj3pB6qMX/KzWmV6OXDrJs53WI5F6TB8EQx82+HPdrLH0t5XXFkSCimxG8AVKOJAEAAQA= runner@unknown]
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1747828Z INFO         | Userspace boot properties:
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1748787Z INFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1749651Z INFO         |   androidboot.dalvik.vm.heapsize=576m
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1750261Z INFO         |   androidboot.debug.hwui.renderer=skiagl
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1750950Z INFO         |   androidboot.debug.sf.nobootanimation=1
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1751497Z INFO         |   androidboot.hardware=ranchu
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1752130Z INFO         |   androidboot.hardware.gltransport=pipe
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1752678Z INFO         |   androidboot.hardware.vulkan=ranchu
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1753362Z INFO         |   androidboot.logcat=*:V
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1754116Z INFO         |   androidboot.opengles.version=196608
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1754583Z INFO         |   androidboot.qemu=1
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1759169Z INFO         |   androidboot.qemu.adb.pubkey=QAAAAI1nAuG7zCLYs4ahoZ9tavPiBysQnQM62ngJwTbWANuaonuU/PzX+Zpy7Wxvan5yhydvHeR3bOpIECmYm8aOCQ16pLet7k8Yczss/nJIGMadRxf/vzZR+g5sM71FEoNXpboN3LADmbB5h6CPeMr06M48GjYnt+7v53ouyNN0NwlofZytLhbG+tx7EUI/6GzW7QtQqZODQx+bNbhpD3hsJImeSIxX4D378Z2CtjmeCHRNBPjMgDQGWRs5UTBpHXNlpqXwmYStK+n+MtY2jg8CdUaO9yqyo2Dk1qSdQzpxkkK93wGUbQuamlKH8//sEl7rflVIZ8oElUduEJHbRoFN7Udmm73NhAoHwpEc2k/268WZEwVI59LZoRwky5gRRVLyhYQ75u1eNjES9IuHiX2N29GMuMo84x4s5NogB3OSuEMpLYv9Y3eBHAgmSBHuiCpKfDoqoFJUZnNNUqIh/2IihQTS8i1eYok6ocp9UMcbxoARY17QPVw/3YYN/U7ZfAsEbQdUYdRxOer8fbZsMP6LI/ubw4j0eY1hs5srDy9TotaijMb6IhzhlvEh9kQbB6DPU+0Qeqn2PsPl0VnSyz5Zde6D4iK6BIVMx3k/x3raJUq5QY5b2iVj3pB6qMX/KzWmV6OXDrJs53WI5F6TB8EQx82+HPdrLH0t5XXFkSCimxG8AVKOJAEAAQA= runner@unknown
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1762431Z INFO         |   androidboot.qemu.avd_name=test
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1762827Z INFO         |   androidboot.qemu.camera_hq_edge_processing=0
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1763201Z INFO         |   androidboot.qemu.camera_protocol_ver=1
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1763565Z INFO         |   androidboot.qemu.cpuvulkan.version=4206592
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1764387Z INFO         |   androidboot.qemu.gltransport.drawFlushInterval=800
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1765055Z INFO         |   androidboot.qemu.gltransport.name=pipe
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1765555Z INFO         |   androidboot.qemu.hwcodec.avcdec=2
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1765898Z INFO         |   androidboot.qemu.hwcodec.hevcdec=2
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1766232Z INFO         |   androidboot.qemu.hwcodec.vpxdec=2
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1766652Z INFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1767059Z INFO         |   androidboot.qemu.skin=1080x2400
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1767379Z INFO         |   androidboot.qemu.virtiowifi=1
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1767700Z INFO         |   androidboot.qemu.vsync=60
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1768017Z INFO         |   androidboot.serialno=EMULATOR37X2X12X0
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1768524Z INFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1769051Z INFO         |   androidboot.vbmeta.hash_alg=sha256
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1769368Z INFO         |   androidboot.vbmeta.size=6656
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1769693Z INFO         |   androidboot.veritymode=enforcing
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.1920185Z WARNING: cannnot unmap ptr 0x7fd96b201000 as it is in the protected range from 0x7fd8cb200000 to 0x7fd96b400000
+emulator	UNKNOWN STEP	2026-10-17T23:17:28.2135652Z INFO         | Monitoring duration of emulator setup.
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2002654Z INFO         | Successfully initialized netsim WiFi
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2003188Z INFO         | Activated packet streamer for bluetooth emulation
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2056050Z INFO         | Setting display: 0 configuration to: 1080x2400, dpi: 420x420 
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2056798Z INFO         | setDisplayActiveConfig: id:0, 1080x2400
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2057523Z INFO         | emulatorSetupEnvironment: Environment scene is not required
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2127924Z INFO         | Loading snapshot 'default_boot'...
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2253205Z WARNING      | Device 'cache' does not have the requested snapshot 'default_boot'
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2253869Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2254118Z WARNING      | Failed to load snapshot 'default_boot'
+emulator	UNKNOWN STEP	2026-10-17T23:17:29.2255286Z USER_INFO    | The emulator is performing a cold boot without a saved state because there's no snapshot and you have configured it not to save on exit.
+emulator	UNKNOWN STEP	2026-10-17T23:17:37.9163566Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:37.9215704Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T23:17:37.9221223Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T23:17:39.9264671Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:39.9319185Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T23:17:39.9322273Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T23:17:41.9352888Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:41.9382103Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T23:17:41.9387000Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T23:17:43.9435940Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:43.9477709Z adb: device offline
+emulator	UNKNOWN STEP	2026-10-17T23:17:43.9490053Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T23:17:45.9528860Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:46.0120336Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:48.0286296Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:48.0504381Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:50.0552898Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:50.0880660Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:52.0969022Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:52.1178234Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:54.1235392Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:54.1525768Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:56.1616191Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:56.2044050Z 
+emulator	UNKNOWN STEP	2026-10-17T23:17:58.2100040Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:17:58.2558752Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:00.2637092Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:00.2950742Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:02.3021857Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:02.3318532Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:04.3384842Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:04.3681747Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:06.3729166Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:06.4047268Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:08.4101690Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:08.4314331Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:10.4371382Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:10.4725486Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:12.4767997Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:12.5087613Z 
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.3675100Z INFO         | Boot completed in 46424 ms
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.3676026Z INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.5125510Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.5374884Z 1
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.5384477Z Emulator booted.
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.5406754Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell input keyevent 82
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6572414Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6591926Z [command]/usr/bin/sh -c bash evidence.sh
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6634284Z + APP=com.raydocs.tono.mobile.test
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6635224Z + '[' -d evidence ']'
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6635880Z ++ date +%s
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6650706Z + mv evidence evidence-attempt-1792279094
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6670147Z + mkdir -p evidence
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6703549Z + adb shell getprop ro.build.fingerprint
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6710163Z + tee evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.6990217Z google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.7014867Z + adb shell getprop ro.product.cpu.abi
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.7017012Z + tee -a evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.7507525Z x86_64
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.7595695Z + adb shell wm size
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.7596281Z + tee -a evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.8186313Z Physical size: 1080x2400
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.8228599Z + adb shell wm density
+emulator	UNKNOWN STEP	2026-10-17T23:18:14.8229778Z + tee -a evidence/device.txt
+emulator	UNKNOWN STEP	2026-10-17T23:18:15.0765101Z Physical density: 420
+emulator	UNKNOWN STEP	2026-10-17T23:18:15.0795191Z + adb shell settings put system screen_off_timeout 1800000
+emulator	UNKNOWN STEP	2026-10-17T23:18:15.1916325Z + adb shell svc power stayon true
+emulator	UNKNOWN STEP	2026-10-17T23:18:16.6966078Z + adb shell input keyevent 82
+emulator	UNKNOWN STEP	2026-10-17T23:18:24.4954988Z + sleep 60
+emulator	UNKNOWN STEP	2026-10-17T23:19:24.4967117Z + adb shell input keyevent 3
+emulator	UNKNOWN STEP	2026-10-17T23:19:24.5656656Z + adb install -r apk/tono-mobile-0.3.1-test-9ae2e30ba.apk
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.0907012Z Performing Streamed Install
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.0907931Z Success
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.0912504Z + adb install -r apk/instrumentation.apk
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.5130331Z Performing Streamed Install
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.5155981Z Success
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.5184630Z + set +e
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.5185336Z + failed=
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.5187662Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:19:27.5191482Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:22:06.7252375Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:22:06.7269252Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:22:06.7274350Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:25:53.3352336Z + grep -q '^OK (' evidence/instrument-a1_realSignInScreenAndLocalValidation.txt
+emulator	UNKNOWN STEP	2026-10-17T23:25:53.3444693Z + echo 'PASS a1_realSignInScreenAndLocalValidation'
+emulator	UNKNOWN STEP	2026-10-17T23:25:53.3446275Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:25:53.5202783Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 2 files pulled, 0 skipped. 3.3 MB/s (423848 bytes in 0.123s)
+emulator	UNKNOWN STEP	2026-10-17T23:25:53.5223843Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:25:53.5226058Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:25:53.5229054Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a2_realSystemVpnConsentDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:29:06.9080393Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:29:06.9299235Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:29:06.9324890Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:30:55.6527265Z + grep -q '^OK (' evidence/instrument-a2_realSystemVpnConsentDialog.txt
+emulator	UNKNOWN STEP	2026-10-17T23:30:55.6715230Z + echo 'PASS a2_realSystemVpnConsentDialog'
+emulator	UNKNOWN STEP	2026-10-17T23:30:55.6725808Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:30:55.9197652Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 4 files pulled, 0 skipped. 4.8 MB/s (829290 bytes in 0.166s)
+emulator	UNKNOWN STEP	2026-10-17T23:30:55.9335249Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:30:55.9368824Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:30:55.9421128Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:36:00.1132291Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:36:00.2188550Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:36:00.2191406Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:37:13.2465533Z + grep -q '^OK (' evidence/instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+emulator	UNKNOWN STEP	2026-10-17T23:37:13.2497976Z + echo 'PASS a3_realEngineRefusesToConnectWithoutAccount'
+emulator	UNKNOWN STEP	2026-10-17T23:37:13.2515420Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:37:13.4425650Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 6 files pulled, 0 skipped. 6.3 MB/s (1033183 bytes in 0.156s)
+emulator	UNKNOWN STEP	2026-10-17T23:37:13.4496345Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:37:13.4520165Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:37:13.4555648Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:37:16.9918315Z + grep -q '^OK (' evidence/instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+emulator	UNKNOWN STEP	2026-10-17T23:37:16.9927760Z + echo 'PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig'
+emulator	UNKNOWN STEP	2026-10-17T23:37:16.9929109Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:37:17.0875791Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 7 files pulled, 0 skipped. 14.1 MB/s (1033284 bytes in 0.070s)
+emulator	UNKNOWN STEP	2026-10-17T23:37:17.0925717Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:37:17.0956762Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:37:17.0985517Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:37:30.8123361Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:37:30.8124803Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:37:30.8125827Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:41:07.1335550Z + grep -q '^OK (' evidence/instrument-b1_fixtureStatesRenderedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:41:07.1384987Z + echo 'PASS b1_fixtureStatesRenderedOnDevice'
+emulator	UNKNOWN STEP	2026-10-17T23:41:07.1445541Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:41:07.9264407Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 13 files pulled, 0 skipped. 5.9 MB/s (2506502 bytes in 0.404s)
+emulator	UNKNOWN STEP	2026-10-17T23:41:08.0997620Z + '[' b1_fixtureStatesRenderedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:41:08.1095743Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:41:08.1134326Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.1029399Z + grep -q '^OK (' evidence/instrument-b2_fixtureMotionRecordedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.1064826Z + echo 'FAIL b2_fixtureMotionRecordedOnDevice'
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.1065832Z + failed=' b2_fixtureMotionRecordedOnDevice'
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.1090892Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.5389129Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 13 files pulled, 0 skipped. 6.2 MB/s (2506502 bytes in 0.385s)
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.5515004Z + '[' b2_fixtureMotionRecordedOnDevice = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.5584907Z + timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.6038207Z /sdcard/Download/tono-fixture-motion.mp4: 1 file pulled, 0 skipped. 64.8 MB/s (2261000 bytes in 0.033s)
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.6119796Z + for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:51:08.6128969Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#b3_fixtureAtLargeFontScale com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+emulator	UNKNOWN STEP	2026-10-17T23:51:20.7726899Z s_glBindAttribLocation: bind attrib 0 name position
+emulator	UNKNOWN STEP	2026-10-17T23:51:20.7729751Z s_glBindAttribLocation: bind attrib 1 name color
+emulator	UNKNOWN STEP	2026-10-17T23:51:20.7730384Z s_glBindAttribLocation: bind attrib 2 name localCoord
+emulator	UNKNOWN STEP	2026-10-17T23:56:55.5449834Z + grep -q '^OK (' evidence/instrument-b3_fixtureAtLargeFontScale.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:55.5504833Z + echo 'PASS b3_fixtureAtLargeFontScale'
+emulator	UNKNOWN STEP	2026-10-17T23:56:55.5546452Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+emulator	UNKNOWN STEP	2026-10-17T23:56:55.6867516Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 15 files pulled, 0 skipped. 27.8 MB/s (2945793 bytes in 0.101s)
+emulator	UNKNOWN STEP	2026-10-17T23:56:55.6915030Z + '[' b3_fixtureAtLargeFontScale = b2_fixtureMotionRecordedOnDevice ']'
+emulator	UNKNOWN STEP	2026-10-17T23:56:55.6915908Z + timeout 60 adb logcat -d
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1155198Z + ls -la evidence
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1165075Z total 16360
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1165837Z drwxr-xr-x 2 runner runner     4096 Oct 17 23:56 .
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1166656Z drwxr-xr-x 5 runner runner     4096 Oct 17 23:18 ..
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1170337Z -rw-r--r-- 1 runner runner      136 Oct 17 23:18 device.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1170956Z -rw-r--r-- 1 runner runner   206259 Oct 17 23:56 fixture-01-idle.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1171570Z -rw-r--r-- 1 runner runner   308752 Oct 17 23:56 fixture-02-connecting.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1172633Z -rw-r--r-- 1 runner runner   314390 Oct 17 23:56 fixture-03-connected.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1174492Z -rw-r--r-- 1 runner runner   279347 Oct 17 23:56 fixture-04-degraded.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1175756Z -rw-r--r-- 1 runner runner   195977 Oct 17 23:56 fixture-05-failed.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1176222Z -rw-r--r-- 1 runner runner   168493 Oct 17 23:56 fixture-06-details-sheet.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1176701Z -rw-r--r-- 1 runner runner   290501 Oct 17 23:56 fixture-07-font-1.3-home.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1177189Z -rw-r--r-- 1 runner runner   148790 Oct 17 23:56 fixture-08-font-1.3-details.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1177902Z -rw-r--r-- 1 runner runner  2261000 Oct 17 23:51 fixture-motion.mp4
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1178666Z -rw-r--r-- 1 runner runner      768 Oct 17 23:25 instrument-a1_realSignInScreenAndLocalValidation.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1179561Z -rw-r--r-- 1 runner runner      752 Oct 17 23:30 instrument-a2_realSystemVpnConsentDialog.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1182482Z -rw-r--r-- 1 runner runner      779 Oct 17 23:37 instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1183198Z -rw-r--r-- 1 runner runner      782 Oct 17 23:37 instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1184274Z -rw-r--r-- 1 runner runner      758 Oct 17 23:41 instrument-b1_fixtureStatesRenderedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1185266Z -rw-r--r-- 1 runner runner      357 Oct 17 23:41 instrument-b2_fixtureMotionRecordedOnDevice.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1186365Z -rw-r--r-- 1 runner runner      746 Oct 17 23:56 instrument-b3_fixtureAtLargeFontScale.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1187110Z -rw-r--r-- 1 runner runner 11458111 Oct 17 23:56 logcat.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1187655Z -rw-r--r-- 1 runner runner   201125 Oct 17 23:56 real-01-signin.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1188101Z -rw-r--r-- 1 runner runner   222723 Oct 17 23:56 real-02-signin-invalid-email.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1188583Z -rw-r--r-- 1 runner runner   203936 Oct 17 23:56 real-03-system-vpn-consent.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1189058Z -rw-r--r-- 1 runner runner   201506 Oct 17 23:56 real-04-after-consent.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1189596Z -rw-r--r-- 1 runner runner   201632 Oct 17 23:56 real-05-connect-without-account-stays-signed-out.png
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1190124Z -rw-r--r-- 1 runner runner     2261 Oct 17 23:56 real-05-services.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1190518Z -rw-r--r-- 1 runner runner      101 Oct 17 23:56 real-core.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1190912Z -rw-r--r-- 1 runner runner      286 Oct 17 23:56 summary.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1191265Z + cat evidence/summary.txt
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1191544Z PASS a1_realSignInScreenAndLocalValidation
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1191875Z PASS a2_realSystemVpnConsentDialog
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1192203Z PASS a3_realEngineRefusesToConnectWithoutAccount
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1192567Z PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1192917Z PASS b1_fixtureStatesRenderedOnDevice
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1193209Z FAIL b2_fixtureMotionRecordedOnDevice
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1193501Z PASS b3_fixtureAtLargeFontScale
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1193963Z + set -e
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1194206Z + '[' -z ' b2_fixtureMotionRecordedOnDevice' ']'
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1197982Z ##[error]The process '/usr/bin/sh' failed with exit code 1
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1201295Z ##[group]Terminate Emulator
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1213877Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 emu kill
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1262695Z OK: killing emulator, bye bye
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1263438Z OK
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1271222Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1272754Z INFO         | Wait for emulator (pid 4235) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+emulator	UNKNOWN STEP	2026-10-17T23:56:57.1275007Z 
+emulator	UNKNOWN STEP	2026-10-17T23:57:00.8339698Z INFO         | Saving with gfxstream=1
+emulator	UNKNOWN STEP	2026-10-17T23:57:00.9543343Z INFO         | Saving snapshot 'default_boot' took 3816 ms
+emulator	UNKNOWN STEP	2026-10-17T23:57:01.7425155Z ERROR        | stop: Not implemented
+emulator	UNKNOWN STEP	2026-10-17T23:57:01.7426598Z WARNING      | Emulator client has not yet been configured.. Call configure me first!
+emulator	UNKNOWN STEP	2026-10-17T23:57:01.7674289Z INFO         | removeAll
+emulator	UNKNOWN STEP	2026-10-17T23:57:01.8541553Z WARNING      | Netsim Wifi dns:///localhost:39383 is gone due to Stream removed (CANCELLED)
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2219276Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2219722Z with:
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2219962Z   name: android-emulator-evidence
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2220281Z   path: evidence/
+emulator	UNKNOWN STEP	evidence-attempt-*/
+emulator	UNKNOWN STEP	
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2220580Z   retention-days: 90
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2220809Z   if-no-files-found: warn
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2221052Z   compression-level: 6
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2221294Z   overwrite: false
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2221515Z   include-hidden-files: false
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2221765Z   archive: true
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2221971Z env:
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2222193Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.2222500Z ##[endgroup]
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.3745448Z With the provided path, there will be 52 files uploaded
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.3751138Z Artifact name is valid!
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.3751686Z Root directory input is valid!
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.7149678Z Uploading artifact: android-emulator-evidence.zip
+emulator	UNKNOWN STEP	2026-10-17T23:57:02.7188809Z Beginning upload of artifact content to blob storage
+emulator	UNKNOWN STEP	2026-10-17T23:57:03.9262346Z Uploaded bytes 8388608
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.0223055Z Uploaded bytes 11035279
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.0827130Z Finished uploading artifact content to blob storage!
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.0828877Z SHA256 digest of uploaded artifact is f768c9bfa8d895519ec58156a0edecac3a240f74159f1df71aff51050c4b2425
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.0829637Z Finalizing artifact upload
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.4458434Z Artifact android-emulator-evidence successfully finalized. Artifact ID 12119265288
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.4459940Z Artifact android-emulator-evidence has been successfully uploaded! Final size is 11035279 bytes. Artifact ID is 12119265288
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.4464009Z Artifact download URL: https://github.com/raydocs/tono/actions/runs/39076280350/artifacts/12119265288
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.4658343Z Cleaning up orphan processes
+emulator	UNKNOWN STEP	2026-10-17T23:57:04.4905365Z Terminate orphan process: pid (2645) (adb)

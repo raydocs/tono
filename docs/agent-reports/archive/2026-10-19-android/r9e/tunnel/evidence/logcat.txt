@@ -1,0 +1,1018 @@
+--------- beginning of main
+10-19 06:50:53.033  9109  9129 I Process : Sending signal. PID: 9227 SIG: 19
+10-19 06:50:53.034  9109  9129 I Process : Sending signal. PID: 9474 SIG: 9
+10-19 06:50:53.044   336   368 I Netd    : Destroyed 1 sockets on fdfe:dcba:9876::1 in 233us
+10-19 06:50:53.044   336  9560 W resolv  : SSL_connect ssl error =5, mark 0xf006f: Software caused connection abort
+10-19 06:50:53.045   336  9560 W resolv  : TLS Handshake failed
+10-19 06:50:53.045   336  9560 W resolv  : query failed
+10-19 06:50:53.045   336  9560 W resolv  : validateDnsTlsServer returned 0 for fdfe:dcba:9876::2
+10-19 06:50:53.045   336  9560 W resolv  : Validation failed
+10-19 06:50:53.047   336   368 I Netd    : Destroyed 8 sockets on 198.18.0.1 in 393us
+10-19 06:50:53.047   519   519 W android.fg: type=1400 audit(0.0:159): avc:  denied  { sys_module } for  capability=16  scontext=u:r:system_server:s0 tcontext=u:r:system_server:s0 tclass=capability permissive=0 bug=b/228030183
+10-19 06:50:53.053   519   536 D Vpn     : setting state=DISCONNECTED, reason=agentDisconnect
+10-19 06:50:53.053   519   763 D ConnectivityService: [111 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTED to DISCONNECTED
+10-19 06:50:53.054   336  9558 W resolv  : SSL_connect ssl error =5, mark 0xf006f: Software caused connection abort
+10-19 06:50:53.054   336  9558 W resolv  : TLS Handshake failed
+10-19 06:50:53.054   336  9558 W resolv  : query failed
+10-19 06:50:53.054   336  9558 W resolv  : validateDnsTlsServer returned 0 for 198.18.0.2
+10-19 06:50:53.054   336  9558 W resolv  : Validation failed
+10-19 06:50:53.054   519   768 D VPN     : NetworkAgent: NetworkAgent channel lost
+10-19 06:50:53.055   519   763 D InetDiagMessage: Destroyed 1 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 06:50:53.055   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 06:50:53.055   519   763 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 2ms
+10-19 06:50:53.055   336   336 I netd    : networkRemoveUidRangesParcel(NativeUidRangeConfig{netId: 111, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}) <0.09ms>
+10-19 06:50:53.056   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 06:50:53.057   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 06:50:53.057   519   763 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 1ms
+10-19 06:50:53.059   519   763 D ConnectivityService: [111 WIFI|VPN] disconnected, was satisfying 50
+10-19 06:50:53.071   337   337 I Zygote  : Process 9474 exited due to signal 9 (Killed)
+--------- beginning of system
+10-19 06:50:53.072   519  1900 I ActivityManager: Process com.raydocs.tono.mobile.test:vpn (pid 9474) has died: prcp FGS 
+10-19 06:50:53.072   519   549 I libprocessgroup: Successfully killed process cgroup uid 10192 pid 9474 in 0ms
+10-19 06:50:53.073   519  1900 W ActivityManager: Scheduling restart of crashed service com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService in 1000ms for start-requested
+10-19 06:50:53.081   336   336 I netd    : tetherGetStats() -> {[]} <0.40ms>
+10-19 06:50:53.083   519   536 I GnssNetworkConnectivityHandler: Network connection lost. Available networks count: 2
+10-19 06:50:53.083   519   536 I GnssNetworkConnectivityHandler: updateNetworkState, state=CLOSED, connected=false, network=111, capabilities=[ Transports: WIFI|VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&VALIDATED&NOT_ROAMING&FOREGROUND&NOT_CONGESTED&NOT_SUSPENDED&NOT_VCN_MANAGED LinkUpBandwidth>=12000Kbps LinkDnBandwidth>=30000Kbps TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> AdminUids: [10192] UnderlyingNetworks: [100]], availableNetworkCount: 2
+10-19 06:50:53.085  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:50:53.086  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:50:53.087   336   336 I netd    : wakeupDelInterface(tun0, 480147066893:tun0, -2147483648, -2147483648) <0.33ms>
+10-19 06:50:53.090   336   336 I netd    : setNetworkAllowlist([NativeUidRangeConfig{netId: 101, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 100, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}]) <0.00ms>
+10-19 06:50:53.091   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=7, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=15, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=17, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1073 RequestorUid: 1073 RequestorPkg: com.google.android.networkstack UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=22, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10166 RequestorUid: 10166 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=24, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10166 RequestorUid: 10166 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=27, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10166 RequestorUid: 10166 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=31, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=33, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 06:50:53.092   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=35, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.095   519   763 D ConnectivityService: Sending DISCONNECTED broadcast for type 17 [111 WIFI|VPN] isDefaultNetwork=false
+10-19 06:50:53.095   519   763 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendStickyBroadcast:1626 android.net.connectivity.com.android.server.ConnectivityService.sendStickyBroadcast:3278 android.net.connectivity.com.android.server.ConnectivityService.sendLegacyNetworkBroadcast:10154 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1165 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1182 
+10-19 06:50:53.103   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=37, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10142 RequestorUid: 10142 RequestorPkg: com.google.android.inputmethod.latin UnderlyingNetworks: Null] ]
+10-19 06:50:53.106   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=41, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10124 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.108   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=43, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10120 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.108   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=54, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10142 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.109   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=56, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.109   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 06:50:53.112   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.118   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:50:53.118   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:50:53.119   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=69, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.119   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=71, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10128 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.120   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 06:50:53.120   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=79, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10146 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.120   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=82, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10135 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.120   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=84, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 10129 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 06:50:53.120   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=89, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 06:50:53.120   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=92, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10117 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.120   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=94, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10170 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.121   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=98, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10190 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.121   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.124   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10155 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.126   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=108, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10140 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.126   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=110, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.138   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=120, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:50:53.138   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=122, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:50:53.138   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=124, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:50:53.139   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=126, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:50:53.139   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=129, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:50:53.139   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=139, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 10129 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 06:50:53.139   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=167, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:50:53.140   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=173, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10148 RequestorUid: 10148 RequestorPkg: com.google.android.apps.photos UnderlyingNetworks: Null] ]
+10-19 06:50:53.144   519   519 I NotificationService: Cannot find enqueued record for key: 0|com.raydocs.tono.mobile.test|7|null|10192
+10-19 06:50:53.152   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.50ms>
+10-19 06:50:53.157   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.43ms>
+10-19 06:50:53.157   336   336 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.14ms>
+10-19 06:50:53.180   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <3.53ms>
+10-19 06:50:53.181   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.44ms>
+10-19 06:50:53.185   336   336 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.35ms>
+10-19 06:50:53.196   519   833 D NetworkStatsObservers: Unregistering RequestInfo from pid/uid:519/1000(android) for DataUsageRequest [ requestId=41, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3091492 ] accessLevel:3
+10-19 06:50:53.196   519   754 D NetworkStatsObservers: Registering observer for RequestInfo from pid/uid:519/1000(android) for DataUsageRequest [ requestId=42, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3074421 ] accessLevel:3
+10-19 06:50:53.200   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <3.42ms>
+10-19 06:50:53.201   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.36ms>
+10-19 06:50:53.205   519   763 W system_server: Long monitor contention with owner WifiHandlerThread (756) at java.lang.Object android.app.PropertyInvalidatedCache.query(java.lang.Object)(PropertyInvalidatedCache.java:953) waiters=2 in java.lang.Object android.app.PropertyInvalidatedCache.query(java.lang.Object) for 108ms
+10-19 06:50:53.211   519   792 D NetworkTimeUpdateService: New default network 100; checking time.
+10-19 06:50:53.232   336   336 I netd    : tetherGetStats() -> {[]} <0.29ms>
+10-19 06:50:53.233  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:50:53.234  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:50:53.235   519   763 D ConnectivityService: NetReassign [17 : null → 100, 35 : null → 100, 129 : null → 100, 43 : null → 100, 61 : null → 100, 24 : null → 100, 139 : null → 100, 15 : null → 100, 84 : null → 100, 167 : null → 100, 37 : null → 100, 98 : null → 100, 104 : null → 100, 22 : null → 100, 108 : null → 100, 56 : null → 100, 69 : null → 100, 71 : null → 100, 110 : null → 100, 82 : null → 100, 63 : null → 100, 79 : null → 100, 75 : null → 100, 7 : null → 100, 27 : null → 100, 120 : null → 100, 173 : null → 100, 92 : null → 100, 124 : null → 100, 41 : null → 100, 126 : null → 100, 54 : null → 100, 31 : null → 100, 94 : null → 100, 89 : null → 100, 33 : null → 100, 106 : null → 100, 122 : null → 100] [c 0] [a 136] [i 3]
+10-19 06:50:53.236   336   336 I netd    : networkDestroy(111) <1.06ms>
+10-19 06:50:53.237   336   336 I resolv  : DNS cache flushed
+10-19 06:50:53.237   336   336 W resolv  : resolv_stats_set_addrs: Network 111 not found for PROTO_DOT
+10-19 06:50:53.237   336   336 W resolv  : resolv_stats_set_addrs: Network 111 not found for PROTO_DOH
+10-19 06:50:53.237   336   336 I netd    : destroyNetworkCache(111) <0.12ms>
+10-19 06:50:53.238   519   763 D ProxyTracker: sending Proxy Broadcast for [] 0 xl=
+10-19 06:50:53.241  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:50:53.246  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:50:53.250   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:50:53.250   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:50:53.251   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:50:53.318   519   547 D ActivityManager: sync unfroze 9323 com.android.settings for 3
+10-19 06:50:53.325  9323  9323 D BatteryUsageBroadcastReceiver: onReceive:android.intent.action.BATTERY_LEVEL_CHANGED
+10-19 06:50:53.336  9109  9129 I Process : Sending signal. PID: 9227 SIG: 9
+--------- beginning of kernel
+10-19 06:50:53.553     0     0 W binder_debug: 184 callbacks suppressed
+10-19 06:50:53.553     0     0 I binder  : undelivered transaction 930667, process died.
+10-19 06:50:53.555     0     0 I binder  : undelivered transaction 930668, process died.
+10-19 06:50:53.558     0     0 I binder  : undelivered transaction 931221, process died.
+10-19 06:50:53.560     0     0 I binder  : undelivered transaction 930666, process died.
+10-19 06:50:53.370   519  1841 I ActivityManager: Process com.raydocs.tono.mobile.test:watch (pid 9227) has died: fg  SVC 
+10-19 06:50:53.371   519   549 I libprocessgroup: Successfully killed process cgroup uid 10192 pid 9227 in 0ms
+10-19 06:50:53.372   834   907 D EGL_emulation: app_time_stats: avg=267.35ms min=3.82ms max=808.11ms count=4
+10-19 06:50:53.373   337   337 I Zygote  : Process 9227 exited due to signal 9 (Killed)
+10-19 06:50:53.597  1538  1613 I DeviceStatusMonitor: DeviceStatusMonitor.handleBroadcast():122 onReceive() : Action = android.net.conn.CONNECTIVITY_CHANGE
+10-19 06:50:53.597  1538  1613 I DeviceStatusMonitor: DeviceStatusMonitor.notifyIfNetworkChanged():179 notifyIfNetworkChanged: newState = NON_METERED, airplaneModeOn = false, notifyAnyway = false
+10-19 06:50:53.598  1538  1538 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 06:50:53.598  1538  1613 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 06:50:53.598  1538  9366 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 06:50:53.611  5371  9547 W ctxmgr  : [NetworkStateProducer] No state change for network connection context [CONTEXT service_id=47 ]
+10-19 06:50:53.615  8838  8881 I BugleTransport: Tachygram is disabled in the RCS Configuration [CONTEXT ratelimit_period="5 SECONDS" ]
+10-19 06:50:53.616  8838  8881 I BugleTransport: Enabled chat transport is TRANSPORT_RCS [CONTEXT group_by="TRANSPORT_RCS" ratelimit_period="5 SECONDS" ]
+10-19 06:50:54.073   519   547 D CompatibilityChangeReporter: Compat change id reported: 135634846; UID 10192; state: DISABLED
+10-19 06:50:54.074   519   548 D CompatibilityChangeReporter: Compat change id reported: 143937733; UID 10192; state: ENABLED
+10-19 06:50:54.078   337   337 D Zygote  : Forked child process 9605
+10-19 06:50:54.078   519   548 I ActivityManager: Start proc 9605:com.raydocs.tono.mobile.test:vpn/u0a192 for service {com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+10-19 06:50:54.097  9605  9605 I mobile.test:vpn: Late-enabling -Xcheck:jni
+10-19 06:50:54.106  9605  9605 I mobile.test:vpn: Using CollectorTypeCC GC.
+10-19 06:50:54.107  9605  9605 W mobile.test:vpn: Unexpected CPU variant for x86: x86_64.
+10-19 06:50:54.107  9605  9605 W mobile.test:vpn: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-19 06:50:54.119   413   426 I adbd    : jdwp connection from 9605
+10-19 06:50:54.124   519  2446 D CompatibilityChangeReporter: Compat change id reported: 168419799; UID 10192; state: DISABLED
+10-19 06:50:54.124   519  2446 D CompatibilityChangeReporter: Compat change id reported: 273564678; UID 10192; state: DISABLED
+10-19 06:50:54.132  9605  9605 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10192; state: ENABLED
+10-19 06:50:54.132  9605  9605 D CompatibilityChangeReporter: Compat change id reported: 242716250; UID 10192; state: ENABLED
+10-19 06:50:54.135   519   592 D CompatibilityChangeReporter: Compat change id reported: 170503758; UID 10192; state: ENABLED
+10-19 06:50:54.137  9605  9605 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+10-19 06:50:54.137  9605  9605 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.sidecar.jar
+10-19 06:50:54.138  9605  9605 W ziparchive: Unable to open '/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.dm': No such file or directory
+10-19 06:50:54.138  9605  9605 W ziparchive: Unable to open '/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.dm': No such file or directory
+10-19 06:50:54.218  9605  9605 D nativeloader: Configuring clns-6 for other apk /data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/lib/x86_64:/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.raydocs.tono.mobile.test
+10-19 06:50:54.224  9605  9605 V GraphicsEnvironment: Currently set values for:
+10-19 06:50:54.224  9605  9605 V GraphicsEnvironment:   angle_gl_driver_selection_pkgs=[]
+10-19 06:50:54.225  9605  9605 V GraphicsEnvironment:   angle_gl_driver_selection_values=[]
+10-19 06:50:54.225  9605  9605 V GraphicsEnvironment: ANGLE GameManagerService for com.raydocs.tono.mobile.test: false
+10-19 06:50:54.225  9605  9605 V GraphicsEnvironment: com.raydocs.tono.mobile.test is not listed in per-application setting
+10-19 06:50:54.226  9605  9605 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+10-19 06:50:54.229   519   592 I ActivityManager: Flag disabled. Ignoring finishAttachApplication from uid: 10192. pid: 9605
+10-19 06:50:54.241  9605  9605 D CompatibilityChangeReporter: Compat change id reported: 160794467; UID 10192; state: ENABLED
+10-19 06:50:54.243  9605  9605 I TonoWatchdog: engine starting: replaced a leftover CONNECTED notification (VPN network false)
+10-19 06:50:54.264   519   592 D ConnectivityService: requestNetwork for uid/pid:10192/9605 activeRequest: null callbackRequest: 175 [NetworkRequest [ LISTEN_FOR_BEST id=175, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&FOREGROUND&NOT_VCN_MANAGED Uid: 10192 RequestorUid: 10192 RequestorPkg: com.raydocs.tono.mobile.test UnderlyingNetworks: Null] ]] callback flags: 0 order: 2147483647
+10-19 06:50:54.266   519   763 D ConnectivityService: NetReassign [175 : null → 100] [c 0] [a 1] [i 0]
+10-19 06:50:54.277   519   592 D CompatibilityChangeReporter: Compat change id reported: 170668199; UID 10192; state: ENABLED
+10-19 06:50:54.298   519  2446 D CompatibilityChangeReporter: Compat change id reported: 172251878; UID 10192; state: ENABLED
+10-19 06:50:54.298   834   834 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 06:50:54.314   519  2446 D CompatibilityChangeReporter: Compat change id reported: 135634846; UID 10192; state: DISABLED
+10-19 06:50:54.314   519   548 D CompatibilityChangeReporter: Compat change id reported: 143937733; UID 10192; state: ENABLED
+10-19 06:50:54.320   337   337 D Zygote  : Forked child process 9628
+10-19 06:50:54.322  9605  9627 D TrafficStats: tagSocket(79) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:54.322   834   834 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 06:50:54.323   519   548 I ActivityManager: Start proc 9628:com.raydocs.tono.mobile.test:watch/u0a192 for service {com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService}
+10-19 06:50:54.327   519   519 W NotificationHistory: Attempted to add notif for locked/gone/disabled user 0
+10-19 06:50:54.329  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:54.330  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:54.349  9628  9628 I bile.test:watch: Late-enabling -Xcheck:jni
+10-19 06:50:54.359   834   834 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 06:50:54.360  9628  9628 I bile.test:watch: Using CollectorTypeCC GC.
+10-19 06:50:54.361  9628  9628 W bile.test:watch: Unexpected CPU variant for x86: x86_64.
+10-19 06:50:54.361  9628  9628 W bile.test:watch: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-19 06:50:54.371   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:54.381   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:54.428   519  1841 D CompatibilityChangeReporter: Compat change id reported: 261072174; UID 10192; state: ENABLED
+10-19 06:50:54.429   413   426 I adbd    : jdwp connection from 9628
+10-19 06:50:54.492  9628  9628 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10192; state: ENABLED
+10-19 06:50:54.498  9628  9628 D CompatibilityChangeReporter: Compat change id reported: 242716250; UID 10192; state: ENABLED
+10-19 06:50:54.504  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:54.504  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:54.504  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:54.504  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:54.514  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:54.514  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:54.515  9605  9605 W tono-engine: type=1400 audit(0.0:160): avc:  denied  { read } for  name="tcp" dev="proc" ino=4026532053 scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:object_r:proc_net_tcp_udp:s0 tclass=file permissive=0 app=com.raydocs.tono.mobile.test
+10-19 06:50:54.529   834   907 D EGL_emulation: app_time_stats: avg=377.22ms min=115.47ms max=833.94ms count=3
+10-19 06:50:54.536  9628  9628 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+10-19 06:50:54.536  9628  9628 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.sidecar.jar
+10-19 06:50:54.537  9628  9628 W ziparchive: Unable to open '/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.dm': No such file or directory
+10-19 06:50:54.537  9628  9628 W ziparchive: Unable to open '/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.dm': No such file or directory
+10-19 06:50:54.539  9605  9605 W tono-engine: type=1400 audit(0.0:161): avc:  denied  { read } for  name="somaxconn" dev="proc" ino=91786 scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:object_r:proc_net:s0 tclass=file permissive=0 app=com.raydocs.tono.mobile.test
+10-19 06:50:54.548  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:54.549  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:54.554  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:54.554  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:54.558  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:54.558  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:54.957   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:54.963   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:55.162  9628  9628 D nativeloader: Configuring clns-6 for other apk /data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/lib/x86_64:/data/app/~~4UIcUi_Luyjrye4JwFyXfw==/com.raydocs.tono.mobile.test-bG-j8T3V-iUvoUd9N3_4mw==/base.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.raydocs.tono.mobile.test
+10-19 06:50:55.187  9628  9628 V GraphicsEnvironment: Currently set values for:
+10-19 06:50:55.188  9628  9628 V GraphicsEnvironment:   angle_gl_driver_selection_pkgs=[]
+10-19 06:50:55.188  9628  9628 V GraphicsEnvironment:   angle_gl_driver_selection_values=[]
+10-19 06:50:55.189  9628  9628 V GraphicsEnvironment: ANGLE GameManagerService for com.raydocs.tono.mobile.test: false
+10-19 06:50:55.189  9628  9628 V GraphicsEnvironment: com.raydocs.tono.mobile.test is not listed in per-application setting
+10-19 06:50:55.189  9628  9628 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+10-19 06:50:55.219   519   590 I ActivityManager: Flag disabled. Ignoring finishAttachApplication from uid: 10192. pid: 9628
+10-19 06:50:55.492   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:50:55.830  9605  9623 D TonoEngine: [36mINFO[0m[0000] network: updated available networks: wlan0 (wifi), eth0 (cellular, expensive)
+10-19 06:50:55.831  9605  9605 W tono-engine: type=1400 audit(0.0:162): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 06:50:55.848   519   756 D NetdWrapper: NetdWrapper interface add, iface= tun0
+10-19 06:50:55.854   336   368 I Netd    : Destroyed 8 sockets on 198.18.0.1 in 381us
+10-19 06:50:55.855   519   590 D VpnJni  : Address added on tun0: 198.18.0.1/30
+10-19 06:50:55.856   519   590 D VpnJni  : Address added on tun0: fdfe:dcba:9876::1/126
+10-19 06:50:55.857   519   590 D Vpn     : setting state=CONNECTING, reason=establish
+10-19 06:50:55.859   519   590 D Vpn     : setting state=CONNECTING, reason=agentConnect
+10-19 06:50:55.860   519   590 I ConnectivityService: Update score for net 112 : +IS_VPN
+10-19 06:50:55.861   519   590 D ConnectivityService: registerNetworkAgent NetworkAgentInfo{network{112}  handle{484442034189}  ni{VPN CONNECTING extra: } created=2026-10-19T06:50:55.860Z Score(Policies : IS_VPN ; KeepConnected : 0)  underlying{[100]}  lp{{InterfaceName: tun0 LinkAddresses: [ 198.18.0.1/30,fdfe:dcba:9876::1/126 ] DnsAddresses: [ /198.18.0.2,/fdfe:dcba:9876::2 ] Domains:  MTU: 9000 Routes: [ 0.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,8.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,11.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,12.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,16.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,32.0.0.0/3 -> 0.0.0.0 tun0 mtu 0,64.0.0.0/3 -> 0.0.0.0 tun0 mtu 0,96.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,100.0.0.0/10 -> 0.0.0.0 tun0 mtu 0,100.128.0.0/9 -> 0.0.0.0 tun0 mtu 0,101.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,102.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,104.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,112.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,128.0.0.0/3 -> 0.0.0.0 tun0 mtu 0,160.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,168.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,169.0.0.0/9 -> 0.0.0.0 tun0 mtu 0,169.128.0.0/10 -> 0.0.0.0 tun0 mtu 0,169.192.0.0/11 -> 0.0.0.0 tun0 mtu 0,169.224.0.0/12 -> 0.0.0.0 tun0 mtu 0,169.240.0.0/13 -> 0.0.0.0 tun0 mtu 0,169.248.0.0/14 -> 0.0.0.0 tun0 mtu 0,169.252.0.0/15 -> 0.0.0.0 tun0 mtu 0,169.255.0.0/16 -> 0.0.0.0 tun0 mtu 0,170.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,172.0.0.0/12 -> 0.0.0.0 tun0 mtu 0,172.32.0.0/11 -> 0.0.0.0 tun0 mtu 0,172.64.0.0/10 -> 0.0.0.0 tun0 mtu 0,172.128.0.0/9 -> 0.0.0.0 tun0 mtu 0,173.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,174.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,176.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,192.0.0.0/9 -> 0.0.0.0 tun0 mtu 0,192.128.0.0/11 -> 0.0.0.0 tun0 mtu 0,192.160.0.0/13 -> 0.0.0.0 tun0 mtu 0,192.169.0.0/16 -> 0.0.0.0 tun0 mtu 0,192.170.0.0/15 -> 0.0.0.0 tun0 mtu 0,192.172.0.0/14 -> 0.0.0.0 tun0 mtu 0,192.176.0.0/12 -> 0.0.0.0 tun0 mtu 0,192.192.0.0/10 -> 0.0.0.0 tun0 mtu 0,193.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,194.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,196.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,200.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,208.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,240.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,248.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,252.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,254.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,255.0.0.0/9 -> 0.0.0.0 tun0 mtu 0,255.128.0.0/10 -> 0.0.0.0 tun0 mtu 0,255.192.0.0/11 -> 0.0.0.0 tun0 mtu 0,255.224.0.0/12 -> 0.0.0.0 tun0 mtu 0,255.240.0.0/13 -> 0.0.0.0 tun0 mtu 0,255.248.0.0/14 -> 0.0.0.0 tun0 mtu 0,255.252.0.0/15 -> 0.0.0.0 tun0 mtu 0,255.254.0.0/16 -> 0.0.0.0 tun0 mtu 0,255.255.0.0/17 -> 0.0.0.0 tun0 mtu 0,255.255.128.0/18 -> 0.0.0.0 tun0 mtu 0,255.255.192.0/19 -> 0.0.0.0 tun0 mtu 0,255.255.224.0/20 -> 0.0.0.0 tun0 mtu 0,255.255.240.0/21 -> 0.0.0.0 tun0 mtu 0,255.255.248.0/22 -> 0.0.0.0 tun0 mtu 0,255.255.252.0/23 -> 0.0.0.0 tun0 mtu 0,255.255.254.0/24 -> 0.0.0.0 tun0 mtu 0,255.255.255.0/25 -> 0.0.0.0 tun0 mtu 0,255.255.255.128/26 -> 0.0.0.0 tun0 mtu 0,255.255.255.192/27 -> 0.0.0.0 tun0 mtu 0,255.255.255.224/28 -> 0.0.0.0 tun0 mtu 0,255.255.255.240/29 -> 0.0.0.0 tun0 mtu 0,255.255.255.248/30 -> 0.0.0.0 tun0 mtu 0,255.255.255.252/31 -> 0.0.0.0 tun0 mtu 0,255.255.255.254/32 -> 0.0.0.0 tun0 mtu 0,::/1 -> :: tun0 mtu 0,8000::/2 -> :: tun0 mtu 0,c000::/3 -> :: tun0 mtu 0,e000::/4 -> :: tun0 mtu 0,f000::/5 -> :: tun0 mtu 0,f800::/6 -> :: tun0 mtu 0,fc00::/7 -> :: tun0 mtu 0,fe00::/9 -> :: tun0 mtu 0,fec0::/10 -> :: tun0 mtu 0 ]}}  nc{[ Transports: VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> OwnerUid: 10192 AdminUids: [10192] UnderlyingNetworks: [100]]}  factorySerialNumber=2}
+10-19 06:50:55.861   519   590 D Vpn     : setting state=CONNECTED, reason=agentConnect
+10-19 06:50:55.862   336   336 I netd    : getFwmarkForNetwork(112) -> {MarkMaskParcel{mark: 112, mask: 65535}} <0.00ms>
+10-19 06:50:55.862   519   590 I Vpn     : Established by com.raydocs.tono.mobile.test on tun0
+10-19 06:50:55.863  9605  9623 D TonoEngine: [37mTRACE[0m[0000] inbound/tun[tun-in]: creating stack
+10-19 06:50:55.864  9605  9623 D TonoEngine: [36mINFO[0m[0000] inbound/tun[tun-in]: started at tun0
+10-19 06:50:55.864   519   763 D ConnectivityService: [112 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTING to CONNECTING
+10-19 06:50:55.864   336   336 I netd    : networkCreate(NativeNetworkConfig{netId: 112, networkType: VIRTUAL, permission: 0, secure: true, vpnType: SERVICE, excludeLocalRoutes: false}) <0.10ms>
+10-19 06:50:55.865   336   336 I netd    : createNetworkCache(112) <0.05ms>
+10-19 06:50:55.865   336   336 I netd    : setNetworkAllowlist([NativeUidRangeConfig{netId: 101, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 112, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 100, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}]) <0.00ms>
+10-19 06:50:55.865   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 06:50:55.865   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 06:50:55.865   519   763 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 1ms
+10-19 06:50:55.865   336   336 I netd    : networkAddUidRangesParcel(NativeUidRangeConfig{netId: 112, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}) <0.00ms>
+10-19 06:50:55.866   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 06:50:55.866   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 06:50:55.866   519   763 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 0ms
+10-19 06:50:55.868   999  9654 D NetworkMonitor/112: checkAndRenewResourceConfig: update captive portal https urls to [https://www.google.com/generate_204]
+10-19 06:50:55.868   999  9654 D NetworkMonitor/112: checkAndRenewResourceConfig: update captive portal http urls to [http://connectivitycheck.gstatic.com/generate_204]
+10-19 06:50:55.868   999  9654 D NetworkMonitor/112: checkAndRenewResourceConfig: update captive portal fallback urls to[http://www.google.com/gen_204, http://play.googleapis.com/generate_204]
+10-19 06:50:55.868   999  9654 D NetworkMonitor: Starting on network 112 with capport HTTPS URL [https://www.google.com/generate_204] and HTTP URL [http://connectivitycheck.gstatic.com/generate_204]
+10-19 06:50:55.863  9605  9605 W tono-engine: type=1400 audit(0.0:163): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 06:50:55.873   519   763 D ConnectivityService: [112 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTING to CONNECTED
+10-19 06:50:55.874   519   763 W DnsManager: updatePrivateDns(112, PrivateDnsConfig{true:/[]})
+10-19 06:50:55.874   519   763 D ConnectivityService: Setting DNS servers for network 112 to [/198.18.0.2, /fdfe:dcba:9876::2]
+10-19 06:50:55.874   519   763 D DnsManager: sendDnsConfigurationForNetwork(112, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, , [198.18.0.2, fdfe:dcba:9876::2])
+10-19 06:50:55.874   336   336 I resolv  : setDoh: No suitable DoH server found
+10-19 06:50:55.874   336   336 I resolv  : resolv_set_nameservers: netid = 112, addr = 198.18.0.2
+10-19 06:50:55.874   336   336 I resolv  : resolv_set_nameservers: netid = 112, addr = fdfe:dcba:9876::2
+10-19 06:50:55.874   336   336 I netd    : DnsResolverService::setResolverConfiguration(112, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, "", [198.18.0.2, fdfe:dcba:9876::2]) -> (0) (0.2ms)
+10-19 06:50:55.874   336   336 I netd    : setResolverConfiguration(ResolverParamsParcel{netId: 112, sampleValiditySeconds: 1800, successThreshold: 25, minSamples: 8, maxSamples: 64, baseTimeoutMsec: 0, retryCount: 0, servers: [198.18.0.2, fdfe:dcba:9876::2], domains: [], tlsName: , tlsServers: [198.18.0.2, fdfe:dcba:9876::2], tlsFingerprints: [], caCertificate: , tlsConnectTimeoutMs: 0, resolverOptions: (null), transportTypes: [1, 4]}) <0.23ms>
+10-19 06:50:55.876  9605  9650 D TonoEngine: [36mINFO[0m[0000] network: updated default interface wlan0, index 16, type wifi
+10-19 06:50:55.878   519   763 D ConnectivityService: Adding iface tun0 to network 112
+10-19 06:50:55.878   336  9655 W resolv  : Validating DnsTlsServer 198.18.0.2 with mark 0xf0070
+10-19 06:50:55.881   336   336 I netd    : networkAddInterface(112, tun0) <2.93ms>
+10-19 06:50:55.881  9605  9623 D TonoEngine: [36mINFO[0m[0000] sing-box started (0.90s)
+10-19 06:50:55.875  9605  9605 W Thread-4: type=1400 audit(0.0:164): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 06:50:55.881   336   336 I netd    : wakeupAddInterface(tun0, 484442034189:tun0, -2147483648, -2147483648) <0.59ms>
+10-19 06:50:55.884   336   336 I netd    : interfaceSetMtu(tun0, 9000) <0.10ms>
+10-19 06:50:55.884   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 0.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.884   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 8.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.884   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 11.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.885   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 12.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.885   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 16.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.885   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 32.0.0.0/3, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.885   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 64.0.0.0/3, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.885   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 96.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.885   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 100.0.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.886   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 100.128.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.886   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 101.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.886   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 102.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.886   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 104.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.886   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 112.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.886   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 128.0.0.0/3, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.887   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 160.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.887   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 168.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.887   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.0.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.887   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.128.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.887   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.192.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.887   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.224.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.887   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.240.0.0/13, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.888   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.248.0.0/14, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.888   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.252.0.0/15, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.888   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 169.255.0.0/16, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.888   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 170.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.888   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 172.0.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.888   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 172.32.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.889   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 172.64.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.889   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 172.128.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.889   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 173.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.879  9605  9605 W tono-engine: type=1400 audit(0.0:165): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 06:50:55.890   336  9656 W resolv  : Validating DnsTlsServer fdfe:dcba:9876::2 with mark 0xf0070
+10-19 06:50:55.890   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 174.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 06:50:55.890   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 176.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.891   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.0.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 06:50:55.891   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.128.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.891   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.160.0.0/13, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.892   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.169.0.0/16, ifName: tun0, nextHop: , mtu: 0}) <0.07ms>
+10-19 06:50:55.892   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.170.0.0/15, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.892   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.172.0.0/14, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.893   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.176.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.893   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 192.192.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.893   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 193.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.894   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 194.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.07ms>
+10-19 06:50:55.894   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 196.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.894   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 200.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.894   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 208.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.895   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 240.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.895   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 248.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.12ms>
+10-19 06:50:55.895   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 252.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 06:50:55.895   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 254.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.896   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.0.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.896   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.128.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.896   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.192.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.896   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.224.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.897   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.240.0.0/13, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.897   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.248.0.0/14, ifName: tun0, nextHop: , mtu: 0}) <0.08ms>
+10-19 06:50:55.897   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.252.0.0/15, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.897   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.254.0.0/16, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.897   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.0.0/17, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 06:50:55.898   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.128.0/18, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.898   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.192.0/19, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.898   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.224.0/20, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.898   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.240.0/21, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 06:50:55.899   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.248.0/22, ifName: tun0, nextHop: , mtu: 0}) <0.07ms>
+10-19 06:50:55.899   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.252.0/23, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.899   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.254.0/24, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 06:50:55.900   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.0/25, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.900   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.128/26, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.900   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.192/27, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.900   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.224/28, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 06:50:55.900   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.240/29, ifName: tun0, nextHop: , mtu: 0}) <0.07ms>
+10-19 06:50:55.901   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.248/30, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.901   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.252/31, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 06:50:55.901   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 255.255.255.254/32, ifName: tun0, nextHop: , mtu: 0}) <0.12ms>
+10-19 06:50:55.901   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: ::/1, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 06:50:55.902   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 8000::/2, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 06:50:55.902   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: c000::/3, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 06:50:55.903   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: e000::/4, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 06:50:55.903   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: f000::/5, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 06:50:55.904   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: f800::/6, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 06:50:55.904   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: fc00::/7, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 06:50:55.905   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: fe00::/9, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 06:50:55.905   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: fec0::/10, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 06:50:55.906   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: 198.18.0.0/30, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 06:50:55.906   336   336 I netd    : networkAddRouteParcel(112, RouteInfoParcel{destination: fdfe:dcba:9876::/126, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 06:50:55.906   519   763 D ConnectivityService: Setting DNS servers for network 112 to [/198.18.0.2, /fdfe:dcba:9876::2]
+10-19 06:50:55.906   519   763 D DnsManager: sendDnsConfigurationForNetwork(112, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, , [198.18.0.2, fdfe:dcba:9876::2])
+10-19 06:50:55.906   336   336 I resolv  : setDoh: No suitable DoH server found
+10-19 06:50:55.907   336   336 I netd    : DnsResolverService::setResolverConfiguration(112, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, "", [198.18.0.2, fdfe:dcba:9876::2]) -> (0) (0.1ms)
+10-19 06:50:55.907   336   336 I netd    : setResolverConfiguration(ResolverParamsParcel{netId: 112, sampleValiditySeconds: 1800, successThreshold: 25, minSamples: 8, maxSamples: 64, baseTimeoutMsec: 0, retryCount: 0, servers: [198.18.0.2, fdfe:dcba:9876::2], domains: [], tlsName: , tlsServers: [198.18.0.2, fdfe:dcba:9876::2], tlsFingerprints: [], caCertificate: , tlsConnectTimeoutMs: 0, resolverOptions: (null), transportTypes: [1, 4]}) <0.14ms>
+10-19 06:50:55.921  9605  9658 D TonoEngine: [36mINFO[0m[0000] [[38;5;231m1552041687[0m 0ms] inbound/tun[tun-in]: inbound DNS connection from [fdfe:dcba:9876::1]:46184
+10-19 06:50:55.922  9605  9658 D TonoEngine: [36mINFO[0m[0000] [[38;5;231m1552041687[0m 1ms] router: found user id: 1051
+10-19 06:50:55.924   336   336 I netd    : tetherGetStats() -> {[]} <0.32ms>
+10-19 06:50:55.929   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.42ms>
+10-19 06:50:55.930   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.39ms>
+10-19 06:50:55.930   999  9654 D NetworkMonitor/112: Network would not satisfy default request, resolving private DNS
+10-19 06:50:55.932   336   336 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.40ms>
+10-19 06:50:55.933   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.31ms>
+10-19 06:50:55.933   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.47ms>
+10-19 06:50:55.934   336   336 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.47ms>
+10-19 06:50:55.934   336   336 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.45ms>
+10-19 06:50:55.936   519   754 D NetworkStatsObservers: Registering observer for RequestInfo from pid/uid:519/1000(android) for DataUsageRequest [ requestId=43, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3063916 ] accessLevel:3
+10-19 06:50:55.936   519   833 D NetworkStatsObservers: Unregistering RequestInfo from pid/uid:519/1000(android) for DataUsageRequest [ requestId=42, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3074421 ] accessLevel:3
+10-19 06:50:55.943   519   763 D ConnectivityService: Sending CONNECTED broadcast for type 17 [112 WIFI|VPN] isDefaultNetwork=false
+10-19 06:50:55.943   519   763 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendStickyBroadcast:1626 android.net.connectivity.com.android.server.ConnectivityService.sendStickyBroadcast:3278 android.net.connectivity.com.android.server.ConnectivityService.sendGeneralBroadcast:3248 android.net.connectivity.com.android.server.ConnectivityService.sendConnectedBroadcast:3221 android.net.connectivity.com.android.server.ConnectivityService.sendLegacyNetworkBroadcast:10126 
+10-19 06:50:55.944   519   792 D NetworkTimeUpdateService: New default network 112; checking time.
+10-19 06:50:55.951  1816  3178 D TrafficStats: tagSocket(120) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.952  1816  3563 D TrafficStats: tagSocket(147) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.954  1816  3563 D TrafficStats: tagSocket(120) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.954  1538  1990 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.955  1816  3178 D TrafficStats: tagSocket(120) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.956   336   336 I netd    : tetherGetStats() -> {[]} <0.32ms>
+10-19 06:50:55.957  1538  1990 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.961  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:50:55.962  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:50:55.963  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:50:55.966  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:50:55.966  5371  5794 D TrafficStats: tagSocket(141) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.967   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.56ms>
+10-19 06:50:55.968   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.48ms>
+10-19 06:50:55.969   336   336 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.42ms>
+10-19 06:50:55.969   336   336 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.44ms>
+10-19 06:50:55.974  5371  5794 D TrafficStats: tagSocket(141) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.982  8838  8946 D TrafficStats: tagSocket(84) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.984  8838  8946 D TrafficStats: tagSocket(84) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:55.986   834   907 D EGL_emulation: app_time_stats: avg=239.15ms min=3.11ms max=854.85ms count=6
+10-19 06:50:55.987   519   763 D ConnectivityService: NetReassign [17 : 100 → 112, 35 : 100 → 112, 129 : 100 → 112, 43 : 100 → 112, 61 : 100 → 112, 24 : 100 → 112, 139 : 100 → 112, 15 : 100 → 112, 84 : 100 → 112, 167 : 100 → 112, 37 : 100 → 112, 98 : 100 → 112, 104 : 100 → 112, 22 : 100 → 112, 108 : 100 → 112, 56 : 100 → 112, 69 : 100 → 112, 71 : 100 → 112, 110 : 100 → 112, 82 : 100 → 112, 63 : 100 → 112, 79 : 100 → 112, 75 : 100 → 112, 7 : 100 → 112, 27 : 100 → 112, 120 : 100 → 112, 173 : 100 → 112, 92 : 100 → 112, 124 : 100 → 112, 41 : 100 → 112, 126 : 100 → 112, 54 : 100 → 112, 31 : 100 → 112, 94 : 100 → 112, 89 : 100 → 112, 33 : 100 → 112, 106 : 100 → 112, 122 : 100 → 112] [c 1] [a 12] [i 2]
+10-19 06:50:55.990   519   763 I ConnectivityService: Update score for net 112 : +EVER_EVALUATED
+10-19 06:50:55.990   519   763 D ConnectivityService: [112 WIFI|VPN] validation passed
+10-19 06:50:55.990   519   763 I ConnectivityService: Update capabilities for net 112 : +VALIDATED
+10-19 06:50:55.990   519   763 I ConnectivityService: Update score for net 112 : +EVER_VALIDATED+IS_VALIDATED
+10-19 06:50:55.992   519   536 I GnssNetworkConnectivityHandler: updateNetworkState, state=CLOSED, connected=true, network=112, capabilities=[ Transports: WIFI|VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&VALIDATED&NOT_ROAMING&FOREGROUND&NOT_CONGESTED&NOT_SUSPENDED&NOT_VCN_MANAGED LinkUpBandwidth>=12000Kbps LinkDnBandwidth>=30000Kbps TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> AdminUids: [10192] UnderlyingNetworks: [100]], availableNetworkCount: 3
+10-19 06:50:56.000   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:50:56.001   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:50:56.001   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:50:56.002   519   763 D ConnectivityService: NetReassign [no changes] [c 0] [a 1] [i 10]
+10-19 06:50:56.013  1538  1990 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:56.014  1816  3178 D TrafficStats: tagSocket(120) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:56.016  1816  3563 D TrafficStats: tagSocket(120) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:56.020  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:50:56.021  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:50:56.038   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:50:56.048   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:50:56.070   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:50:56.128  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:56.128  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:56.129  5371  5794 D TrafficStats: tagSocket(141) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:56.130   519   763 D ConnectivityService: Setting DNS servers for network 112 to [/198.18.0.2, /fdfe:dcba:9876::2]
+10-19 06:50:56.130   519   763 D DnsManager: sendDnsConfigurationForNetwork(112, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, , [198.18.0.2, fdfe:dcba:9876::2])
+10-19 06:50:56.130   336   336 I resolv  : setDoh: No suitable DoH server found
+10-19 06:50:56.130   336   336 I netd    : DnsResolverService::setResolverConfiguration(112, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, "", [198.18.0.2, fdfe:dcba:9876::2]) -> (0) (0.3ms)
+10-19 06:50:56.130   336   336 I netd    : setResolverConfiguration(ResolverParamsParcel{netId: 112, sampleValiditySeconds: 1800, successThreshold: 25, minSamples: 8, maxSamples: 64, baseTimeoutMsec: 0, retryCount: 0, servers: [198.18.0.2, fdfe:dcba:9876::2], domains: [], tlsName: , tlsServers: [198.18.0.2, fdfe:dcba:9876::2], tlsFingerprints: [], caCertificate: , tlsConnectTimeoutMs: 0, resolverOptions: (null), transportTypes: [1, 4]}) <0.34ms>
+10-19 06:50:56.132   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:50:56.140  8838  8946 D TrafficStats: tagSocket(84) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:56.140   834   853 I ndroid.systemui: Background young concurrent copying GC freed 375375(16MB) AllocSpace objects, 16(320KB) LOS objects, 40% free, 23MB/40MB, paused 261us,23us total 164.801ms
+10-19 06:50:56.188   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:56.190   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:56.444  1538  1613 I DeviceStatusMonitor: DeviceStatusMonitor.handleBroadcast():122 onReceive() : Action = android.net.conn.CONNECTIVITY_CHANGE
+10-19 06:50:56.447  1538  1613 I DeviceStatusMonitor: DeviceStatusMonitor.getNetworkState():276 Network has WIFI transport but no NET_CAPABILITY_NOT_METERED capability.
+10-19 06:50:56.447  1538  1613 I DeviceStatusMonitor: DeviceStatusMonitor.notifyIfNetworkChanged():179 notifyIfNetworkChanged: newState = METERED, airplaneModeOn = false, notifyAnyway = false
+10-19 06:50:56.447  1538  1538 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = METERED, isAirplaneModeOn = false
+10-19 06:50:56.447  1538  1613 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = METERED, isAirplaneModeOn = false
+10-19 06:50:56.447  1538  8043 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = METERED, isAirplaneModeOn = false
+10-19 06:50:56.466  5371  8875 W ctxmgr  : [NetworkStateProducer] No state change for network connection context [CONTEXT service_id=47 ]
+10-19 06:50:56.521   336  9659 I resolv  : GetAddrInfoHandler::run: {100 100 112 917616 10192 0}
+10-19 06:50:56.522   336  9660 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 06:50:56.522   336  9661 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 06:50:56.523  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;170m1416172442[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:25726
+10-19 06:50:56.524  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;170m1416172442[0m 1ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:56.524  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;170m1416172442[0m 1ms] dns: exchange www.cloudflare.com. IN AAAA
+10-19 06:50:56.524  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;170m1416172442[0m 1ms] dns: match[2] query_type=[A AAAA] domain=[www.wikipedia.org en.wikipedia.org www.mozilla.org...] => route(fakeip)
+10-19 06:50:56.524  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;170m1416172442[0m 1ms] dns: exchanged www.cloudflare.com NOERROR 600
+10-19 06:50:56.524  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;170m1416172442[0m 1ms] dns: exchanged AAAA www.cloudflare.com. 600 IN AAAA fc00::402
+10-19 06:50:56.524  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;43m2071692786[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:27514
+10-19 06:50:56.525   336  9660 I resolv  : res_nsend: used send_dg 82 terrno: 0
+10-19 06:50:56.525   336  9660 I resolv  : doQuery: rcode=0, ancount=1, return value=82
+10-19 06:50:56.525  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;43m2071692786[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:56.525  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;43m2071692786[0m 0ms] dns: exchange www.cloudflare.com. IN A
+10-19 06:50:56.525  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;43m2071692786[0m 0ms] dns: match[2] query_type=[A AAAA] domain=[www.wikipedia.org en.wikipedia.org www.mozilla.org...] => route(fakeip)
+10-19 06:50:56.525  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;43m2071692786[0m 0ms] dns: exchanged www.cloudflare.com NOERROR 600
+10-19 06:50:56.525  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;43m2071692786[0m 1ms] dns: exchanged A www.cloudflare.com. 600 IN A 198.18.132.2
+10-19 06:50:56.525   336  9661 I resolv  : res_nsend: used send_dg 70 terrno: 0
+10-19 06:50:56.526   336  9661 I resolv  : doQuery: rcode=0, ancount=1, return value=70
+10-19 06:50:56.527  9605  9627 D TrafficStats: tagSocket(88) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:56.528  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;30m2403609317[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:56.528  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;30m2403609317[0m 0ms] router: found fakeip domain: www.cloudflare.com
+10-19 06:50:56.528  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;30m2403609317[0m 0ms] router: pre-match[0] inbound=tun-in => sniff
+10-19 06:50:56.528  9605  9644 D TonoEngine: [36mINFO[0m[0001] [[38;5;119m697469287[0m 0ms] inbound/tun[tun-in]: inbound connection from 198.18.0.1:41168
+10-19 06:50:56.529  9605  9644 D TonoEngine: [36mINFO[0m[0001] [[38;5;119m697469287[0m 0ms] inbound/tun[tun-in]: inbound connection to 198.18.132.2:443
+10-19 06:50:56.529  9605  9644 D TonoEngine: [36mINFO[0m[0001] [[38;5;119m697469287[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:56.530  9605  9644 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;119m697469287[0m 1ms] router: found fakeip domain: www.cloudflare.com
+10-19 06:50:56.530  9605  9644 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;119m697469287[0m 1ms] router: match[0] inbound=tun-in => sniff
+10-19 06:50:56.534  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;119m697469287[0m 5ms] router: sniffed protocol: tls, domain: www.cloudflare.com
+10-19 06:50:56.534  9605  9658 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;119m697469287[0m 5ms] router: match[13] network=tcp domain=[www.wikipedia.org en.wikipedia.org www.mozilla.org...] => route(Tono-Exit)
+10-19 06:50:56.534  9605  9658 D TonoEngine: [36mINFO[0m[0001] [[38;5;119m697469287[0m 5ms] outbound/vless[Local test · Fixture]: outbound connection to www.cloudflare.com:443
+10-19 06:50:56.883  9605  9644 D TonoEngine: [36mINFO[0m[0001] [[38;5;95m1901564495[0m 0ms] inbound/tun[tun-in]: inbound DNS connection from 10.0.2.16:47964
+10-19 06:50:56.885  9605  9644 D TonoEngine: [36mINFO[0m[0001] [[38;5;95m1901564495[0m 1ms] router: found user id: 1051
+10-19 06:50:57.039  9605  9649 D TonoEngine: [36mINFO[0m[0002] [[38;5;119m697469287[0m 510ms] outbound/vless[Local test · Fixture]: outbound connection to www.cloudflare.com:443
+10-19 06:50:57.039  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls client hello! 517
+10-19 06:50:57.039  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 517 526 0
+10-19 06:50:57.054  9605  9650 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 21 2818 padding 18 0
+10-19 06:50:57.054  9605  9650 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls 1.3! 1163 4865 true
+10-19 06:50:57.081  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 64 1315 0
+10-19 06:50:57.082  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 158 1060 2
+10-19 06:50:57.092  9605  9650 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 1640 padding 135 2
+10-19 06:50:57.092  9605  9650 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsRead readV
+10-19 06:50:57.098   336  9664 I resolv  : GetAddrInfoHandler::run: {100 100 112 917616 10192 0}
+10-19 06:50:57.099   336  9665 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 06:50:57.100  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;133m18922101[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:56263
+10-19 06:50:57.101  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;133m18922101[0m 1ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:57.101  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;133m18922101[0m 1ms] dns: exchange claude.ai. IN AAAA
+10-19 06:50:57.101  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;133m18922101[0m 1ms] dns: match[1] query_type=[A AAAA] domain_suffix=[youtube.com youtube-nocookie.com youtu.be...] => route(fakeip)
+10-19 06:50:57.102  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;133m18922101[0m 2ms] dns: exchanged claude.ai NOERROR 600
+10-19 06:50:57.102  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;133m18922101[0m 2ms] dns: exchanged AAAA claude.ai. 600 IN AAAA fc00::403
+10-19 06:50:57.102   336  9665 I resolv  : res_nsend: used send_dg 64 terrno: 0
+10-19 06:50:57.102   336  9666 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 06:50:57.102   336  9665 I resolv  : doQuery: rcode=0, ancount=1, return value=64
+10-19 06:50:57.105  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;212m1038360772[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:41984
+10-19 06:50:57.105  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;212m1038360772[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:57.106  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;212m1038360772[0m 0ms] dns: exchange claude.ai. IN A
+10-19 06:50:57.106  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;212m1038360772[0m 1ms] dns: match[1] query_type=[A AAAA] domain_suffix=[youtube.com youtube-nocookie.com youtu.be...] => route(fakeip)
+10-19 06:50:57.106  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;212m1038360772[0m 1ms] dns: exchanged claude.ai NOERROR 600
+10-19 06:50:57.106  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;212m1038360772[0m 1ms] dns: exchanged A claude.ai. 600 IN A 198.18.132.3
+10-19 06:50:57.106   336  9666 I resolv  : res_nsend: used send_dg 52 terrno: 0
+10-19 06:50:57.107   336  9666 I resolv  : doQuery: rcode=0, ancount=1, return value=52
+10-19 06:50:57.108  9605  9627 D TrafficStats: tagSocket(92) with statsTag=0xffffffff, statsUid=-1
+10-19 06:50:57.109  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;231m3902561792[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:57.109  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;231m3902561792[0m 1ms] router: found fakeip domain: claude.ai
+10-19 06:50:57.110  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;231m3902561792[0m 1ms] router: pre-match[0] inbound=tun-in => sniff
+10-19 06:50:57.110  9605  9649 D TonoEngine: [36mINFO[0m[0002] [[38;5;37m2506070549[0m 0ms] inbound/tun[tun-in]: inbound connection from 198.18.0.1:50782
+10-19 06:50:57.110  9605  9649 D TonoEngine: [36mINFO[0m[0002] [[38;5;37m2506070549[0m 0ms] inbound/tun[tun-in]: inbound connection to 198.18.132.3:443
+10-19 06:50:57.110  9605  9649 D TonoEngine: [36mINFO[0m[0002] [[38;5;37m2506070549[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 06:50:57.110  9605  9649 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;37m2506070549[0m 0ms] router: found fakeip domain: claude.ai
+10-19 06:50:57.110  9605  9649 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;37m2506070549[0m 0ms] router: match[0] inbound=tun-in => sniff
+10-19 06:50:57.113  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;37m2506070549[0m 2ms] router: sniffed protocol: tls, domain: claude.ai
+10-19 06:50:57.113  9605  9658 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;37m2506070549[0m 2ms] router: match[5] network=tcp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...] => route(Tono-Home-Residential)
+10-19 06:50:57.113  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;37m2506070549[0m 3ms] outbound/socks[Tono-Home-Residential]: outbound connection to claude.ai:443
+10-19 06:50:57.113  9605  9658 D TonoEngine: [36mINFO[0m[0002] [[38;5;37m2506070549[0m 3ms] outbound/vless[Local test · Fixture]: outbound connection to 198.20.0.11:21080
+10-19 06:50:57.124  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:57.124  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:57.129   834   907 D EGL_emulation: app_time_stats: avg=283.33ms min=5.50ms max=835.58ms count=4
+10-19 06:50:57.144   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:57.145   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:57.617  9605  9649 D TonoEngine: [36mINFO[0m[0002] [[38;5;37m2506070549[0m 507ms] outbound/vless[Local test · Fixture]: outbound connection to 198.20.0.11:21080
+10-19 06:50:57.618  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 3 32 0
+10-19 06:50:57.619  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 21 2 padding 190 0
+10-19 06:50:57.620  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 38 164 0
+10-19 06:50:57.621  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 2 padding 93 0
+10-19 06:50:57.621  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 16 109 0
+10-19 06:50:57.624   519   610 D ActivityManager: freezing 1680 com.google.process.gservices
+10-19 06:50:57.625   519   610 D ActivityManager: freezing 9417 com.google.process.gapps
+10-19 06:50:57.633  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 10 padding 100 0
+10-19 06:50:57.634  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls client hello! 517
+10-19 06:50:57.634  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 517 821 1
+10-19 06:50:57.643  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 3735 padding 215 0
+10-19 06:50:57.643  9605  9649 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls 1.3! 3735 4865 true
+10-19 06:50:57.685  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 1029 padding 63 2
+10-19 06:50:57.685  9605  9658 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsRead readV
+10-19 06:50:57.693   834   834 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 06:50:57.894  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:57.894  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:57.926   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:57.928   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:58.044   519   610 D ActivityManager: freezing 9071 com.android.chrome
+10-19 06:50:58.157  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:58.157  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:58.176   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:58.184   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:58.185   834   907 D EGL_emulation: app_time_stats: avg=264.10ms min=135.65ms max=626.86ms count=4
+10-19 06:50:59.137   519   610 D ActivityManager: freezing 6022 com.raydocs.tono.mobile.test.test
+10-19 06:50:59.142  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:50:59.142  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:50:59.176   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:59.178   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:50:59.278   519   546 W ProcessStats: Tracking association SourceState{147ee02 com.google.android.googlequicksearchbox:search/10132 BTop #16681} whose proc state 2 is better than process ProcessState{a4722c9 com.google.android.gms.persistent/10129 pkg=com.google.android.gms} proc state 4 (95 skipped)
+10-19 06:50:59.300   834   907 D EGL_emulation: app_time_stats: avg=371.64ms min=138.03ms max=835.44ms count=3
+10-19 06:50:59.556   336  9667 I resolv  : GetAddrInfoHandler::run: {100 786532 112 917616 10129 0}
+10-19 06:50:59.557   336  9669 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 06:50:59.557   336  9668 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 06:50:59.558  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;37m4165193452[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:1806
+10-19 06:50:59.559  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;37m4165193452[0m 1ms] router: found package name: com.google.android.gsf, com.google.android.gms
+10-19 06:50:59.560  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;37m4165193452[0m 1ms] dns: exchange mtalk.google.com. IN AAAA
+10-19 06:50:59.560  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;37m4165193452[0m 2ms] dns: match[1] query_type=[A AAAA] domain_suffix=[youtube.com youtube-nocookie.com youtu.be...] => route(fakeip)
+10-19 06:50:59.560  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;37m4165193452[0m 2ms] dns: exchanged mtalk.google.com NOERROR 600
+10-19 06:50:59.561  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;37m4165193452[0m 2ms] dns: exchanged AAAA mtalk.google.com. 600 IN AAAA fc00::404
+10-19 06:50:59.561  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;49m2255262968[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:33017
+10-19 06:50:59.561   336  9668 I resolv  : res_nsend: used send_dg 78 terrno: 0
+10-19 06:50:59.562   336  9668 I resolv  : doQuery: rcode=0, ancount=1, return value=78
+10-19 06:50:59.562  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;49m2255262968[0m 1ms] router: found package name: com.google.android.gsf, com.google.android.gms
+10-19 06:50:59.562  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;49m2255262968[0m 1ms] dns: exchange mtalk.google.com. IN A
+10-19 06:50:59.563  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;49m2255262968[0m 1ms] dns: match[1] query_type=[A AAAA] domain_suffix=[youtube.com youtube-nocookie.com youtu.be...] => route(fakeip)
+10-19 06:50:59.563  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;49m2255262968[0m 1ms] dns: exchanged mtalk.google.com NOERROR 600
+10-19 06:50:59.563  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;49m2255262968[0m 1ms] dns: exchanged A mtalk.google.com. 600 IN A 198.18.132.4
+10-19 06:50:59.563   336  9669 I resolv  : res_nsend: used send_dg 66 terrno: 0
+10-19 06:50:59.563   336  9669 I resolv  : doQuery: rcode=0, ancount=1, return value=66
+10-19 06:50:59.564  5371  9547 D TrafficStats: tagSocket(-1) with statsTag=0x30000407, statsUid=-1
+10-19 06:50:59.564  5371  9547 I TrafficStats: tagSocketFd(-1, 805307399, -1) failed with errno-9
+10-19 06:50:59.564  5371  9547 D TrafficStats: tagSocket(157) with statsTag=0x30000407, statsUid=-1
+10-19 06:50:59.566  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;195m3873494820[0m 0ms] router: found package name: com.google.android.gsf, com.google.android.gms
+10-19 06:50:59.566  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;195m3873494820[0m 0ms] router: found fakeip domain: mtalk.google.com
+10-19 06:50:59.566  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;195m3873494820[0m 0ms] router: pre-match[0] inbound=tun-in => sniff
+10-19 06:50:59.566  9605  9649 D TonoEngine: [36mINFO[0m[0004] [[38;5;230m2590760920[0m 0ms] inbound/tun[tun-in]: inbound connection from 198.18.0.1:37304
+10-19 06:50:59.566  9605  9649 D TonoEngine: [36mINFO[0m[0004] [[38;5;230m2590760920[0m 0ms] inbound/tun[tun-in]: inbound connection to 198.18.132.4:5228
+10-19 06:50:59.567  9605  9649 D TonoEngine: [36mINFO[0m[0004] [[38;5;230m2590760920[0m 0ms] router: found package name: com.google.android.gsf, com.google.android.gms
+10-19 06:50:59.567  9605  9649 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;230m2590760920[0m 0ms] router: found fakeip domain: mtalk.google.com
+10-19 06:50:59.567  9605  9649 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;230m2590760920[0m 0ms] router: match[0] inbound=tun-in => sniff
+10-19 06:50:59.568  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;230m2590760920[0m 2ms] router: sniffed protocol: tls, domain: mtalk.google.com
+10-19 06:50:59.569  9605  9644 D TonoEngine: [37mDEBUG[0m[0004] [[38;5;230m2590760920[0m 2ms] router: match[5] network=tcp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...] => route(Tono-Home-Residential)
+10-19 06:50:59.569  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;230m2590760920[0m 2ms] outbound/socks[Tono-Home-Residential]: outbound connection to mtalk.google.com:5228
+10-19 06:50:59.569  9605  9644 D TonoEngine: [36mINFO[0m[0004] [[38;5;230m2590760920[0m 2ms] outbound/vless[Local test · Fixture]: outbound connection to 198.20.0.11:21080
+10-19 06:51:00.030  1660  1968 I AiAiEcho: Predicting[0]: 
+10-19 06:51:00.030  1660  1968 I AiAiEcho: EchoTargets: 
+10-19 06:51:00.030  1660  1968 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 06:51:00.031  1660  1968 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 06:51:00.031  1660  1968 I AiAiEcho: Predicting[0]: 
+10-19 06:51:00.032  1660  1968 I AiAiEcho: EchoTargets: 
+10-19 06:51:00.032  1660  1968 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 06:51:00.032  1660  1968 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 06:51:00.033  1660  1968 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface lockscreen with targets# 0 (types=[])
+10-19 06:51:00.034  1660  1968 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface lockscreen with targets# 0 (types=[])
+10-19 06:51:00.042   834   834 W PageIndicator: Total number of pages invalid: 0. Assuming 1 page.
+10-19 06:51:00.042   834   834 W PageIndicator: Total number of pages invalid: 0. Assuming 1 page.
+10-19 06:51:00.149  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:00.149  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:00.173  9605  9644 D TonoEngine: [36mINFO[0m[0005] [[38;5;230m2590760920[0m 606ms] outbound/vless[Local test · Fixture]: outbound connection to 198.20.0.11:21080
+10-19 06:51:00.173  9605  9644 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: XtlsPadding 3 240 0
+10-19 06:51:00.176   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:00.177  9605  9658 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 21 2 padding 143 0
+10-19 06:51:00.177  9605  9658 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: XtlsPadding 38 31 0
+10-19 06:51:00.178   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:00.179  9605  9644 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 2 padding 101 0
+10-19 06:51:00.179  9605  9644 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: XtlsPadding 23 121 0
+10-19 06:51:00.315  9605  9644 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 10 padding 88 0
+10-19 06:51:00.315  9605  9644 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls client hello! 536
+10-19 06:51:00.315  9605  9644 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: XtlsPadding 536 454 1
+10-19 06:51:00.316   834   907 D EGL_emulation: app_time_stats: avg=338.30ms min=140.12ms max=732.14ms count=3
+10-19 06:51:00.330  9605  9650 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 203 padding 863 0
+10-19 06:51:00.330  9605  9650 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls 1.3! 203 4865 true
+10-19 06:51:00.337  5371  8875 D TrafficStats: tagSocket(162) with statsTag=0x30000407, statsUid=-1
+10-19 06:51:00.346  5371  8875 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_HB_ALARM type: 2 triggerAtMillis: 1326231]
+10-19 06:51:00.438  9605  9650 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 535 padding 412 2
+10-19 06:51:00.439  9605  9650 D TonoEngine: [37mTRACE[0m[0005] outbound/vless[Local test · Fixture]: XtlsRead readV
+10-19 06:51:00.442  5371  9670 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_HB_ALARM type: 2 triggerAtMillis: 1326328]
+10-19 06:51:00.443  5371  9670 E WakeLock: GCM_CONN_ALARM release without a matched acquire!
+10-19 06:51:00.445  5371  9670 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_HB_ALARM type: 2 triggerAtMillis: 1326330]
+10-19 06:51:01.152  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:01.153  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:01.183   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:01.185   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:02.156  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:02.156  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:02.163   834   907 D EGL_emulation: app_time_stats: avg=615.20ms min=136.97ms max=863.24ms count=3
+10-19 06:51:02.177   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:02.177   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:02.575   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:51:03.162  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:03.163  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:03.180   834   907 D EGL_emulation: app_time_stats: avg=339.00ms min=129.36ms max=602.41ms count=3
+10-19 06:51:03.215   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:03.219   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:03.363   519   610 D ActivityManager: freezing 9323 com.android.settings
+10-19 06:51:04.168  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:04.168  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:04.180   834   907 D EGL_emulation: app_time_stats: avg=499.99ms min=132.57ms max=867.41ms count=2
+10-19 06:51:04.195   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:04.197   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:04.337   157  9624 I keystore2: system/security/keystore2/src/watchdog.rs:319 - Watchdog thread idle -> terminating. Have a great day.
+10-19 06:51:04.501   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:51:05.174  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:05.174  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:05.202   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:05.204   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:05.323   834   907 D EGL_emulation: app_time_stats: avg=381.05ms min=144.24ms max=850.63ms count=3
+10-19 06:51:05.953  5392  9672 I ChimeraConfigurator: Starting update, reason: 4 urgentFeatures: vision.ocr:-1
+10-19 06:51:05.961  5392  9672 I ChimeraConfigurator: Detected pending changes for urgent request: [vision.ocr]. Pending module sets: container:2318189190800+mlkit.ocr.common,tflite_dynamite:2627305025100800+tflite_dynamite,vision_ocr:2316024025100000+vision.ocr
+10-19 06:51:05.969  5392  9672 I GmsDebugLogger: [73] 1801
+10-19 06:51:05.971  5392  9672 W ZappDownloader: No successful module downloads for requested features [vision.ocr].
+10-19 06:51:05.971  5392  9672 I GmsDebugLogger: [30] [VisionOcrDynamite.integ:231602402100000],[TfliteDynamiteDynamite.integ:262730502100800],[MlkitOcrCommon.optional:231818100800]
+10-19 06:51:05.978  5392  9672 W ChimeraConfigService: Retry attempt was throttled. [CONTEXT service_id=264 ]
+10-19 06:51:05.978  5392  9672 I GmsDebugLogger: [83] 1 [vision.ocr]
+10-19 06:51:05.980  5392  9671 W Vision  : Request for optional module download of ocr failed. Request again.
+10-19 06:51:05.981  5392  9671 W Vision  : Would have logged:
+10-19 06:51:05.981  5392  9671 W Vision  : # dsae@37884fe7
+10-19 06:51:05.981  5392  9671 I Vision  : Schedule retrying download ocr at 771867 with backoff 160 seconds
+10-19 06:51:06.180  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:06.180  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:06.209   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:06.211   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:06.331   834   907 D EGL_emulation: app_time_stats: avg=504.12ms min=136.22ms max=872.02ms count=2
+10-19 06:51:07.184  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:07.185  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:07.209   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:07.211   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:07.332   834   907 D EGL_emulation: app_time_stats: avg=500.19ms min=137.01ms max=863.37ms count=2
+10-19 06:51:07.505   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:51:08.189  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:08.189  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:08.209   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:08.211   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:08.348   834   907 D EGL_emulation: app_time_stats: avg=507.48ms min=153.15ms max=861.82ms count=2
+10-19 06:51:09.197  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:09.197  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:09.226   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:09.229   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:09.354   834   907 D EGL_emulation: app_time_stats: avg=502.68ms min=141.52ms max=863.84ms count=2
+10-19 06:51:09.492   519   590 W ProcessStats: Tracking association SourceState{8343d5c com.google.android.googlequicksearchbox:search/10132 BTop #16716} whose proc state 2 is better than process ProcessState{ec124d2 com.google.android.gms/10129 pkg=com.google.android.gms} proc state 4 (144 skipped)
+10-19 06:51:09.974     0     0 I logd    : logdr: UID=2000 GID=2000 PID=9678 n tail=0 logMask=99 pid=0 start=0ns deadline=0ns
+10-19 06:51:09.983     0     0 I logd    : logdr: UID=2000 GID=2000 PID=9682 n tail=0 logMask=9 pid=0 start=0ns deadline=0ns
+10-19 06:51:09.827  9109  9129 I Process : Sending signal. PID: 9605 SIG: 9
+10-19 06:51:09.836   336   368 I Netd    : Destroyed 1 sockets on fdfe:dcba:9876::1 in 360us
+10-19 06:51:09.837   336  9656 W resolv  : SSL_connect ssl error =5, mark 0xf0070: Software caused connection abort
+10-19 06:51:09.837   336  9656 W resolv  : TLS Handshake failed
+10-19 06:51:09.837   336  9656 W resolv  : query failed
+10-19 06:51:09.837   336  9656 W resolv  : validateDnsTlsServer returned 0 for fdfe:dcba:9876::2
+10-19 06:51:09.837   336  9656 W resolv  : Validation failed
+10-19 06:51:09.838   336   368 I Netd    : Destroyed 11 sockets on 198.18.0.1 in 357us
+10-19 06:51:09.839  5371  9296 V NativeCrypto: Read error: ssl=0x785ded0a6618: I/O error during system call, Software caused connection abort
+10-19 06:51:09.839   519   519 W android.fg: type=1400 audit(0.0:166): avc:  denied  { sys_module } for  capability=16  scontext=u:r:system_server:s0 tcontext=u:r:system_server:s0 tclass=capability permissive=0 bug=b/228030183
+10-19 06:51:09.845  5371  8091 V NativeCrypto: SSL shutdown failed: ssl=0x785ded0a6618: I/O error during system call, Broken pipe
+10-19 06:51:09.845  5371  8091 E WakeLock: GCM_HB_ALARM release without a matched acquire!
+10-19 06:51:09.845  5371  8091 W WakeLock: GCM_HB_ALARM counter does not exist
+10-19 06:51:10.034     0     0 I binder_alloc: 9605: binder_alloc_buf, no vma
+10-19 06:51:09.848   337   337 I Zygote  : Process 9605 exited due to signal 9 (Killed)
+10-19 06:51:10.042     0     0 I binder  : cannot allocate buffer: vma cleared, target dead or dying
+10-19 06:51:10.042     0     0 I binder  : 519:536 transaction async to 9605:0 failed 937399/29189/-3, size 348-8 line 3406
+10-19 06:51:09.853   519   536 E IPCThreadState: Binder transaction failure: 937399/29189/-3
+10-19 06:51:09.853  9628  9628 I TonoWatchdog: engine died: the watch heard its binder die (VPN network true)
+10-19 06:51:09.854   519   536 W ActivityManager: Exception when unbinding service com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService
+10-19 06:51:09.854   519   536 W ActivityManager: android.os.DeadObjectException
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.os.BinderProxy.transactNative(Native Method)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.os.BinderProxy.transact(BinderProxy.java:584)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.app.IApplicationThread$Stub$Proxy.scheduleUnbindService(IApplicationThread.java:1419)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.am.ActiveServices.removeConnectionLocked(ActiveServices.java:5896)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.am.ActiveServices.unbindServiceLocked(ActiveServices.java:3970)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.am.ActivityManagerService.unbindService(ActivityManagerService.java:13426)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.app.ContextImpl.unbindService(ContextImpl.java:2171)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.connectivity.Vpn$1.interfaceRemoved(Vpn.java:2302)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService.lambda$notifyInterfaceRemoved$3(NetworkManagementService.java:352)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService.$r8$lambda$hVm3bQaIEYWthKxfd7oL9u5O8zg(NetworkManagementService.java:0)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService$$ExternalSyntheticLambda10.sendCallback(R8$$SyntheticClass:0)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService.invokeForAllObservers(NetworkManagementService.java:313)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService.notifyInterfaceRemoved(NetworkManagementService.java:352)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService.-$$Nest$mnotifyInterfaceRemoved(NetworkManagementService.java:0)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService$NetdUnsolicitedEventListener.lambda$onInterfaceRemoved$6(NetworkManagementService.java:619)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService$NetdUnsolicitedEventListener.$r8$lambda$piup9FgGLVmuqEVHCUukqqP2cGU(NetworkManagementService.java:0)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.net.NetworkManagementService$NetdUnsolicitedEventListener$$ExternalSyntheticLambda3.run(R8$$SyntheticClass:0)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.os.Handler.handleCallback(Handler.java:958)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.os.Handler.dispatchMessage(Handler.java:99)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.os.Looper.loopOnce(Looper.java:205)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.os.Looper.loop(Looper.java:294)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at android.os.HandlerThread.run(HandlerThread.java:67)
+10-19 06:51:09.854   519   536 W ActivityManager: 	at com.android.server.ServiceThread.run(ServiceThread.java:46)
+10-19 06:51:09.854   133   133 W lowmemorykiller: Failed to open /proc/9605/oom_score_adj; errno=2: process 9605 might have been killed
+10-19 06:51:09.858   519  1900 I ActivityManager: Process com.raydocs.tono.mobile.test:vpn (pid 9605) has died: prcp FGS 
+10-19 06:51:09.859   519   536 D Vpn     : setting state=DISCONNECTED, reason=agentDisconnect
+10-19 06:51:09.859   519   549 I libprocessgroup: Successfully killed process cgroup uid 10192 pid 9605 in 0ms
+10-19 06:51:09.859   519   763 D ConnectivityService: [112 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTED to DISCONNECTED
+10-19 06:51:09.860   336  9655 W resolv  : SSL_connect ssl error =5, mark 0xf0070: Software caused connection abort
+10-19 06:51:09.860   336  9655 W resolv  : TLS Handshake failed
+10-19 06:51:09.860   336  9655 W resolv  : query failed
+10-19 06:51:09.860   336  9655 W resolv  : validateDnsTlsServer returned 0 for 198.18.0.2
+10-19 06:51:09.860   336  9655 W resolv  : Validation failed
+10-19 06:51:09.860   519   768 D VPN     : NetworkAgent: NetworkAgent channel lost
+10-19 06:51:09.861   519   763 D InetDiagMessage: Destroyed 1 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 06:51:09.861   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 06:51:09.861   519   763 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 2ms
+10-19 06:51:09.862   336   336 I netd    : networkRemoveUidRangesParcel(NativeUidRangeConfig{netId: 112, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}) <0.27ms>
+10-19 06:51:09.863   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 06:51:09.867   336  9701 I resolv  : GetAddrInfoHandler::run: {100 786532 100 983140 10129 0}
+10-19 06:51:09.868  9628  9628 D CompatibilityChangeReporter: Compat change id reported: 160794467; UID 10192; state: ENABLED
+10-19 06:51:09.869   336  9703 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 06:51:09.874  1761  1811 D StrictMode: StrictMode policy violation: android.os.strictmode.SqliteObjectLeakedViolation: Finalizing a Cursor that has not been deactivated or closed. database = /data/user/0/com.android.providers.contacts/databases/contacts2.db, table = raw_contacts, query = SELECT contacts_view._id AS _id, contacts_view.display_name AS display_name, contacts_view.photo_thumb_uri AS photo_thumb_uri, data1 AS number, data2 AS type, data3 AS label, contacts_view.lookup AS lookup FROM raw_contacts JOIN view_contacts as contacts_view ON (contacts_view._id = raw_contacts.contact_id) JOIN (SELECT data_id,normalized_number FROM phone_lookup WHERE (phone_lookup.min_match = '7654321')) AS lookup ON lookup.data_id=data._id JOIN data ON data.raw_contact_id=raw_contacts._id WHERE (PHONE_NUMBERS_EQUAL(data.data1, '+15551234567', 0, 7)) ORDER BY  length(lookup.normalized_number) DESC
+10-19 06:51:09.874  1761  1811 D StrictMode: 	at android.os.StrictMode.onSqliteObjectLeaked(StrictMode.java:2222)
+10-19 06:51:09.874  1761  1811 D StrictMode: 	at android.database.sqlite.SQLiteCursor.finalize(SQLiteCursor.java:282)
+10-19 06:51:09.874  1761  1811 D StrictMode: 	at java.lang.Daemons$FinalizerDaemon.doFinalize(Daemons.java:339)
+10-19 06:51:09.874  1761  1811 D StrictMode: 	at java.lang.Daemons$FinalizerDaemon.processReference(Daemons.java:324)
+10-19 06:51:09.874  1761  1811 D StrictMode: 	at java.lang.Daemons$FinalizerDaemon.runInternal(Daemons.java:300)
+10-19 06:51:09.874  1761  1811 D StrictMode: 	at java.lang.Daemons$Daemon.run(Daemons.java:145)
+10-19 06:51:09.874  1761  1811 D StrictMode: 	at java.lang.Thread.run(Thread.java:1012)
+10-19 06:51:09.874   519  1900 I ActivityManager: Killing 4940:com.google.android.settings.intelligence/u0a118 (adj 985): empty #17
+10-19 06:51:09.874   519   763 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 06:51:09.875   519   763 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 12ms
+10-19 06:51:09.876  9628  9628 I TonoWatchdog: engine died: replaced its CONNECTED notification (VPN network true)
+10-19 06:51:09.877   519   763 D ConnectivityService: [112 WIFI|VPN] disconnected, was satisfying 50
+10-19 06:51:09.881   336  9702 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 06:51:09.882   519   549 I libprocessgroup: Successfully killed process cgroup uid 10118 pid 4940 in 6ms
+10-19 06:51:09.883  1761  1811 D StrictMode: StrictMode policy violation: android.os.strictmode.LeakedClosableViolation: A resource was acquired at attached stack trace but never released. See java.io.Closeable for information on avoiding resource leaks.
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.os.StrictMode$AndroidCloseGuardReporter.report(StrictMode.java:1994)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at dalvik.system.CloseGuard.warnIfOpen(CloseGuard.java:336)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.AbstractCursor.finalize(AbstractCursor.java:531)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.sqlite.SQLiteCursor.finalize(SQLiteCursor.java:291)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at java.lang.Daemons$FinalizerDaemon.doFinalize(Daemons.java:339)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at java.lang.Daemons$FinalizerDaemon.processReference(Daemons.java:324)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at java.lang.Daemons$FinalizerDaemon.runInternal(Daemons.java:300)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at java.lang.Daemons$Daemon.run(Daemons.java:145)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at java.lang.Thread.run(Thread.java:1012)
+10-19 06:51:09.883  1761  1811 D StrictMode: Caused by: java.lang.Throwable: Explicit termination method 'AbstractCursor.close' not called
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at dalvik.system.CloseGuard.openWithCallSite(CloseGuard.java:288)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at dalvik.system.CloseGuard.open(CloseGuard.java:257)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.AbstractCursor.<init>(AbstractCursor.java:227)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.AbstractWindowedCursor.<init>(AbstractWindowedCursor.java:39)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.sqlite.SQLiteCursor.<init>(SQLiteCursor.java:98)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.sqlite.SQLiteDirectCursorDriver.query(SQLiteDirectCursorDriver.java:52)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.sqlite.SQLiteDatabase.rawQueryWithFactory(SQLiteDatabase.java:1714)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.database.sqlite.SQLiteQueryBuilder.query(SQLiteQueryBuilder.java:592)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.doQuery(ContactsProvider2.java:7543)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.queryLocal(ContactsProvider2.java:7249)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.queryCorpLookupIfNecessary(ContactsProvider2.java:7728)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.queryLookupEnterprise(ContactsProvider2.java:7867)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.queryPhoneLookupEnterprise(ContactsProvider2.java:7838)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.queryLocal(ContactsProvider2.java:7172)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.queryDirectoryIfNecessary(ContactsProvider2.java:5883)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.queryInternal(ContactsProvider2.java:5728)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at com.android.providers.contacts.ContactsProvider2.query(ContactsProvider2.java:5673)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.content.ContentProvider.query(ContentProvider.java:1692)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.content.ContentProvider$Transport.query(ContentProvider.java:292)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.content.ContentProviderNative.onTransact(ContentProviderNative.java:107)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.os.Binder.execTransactInternal(Binder.java:1339)
+10-19 06:51:09.883  1761  1811 D StrictMode: 	at android.os.Binder.execTransact(Binder.java:1275)
+10-19 06:51:10.078     0     0 I binder  : undelivered transaction 816081, process died.
+10-19 06:51:10.079     0     0 I binder  : undelivered transaction 816385, process died.
+10-19 06:51:10.080     0     0 I binder  : undelivered transaction 818809, process died.
+10-19 06:51:10.081     0     0 I binder  : undelivered transaction 819984, process died.
+10-19 06:51:10.082     0     0 I binder  : undelivered transaction 820256, process died.
+10-19 06:51:10.083     0     0 I binder  : undelivered transaction 820964, process died.
+10-19 06:51:10.084     0     0 I binder  : undelivered transaction 822521, process died.
+10-19 06:51:10.085     0     0 I binder  : undelivered transaction 835842, process died.
+10-19 06:51:09.887   336  9703 I resolv  : res_nsend: used send_dg 89 terrno: 0
+10-19 06:51:09.888   336  9703 I resolv  : doQuery: rcode=0, ancount=2, return value=89
+10-19 06:51:09.894   834   834 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 06:51:09.894   337   337 I Zygote  : Process 4940 exited due to signal 9 (Killed)
+10-19 06:51:09.895   519   537 D DisplayManagerService: Drop pending events for gone uid 10118
+10-19 06:51:09.900   336   336 I netd    : tetherGetStats() -> {[]} <0.46ms>
+10-19 06:51:09.905   519   536 I GnssNetworkConnectivityHandler: Network connection lost. Available networks count: 2
+10-19 06:51:09.905   519   536 I GnssNetworkConnectivityHandler: updateNetworkState, state=CLOSED, connected=false, network=112, capabilities=[ Transports: WIFI|VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&VALIDATED&NOT_ROAMING&FOREGROUND&NOT_CONGESTED&NOT_SUSPENDED&NOT_VCN_MANAGED LinkUpBandwidth>=12000Kbps LinkDnBandwidth>=30000Kbps TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> AdminUids: [10192] UnderlyingNetworks: [100]], availableNetworkCount: 2
+10-19 06:51:09.920   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.59ms>
+10-19 06:51:09.921   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.40ms>
+10-19 06:51:09.922   336   336 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.12ms>
+10-19 06:51:09.923   336   336 I netd    : wakeupDelInterface(tun0, 484442034189:tun0, -2147483648, -2147483648) <0.62ms>
+10-19 06:51:09.923   336  9702 I resolv  : res_nsend: used send_dg 101 terrno: 0
+10-19 06:51:09.923   336  9702 I resolv  : doQuery: rcode=0, ancount=2, return value=101
+10-19 06:51:09.924  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:51:09.926  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:51:09.926   519  2496 I ActivityManager: Killing 4355:com.google.android.marvin.talkback/u0a138 (adj 975): empty #17
+10-19 06:51:09.927  5371  9296 D TrafficStats: tagSocket(-1) with statsTag=0x30000407, statsUid=-1
+10-19 06:51:09.931  5371  9296 I TrafficStats: tagSocketFd(-1, 805307399, -1) failed with errno-9
+10-19 06:51:09.931  5371  9296 D TrafficStats: tagSocket(157) with statsTag=0x30000407, statsUid=-1
+10-19 06:51:09.939   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:51:09.939   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:51:09.944   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.46ms>
+10-19 06:51:09.945   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.45ms>
+10-19 06:51:09.946   336   336 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.32ms>
+10-19 06:51:09.949   336   336 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <3.41ms>
+10-19 06:51:09.951   519   833 D NetworkStatsObservers: Unregistering RequestInfo from pid/uid:519/1000(android) for DataUsageRequest [ requestId=43, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3063916 ] accessLevel:3
+10-19 06:51:09.951   519   754 D NetworkStatsObservers: Registering observer for RequestInfo from pid/uid:519/1000(android) for DataUsageRequest [ requestId=44, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3046947 ] accessLevel:3
+10-19 06:51:09.962   336   336 I netd    : setNetworkAllowlist([NativeUidRangeConfig{netId: 101, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 100, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}]) <0.00ms>
+10-19 06:51:09.967   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=7, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.967   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=15, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.967   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=17, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1073 RequestorUid: 1073 RequestorPkg: com.google.android.networkstack UnderlyingNetworks: Null] ]
+10-19 06:51:09.984   336   336 I netd    : tetherGetStats() -> {[]} <0.27ms>
+10-19 06:51:09.991   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=22, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10166 RequestorUid: 10166 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 06:51:09.991   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=24, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10166 RequestorUid: 10166 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 06:51:09.992   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=27, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10166 RequestorUid: 10166 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 06:51:09.996   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=31, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 06:51:09.996   519   549 I libprocessgroup: Successfully killed process cgroup uid 10138 pid 4355 in 56ms
+10-19 06:51:09.996   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=33, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 06:51:09.997   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=35, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.997   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=37, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10142 RequestorUid: 10142 RequestorPkg: com.google.android.inputmethod.latin UnderlyingNetworks: Null] ]
+10-19 06:51:09.997   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=41, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10124 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.997   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=43, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10120 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.997   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=54, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10142 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.997   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=56, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.997   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 06:51:09.998   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:09.998   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=69, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.001   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=71, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10128 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.001   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 06:51:10.007   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=79, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10146 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.007   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=82, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10135 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.007   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=84, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 10129 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 06:51:10.008   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=89, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 06:51:10.008   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=92, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10117 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.008   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=94, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10170 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.008   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=98, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10190 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.008   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.008   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10155 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.008   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=108, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10140 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.009   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=110, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.009   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=120, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:51:10.009   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=122, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:51:10.009   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=124, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:51:10.009   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=126, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:51:10.009   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=129, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 06:51:10.010   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=139, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 10129 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 06:51:10.010   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=167, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 06:51:10.013   519   756 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=173, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10148 RequestorUid: 10148 RequestorPkg: com.google.android.apps.photos UnderlyingNetworks: Null] ]
+10-19 06:51:10.014   519   763 D ConnectivityService: Sending DISCONNECTED broadcast for type 17 [112 WIFI|VPN] isDefaultNetwork=false
+10-19 06:51:10.014   519   763 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendStickyBroadcast:1626 android.net.connectivity.com.android.server.ConnectivityService.sendStickyBroadcast:3278 android.net.connectivity.com.android.server.ConnectivityService.sendLegacyNetworkBroadcast:10154 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1165 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1182 
+10-19 06:51:10.030   337   337 I Zygote  : Process 4355 exited due to signal 9 (Killed)
+10-19 06:51:10.030   519   537 D DisplayManagerService: Drop pending events for gone uid 10138
+10-19 06:51:10.042   336   336 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.49ms>
+10-19 06:51:10.043   336   336 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.64ms>
+10-19 06:51:10.047   336   336 I netd    : bandwidthRemoveInterfaceQuota(tun0) <3.38ms>
+10-19 06:51:10.050   519   792 D NetworkTimeUpdateService: New default network 100; checking time.
+10-19 06:51:10.059  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:51:10.063  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:51:10.066   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:51:10.067   834   834 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 06:51:10.067   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:51:10.070  4855  4899 I BugleRcsEngine: [55] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 06:51:10.070  4855  4914 I BugleRcsEngine: [69] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[0bc9fed0-6056]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 06:51:10.086   519   763 D ConnectivityService: NetReassign [17 : null → 100, 35 : null → 100, 129 : null → 100, 43 : null → 100, 61 : null → 100, 24 : null → 100, 139 : null → 100, 15 : null → 100, 84 : null → 100, 167 : null → 100, 37 : null → 100, 98 : null → 100, 104 : null → 100, 22 : null → 100, 108 : null → 100, 56 : null → 100, 69 : null → 100, 71 : null → 100, 110 : null → 100, 82 : null → 100, 63 : null → 100, 79 : null → 100, 75 : null → 100, 7 : null → 100, 27 : null → 100, 120 : null → 100, 173 : null → 100, 92 : null → 100, 124 : null → 100, 41 : null → 100, 126 : null → 100, 54 : null → 100, 31 : null → 100, 94 : null → 100, 89 : null → 100, 33 : null → 100, 106 : null → 100, 122 : null → 100] [c 1] [a 33] [i 5]
+10-19 06:51:10.117  1660  2098 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 06:51:10.120  1660  2098 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 06:51:10.126   336   336 I netd    : networkDestroy(112) <1.01ms>
+10-19 06:51:10.136   336   336 I resolv  : DNS cache flushed
+10-19 06:51:10.136   336   336 W resolv  : resolv_stats_set_addrs: Network 112 not found for PROTO_DOT
+10-19 06:51:10.136   336   336 W resolv  : resolv_stats_set_addrs: Network 112 not found for PROTO_DOH
+10-19 06:51:10.136   336   336 I netd    : destroyNetworkCache(112) <0.20ms>
+10-19 06:51:10.136   519   763 D ProxyTracker: sending Proxy Broadcast for [] 0 xl=
+10-19 06:51:10.148   519   763 D ConnectivityService: handleLingerComplete for [100 WIFI]
+10-19 06:51:10.267   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:51:10.309  5371  8091 D TrafficStats: tagSocket(162) with statsTag=0x30000407, statsUid=-1
+10-19 06:51:10.335  5371  8091 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_HB_ALARM type: 2 triggerAtMillis: 1336220]
+10-19 06:51:10.455   834   907 D EGL_emulation: app_time_stats: avg=211.85ms min=10.62ms max=557.46ms count=5
+10-19 06:51:10.516  1538  1613 I DeviceStatusMonitor: DeviceStatusMonitor.handleBroadcast():122 onReceive() : Action = android.net.conn.CONNECTIVITY_CHANGE
+10-19 06:51:10.524  1538  1613 I DeviceStatusMonitor: DeviceStatusMonitor.notifyIfNetworkChanged():179 notifyIfNetworkChanged: newState = NON_METERED, airplaneModeOn = false, notifyAnyway = false
+10-19 06:51:10.524  1538  1538 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 06:51:10.525  1538  1613 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 06:51:10.525  1538  7815 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 06:51:10.534  8838  8923 I BugleTransport: Tachygram is disabled in the RCS Configuration [CONTEXT ratelimit_period="5 SECONDS" skipped=1 ]
+10-19 06:51:10.543  5371  8091 W ctxmgr  : [NetworkStateProducer] No state change for network connection context [CONTEXT service_id=47 ]
+10-19 06:51:10.545  5371  9670 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_HB_ALARM type: 2 triggerAtMillis: 1336430]
+10-19 06:51:10.577  5371  9670 E WakeLock: GCM_CONN_ALARM release without a matched acquire!
+10-19 06:51:10.587  8838  8923 I BugleTransport: Enabled chat transport is TRANSPORT_RCS [CONTEXT group_by="TRANSPORT_RCS" ratelimit_period="5 SECONDS" skipped=1 ]
+10-19 06:51:10.628  9109  9129 I TestRunner: finished: t6_engineDiesInDozeAndTogetherWithItsWatch(com.raydocs.tono.mobile.LocalTunnelDeviceTest)
+10-19 06:51:10.637   834   834 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 06:51:10.637  9109  9129 I TestRunner: run finished: 1 tests, 0 failed, 0 ignored
+10-19 06:51:10.640   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:10.647   519  1900 W WindowMagnificationMgr: requestConnection duplicated request: connect=false, mConnectionState=DISCONNECTED
+10-19 06:51:10.647   519  1900 D AccessibilityManagerService: restoreCurrentUserForTestAutomationIfNeededLocked(): ignoring because device doesn't support visible background users
+10-19 06:51:10.647  5371  9706 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_HB_ALARM type: 2 triggerAtMillis: 1336533]
+10-19 06:51:10.651  1660  1678 I AiAiEcho: Settings changed for uri: content://settings/secure/accessibility_enabled
+10-19 06:51:10.652  1660  1968 I AiAiEcho: Predicting[0]: 
+10-19 06:51:10.652  1660  1968 I AiAiEcho: EchoTargets: 
+10-19 06:51:10.652  1660  1968 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 06:51:10.657  1660  1968 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 06:51:10.661  1660  1968 I AiAiEcho: Predicting[0]: 
+10-19 06:51:10.663  1816  2385 I A       : NGA enabled in interactor.
+10-19 06:51:10.663  1816  2385 I A       : Nga state changed to NgaStateDetails{state=ENABLED, isSpecialExperience=false}
+10-19 06:51:10.675  1683  7123 I A       : Initializing all components
+10-19 06:51:10.679  1683  7123 I A       : APA or Classic session decision: SessionDecision(sessionVariance=CLASSIC, platformVariance=CLASSIC, justification=CURRENT_PLATFORM_VARIANCE).
+10-19 06:51:10.680  1660  1968 I AiAiEcho: EchoTargets: 
+10-19 06:51:10.680  1660  1968 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 06:51:10.681  1660  1968 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 06:51:10.687   519   519 D BatterySaverPolicy: accessibility changed to false, updating policy.
+10-19 06:51:10.687  1683  7123 I A       : [Memory] eligibility: StashEligibility{6}
+10-19 06:51:10.688  1660  1968 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface home with targets# 0 (types=[])
+10-19 06:51:10.689  1660  1968 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface lockscreen with targets# 0 (types=[])
+10-19 06:51:10.691   834   834 W PageIndicator: Total number of pages invalid: 0. Assuming 1 page.
+10-19 06:51:10.698  1683  2218 I A       : onIsEnabledChanged, isEnabled: false
+10-19 06:51:10.698  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.698  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.700   834   905 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 I A       : onOpaVisibilityChanged: false
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.705  1683  2218 I A       : Setting session to type: NO_SESSION
+10-19 06:51:10.705  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 I A       : setNavBarVisible: GestureNavBarVisible{navbarVisible=true}
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 06:51:10.706  1683  2218 I A       : onDisabled. Registered: false
+10-19 06:51:10.706  1683  2218 I A       : on opa visibility changed false
+10-19 06:51:10.707  1683  2218 I A       : on opa visibility changed false
+10-19 06:51:10.707  1683  2218 I A       : State changed: IDLE => IDLE by NGA_STATE_CHANGED and N/A with Optional.empty
+10-19 06:51:10.707  1683  2218 I A       : Recognizer choice: (recognizer_type: 1, recognizer_mode: 1, choice_reason: 4)
+10-19 06:51:10.710  1683  2218 I A       : onActiveStateChangeEvent: IDLE => IDLE
+10-19 06:51:10.710  1683  2218 I A       : #onActiveStateChangeEvent, newState: IDLE, previousState: IDLE.
+10-19 06:51:10.711  1683  2218 I NgaEntryPointEventSendr: setupConnection
+10-19 06:51:10.717  1683  2218 I NgaEntryPointEventSendr: State changed: Disconnected => Connecting
+10-19 06:51:10.718  1683  2218 I A       : Initialize
+10-19 06:51:10.722  1683  2218 I A       : stopListening(NGA_PAUSED_UNKNOWN_REASON, NGA_CREATE), idleOverride=NOT_LISTENING
+10-19 06:51:10.734   519  2496 I ActivityManager: Force stopping com.raydocs.tono.mobile.test appid=10192 user=0: finished inst
+10-19 06:51:10.742   519  2496 E ActivityManager: Unable to freeze binder for 9109: -11
+10-19 06:51:10.742   519  2496 I ActivityManager: Killing 9109:com.raydocs.tono.mobile.test/u0a192 (adj 0): stop com.raydocs.tono.mobile.test due to finished inst
+10-19 06:51:10.743   519   537 D DisplayManagerService: Drop pending events for gone uid 10192
+10-19 06:51:10.744   519  2496 I ActivityManager: Killing 9628:com.raydocs.tono.mobile.test:watch/u0a192 (adj 905): stop com.raydocs.tono.mobile.test due to finished inst
+10-19 06:51:10.748   519  2496 I ActivityManager:   Force stopping service ServiceRecord{a7f4fae u0 com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+10-19 06:51:10.927     0     0 I binder  : 519:2496 ioctl 400c620e 785d1f1ff930 returned -11
+10-19 06:51:10.930     0     0 I binder  : 519:2496 ioctl 400c620e 785d1f1ff930 returned -11
+10-19 06:51:10.773  1816  1816 I A       : Creating pss binder().
+10-19 06:51:10.775  9070  9070 I app_process: System.exit called, status: 0
+10-19 06:51:10.775  9070  9070 I AndroidRuntime: VM exiting with result code 0.
+10-19 06:51:10.779   337   337 I Zygote  : Process 9628 exited due to signal 9 (Killed)
+10-19 06:51:10.779   519   917 V ActivityManager: Got obituary of 9628:com.raydocs.tono.mobile.test:watch
+10-19 06:51:10.784  1683  2213 I NgaEntryPointEventSendr: onServiceConnected
+10-19 06:51:10.785  1816  1869 I A       : Calling beginBinderSession().
+10-19 06:51:10.794  1816  1869 I A       : beginBinderSession(): calling binder
+10-19 06:51:10.795  1683  2213 I NgaEntryPointEventSendr: State changed: Connecting => Ready
+10-19 06:51:10.796  1683  2218 I A       : Successfully initialized all components
+10-19 06:51:10.801  1816  3221 I PBSessionCacheImpl: Deleted sessionId[7988644856100794] from persistence.
+10-19 06:51:10.819  1816  2690 I A       : Using proto config with mendel
+10-19 06:51:10.826  1816  2690 I A       : Using proto config with mendel
+10-19 06:51:10.828  1816  1816 W A       : Queue length for executor EventBus is now 11. Perhaps some tasks are too long, or the pool is too small.
+10-19 06:51:10.830   519  1900 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-19 06:51:10.830  1816  2690 I MicroDetectionState: Should stop hotword detection immediately - true
+10-19 06:51:10.830  1816  2690 I A       : Using proto config with mendel
+10-19 06:51:10.831  1816  2690 I A       : Using proto config with mendel
+10-19 06:51:10.831  1816  2690 W A       : UiCallbackStub-onGenericEvent[ServiceEvent = 241] task was not run. Callback from Service received after client was disposed.
+10-19 06:51:10.831  1816  2690 W A       : UiCallbackStub-onGenericEvent[ServiceEvent = 241] task was not run. Callback from Service received after client was disposed.
+10-19 06:51:10.833  1816  2690 W A       : UiCallbackStub-onGenericEvent[ServiceEvent = 60] task was not run. Callback from Service received after client was disposed.
+10-19 06:51:10.836  1816  3220 I PBSessionCacheImpl: Deleted sessionId[7988644856100797] from persistence.
+10-19 06:51:10.837  1683  2213 I NgaEntryPointEventSendr: State changed: Ready => Disconnected (onOpaDisconnected)
+10-19 06:51:10.843  1816  2690 I A       : Using proto config with mendel
+10-19 06:51:10.852  1816  2690 I A       : Using proto config with mendel
+10-19 06:51:10.860   519  2499 V ActivityManager: Got obituary of 9109:com.raydocs.tono.mobile.test
+10-19 06:51:10.862   337   337 I Zygote  : Process 9109 exited due to signal 9 (Killed)
+10-19 06:51:10.862   519   539 W ActivityManager: setHasOverlayUi called on unknown pid: 9109
+10-19 06:51:11.546   519  1900 I WindowManager: Using new display size: 1080x2400
+10-19 06:51:11.567  1660  1678 I AiAiEcho: Settings changed for uri: content://settings/secure/display_density_forced
+10-19 06:51:11.567  1660  1968 I AiAiEcho: Predicting[0]: 
+10-19 06:51:11.567  1660  1968 I AiAiEcho: EchoTargets: 
+10-19 06:51:11.567  1660  1968 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 06:51:11.567  1660  1968 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 06:51:11.568  1660  1968 I AiAiEcho: Predicting[0]: 
+10-19 06:51:11.568  1660  1968 I AiAiEcho: EchoTargets: 
+10-19 06:51:11.568  1660  1968 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 06:51:11.568  1660  1968 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 06:51:11.568  1660  1968 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface home with targets# 0 (types=[])
+10-19 06:51:11.569  1660  1968 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface lockscreen with targets# 0 (types=[])
+10-19 06:51:11.569   834   834 W PageIndicator: Total number of pages invalid: 0. Assuming 1 page.

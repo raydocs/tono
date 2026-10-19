@@ -1,0 +1,1121 @@
+--------- beginning of main
+10-19 05:23:00.148  8765  8784 I Process : Sending signal. PID: 8854 SIG: 19
+10-19 05:23:00.152  8765  8784 I Process : Sending signal. PID: 9112 SIG: 9
+10-19 05:23:00.194   335   351 I Netd    : Destroyed 1 sockets on fdfe:dcba:9876::1 in 443us
+10-19 05:23:00.205   335  9267 W resolv  : SSL_connect ssl error =5, mark 0xf0070: Software caused connection abort
+10-19 05:23:00.206   335  9267 W resolv  : TLS Handshake failed
+10-19 05:23:00.206   335  9267 W resolv  : query failed
+10-19 05:23:00.206   335  9267 W resolv  : validateDnsTlsServer returned 0 for fdfe:dcba:9876::2
+10-19 05:23:00.206   335  9267 W resolv  : Validation failed
+10-19 05:23:00.215   335   351 I Netd    : Destroyed 10 sockets on 198.18.0.1 in 691us
+10-19 05:23:00.233   521   538 D Vpn     : setting state=DISCONNECTED, reason=agentDisconnect
+10-19 05:23:00.233   521   769 D ConnectivityService: [112 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTED to DISCONNECTED
+10-19 05:23:00.234   335  9265 W resolv  : SSL_connect ssl error =5, mark 0xf0070: Software caused connection abort
+10-19 05:23:00.234   521   769 D InetDiagMessage: Destroyed 1 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 05:23:00.234   335  9265 W resolv  : TLS Handshake failed
+10-19 05:23:00.234   335  9265 W resolv  : query failed
+10-19 05:23:00.234   335  9265 W resolv  : validateDnsTlsServer returned 0 for 198.18.0.2
+10-19 05:23:00.234   335  9265 W resolv  : Validation failed
+10-19 05:23:00.234   521   769 D InetDiagMessage: Destroyed 1 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 05:23:00.235   521   769 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 2ms
+10-19 05:23:00.235   335   358 I netd    : networkRemoveUidRangesParcel(NativeUidRangeConfig{netId: 112, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}) <0.14ms>
+10-19 05:23:00.236   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 05:23:00.236   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 05:23:00.236   521   769 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 2ms
+10-19 05:23:00.225   521   521 W android.fg: type=1400 audit(0.0:169): avc:  denied  { sys_module } for  capability=16  scontext=u:r:system_server:s0 tcontext=u:r:system_server:s0 tclass=capability permissive=0 bug=b/228030183
+10-19 05:23:00.238   521   774 D VPN     : NetworkAgent: NetworkAgent channel lost
+10-19 05:23:00.241   521   769 D ConnectivityService: [112 WIFI|VPN] disconnected, was satisfying 59
+10-19 05:23:00.242  5676  9243 D TrafficStats: tagSocket(-1) with statsTag=0x30000407, statsUid=-1
+10-19 05:23:00.242  5676  9243 I TrafficStats: tagSocketFd(-1, 805307399, -1) failed with errno-9
+10-19 05:23:00.242  5676  9243 D TrafficStats: tagSocket(83) with statsTag=0x30000407, statsUid=-1
+10-19 05:23:00.247  5676  7820 E WakeLock: GCM_HB_ALARM release without a matched acquire!
+10-19 05:23:00.247  5676  7820 W WakeLock: GCM_HB_ALARM counter does not exist
+10-19 05:23:00.248  5676  7820 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_CONN_ALARM type: 2 triggerAtMillis: 846735]
+10-19 05:23:00.249  5676  7820 E WakeLock: GCM_CONN_ALARM release without a matched acquire!
+10-19 05:23:00.249  5676  7820 W WakeLock: GCM_CONN_ALARM counter does not exist
+--------- beginning of system
+10-19 05:23:00.250   521  2499 I ActivityManager: Process com.raydocs.tono.mobile.test:vpn (pid 9112) has died: prcp FGS 
+10-19 05:23:00.250   336   336 I Zygote  : Process 9112 exited due to signal 9 (Killed)
+10-19 05:23:00.251   521  2499 W ActivityManager: Scheduling restart of crashed service com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService in 1000ms for start-requested
+10-19 05:23:00.251   521   552 I libprocessgroup: Successfully killed process cgroup uid 10192 pid 9112 in 0ms
+10-19 05:23:00.254   521  2499 I ActivityManager: Killing 1563:com.google.android.apps.wellbeing/u0a121 (adj 985): empty #17
+10-19 05:23:00.258   335   358 I netd    : tetherGetStats() -> {[]} <0.28ms>
+10-19 05:23:00.260   521   538 I GnssNetworkConnectivityHandler: Network connection lost. Available networks count: 2
+10-19 05:23:00.260   521   538 I GnssNetworkConnectivityHandler: updateNetworkState, state=CLOSED, connected=false, network=112, capabilities=[ Transports: WIFI|VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&VALIDATED&NOT_ROAMING&FOREGROUND&NOT_CONGESTED&NOT_SUSPENDED&NOT_VCN_MANAGED LinkUpBandwidth>=12000Kbps LinkDnBandwidth>=30000Kbps TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> AdminUids: [10192] UnderlyingNetworks: [100]], availableNetworkCount: 2
+--------- beginning of kernel
+10-19 05:23:00.755     0     0 W binder_debug: 56 callbacks suppressed
+10-19 05:23:00.755     0     0 I binder  : cannot allocate buffer: no space left
+10-19 05:23:00.756     0     0 I binder  : undelivered transaction 797918, process died.
+10-19 05:23:00.757     0     0 I binder  : 521:769 transaction async to 1835:0 failed 943948/29201/-28, size 576-0 line 3406
+10-19 05:23:00.758     0     0 I binder  : undelivered transaction 798640, process died.
+10-19 05:23:00.267   521   769 E IPCThreadState: Binder transaction failure: 943948/29201/-28
+10-19 05:23:00.267   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:00.268   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.270   336   336 I Zygote  : Process 1563 exited due to signal 9 (Killed)
+10-19 05:23:00.271   521   769 E IPCThreadState: Binder transaction failure: 943958/29201/-28
+10-19 05:23:00.271   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:00.272   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.761     0     0 I binder  : cannot allocate buffer: no space left
+10-19 05:23:00.762     0     0 I binder  : 521:769 transaction async to 1835:0 failed 943958/29201/-28, size 576-0 line 3406
+10-19 05:23:00.763     0     0 I binder  : undelivered transaction 803477, process died.
+10-19 05:23:00.765     0     0 I binder  : cannot allocate buffer: no space left
+10-19 05:23:00.768     0     0 I binder  : undelivered transaction 824523, process died.
+10-19 05:23:00.769     0     0 I binder  : 521:769 transaction async to 1835:0 failed 943961/29201/-28, size 564-0 line 3406
+10-19 05:23:00.284   521   539 D DisplayManagerService: Drop pending events for gone uid 10121
+10-19 05:23:00.285   521   552 I libprocessgroup: Successfully killed process cgroup uid 10121 pid 1563 in 0ms
+10-19 05:23:00.287   335   358 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.52ms>
+10-19 05:23:00.288   335   358 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.43ms>
+10-19 05:23:00.289   335   358 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.14ms>
+10-19 05:23:00.289   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:00.289   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:00.290   335   358 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.55ms>
+10-19 05:23:00.291   335   358 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.37ms>
+10-19 05:23:00.291   335   358 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.26ms>
+10-19 05:23:00.292   335   358 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.36ms>
+10-19 05:23:00.295   521   769 E IPCThreadState: Binder transaction failure: 943961/29201/-28
+10-19 05:23:00.295   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 564)
+10-19 05:23:00.296   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=65, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.297   521   769 E IPCThreadState: Binder transaction failure: 944088/29201/-28
+10-19 05:23:00.297   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:00.297   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.298   521   839 D NetworkStatsObservers: Unregistering RequestInfo from pid/uid:521/1000(android) for DataUsageRequest [ requestId=39, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3074701 ] accessLevel:3
+10-19 05:23:00.298   521   760 D NetworkStatsObservers: Registering observer for RequestInfo from pid/uid:521/1000(android) for DataUsageRequest [ requestId=40, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3057345 ] accessLevel:3
+10-19 05:23:00.384   521   769 E IPCThreadState: Binder transaction failure: 944147/29201/-28
+10-19 05:23:00.385   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:00.388   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.389   521   769 E IPCThreadState: Binder transaction failure: 944148/29201/-28
+10-19 05:23:00.389   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:00.395   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.395   521   769 E IPCThreadState: Binder transaction failure: 944149/29201/-28
+10-19 05:23:00.396   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:00.396   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=112, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.399   521   769 E IPCThreadState: Binder transaction failure: 944150/29201/-28
+10-19 05:23:00.399   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:00.403   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=114, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.403   521   769 E IPCThreadState: Binder transaction failure: 944152/29201/-28
+10-19 05:23:00.404   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 544)
+10-19 05:23:00.404   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=116, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.409  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:00.437   335   358 I netd    : tetherGetStats() -> {[]} <90.46ms>
+10-19 05:23:00.438   335   361 I netd    : wakeupDelInterface(tun0, 484442034189:tun0, -2147483648, -2147483648) <27.04ms>
+10-19 05:23:00.448  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:00.454  8765  8784 I Process : Sending signal. PID: 8854 SIG: 9
+10-19 05:23:00.474   521   596 I ActivityManager: Process com.raydocs.tono.mobile.test:watch (pid 8854) has died: fg  SVC 
+10-19 05:23:00.477   336   336 I Zygote  : Process 8854 exited due to signal 9 (Killed)
+10-19 05:23:00.483   521   552 I libprocessgroup: Successfully killed process cgroup uid 10192 pid 8854 in 0ms
+10-19 05:23:00.485   335   361 I netd    : setNetworkAllowlist([NativeUidRangeConfig{netId: 101, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 100, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}]) <0.01ms>
+10-19 05:23:00.486   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=7, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.486   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=15, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.487   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=17, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1073 RequestorUid: 1073 RequestorPkg: com.google.android.networkstack UnderlyingNetworks: Null] ]
+10-19 05:23:00.488   521   769 D ConnectivityService: Sending DISCONNECTED broadcast for type 17 [112 WIFI|VPN] isDefaultNetwork=false
+10-19 05:23:00.488   521   769 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendStickyBroadcast:1626 android.net.connectivity.com.android.server.ConnectivityService.sendStickyBroadcast:3278 android.net.connectivity.com.android.server.ConnectivityService.sendLegacyNetworkBroadcast:10154 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1165 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1182 
+10-19 05:23:00.489   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=22, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10165 RequestorUid: 10165 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 05:23:00.490   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=24, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10165 RequestorUid: 10165 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 05:23:00.491   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=27, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10165 RequestorUid: 10165 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 05:23:00.491   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=31, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 05:23:00.492   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=33, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 05:23:00.492   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=35, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.492   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=37, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10121 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.492   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=39, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10140 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.492   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=41, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10140 RequestorUid: 10140 RequestorPkg: com.google.android.inputmethod.latin UnderlyingNetworks: Null] ]
+10-19 05:23:00.492   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=45, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10125 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.493   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=51, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 05:23:00.497   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:00.500   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=53, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.500   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=57, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.500   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=62, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=64, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=69, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=71, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10128 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=73, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=76, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=78, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=81, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10134 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=83, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10147 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=85, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 10131 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=92, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10117 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=96, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10187 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=100, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10180 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=105, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=107, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=109, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10142 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=113, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=115, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.502   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=118, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10155 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.505   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=121, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.505   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=123, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.505   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=129, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:00.505   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=134, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:00.505   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=136, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:00.506   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=138, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:00.506   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=140, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:00.506   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=146, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:00.506   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=153, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 10131 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 05:23:00.506   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=182, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10145 RequestorUid: 10145 RequestorPkg: com.google.android.apps.photos UnderlyingNetworks: Null] ]
+10-19 05:23:00.508  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:00.508  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:00.514  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:00.539   521   769 E IPCThreadState: Binder transaction failure: 944379/29201/-28
+10-19 05:23:00.539   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:00.540   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=114, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.546   521   769 E IPCThreadState: Binder transaction failure: 944460/29201/-28
+10-19 05:23:00.549   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2600)
+10-19 05:23:00.550  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:00.550   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.551   521   769 E IPCThreadState: Binder transaction failure: 944466/29201/-28
+10-19 05:23:00.557   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:00.558   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.574   335   361 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.66ms>
+10-19 05:23:00.576   335   361 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.59ms>
+10-19 05:23:00.579   521   769 E IPCThreadState: Binder transaction failure: 944499/29201/-28
+10-19 05:23:00.580   335   361 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.54ms>
+10-19 05:23:00.585   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:00.586   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=112, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.610   521   769 E IPCThreadState: Binder transaction failure: 944544/29201/-28
+10-19 05:23:00.611   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2600)
+10-19 05:23:00.614   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.626   521   796 D NetworkTimeUpdateService: New default network 100; checking time.
+10-19 05:23:00.666   521   769 E IPCThreadState: Binder transaction failure: 944573/29201/-28
+10-19 05:23:00.677   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2600)
+10-19 05:23:00.681   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:00.689   840   887 D EGL_emulation: app_time_stats: avg=266.17ms min=194.86ms max=419.45ms count=4
+10-19 05:23:00.689   521   769 E IPCThreadState: Binder transaction failure: 944591/29201/-28
+10-19 05:23:00.691   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:00.691   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:00.691   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:00.694   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:00.697   521   769 D ConnectivityService: NetReassign [136 : null → 100, 134 : null → 100, 123 : null → 100, 69 : null → 100, 83 : null → 100, 121 : null → 100, 57 : null → 100, 39 : null → 100, 41 : null → 100, 115 : null → 100, 31 : null → 100, 64 : null → 100, 107 : null → 100, 96 : null → 100, 17 : null → 100, 92 : null → 100, 113 : null → 100, 138 : null → 100, 71 : null → 100, 140 : null → 100, 35 : null → 100, 73 : null → 100, 100 : null → 100, 85 : null → 100, 81 : null → 100, 76 : null → 100, 15 : null → 100, 37 : null → 100, 109 : null → 100, 51 : null → 100, 153 : null → 100, 146 : null → 100, 45 : null → 100, 118 : null → 100, 182 : null → 100, 27 : null → 100, 129 : null → 100, 62 : null → 100, 24 : null → 100, 78 : null → 100, 105 : null → 100, 7 : null → 100, 33 : null → 100, 53 : null → 100, 22 : null → 100] [c 1] [a 198] [i 3]
+10-19 05:23:00.717   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:00.743   335   361 I netd    : networkDestroy(112) <44.77ms>
+10-19 05:23:00.769   335   361 I resolv  : DNS cache flushed
+10-19 05:23:00.769   335   361 W resolv  : resolv_stats_set_addrs: Network 112 not found for PROTO_DOT
+10-19 05:23:00.769   335   361 W resolv  : resolv_stats_set_addrs: Network 112 not found for PROTO_DOH
+10-19 05:23:00.769   335   361 I netd    : destroyNetworkCache(112) <0.24ms>
+10-19 05:23:00.771   521   769 D ProxyTracker: sending Proxy Broadcast for [] 0 xl=
+10-19 05:23:00.775   521   548 E IPCThreadState: Binder transaction failure: 944724/29201/-28
+10-19 05:23:00.777   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:00.778   521   548 W ActivityManager: Failed to update http proxy for: com.google.android.youtube
+10-19 05:23:00.778   521   548 E IPCThreadState: Binder transaction failure: 944729/29201/-28
+10-19 05:23:00.779   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:00.779   521   548 W ActivityManager: Failed to update http proxy for: com.google.android.apps.youtube.music
+10-19 05:23:00.784   521   769 D ConnectivityService: reportNetworkConnectivity(100, false) by 10131
+10-19 05:23:00.785  1004  2384 D NetworkMonitor/100: Forcing reevaluation for UID 10131. Dns signal count: 0
+10-19 05:23:00.788  1004  9302 D TrafficStats: tagSocket(68) with statsTag=0xffffff81, statsUid=-1
+10-19 05:23:00.790  1004  9302 D TrafficStats: tagSocket(68) with statsTag=0xffffff81, statsUid=-1
+10-19 05:23:00.792  1004  9301 D TrafficStats: tagSocket(75) with statsTag=0xffffff81, statsUid=-1
+10-19 05:23:00.793  1004  9301 D TrafficStats: tagSocket(75) with statsTag=0xffffff81, statsUid=-1
+10-19 05:23:00.795   335  9304 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+10-19 05:23:00.796   335  9304 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x786f9a0188d0
+10-19 05:23:00.796   335  9305 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+10-19 05:23:00.797   335  9305 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x78705a022b90
+10-19 05:23:00.803   335  9303 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+10-19 05:23:00.803   335  9303 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x786f9a018550
+10-19 05:23:00.808   335  9306 I resolv  : ResNSendHandler::run: 0 / {100 983140 100 983140 1073 1}
+10-19 05:23:00.809   335  9306 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x786fea01d7d0
+10-19 05:23:00.823  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.826  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.827  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.831  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.834  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.835  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.838  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.838  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.839  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.840  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.840  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.847  1004  9302 D NetworkMonitor/100: PROBE_DNS connectivitycheck.gstatic.com 58ms OK 142.251.150.120,2001:4860:4826:7800::
+10-19 05:23:00.847  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.848  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.853  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.854  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.855  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.858  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.859  1004  1004 D TrafficStats: tagSocket(68) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:00.859  1004  9301 D NetworkMonitor/100: PROBE_DNS www.google.com 67ms OK 142.251.156.119,142.251.152.119,142.251.155.119,142.251.154.119,142.251.157.119,142.251.151.119,142.251.150.119,142.251.153.119,2001:4860:482c:7700::,2001:4860:4828:7700::,2001:4860:4827:7700::,2001:4860:4829:7700::,2001:4860:4826:7700::,2001:4860:482b:7700::,2001:4860:482a:7700::,2001:4860:482d:7700::
+10-19 05:23:00.864   335  9307 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+10-19 05:23:00.865   335  9308 I resolv  : GetAddrInfoHandler::run: {100 983140 100 983140 1073 1}
+10-19 05:23:00.865   335  9310 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 05:23:00.869   335  9310 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x786f9a0188d0
+10-19 05:23:00.869   335  9310 I resolv  : doQuery: rcode=0, ancount=1, return value=63
+10-19 05:23:00.870   335  9312 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 05:23:00.870   335  9312 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x786fea01d7d0
+10-19 05:23:00.871   335  9312 I resolv  : doQuery: rcode=0, ancount=8, return value=160
+10-19 05:23:00.871   335  9309 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 05:23:00.871   335  9311 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 05:23:00.874   335  9311 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x78705a022b90
+10-19 05:23:00.875   335  9311 I resolv  : doQuery: rcode=0, ancount=8, return value=256
+10-19 05:23:00.881  1004  9301 D TrafficStats: tagSocket(68) with statsTag=0xffffff81, statsUid=-1
+10-19 05:23:00.887   335  9309 I resolv  : resolv_cache_lookup: FOUND IN CACHE entry=0x786f9a018550
+10-19 05:23:00.891   335  9309 I resolv  : doQuery: rcode=0, ancount=1, return value=75
+10-19 05:23:00.892  1004  9302 D TrafficStats: tagSocket(108) with statsTag=0xffffff81, statsUid=-1
+10-19 05:23:00.903  1004  9302 D NetworkMonitor/100: PROBE_HTTP http://connectivitycheck.gstatic.com/generate_204 time=54ms ret=204 request={Connection=[close], User-Agent=[Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.32 Safari/537.36]} headers={null=[HTTP/1.1 204 No Content], Connection=[close], Content-Length=[0], Cross-Origin-Resource-Policy=[cross-origin], Date=[Mon, 19 Oct 2026 05:23:01 GMT], X-Android-Received-Millis=[1792387380903], X-Android-Response-Source=[NETWORK 204], X-Android-Selected-Protocol=[http/1.1], X-Android-Sent-Millis=[1792387380897]}
+10-19 05:23:00.904  1004  9301 D NetworkMonitor/100: PROBE_HTTPS https://www.google.com/generate_204 time=40ms ret=204 request={Connection=[close], User-Agent=[Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.32 Safari/537.36]} headers={null=[HTTP/1.1 204 No Content], Alt-Svc=[h3=":443"; ma=2592000,h3-29=":443"; ma=2592000], Connection=[close], Content-Length=[0], Cross-Origin-Resource-Policy=[cross-origin], Date=[Mon, 19 Oct 2026 05:23:01 GMT], X-Android-Received-Millis=[1792387380904], X-Android-Response-Source=[NETWORK 204], X-Android-Selected-Protocol=[http/1.1], X-Android-Sent-Millis=[1792387380896]}
+10-19 05:23:00.905  1004  9300 D NetworkMonitor/100: isCaptivePortal: isSuccessful()=true isPortal()=false RedirectUrl=null isPartialConnectivity()=false Time=117ms
+10-19 05:23:00.908   521   769 D ConnectivityService: [100 WIFI] validation passed
+10-19 05:23:00.996  1543  1607 I DeviceStatusMonitor: DeviceStatusMonitor.handleBroadcast():122 onReceive() : Action = android.net.conn.CONNECTIVITY_CHANGE
+10-19 05:23:00.999  1543  1607 I DeviceStatusMonitor: DeviceStatusMonitor.notifyIfNetworkChanged():179 notifyIfNetworkChanged: newState = NON_METERED, airplaneModeOn = false, notifyAnyway = false
+10-19 05:23:00.999  1543  1606 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 05:23:00.999  1543  1543 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 05:23:01.006  4369  4469 I BugleTransport: Tachygram is disabled in RCS Configuration. Enabled transport is Dual Reg [CONTEXT ratelimit_period="5 SECONDS" ]
+10-19 05:23:01.019  5676  9083 W ctxmgr  : [NetworkStateProducer] No state change for network connection context [CONTEXT service_id=47 ]
+10-19 05:23:01.024  1543  7926 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 05:23:01.138   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:01.252   521   548 D CompatibilityChangeReporter: Compat change id reported: 135634846; UID 10192; state: DISABLED
+10-19 05:23:01.253   521   549 D CompatibilityChangeReporter: Compat change id reported: 143937733; UID 10192; state: ENABLED
+10-19 05:23:01.257   336   336 D Zygote  : Forked child process 9313
+10-19 05:23:01.258   521   549 I ActivityManager: Start proc 9313:com.raydocs.tono.mobile.test:vpn/u0a192 for service {com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+10-19 05:23:01.279  9313  9313 I mobile.test:vpn: Late-enabling -Xcheck:jni
+10-19 05:23:01.292  9313  9313 I mobile.test:vpn: Using CollectorTypeCC GC.
+10-19 05:23:01.293  9313  9313 W mobile.test:vpn: Unexpected CPU variant for x86: x86_64.
+10-19 05:23:01.293  9313  9313 W mobile.test:vpn: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-19 05:23:01.314   420   430 I adbd    : jdwp connection from 9313
+10-19 05:23:01.318   521  2532 D CompatibilityChangeReporter: Compat change id reported: 168419799; UID 10192; state: DISABLED
+10-19 05:23:01.318   521  2532 D CompatibilityChangeReporter: Compat change id reported: 273564678; UID 10192; state: DISABLED
+10-19 05:23:01.324  9313  9313 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10192; state: ENABLED
+10-19 05:23:01.324  9313  9313 D CompatibilityChangeReporter: Compat change id reported: 242716250; UID 10192; state: ENABLED
+10-19 05:23:01.328   521  1653 D CompatibilityChangeReporter: Compat change id reported: 170503758; UID 10192; state: ENABLED
+10-19 05:23:01.332  9313  9313 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+10-19 05:23:01.333  9313  9313 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.sidecar.jar
+10-19 05:23:01.333  9313  9313 W ziparchive: Unable to open '/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.dm': No such file or directory
+10-19 05:23:01.333  9313  9313 W ziparchive: Unable to open '/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.dm': No such file or directory
+10-19 05:23:01.414  9313  9313 D nativeloader: Configuring clns-6 for other apk /data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/lib/x86_64:/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.raydocs.tono.mobile.test
+10-19 05:23:01.421  9313  9313 V GraphicsEnvironment: Currently set values for:
+10-19 05:23:01.421  9313  9313 V GraphicsEnvironment:   angle_gl_driver_selection_pkgs=[]
+10-19 05:23:01.421  9313  9313 V GraphicsEnvironment:   angle_gl_driver_selection_values=[]
+10-19 05:23:01.422  9313  9313 V GraphicsEnvironment: ANGLE GameManagerService for com.raydocs.tono.mobile.test: false
+10-19 05:23:01.422  9313  9313 V GraphicsEnvironment: com.raydocs.tono.mobile.test is not listed in per-application setting
+10-19 05:23:01.422  9313  9313 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+10-19 05:23:01.426   521  2532 I ActivityManager: Flag disabled. Ignoring finishAttachApplication from uid: 10192. pid: 9313
+10-19 05:23:01.441  9313  9313 D CompatibilityChangeReporter: Compat change id reported: 160794467; UID 10192; state: ENABLED
+10-19 05:23:01.445  9313  9313 I TonoWatchdog: engine starting: replaced a leftover CONNECTED notification (VPN network false)
+10-19 05:23:01.466   521  2532 D ConnectivityService: requestNetwork for uid/pid:10192/9313 activeRequest: null callbackRequest: 183 [NetworkRequest [ LISTEN_FOR_BEST id=183, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&FOREGROUND&NOT_VCN_MANAGED Uid: 10192 RequestorUid: 10192 RequestorPkg: com.raydocs.tono.mobile.test UnderlyingNetworks: Null] ]] callback flags: 0 order: 2147483647
+10-19 05:23:01.467   521   769 D ConnectivityService: NetReassign [183 : null → 100] [c 1] [a 0] [i 1]
+10-19 05:23:01.479   521  2532 D CompatibilityChangeReporter: Compat change id reported: 170668199; UID 10192; state: ENABLED
+10-19 05:23:01.501   521  1653 D CompatibilityChangeReporter: Compat change id reported: 172251878; UID 10192; state: ENABLED
+10-19 05:23:01.502   840   840 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 05:23:01.516   521  2532 D CompatibilityChangeReporter: Compat change id reported: 135634846; UID 10192; state: DISABLED
+10-19 05:23:01.518   521   549 D CompatibilityChangeReporter: Compat change id reported: 143937733; UID 10192; state: ENABLED
+10-19 05:23:01.522   336   336 D Zygote  : Forked child process 9335
+10-19 05:23:01.523   521   549 I ActivityManager: Start proc 9335:com.raydocs.tono.mobile.test:watch/u0a192 for service {com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.EngineWatchService}
+10-19 05:23:01.526   840   840 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 05:23:01.528   521   521 W NotificationHistory: Attempted to add notif for locked/gone/disabled user 0
+10-19 05:23:01.530  9313  9336 D TrafficStats: tagSocket(79) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:01.533  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:01.533  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:01.547  9335  9335 I bile.test:watch: Late-enabling -Xcheck:jni
+10-19 05:23:01.565  9335  9335 I bile.test:watch: Using CollectorTypeCC GC.
+10-19 05:23:01.566  9335  9335 W bile.test:watch: Unexpected CPU variant for x86: x86_64.
+10-19 05:23:01.566  9335  9335 W bile.test:watch: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-19 05:23:01.609   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:01.621   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:01.650  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:01.654  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:01.696  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:01.700  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:01.726   840   887 D EGL_emulation: app_time_stats: avg=328.03ms min=3.72ms max=792.83ms count=3
+10-19 05:23:01.727  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:01.728  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:01.766   840   840 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 05:23:01.808  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:01.809  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:01.830   420   430 I adbd    : jdwp connection from 9335
+10-19 05:23:01.844   521  2532 D CompatibilityChangeReporter: Compat change id reported: 261072174; UID 10192; state: ENABLED
+10-19 05:23:01.880  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:01.881  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:01.921  9335  9335 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10192; state: ENABLED
+10-19 05:23:01.923  9335  9335 D CompatibilityChangeReporter: Compat change id reported: 242716250; UID 10192; state: ENABLED
+10-19 05:23:01.933  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:01.933  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:01.936  9335  9335 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+10-19 05:23:01.937  9335  9335 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.sidecar.jar
+10-19 05:23:01.940  9335  9335 W ziparchive: Unable to open '/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.dm': No such file or directory
+10-19 05:23:01.940  9335  9335 W ziparchive: Unable to open '/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.dm': No such file or directory
+10-19 05:23:01.941  9313  9313 W tono-engine: type=1400 audit(0.0:170): avc:  denied  { read } for  name="tcp" dev="proc" ino=4026532053 scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:object_r:proc_net_tcp_udp:s0 tclass=file permissive=0 app=com.raydocs.tono.mobile.test
+10-19 05:23:02.041  9313  9313 W tono-engine: type=1400 audit(0.0:171): avc:  denied  { read } for  name="somaxconn" dev="proc" ino=75496 scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:object_r:proc_net:s0 tclass=file permissive=0 app=com.raydocs.tono.mobile.test
+10-19 05:23:02.092   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:02.143   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:02.470   840   860 I ndroid.systemui: Background young concurrent copying GC freed 318258(14MB) AllocSpace objects, 13(260KB) LOS objects, 36% free, 25MB/39MB, paused 30us,43us total 305.085ms
+10-19 05:23:02.721  9335  9335 D nativeloader: Configuring clns-6 for other apk /data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/lib/x86_64:/data/app/~~cmTrsCgs320YuXRs73Azag==/com.raydocs.tono.mobile.test-zPd-1fqLGy-Ow6ULEhYNTQ==/base.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.raydocs.tono.mobile.test
+10-19 05:23:02.727  9335  9335 V GraphicsEnvironment: Currently set values for:
+10-19 05:23:02.727  9335  9335 V GraphicsEnvironment:   angle_gl_driver_selection_pkgs=[]
+10-19 05:23:02.728  9335  9335 V GraphicsEnvironment:   angle_gl_driver_selection_values=[]
+10-19 05:23:02.729  9335  9335 V GraphicsEnvironment: ANGLE GameManagerService for com.raydocs.tono.mobile.test: false
+10-19 05:23:02.730  9335  9335 V GraphicsEnvironment: com.raydocs.tono.mobile.test is not listed in per-application setting
+10-19 05:23:02.730  9335  9335 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+10-19 05:23:02.734   521  1658 I ActivityManager: Flag disabled. Ignoring finishAttachApplication from uid: 10192. pid: 9335
+10-19 05:23:03.264  9313  9331 D TonoEngine: [36mINFO[0m[0000] network: updated available networks: wlan0 (wifi), eth0 (cellular, expensive)
+10-19 05:23:03.261  9313  9313 W tono-engine: type=1400 audit(0.0:172): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 05:23:03.286   521   762 D NetdWrapper: NetdWrapper interface add, iface= tun0
+10-19 05:23:03.292   335   351 I Netd    : Destroyed 10 sockets on 198.18.0.1 in 485us
+10-19 05:23:03.294   521  1658 D VpnJni  : Address added on tun0: 198.18.0.1/30
+10-19 05:23:03.295   521  1658 D VpnJni  : Address added on tun0: fdfe:dcba:9876::1/126
+10-19 05:23:03.297   521  1658 D Vpn     : setting state=CONNECTING, reason=establish
+10-19 05:23:03.299   521  1658 D Vpn     : setting state=CONNECTING, reason=agentConnect
+10-19 05:23:03.300   521  1658 I ConnectivityService: Update score for net 113 : +IS_VPN
+10-19 05:23:03.301   521  1658 D ConnectivityService: registerNetworkAgent NetworkAgentInfo{network{113}  handle{488737001485}  ni{VPN CONNECTING extra: } created=2026-10-19T05:23:03.300Z Score(Policies : IS_VPN ; KeepConnected : 0)  underlying{[100]}  lp{{InterfaceName: tun0 LinkAddresses: [ 198.18.0.1/30,fdfe:dcba:9876::1/126 ] DnsAddresses: [ /198.18.0.2,/fdfe:dcba:9876::2 ] Domains:  MTU: 9000 Routes: [ 0.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,8.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,11.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,12.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,16.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,32.0.0.0/3 -> 0.0.0.0 tun0 mtu 0,64.0.0.0/3 -> 0.0.0.0 tun0 mtu 0,96.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,100.0.0.0/10 -> 0.0.0.0 tun0 mtu 0,100.128.0.0/9 -> 0.0.0.0 tun0 mtu 0,101.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,102.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,104.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,112.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,128.0.0.0/3 -> 0.0.0.0 tun0 mtu 0,160.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,168.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,169.0.0.0/9 -> 0.0.0.0 tun0 mtu 0,169.128.0.0/10 -> 0.0.0.0 tun0 mtu 0,169.192.0.0/11 -> 0.0.0.0 tun0 mtu 0,169.224.0.0/12 -> 0.0.0.0 tun0 mtu 0,169.240.0.0/13 -> 0.0.0.0 tun0 mtu 0,169.248.0.0/14 -> 0.0.0.0 tun0 mtu 0,169.252.0.0/15 -> 0.0.0.0 tun0 mtu 0,169.255.0.0/16 -> 0.0.0.0 tun0 mtu 0,170.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,172.0.0.0/12 -> 0.0.0.0 tun0 mtu 0,172.32.0.0/11 -> 0.0.0.0 tun0 mtu 0,172.64.0.0/10 -> 0.0.0.0 tun0 mtu 0,172.128.0.0/9 -> 0.0.0.0 tun0 mtu 0,173.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,174.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,176.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,192.0.0.0/9 -> 0.0.0.0 tun0 mtu 0,192.128.0.0/11 -> 0.0.0.0 tun0 mtu 0,192.160.0.0/13 -> 0.0.0.0 tun0 mtu 0,192.169.0.0/16 -> 0.0.0.0 tun0 mtu 0,192.170.0.0/15 -> 0.0.0.0 tun0 mtu 0,192.172.0.0/14 -> 0.0.0.0 tun0 mtu 0,192.176.0.0/12 -> 0.0.0.0 tun0 mtu 0,192.192.0.0/10 -> 0.0.0.0 tun0 mtu 0,193.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,194.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,196.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,200.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,208.0.0.0/4 -> 0.0.0.0 tun0 mtu 0,240.0.0.0/5 -> 0.0.0.0 tun0 mtu 0,248.0.0.0/6 -> 0.0.0.0 tun0 mtu 0,252.0.0.0/7 -> 0.0.0.0 tun0 mtu 0,254.0.0.0/8 -> 0.0.0.0 tun0 mtu 0,255.0.0.0/9 -> 0.0.0.0 tun0 mtu 0,255.128.0.0/10 -> 0.0.0.0 tun0 mtu 0,255.192.0.0/11 -> 0.0.0.0 tun0 mtu 0,255.224.0.0/12 -> 0.0.0.0 tun0 mtu 0,255.240.0.0/13 -> 0.0.0.0 tun0 mtu 0,255.248.0.0/14 -> 0.0.0.0 tun0 mtu 0,255.252.0.0/15 -> 0.0.0.0 tun0 mtu 0,255.254.0.0/16 -> 0.0.0.0 tun0 mtu 0,255.255.0.0/17 -> 0.0.0.0 tun0 mtu 0,255.255.128.0/18 -> 0.0.0.0 tun0 mtu 0,255.255.192.0/19 -> 0.0.0.0 tun0 mtu 0,255.255.224.0/20 -> 0.0.0.0 tun0 mtu 0,255.255.240.0/21 -> 0.0.0.0 tun0 mtu 0,255.255.248.0/22 -> 0.0.0.0 tun0 mtu 0,255.255.252.0/23 -> 0.0.0.0 tun0 mtu 0,255.255.254.0/24 -> 0.0.0.0 tun0 mtu 0,255.255.255.0/25 -> 0.0.0.0 tun0 mtu 0,255.255.255.128/26 -> 0.0.0.0 tun0 mtu 0,255.255.255.192/27 -> 0.0.0.0 tun0 mtu 0,255.255.255.224/28 -> 0.0.0.0 tun0 mtu 0,255.255.255.240/29 -> 0.0.0.0 tun0 mtu 0,255.255.255.248/30 -> 0.0.0.0 tun0 mtu 0,255.255.255.252/31 -> 0.0.0.0 tun0 mtu 0,255.255.255.254/32 -> 0.0.0.0 tun0 mtu 0,::/1 -> :: tun0 mtu 0,8000::/2 -> :: tun0 mtu 0,c000::/3 -> :: tun0 mtu 0,e000::/4 -> :: tun0 mtu 0,f000::/5 -> :: tun0 mtu 0,f800::/6 -> :: tun0 mtu 0,fc00::/7 -> :: tun0 mtu 0,fe00::/9 -> :: tun0 mtu 0,fec0::/10 -> :: tun0 mtu 0 ]}}  nc{[ Transports: VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> OwnerUid: 10192 AdminUids: [10192] UnderlyingNetworks: [100]]}  factorySerialNumber=2}
+10-19 05:23:03.301   521  1658 D Vpn     : setting state=CONNECTED, reason=agentConnect
+10-19 05:23:03.301   521  1658 I Vpn     : Established by com.raydocs.tono.mobile.test on tun0
+10-19 05:23:03.302   335   361 I netd    : getFwmarkForNetwork(113) -> {MarkMaskParcel{mark: 113, mask: 65535}} <0.00ms>
+10-19 05:23:03.305   521   769 D ConnectivityService: [113 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTING to CONNECTING
+10-19 05:23:03.305   335   361 I netd    : networkCreate(NativeNetworkConfig{netId: 113, networkType: VIRTUAL, permission: 0, secure: true, vpnType: SERVICE, excludeLocalRoutes: false}) <0.09ms>
+10-19 05:23:03.306   335   361 I netd    : createNetworkCache(113) <0.09ms>
+10-19 05:23:03.306   335   361 I netd    : setNetworkAllowlist([NativeUidRangeConfig{netId: 113, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 101, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 100, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}]) <0.01ms>
+10-19 05:23:03.308   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 05:23:03.309   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 05:23:03.310   521   769 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 2ms
+10-19 05:23:03.310   335   361 I netd    : networkAddUidRangesParcel(NativeUidRangeConfig{netId: 113, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}) <0.01ms>
+10-19 05:23:03.311  9313  9331 D TonoEngine: [37mTRACE[0m[0000] inbound/tun[tun-in]: creating stack
+10-19 05:23:03.312   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 05:23:03.313   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 05:23:03.313   521   769 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 3ms
+10-19 05:23:03.313  9313  9331 D TonoEngine: [36mINFO[0m[0000] inbound/tun[tun-in]: started at tun0
+10-19 05:23:03.320   521   769 D ConnectivityService: [113 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTING to CONNECTED
+10-19 05:23:03.320  1004  9360 D NetworkMonitor/113: checkAndRenewResourceConfig: update captive portal https urls to [https://www.google.com/generate_204]
+10-19 05:23:03.320  1004  9360 D NetworkMonitor/113: checkAndRenewResourceConfig: update captive portal http urls to [http://connectivitycheck.gstatic.com/generate_204]
+10-19 05:23:03.320  1004  9360 D NetworkMonitor/113: checkAndRenewResourceConfig: update captive portal fallback urls to[http://www.google.com/gen_204, http://play.googleapis.com/generate_204]
+10-19 05:23:03.320  1004  9360 D NetworkMonitor: Starting on network 113 with capport HTTPS URL [https://www.google.com/generate_204] and HTTP URL [http://connectivitycheck.gstatic.com/generate_204]
+10-19 05:23:03.321   521   769 W DnsManager: updatePrivateDns(113, PrivateDnsConfig{true:/[]})
+10-19 05:23:03.321   521   769 D ConnectivityService: Setting DNS servers for network 113 to [/198.18.0.2, /fdfe:dcba:9876::2]
+10-19 05:23:03.321   521   769 D DnsManager: sendDnsConfigurationForNetwork(113, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, , [198.18.0.2, fdfe:dcba:9876::2])
+10-19 05:23:03.321   335   361 I resolv  : setDoh: No suitable DoH server found
+10-19 05:23:03.321   335   361 I resolv  : resolv_set_nameservers: netid = 113, addr = 198.18.0.2
+10-19 05:23:03.321   335   361 I resolv  : resolv_set_nameservers: netid = 113, addr = fdfe:dcba:9876::2
+10-19 05:23:03.321   335   361 I netd    : DnsResolverService::setResolverConfiguration(113, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, "", [198.18.0.2, fdfe:dcba:9876::2]) -> (0) (0.3ms)
+10-19 05:23:03.321   335   361 I netd    : setResolverConfiguration(ResolverParamsParcel{netId: 113, sampleValiditySeconds: 1800, successThreshold: 25, minSamples: 8, maxSamples: 64, baseTimeoutMsec: 0, retryCount: 0, servers: [198.18.0.2, fdfe:dcba:9876::2], domains: [], tlsName: , tlsServers: [198.18.0.2, fdfe:dcba:9876::2], tlsFingerprints: [], caCertificate: , tlsConnectTimeoutMs: 0, resolverOptions: (null), transportTypes: [1, 4]}) <0.35ms>
+10-19 05:23:03.321   521   769 D ConnectivityService: Adding iface tun0 to network 113
+10-19 05:23:03.322   335  9361 W resolv  : Validating DnsTlsServer 198.18.0.2 with mark 0xf0071
+10-19 05:23:03.324   521   548 E IPCThreadState: Binder transaction failure: 946308/29201/-28
+10-19 05:23:03.324   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:03.324   521   548 W ActivityManager: Failed to clear dns cache for: com.google.android.youtube
+10-19 05:23:03.324   521   548 E IPCThreadState: Binder transaction failure: 946309/29201/-28
+10-19 05:23:03.324   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:03.324   521   548 W ActivityManager: Failed to clear dns cache for: com.google.android.apps.youtube.music
+10-19 05:23:03.325   335   361 I netd    : networkAddInterface(113, tun0) <3.43ms>
+10-19 05:23:03.326  9313  9355 D TonoEngine: [36mINFO[0m[0000] network: updated default interface wlan0, index 16, type wifi
+10-19 05:23:03.327   335   361 I netd    : wakeupAddInterface(tun0, 488737001485:tun0, -2147483648, -2147483648) <0.42ms>
+10-19 05:23:03.327   335  9362 W resolv  : Validating DnsTlsServer fdfe:dcba:9876::2 with mark 0xf0071
+10-19 05:23:03.313  9313  9313 W tono-engine: type=1400 audit(0.0:173): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 05:23:03.333  9313  9331 D TonoEngine: [36mINFO[0m[0000] sing-box started (0.90s)
+10-19 05:23:03.325  9313  9313 W Thread-4: type=1400 audit(0.0:174): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 05:23:03.336  9313  9348 D TonoEngine: [36mINFO[0m[0000] [[38;5;78m3831121726[0m 0ms] inbound/tun[tun-in]: inbound DNS connection from [fdfe:dcba:9876::1]:36632
+10-19 05:23:03.337  9313  9348 D TonoEngine: [36mINFO[0m[0000] [[38;5;78m3831121726[0m 1ms] router: found user id: 1051
+10-19 05:23:03.329  9313  9313 W tono-engine: type=1400 audit(0.0:175): avc:  denied  { bind } for  scontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tcontext=u:r:untrusted_app:s0:c192,c256,c512,c768 tclass=netlink_route_socket permissive=0 bug=b/155595000 app=com.raydocs.tono.mobile.test
+10-19 05:23:03.345   335   361 I netd    : interfaceSetMtu(tun0, 9000) <0.10ms>
+10-19 05:23:03.346   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 0.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 05:23:03.346   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 8.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.348   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 11.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.348   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 12.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.349   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 16.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.349   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 32.0.0.0/3, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.349   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 64.0.0.0/3, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.350   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 96.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 05:23:03.350   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 100.0.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 05:23:03.350   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 100.128.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 05:23:03.350   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 101.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 05:23:03.350   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 102.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 05:23:03.351   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 104.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 05:23:03.351   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 112.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.351   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 128.0.0.0/3, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.352   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 160.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.07ms>
+10-19 05:23:03.352   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 168.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.352   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.0.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.353   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.128.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.353   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.192.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 05:23:03.353   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.224.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.354   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.240.0.0/13, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.354   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.248.0.0/14, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.354   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.252.0.0/15, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.355   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 169.255.0.0/16, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.355   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 170.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.355   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 172.0.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.07ms>
+10-19 05:23:03.355   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 172.32.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.356   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 172.64.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.356   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 172.128.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.356   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 173.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.356   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 174.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.357   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 176.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.357   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.0.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.358   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.128.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.358   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.160.0.0/13, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.358   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.169.0.0/16, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.359   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.170.0.0/15, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 05:23:03.359   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.172.0.0/14, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.359   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.176.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.360   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 192.192.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.360   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 193.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.360   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 194.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.03ms>
+10-19 05:23:03.360   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 196.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.361   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 200.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.07ms>
+10-19 05:23:03.361   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 208.0.0.0/4, ifName: tun0, nextHop: , mtu: 0}) <0.12ms>
+10-19 05:23:03.361   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 240.0.0.0/5, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.362   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 248.0.0.0/6, ifName: tun0, nextHop: , mtu: 0}) <0.26ms>
+10-19 05:23:03.362   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 252.0.0.0/7, ifName: tun0, nextHop: , mtu: 0}) <0.25ms>
+10-19 05:23:03.362   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 254.0.0.0/8, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.363   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.0.0.0/9, ifName: tun0, nextHop: , mtu: 0}) <0.26ms>
+10-19 05:23:03.363   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.128.0.0/10, ifName: tun0, nextHop: , mtu: 0}) <0.15ms>
+10-19 05:23:03.364   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.192.0.0/11, ifName: tun0, nextHop: , mtu: 0}) <0.08ms>
+10-19 05:23:03.364   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.224.0.0/12, ifName: tun0, nextHop: , mtu: 0}) <0.08ms>
+10-19 05:23:03.365   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.240.0.0/13, ifName: tun0, nextHop: , mtu: 0}) <0.14ms>
+10-19 05:23:03.365   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.248.0.0/14, ifName: tun0, nextHop: , mtu: 0}) <0.18ms>
+10-19 05:23:03.365   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.252.0.0/15, ifName: tun0, nextHop: , mtu: 0}) <0.29ms>
+10-19 05:23:03.366   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.254.0.0/16, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.366   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.0.0/17, ifName: tun0, nextHop: , mtu: 0}) <0.18ms>
+10-19 05:23:03.366   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.128.0/18, ifName: tun0, nextHop: , mtu: 0}) <0.23ms>
+10-19 05:23:03.367   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.192.0/19, ifName: tun0, nextHop: , mtu: 0}) <0.21ms>
+10-19 05:23:03.367   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.224.0/20, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.368   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.240.0/21, ifName: tun0, nextHop: , mtu: 0}) <0.33ms>
+10-19 05:23:03.368   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.248.0/22, ifName: tun0, nextHop: , mtu: 0}) <0.05ms>
+10-19 05:23:03.368   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.252.0/23, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.369   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.254.0/24, ifName: tun0, nextHop: , mtu: 0}) <0.10ms>
+10-19 05:23:03.369   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.0/25, ifName: tun0, nextHop: , mtu: 0}) <0.38ms>
+10-19 05:23:03.370   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.128/26, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 05:23:03.370   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.192/27, ifName: tun0, nextHop: , mtu: 0}) <0.13ms>
+10-19 05:23:03.371   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.224/28, ifName: tun0, nextHop: , mtu: 0}) <0.14ms>
+10-19 05:23:03.371   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.240/29, ifName: tun0, nextHop: , mtu: 0}) <0.08ms>
+10-19 05:23:03.372   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.248/30, ifName: tun0, nextHop: , mtu: 0}) <0.13ms>
+10-19 05:23:03.372   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.252/31, ifName: tun0, nextHop: , mtu: 0}) <0.14ms>
+10-19 05:23:03.373   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 255.255.255.254/32, ifName: tun0, nextHop: , mtu: 0}) <0.15ms>
+10-19 05:23:03.373   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: ::/1, ifName: tun0, nextHop: , mtu: 0}) <0.15ms>
+10-19 05:23:03.374   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 8000::/2, ifName: tun0, nextHop: , mtu: 0}) <0.13ms>
+10-19 05:23:03.375   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: c000::/3, ifName: tun0, nextHop: , mtu: 0}) <0.09ms>
+10-19 05:23:03.376   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: e000::/4, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.377   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: f000::/5, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.377   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: f800::/6, ifName: tun0, nextHop: , mtu: 0}) <0.12ms>
+10-19 05:23:03.378   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: fc00::/7, ifName: tun0, nextHop: , mtu: 0}) <0.10ms>
+10-19 05:23:03.378   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: fe00::/9, ifName: tun0, nextHop: , mtu: 0}) <0.06ms>
+10-19 05:23:03.378   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: fec0::/10, ifName: tun0, nextHop: , mtu: 0}) <0.11ms>
+10-19 05:23:03.378   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: 198.18.0.0/30, ifName: tun0, nextHop: , mtu: 0}) <0.04ms>
+10-19 05:23:03.379   335   361 I netd    : networkAddRouteParcel(113, RouteInfoParcel{destination: fdfe:dcba:9876::/126, ifName: tun0, nextHop: , mtu: 0}) <0.13ms>
+10-19 05:23:03.379   521   769 D ConnectivityService: Setting DNS servers for network 113 to [/198.18.0.2, /fdfe:dcba:9876::2]
+10-19 05:23:03.379   521   769 D DnsManager: sendDnsConfigurationForNetwork(113, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, , [198.18.0.2, fdfe:dcba:9876::2])
+10-19 05:23:03.379   335   361 I resolv  : setDoh: No suitable DoH server found
+10-19 05:23:03.379   335   361 I netd    : DnsResolverService::setResolverConfiguration(113, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, "", [198.18.0.2, fdfe:dcba:9876::2]) -> (0) (0.2ms)
+10-19 05:23:03.379   335   361 I netd    : setResolverConfiguration(ResolverParamsParcel{netId: 113, sampleValiditySeconds: 1800, successThreshold: 25, minSamples: 8, maxSamples: 64, baseTimeoutMsec: 0, retryCount: 0, servers: [198.18.0.2, fdfe:dcba:9876::2], domains: [], tlsName: , tlsServers: [198.18.0.2, fdfe:dcba:9876::2], tlsFingerprints: [], caCertificate: , tlsConnectTimeoutMs: 0, resolverOptions: (null), transportTypes: [1, 4]}) <0.18ms>
+10-19 05:23:03.380   521   548 E IPCThreadState: Binder transaction failure: 946579/29201/-28
+10-19 05:23:03.380   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:03.380   521   548 W ActivityManager: Failed to clear dns cache for: com.google.android.youtube
+10-19 05:23:03.380   521   548 E IPCThreadState: Binder transaction failure: 946580/29201/-28
+10-19 05:23:03.380   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:03.380   521   548 W ActivityManager: Failed to clear dns cache for: com.google.android.apps.youtube.music
+10-19 05:23:03.410   335   361 I netd    : tetherGetStats() -> {[]} <0.44ms>
+10-19 05:23:03.414   521   769 E IPCThreadState: Binder transaction failure: 946619/29201/-28
+10-19 05:23:03.414   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13392)
+10-19 05:23:03.414   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=114, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.414   521   769 E IPCThreadState: Binder transaction failure: 946621/29201/-28
+10-19 05:23:03.414   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13412)
+10-19 05:23:03.414   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.414   521   769 E IPCThreadState: Binder transaction failure: 946622/29201/-28
+10-19 05:23:03.414   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13392)
+10-19 05:23:03.414   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.414   521   769 E IPCThreadState: Binder transaction failure: 946624/29201/-28
+10-19 05:23:03.414   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13392)
+10-19 05:23:03.414   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=112, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.418  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:03.418  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:03.419  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:03.424   521   769 E IPCThreadState: Binder transaction failure: 946651/29201/-28
+10-19 05:23:03.424   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13412)
+10-19 05:23:03.424   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.426   521   769 E IPCThreadState: Binder transaction failure: 946659/29201/-28
+10-19 05:23:03.426   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13412)
+10-19 05:23:03.426   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.426   521   769 E IPCThreadState: Binder transaction failure: 946662/29201/-28
+10-19 05:23:03.426   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13392)
+10-19 05:23:03.426   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.429  1923  3033 D TrafficStats: tagSocket(128) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.431  1923  3141 D TrafficStats: tagSocket(128) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.432   521   769 E IPCThreadState: Binder transaction failure: 946689/29201/-28
+10-19 05:23:03.432   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13400)
+10-19 05:23:03.432   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=65, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.433   521   769 E IPCThreadState: Binder transaction failure: 946690/29201/-28
+10-19 05:23:03.433   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 13380)
+10-19 05:23:03.433   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=116, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.433   521   796 D NetworkTimeUpdateService: New default network 113; checking time.
+10-19 05:23:03.434  1543  2055 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.436  1923  3033 D TrafficStats: tagSocket(128) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.437  1923  3141 D TrafficStats: tagSocket(128) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.437  1543  2055 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.445  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:03.453   335   361 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.59ms>
+10-19 05:23:03.454   335   361 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.81ms>
+10-19 05:23:03.454   335   361 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.46ms>
+10-19 05:23:03.455  1004  9360 D NetworkMonitor/113: Network would not satisfy default request, resolving private DNS
+10-19 05:23:03.456   335   361 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.41ms>
+10-19 05:23:03.457   335   361 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.48ms>
+10-19 05:23:03.458   335   361 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.58ms>
+10-19 05:23:03.458   335   361 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.45ms>
+10-19 05:23:03.459  5676  5932 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.460  5676  5932 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.461   521   839 D NetworkStatsObservers: Unregistering RequestInfo from pid/uid:521/1000(android) for DataUsageRequest [ requestId=40, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3057345 ] accessLevel:3
+10-19 05:23:03.461   521   760 D NetworkStatsObservers: Registering observer for RequestInfo from pid/uid:521/1000(android) for DataUsageRequest [ requestId=41, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3046402 ] accessLevel:3
+10-19 05:23:03.464  1004  1010 I rkstack.process: Background young concurrent copying GC freed 49027(1494KB) AllocSpace objects, 0(0B) LOS objects, 22% free, 4412KB/5707KB, paused 22.743ms,8us total 46.437ms
+10-19 05:23:03.467  4369  4865 D TrafficStats: tagSocket(88) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.467   521   769 D ConnectivityService: Sending CONNECTED broadcast for type 17 [113 WIFI|VPN] isDefaultNetwork=false
+10-19 05:23:03.468   521   769 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendStickyBroadcast:1626 android.net.connectivity.com.android.server.ConnectivityService.sendStickyBroadcast:3278 android.net.connectivity.com.android.server.ConnectivityService.sendGeneralBroadcast:3248 android.net.connectivity.com.android.server.ConnectivityService.sendConnectedBroadcast:3221 android.net.connectivity.com.android.server.ConnectivityService.sendLegacyNetworkBroadcast:10126 
+10-19 05:23:03.472  4369  4865 D TrafficStats: tagSocket(88) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.472   840   887 D EGL_emulation: app_time_stats: avg=339.95ms min=11.75ms max=1154.00ms count=5
+10-19 05:23:03.473   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:03.473   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:03.477   521   769 D ConnectivityService: NetReassign [136 : 100 → 113, 134 : 100 → 113, 123 : 100 → 113, 69 : 100 → 113, 83 : 100 → 113, 121 : 100 → 113, 57 : 100 → 113, 39 : 100 → 113, 41 : 100 → 113, 115 : 100 → 113, 31 : 100 → 113, 64 : 100 → 113, 107 : 100 → 113, 96 : 100 → 113, 17 : 100 → 113, 92 : 100 → 113, 113 : 100 → 113, 138 : 100 → 113, 71 : 100 → 113, 140 : 100 → 113, 35 : 100 → 113, 73 : 100 → 113, 100 : 100 → 113, 85 : 100 → 113, 81 : 100 → 113, 76 : 100 → 113, 15 : 100 → 113, 37 : 100 → 113, 109 : 100 → 113, 51 : 100 → 113, 153 : 100 → 113, 146 : 100 → 113, 45 : 100 → 113, 118 : 100 → 113, 182 : 100 → 113, 27 : 100 → 113, 129 : 100 → 113, 62 : 100 → 113, 24 : 100 → 113, 78 : 100 → 113, 105 : 100 → 113, 7 : 100 → 113, 33 : 100 → 113, 53 : 100 → 113, 22 : 100 → 113] [c 0] [a 59] [i 4]
+10-19 05:23:03.478   521   769 E IPCThreadState: Binder transaction failure: 946966/29201/-28
+10-19 05:23:03.478   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:03.478   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.478   521   769 E IPCThreadState: Binder transaction failure: 946967/29201/-28
+10-19 05:23:03.478   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:03.478   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.478   521   769 E IPCThreadState: Binder transaction failure: 946968/29201/-28
+10-19 05:23:03.478   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 564)
+10-19 05:23:03.479   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=65, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.479   521   769 E IPCThreadState: Binder transaction failure: 946971/29201/-28
+10-19 05:23:03.479   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:03.479   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.479   521   769 E IPCThreadState: Binder transaction failure: 946976/29201/-28
+10-19 05:23:03.479   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:03.479   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.480   521   769 E IPCThreadState: Binder transaction failure: 946977/29201/-28
+10-19 05:23:03.480   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:03.480   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.480   521   769 E IPCThreadState: Binder transaction failure: 946978/29201/-28
+10-19 05:23:03.480   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:03.480   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=112, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.480   521   769 E IPCThreadState: Binder transaction failure: 946979/29201/-28
+10-19 05:23:03.480   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:03.480   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=114, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.480   521   769 E IPCThreadState: Binder transaction failure: 946980/29201/-28
+10-19 05:23:03.480   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 544)
+10-19 05:23:03.480   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=116, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.485   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:03.485   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:03.562   521   769 I ConnectivityService: Update score for net 113 : +EVER_EVALUATED
+10-19 05:23:03.563   521   769 D ConnectivityService: [113 WIFI|VPN] validation passed
+10-19 05:23:03.563   521   769 I ConnectivityService: Update capabilities for net 113 : +VALIDATED
+10-19 05:23:03.563   521   769 I ConnectivityService: Update score for net 113 : +EVER_VALIDATED+IS_VALIDATED
+10-19 05:23:03.569   521   769 D ConnectivityService: NetReassign [no changes] [c 0] [a 0] [i 5]
+10-19 05:23:03.582  1543  2055 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.584   521   769 E IPCThreadState: Binder transaction failure: 947043/29201/-28
+10-19 05:23:03.584   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 860)
+10-19 05:23:03.585   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.586   521   769 E IPCThreadState: Binder transaction failure: 947044/29201/-28
+10-19 05:23:03.586   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:03.587   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 860)
+10-19 05:23:03.590   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.591   521   769 E IPCThreadState: Binder transaction failure: 947047/29201/-28
+10-19 05:23:03.591   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 848)
+10-19 05:23:03.591   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=65, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.592  1923  3033 D TrafficStats: tagSocket(128) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.593   521   769 E IPCThreadState: Binder transaction failure: 947052/29201/-28
+10-19 05:23:03.596   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 860)
+10-19 05:23:03.596   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:03.597  1923  3141 D TrafficStats: tagSocket(162) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.598   521   769 E IPCThreadState: Binder transaction failure: 947059/29201/-28
+10-19 05:23:03.598   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 840)
+10-19 05:23:03.598   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.602   521   769 E IPCThreadState: Binder transaction failure: 947060/29201/-28
+10-19 05:23:03.602   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 840)
+10-19 05:23:03.602   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.603   521   769 E IPCThreadState: Binder transaction failure: 947061/29201/-28
+10-19 05:23:03.603   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 840)
+10-19 05:23:03.603   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=112, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.604   521   769 E IPCThreadState: Binder transaction failure: 947062/29201/-28
+10-19 05:23:03.604   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 840)
+10-19 05:23:03.604   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=114, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.604   521   769 E IPCThreadState: Binder transaction failure: 947063/29201/-28
+10-19 05:23:03.639  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:03.640  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:03.649   521   538 I GnssNetworkConnectivityHandler: updateNetworkState, state=CLOSED, connected=true, network=113, capabilities=[ Transports: WIFI|VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&VALIDATED&NOT_ROAMING&FOREGROUND&NOT_CONGESTED&NOT_SUSPENDED&NOT_VCN_MANAGED LinkUpBandwidth>=12000Kbps LinkDnBandwidth>=30000Kbps TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> AdminUids: [10192] UnderlyingNetworks: [100]], availableNetworkCount: 3
+10-19 05:23:03.650   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 828)
+10-19 05:23:03.650   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=116, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:03.651   335   361 I netd    : tetherGetStats() -> {[]} <42.79ms>
+10-19 05:23:03.655   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:03.656   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:03.658  4369  4865 D TrafficStats: tagSocket(88) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.660  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:03.660  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:03.662   521   769 D ConnectivityService: Setting DNS servers for network 113 to [/198.18.0.2, /fdfe:dcba:9876::2]
+10-19 05:23:03.662  5676  5932 D TrafficStats: tagSocket(76) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:03.663   521   769 D DnsManager: sendDnsConfigurationForNetwork(113, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, , [198.18.0.2, fdfe:dcba:9876::2])
+10-19 05:23:03.664   335   361 I resolv  : setDoh: No suitable DoH server found
+10-19 05:23:03.664   335   361 I netd    : DnsResolverService::setResolverConfiguration(113, [198.18.0.2, fdfe:dcba:9876::2], [], 1800, 25, 8, 64, 0, 0, "", [198.18.0.2, fdfe:dcba:9876::2]) -> (0) (0.08ms)
+10-19 05:23:03.664   335   361 I netd    : setResolverConfiguration(ResolverParamsParcel{netId: 113, sampleValiditySeconds: 1800, successThreshold: 25, minSamples: 8, maxSamples: 64, baseTimeoutMsec: 0, retryCount: 0, servers: [198.18.0.2, fdfe:dcba:9876::2], domains: [], tlsName: , tlsServers: [198.18.0.2, fdfe:dcba:9876::2], tlsFingerprints: [], caCertificate: , tlsConnectTimeoutMs: 0, resolverOptions: (null), transportTypes: [1, 4]}) <0.11ms>
+10-19 05:23:03.665   521   548 E IPCThreadState: Binder transaction failure: 947259/29201/-28
+10-19 05:23:03.666   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:03.666   521   548 W ActivityManager: Failed to clear dns cache for: com.google.android.youtube
+10-19 05:23:03.666   521   548 E IPCThreadState: Binder transaction failure: 947262/29201/-28
+10-19 05:23:03.666   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:03.666   521   548 W ActivityManager: Failed to clear dns cache for: com.google.android.apps.youtube.music
+10-19 05:23:03.666   335   361 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.57ms>
+10-19 05:23:03.736   335   361 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <65.09ms>
+10-19 05:23:03.737   335   361 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.64ms>
+10-19 05:23:03.738   335   361 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.45ms>
+10-19 05:23:03.784   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:03.833   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:03.972  1543  1606 I DeviceStatusMonitor: DeviceStatusMonitor.handleBroadcast():122 onReceive() : Action = android.net.conn.CONNECTIVITY_CHANGE
+10-19 05:23:03.973   335  9363 I resolv  : GetAddrInfoHandler::run: {100 100 113 917617 10192 0}
+10-19 05:23:03.982   335  9365 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 05:23:03.983  5676  9083 W ctxmgr  : [NetworkStateProducer] No state change for network connection context [CONTEXT service_id=47 ]
+10-19 05:23:03.984   335  9364 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 05:23:03.986  9313  9348 D TonoEngine: [36mINFO[0m[0001] [[38;5;121m895954286[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:52530
+10-19 05:23:04.005  1543  1606 I DeviceStatusMonitor: DeviceStatusMonitor.getNetworkState():276 Network has WIFI transport but no NET_CAPABILITY_NOT_METERED capability.
+10-19 05:23:04.006  1543  1606 I DeviceStatusMonitor: DeviceStatusMonitor.notifyIfNetworkChanged():179 notifyIfNetworkChanged: newState = METERED, airplaneModeOn = false, notifyAnyway = false
+10-19 05:23:04.006  1543  1607 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = METERED, isAirplaneModeOn = false
+10-19 05:23:04.007  1543  1543 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = METERED, isAirplaneModeOn = false
+10-19 05:23:04.007  1543  8902 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = METERED, isAirplaneModeOn = false
+10-19 05:23:04.017  9313  9348 D TonoEngine: [36mINFO[0m[0001] [[38;5;121m895954286[0m 31ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.017  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;121m895954286[0m 32ms] dns: exchange www.cloudflare.com. IN AAAA
+10-19 05:23:04.018  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;121m895954286[0m 32ms] dns: match[2] query_type=[A AAAA] domain=[www.wikipedia.org en.wikipedia.org www.mozilla.org...] => route(fakeip)
+10-19 05:23:04.018  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;121m895954286[0m 32ms] dns: exchanged www.cloudflare.com NOERROR 600
+10-19 05:23:04.018  9313  9348 D TonoEngine: [36mINFO[0m[0001] [[38;5;121m895954286[0m 32ms] dns: exchanged AAAA www.cloudflare.com. 600 IN AAAA fc00::402
+10-19 05:23:04.018  9313  9348 D TonoEngine: [36mINFO[0m[0001] [[38;5;215m858112967[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:53775
+10-19 05:23:04.018   335  9364 I resolv  : res_nsend: used send_dg 82 terrno: 0
+10-19 05:23:04.018   335  9364 I resolv  : doQuery: rcode=0, ancount=1, return value=82
+10-19 05:23:04.021  9313  9348 D TonoEngine: [36mINFO[0m[0001] [[38;5;215m858112967[0m 2ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.021  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;215m858112967[0m 2ms] dns: exchange www.cloudflare.com. IN A
+10-19 05:23:04.021  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;215m858112967[0m 2ms] dns: match[2] query_type=[A AAAA] domain=[www.wikipedia.org en.wikipedia.org www.mozilla.org...] => route(fakeip)
+10-19 05:23:04.021  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;215m858112967[0m 2ms] dns: exchanged www.cloudflare.com NOERROR 600
+10-19 05:23:04.021  9313  9348 D TonoEngine: [36mINFO[0m[0001] [[38;5;215m858112967[0m 2ms] dns: exchanged A www.cloudflare.com. 600 IN A 198.18.132.2
+10-19 05:23:04.021   335  9365 I resolv  : res_nsend: used send_dg 70 terrno: 0
+10-19 05:23:04.021   335  9365 I resolv  : doQuery: rcode=0, ancount=1, return value=70
+10-19 05:23:04.023   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:04.024  9313  9336 D TrafficStats: tagSocket(88) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:04.026  9313  9348 D TonoEngine: [36mINFO[0m[0001] [[38;5;32m4069064976[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.026  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;32m4069064976[0m 0ms] router: found fakeip domain: www.cloudflare.com
+10-19 05:23:04.026  9313  9348 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;32m4069064976[0m 0ms] router: pre-match[0] inbound=tun-in => sniff
+10-19 05:23:04.027  9313  9357 D TonoEngine: [36mINFO[0m[0001] [[38;5;223m1112320479[0m 0ms] inbound/tun[tun-in]: inbound connection from 198.18.0.1:49512
+10-19 05:23:04.027  9313  9357 D TonoEngine: [36mINFO[0m[0001] [[38;5;223m1112320479[0m 0ms] inbound/tun[tun-in]: inbound connection to 198.18.132.2:443
+10-19 05:23:04.028  9313  9357 D TonoEngine: [36mINFO[0m[0001] [[38;5;223m1112320479[0m 1ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.028  9313  9355 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;223m1112320479[0m 1ms] router: found fakeip domain: www.cloudflare.com
+10-19 05:23:04.029  9313  9357 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;223m1112320479[0m 2ms] router: match[0] inbound=tun-in => sniff
+10-19 05:23:04.034  9313  9357 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;223m1112320479[0m 7ms] router: sniffed protocol: tls, domain: www.cloudflare.com
+10-19 05:23:04.037  9313  9357 D TonoEngine: [37mDEBUG[0m[0001] [[38;5;223m1112320479[0m 10ms] router: match[13] network=tcp domain=[www.wikipedia.org en.wikipedia.org www.mozilla.org...] => route(Tono-Exit)
+10-19 05:23:04.038  9313  9357 D TonoEngine: [36mINFO[0m[0001] [[38;5;223m1112320479[0m 11ms] outbound/vless[Local test · Fixture]: outbound connection to www.cloudflare.com:443
+10-19 05:23:04.045   521   617 D ActivityManager: freezing 9098 com.google.process.gapps
+10-19 05:23:04.046   521   617 D ActivityManager: freezing 1666 com.google.process.gservices
+10-19 05:23:04.342  9313  9367 D TonoEngine: [36mINFO[0m[0001] [[38;5;134m3483965814[0m 0ms] inbound/tun[tun-in]: inbound DNS connection from 10.0.2.16:52058
+10-19 05:23:04.343  9313  9367 D TonoEngine: [36mINFO[0m[0001] [[38;5;134m3483965814[0m 1ms] router: found user id: 1051
+10-19 05:23:04.552  9313  9351 D TonoEngine: [36mINFO[0m[0002] [[38;5;223m1112320479[0m 525ms] outbound/vless[Local test · Fixture]: outbound connection to www.cloudflare.com:443
+10-19 05:23:04.553  9313  9351 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls client hello! 517
+10-19 05:23:04.553  9313  9351 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 517 441 0
+10-19 05:23:04.558  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:04.559  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:04.572   840   887 D EGL_emulation: app_time_stats: avg=274.94ms min=180.27ms max=556.15ms count=4
+10-19 05:23:04.574  9313  9357 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 21 1428 padding 208 0
+10-19 05:23:04.574  9313  9357 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls 1.3! 1163 4865 true
+10-19 05:23:04.575  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 1390 padding 38 0
+10-19 05:23:04.621  9313  9348 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 64 842 0
+10-19 05:23:04.623  9313  9348 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 158 1114 2
+10-19 05:23:04.630   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:04.631   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:04.674  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 1661 padding 12 2
+10-19 05:23:04.677  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsRead readV
+10-19 05:23:04.765   335  9369 I resolv  : GetAddrInfoHandler::run: {100 100 113 917617 10192 0}
+10-19 05:23:04.766   335  9370 I resolv  : res_nmkquery: (QUERY, IN, AAAA)
+10-19 05:23:04.767  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;230m1960573953[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:39407
+10-19 05:23:04.768  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;230m1960573953[0m 1ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.768  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;230m1960573953[0m 1ms] dns: exchange claude.ai. IN AAAA
+10-19 05:23:04.769  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;230m1960573953[0m 1ms] dns: match[1] query_type=[A AAAA] domain_suffix=[youtube.com youtube-nocookie.com youtu.be...] => route(fakeip)
+10-19 05:23:04.769  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;230m1960573953[0m 2ms] dns: exchanged claude.ai NOERROR 600
+10-19 05:23:04.769  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;230m1960573953[0m 2ms] dns: exchanged AAAA claude.ai. 600 IN AAAA fc00::403
+10-19 05:23:04.769   335  9370 I resolv  : res_nsend: used send_dg 64 terrno: 0
+10-19 05:23:04.769   335  9370 I resolv  : doQuery: rcode=0, ancount=1, return value=64
+10-19 05:23:04.770   335  9371 I resolv  : res_nmkquery: (QUERY, IN, A)
+10-19 05:23:04.773  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;73m3190089273[0m 0ms] inbound/tun[tun-in]: inbound DNS packet from 198.18.0.1:37448
+10-19 05:23:04.774  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;73m3190089273[0m 1ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.774  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;73m3190089273[0m 1ms] dns: exchange claude.ai. IN A
+10-19 05:23:04.775  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;73m3190089273[0m 1ms] dns: match[1] query_type=[A AAAA] domain_suffix=[youtube.com youtube-nocookie.com youtu.be...] => route(fakeip)
+10-19 05:23:04.776  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;73m3190089273[0m 2ms] dns: exchanged claude.ai NOERROR 600
+10-19 05:23:04.776  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;73m3190089273[0m 3ms] dns: exchanged A claude.ai. 600 IN A 198.18.132.3
+10-19 05:23:04.776   335  9371 I resolv  : res_nsend: used send_dg 52 terrno: 0
+10-19 05:23:04.776   335  9371 I resolv  : doQuery: rcode=0, ancount=1, return value=52
+10-19 05:23:04.779  9313  9336 D TrafficStats: tagSocket(92) with statsTag=0xffffffff, statsUid=-1
+10-19 05:23:04.781  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;230m2083023361[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.781  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;230m2083023361[0m 0ms] router: found fakeip domain: claude.ai
+10-19 05:23:04.782  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;230m2083023361[0m 1ms] router: pre-match[0] inbound=tun-in => sniff
+10-19 05:23:04.782  9313  9367 D TonoEngine: [36mINFO[0m[0002] [[38;5;86m3778321809[0m 0ms] inbound/tun[tun-in]: inbound connection from 198.18.0.1:53168
+10-19 05:23:04.782  9313  9367 D TonoEngine: [36mINFO[0m[0002] [[38;5;86m3778321809[0m 0ms] inbound/tun[tun-in]: inbound connection to 198.18.132.3:443
+10-19 05:23:04.782  9313  9367 D TonoEngine: [36mINFO[0m[0002] [[38;5;86m3778321809[0m 0ms] router: found package name: com.raydocs.tono.mobile.test
+10-19 05:23:04.782  9313  9367 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;86m3778321809[0m 0ms] router: found fakeip domain: claude.ai
+10-19 05:23:04.783  9313  9367 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;86m3778321809[0m 0ms] router: match[0] inbound=tun-in => sniff
+10-19 05:23:04.789  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;86m3778321809[0m 6ms] router: sniffed protocol: tls, domain: claude.ai
+10-19 05:23:04.789  9313  9348 D TonoEngine: [37mDEBUG[0m[0002] [[38;5;86m3778321809[0m 6ms] router: match[5] network=tcp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...] => route(Tono-Home-Residential)
+10-19 05:23:04.789  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;86m3778321809[0m 6ms] outbound/socks[Tono-Home-Residential]: outbound connection to claude.ai:443
+10-19 05:23:04.789  9313  9348 D TonoEngine: [36mINFO[0m[0002] [[38;5;86m3778321809[0m 6ms] outbound/vless[Local test · Fixture]: outbound connection to 198.20.0.11:21080
+10-19 05:23:05.246   521  2034 W BatteryExternalStatsWorker: error reading Bluetooth stats: 11
+10-19 05:23:05.281   521  2034 W ProcessStats: Tracking association SourceState{5eb056b com.google.android.gms/10131 BTop #15834} whose proc state 2 is better than process ProcessState{caddb8e com.google.android.gms.persistent/10131 pkg=com.google.android.gms} proc state 4 (186 skipped)
+10-19 05:23:05.300  9313  9367 D TonoEngine: [36mINFO[0m[0002] [[38;5;86m3778321809[0m 518ms] outbound/vless[Local test · Fixture]: outbound connection to 198.20.0.11:21080
+10-19 05:23:05.301  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 3 236 0
+10-19 05:23:05.303  9313  9348 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 21 2 padding 50 0
+10-19 05:23:05.304  9313  9348 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 38 118 0
+10-19 05:23:05.305  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 2 padding 79 0
+10-19 05:23:05.306  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 16 157 0
+10-19 05:23:05.318  9313  9357 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 10 padding 155 0
+10-19 05:23:05.318  9313  9357 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls client hello! 517
+10-19 05:23:05.318  9313  9357 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsPadding 517 643 1
+10-19 05:23:05.331  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 3736 padding 124 0
+10-19 05:23:05.331  9313  9367 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsFilterTls found tls 1.3! 3736 4865 true
+10-19 05:23:05.382  9313  9348 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: Xtls Unpadding new block 5 1004 padding 244 2
+10-19 05:23:05.382  9313  9348 D TonoEngine: [37mTRACE[0m[0002] outbound/vless[Local test · Fixture]: XtlsRead readV
+10-19 05:23:05.393   840   840 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 05:23:05.916     0     0 I logd    : logdr: UID=2000 GID=2000 PID=9372 n tail=0 logMask=99 pid=0 start=0ns deadline=0ns
+10-19 05:23:05.931     0     0 I logd    : logdr: UID=2000 GID=2000 PID=9376 n tail=0 logMask=9 pid=0 start=0ns deadline=0ns
+10-19 05:23:05.488  8765  8784 I Process : Sending signal. PID: 9313 SIG: 9
+10-19 05:23:05.499   335   351 I Netd    : Destroyed 1 sockets on fdfe:dcba:9876::1 in 401us
+10-19 05:23:05.499   335  9362 W resolv  : SSL_connect ssl error =5, mark 0xf0071: Software caused connection abort
+10-19 05:23:05.499   335  9362 W resolv  : TLS Handshake failed
+10-19 05:23:05.499   335  9362 W resolv  : query failed
+10-19 05:23:05.499   335  9362 W resolv  : validateDnsTlsServer returned 0 for fdfe:dcba:9876::2
+10-19 05:23:05.499   335  9362 W resolv  : Validation failed
+10-19 05:23:05.502   335   351 I Netd    : Destroyed 12 sockets on 198.18.0.1 in 362us
+10-19 05:23:05.501   521   521 W android.fg: type=1400 audit(0.0:176): avc:  denied  { sys_module } for  capability=16  scontext=u:r:system_server:s0 tcontext=u:r:system_server:s0 tclass=capability permissive=0 bug=b/228030183
+10-19 05:23:06.003     0     0 I binder_alloc: 9313: binder_alloc_buf, no vma
+10-19 05:23:06.008     0     0 W binder_debug: 166 callbacks suppressed
+10-19 05:23:06.008     0     0 I binder  : cannot allocate buffer: vma cleared, target dead or dying
+10-19 05:23:06.010     0     0 I binder  : 521:538 transaction async to 9313:0 failed 948083/29189/-3, size 348-8 line 3406
+10-19 05:23:05.524   521   538 E IPCThreadState: Binder transaction failure: 948083/29189/-3
+10-19 05:23:05.524   521   538 W ActivityManager: Exception when unbinding service com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService
+10-19 05:23:05.524   521   538 W ActivityManager: android.os.DeadObjectException
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.os.BinderProxy.transactNative(Native Method)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.os.BinderProxy.transact(BinderProxy.java:584)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.app.IApplicationThread$Stub$Proxy.scheduleUnbindService(IApplicationThread.java:1419)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.am.ActiveServices.removeConnectionLocked(ActiveServices.java:5896)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.am.ActiveServices.unbindServiceLocked(ActiveServices.java:3970)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.am.ActivityManagerService.unbindService(ActivityManagerService.java:13426)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.app.ContextImpl.unbindService(ContextImpl.java:2171)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.connectivity.Vpn$1.interfaceRemoved(Vpn.java:2302)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService.lambda$notifyInterfaceRemoved$3(NetworkManagementService.java:352)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService.$r8$lambda$hVm3bQaIEYWthKxfd7oL9u5O8zg(NetworkManagementService.java:0)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService$$ExternalSyntheticLambda10.sendCallback(R8$$SyntheticClass:0)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService.invokeForAllObservers(NetworkManagementService.java:313)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService.notifyInterfaceRemoved(NetworkManagementService.java:352)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService.-$$Nest$mnotifyInterfaceRemoved(NetworkManagementService.java:0)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService$NetdUnsolicitedEventListener.lambda$onInterfaceRemoved$6(NetworkManagementService.java:619)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService$NetdUnsolicitedEventListener.$r8$lambda$piup9FgGLVmuqEVHCUukqqP2cGU(NetworkManagementService.java:0)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.net.NetworkManagementService$NetdUnsolicitedEventListener$$ExternalSyntheticLambda3.run(R8$$SyntheticClass:0)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.os.Handler.handleCallback(Handler.java:958)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.os.Handler.dispatchMessage(Handler.java:99)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.os.Looper.loopOnce(Looper.java:205)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.os.Looper.loop(Looper.java:294)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at android.os.HandlerThread.run(HandlerThread.java:67)
+10-19 05:23:05.524   521   538 W ActivityManager: 	at com.android.server.ServiceThread.run(ServiceThread.java:46)
+10-19 05:23:05.525   521   538 D Vpn     : setting state=DISCONNECTED, reason=agentDisconnect
+10-19 05:23:05.526   521   769 D ConnectivityService: [113 WIFI|VPN] EVENT_NETWORK_INFO_CHANGED, going from CONNECTED to DISCONNECTED
+10-19 05:23:05.526   336   336 I Zygote  : Process 9313 exited due to signal 9 (Killed)
+10-19 05:23:05.526   335  9361 W resolv  : SSL_connect ssl error =5, mark 0xf0071: Software caused connection abort
+10-19 05:23:05.526   335  9361 W resolv  : TLS Handshake failed
+10-19 05:23:05.526   335  9361 W resolv  : query failed
+10-19 05:23:05.526   335  9361 W resolv  : validateDnsTlsServer returned 0 for 198.18.0.2
+10-19 05:23:05.526   335  9361 W resolv  : Validation failed
+10-19 05:23:05.526   521   617 D ActivityManager: freezing 6074 com.raydocs.tono.mobile.test.test
+10-19 05:23:05.527   521   769 D InetDiagMessage: Destroyed 1 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 05:23:05.527   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 05:23:05.527   521   769 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 1ms
+10-19 05:23:05.527   521   774 D VPN     : NetworkAgent: NetworkAgent channel lost
+10-19 05:23:05.528   335   361 I netd    : networkRemoveUidRangesParcel(NativeUidRangeConfig{netId: 113, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}) <0.17ms>
+10-19 05:23:05.529   521  2035 I ActivityManager: Process com.raydocs.tono.mobile.test:vpn (pid 9313) has died: prcp FGS 
+10-19 05:23:05.532   521   552 I libprocessgroup: Successfully killed process cgroup uid 10192 pid 9313 in 0ms
+10-19 05:23:05.532   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+10-19 05:23:05.532   521   769 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+10-19 05:23:05.532   521   769 D InetDiagMessage: Destroyed live tcp sockets for uids={[0, 99999]} exemptUids={1016, 10192} in 5ms
+10-19 05:23:05.536   521   769 D ConnectivityService: [113 WIFI|VPN] disconnected, was satisfying 59
+10-19 05:23:05.538  9335  9335 I TonoWatchdog: engine died: the watch heard its binder die (VPN network true)
+10-19 05:23:05.547  9335  9335 D CompatibilityChangeReporter: Compat change id reported: 160794467; UID 10192; state: ENABLED
+10-19 05:23:05.547   335   361 I netd    : tetherGetStats() -> {[]} <1.31ms>
+10-19 05:23:05.549  9335  9335 I TonoWatchdog: engine died: replaced its CONNECTED notification (VPN network true)
+10-19 05:23:05.560   335   361 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.47ms>
+10-19 05:23:05.562  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:05.562  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:05.564   521   538 I GnssNetworkConnectivityHandler: Network connection lost. Available networks count: 2
+10-19 05:23:05.564   521   538 I GnssNetworkConnectivityHandler: updateNetworkState, state=CLOSED, connected=false, network=113, capabilities=[ Transports: WIFI|VPN Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&VALIDATED&NOT_ROAMING&FOREGROUND&NOT_CONGESTED&NOT_SUSPENDED&NOT_VCN_MANAGED LinkUpBandwidth>=12000Kbps LinkDnBandwidth>=30000Kbps TransportInfo: <VpnTransportInfo{type=1, sessionId=Tono, bypassable=false longLivedTcpConnectionsExpensive=false}> Uids: <{0-99999}> AdminUids: [10192] UnderlyingNetworks: [100]], availableNetworkCount: 2
+10-19 05:23:05.568   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:06.058     0     0 I binder  : cannot allocate buffer: no space left
+10-19 05:23:06.058     0     0 I binder  : 521:769 transaction async to 1835:0 failed 948201/29201/-28, size 576-0 line 3406
+10-19 05:23:05.571   335   361 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.51ms>
+10-19 05:23:05.572   335   361 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.08ms>
+10-19 05:23:05.573   521   769 E IPCThreadState: Binder transaction failure: 948201/29201/-28
+10-19 05:23:05.573   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:05.574   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:06.067     0     0 I binder  : cannot allocate buffer: no space left
+10-19 05:23:06.067     0     0 I binder  : 521:769 transaction async to 1835:0 failed 948242/29201/-28, size 576-0 line 3406
+10-19 05:23:05.577   335   361 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.41ms>
+10-19 05:23:05.577   335   361 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.43ms>
+10-19 05:23:05.578   335   361 I netd    : bandwidthRemoveInterfaceQuota(tun0) <0.32ms>
+10-19 05:23:05.578   335   361 I netd    : bandwidthSetInterfaceQuota(tun0, 9223372036854775807) <0.26ms>
+10-19 05:23:05.580   521   769 E IPCThreadState: Binder transaction failure: 948242/29201/-28
+10-19 05:23:05.580   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:05.580   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:06.073     0     0 I binder  : cannot allocate buffer: no space left
+10-19 05:23:06.073     0     0 I binder  : 521:769 transaction async to 1835:0 failed 948287/29201/-28, size 564-0 line 3406
+10-19 05:23:05.585   840   887 D EGL_emulation: app_time_stats: avg=506.10ms min=197.82ms max=814.39ms count=2
+10-19 05:23:05.585   521   839 D NetworkStatsObservers: Unregistering RequestInfo from pid/uid:521/1000(android) for DataUsageRequest [ requestId=41, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3046402 ] accessLevel:3
+10-19 05:23:05.585   521   760 D NetworkStatsObservers: Registering observer for RequestInfo from pid/uid:521/1000(android) for DataUsageRequest [ requestId=42, networkTemplate=NetworkTemplate: matchRule=MOBILE, matchSubscriberIds=[310260...], matchWifiNetworkKeys=[], metered=YES, defaultNetwork=NO, thresholdInBytes=3038990 ] accessLevel:3
+10-19 05:23:05.586   521   769 E IPCThreadState: Binder transaction failure: 948287/29201/-28
+10-19 05:23:05.586   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 564)
+10-19 05:23:05.586   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=65, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:06.079     0     0 I binder  : cannot allocate buffer: no space left
+10-19 05:23:06.079     0     0 I binder  : 521:769 transaction async to 1835:0 failed 948306/29201/-28, size 576-0 line 3406
+10-19 05:23:05.590   521   769 E IPCThreadState: Binder transaction failure: 948306/29201/-28
+10-19 05:23:05.591   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 576)
+10-19 05:23:05.591   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:05.591   521   769 E IPCThreadState: Binder transaction failure: 948325/29201/-28
+10-19 05:23:05.591   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:05.591   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.591   521   769 E IPCThreadState: Binder transaction failure: 948327/29201/-28
+10-19 05:23:05.591   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:05.591   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.591   521   769 E IPCThreadState: Binder transaction failure: 948328/29201/-28
+10-19 05:23:05.591   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:05.591   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=112, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.591   521   769 E IPCThreadState: Binder transaction failure: 948329/29201/-28
+10-19 05:23:05.591   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 556)
+10-19 05:23:05.591   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=114, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.591   521   769 E IPCThreadState: Binder transaction failure: 948330/29201/-28
+10-19 05:23:05.591   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 544)
+10-19 05:23:05.592   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ LISTEN id=116, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&FOREGROUND&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.593   335   361 I netd    : wakeupDelInterface(tun0, 488737001485:tun0, -2147483648, -2147483648) <0.75ms>
+10-19 05:23:05.595   335   361 I netd    : setNetworkAllowlist([NativeUidRangeConfig{netId: 101, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}, NativeUidRangeConfig{netId: 100, uidRanges: [UidRangeParcel{start: 0, stop: 99999}], subPriority: 0}]) <0.00ms>
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=7, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=15, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=17, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1073 RequestorUid: 1073 RequestorPkg: com.google.android.networkstack UnderlyingNetworks: Null] ]
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=22, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10165 RequestorUid: 10165 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=24, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10165 RequestorUid: 10165 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=27, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10165 RequestorUid: 10165 RequestorPkg: com.android.systemui UnderlyingNetworks: Null] ]
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=31, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 05:23:05.596   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=33, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1001 RequestorUid: 1001 RequestorPkg: com.android.phone UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=35, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 1000 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=37, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10121 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=39, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10140 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=41, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10140 RequestorUid: 10140 RequestorPkg: com.google.android.inputmethod.latin UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=45, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10125 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=51, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=53, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=57, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.597   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=62, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:05.598   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=64, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:05.598   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=69, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.599   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=71, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10128 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.618  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:05.618  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:05.651   840   840 D TileServices: Couldn't find tile for ComponentInfo{com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.surface.TonoTileService}(0)
+10-19 05:23:05.651   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:05.652   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:05.652   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:05.681   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=73, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 05:23:05.681   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=76, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:05.683  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:05.687   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=78, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10132 RequestorUid: 10132 RequestorPkg: com.google.android.googlequicksearchbox UnderlyingNetworks: Null] ]
+10-19 05:23:05.688   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=81, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10134 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.688   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=83, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10147 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.688   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=85, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 10131 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 05:23:05.689   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=92, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10117 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.689   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=96, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10187 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.689   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=100, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10180 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.689   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=105, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.689   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=107, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.689   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=109, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10142 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.689   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=113, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.690   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=115, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.690   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=118, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10155 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.690   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=121, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.690   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=123, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.691   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=129, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:05.696   335   361 I netd    : tetherGetStats() -> {[]} <0.33ms>
+10-19 05:23:05.702   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=134, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:05.705   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=136, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:05.708   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=138, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:05.709   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=140, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10130 RequestorUid: 10130 RequestorPkg: com.google.android.apps.messaging UnderlyingNetworks: Null] ]
+10-19 05:23:05.710   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=146, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10129 RequestorUid: 1000 RequestorPkg: android UnderlyingNetworks: Null] ]
+10-19 05:23:05.714   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=153, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10131 RequestorUid: 10131 RequestorPkg: com.google.android.gms UnderlyingNetworks: Null] ]
+10-19 05:23:05.714   521   762 D WifiNetworkFactory: got request NetworkRequest [ REQUEST id=182, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10145 RequestorUid: 10145 RequestorPkg: com.google.android.apps.photos UnderlyingNetworks: Null] ]
+10-19 05:23:05.715   521   769 D ConnectivityService: Sending DISCONNECTED broadcast for type 17 [113 WIFI|VPN] isDefaultNetwork=false
+10-19 05:23:05.716   521   769 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendStickyBroadcast:1626 android.net.connectivity.com.android.server.ConnectivityService.sendStickyBroadcast:3278 android.net.connectivity.com.android.server.ConnectivityService.sendLegacyNetworkBroadcast:10154 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1165 android.net.connectivity.com.android.server.ConnectivityService$LegacyTypeTracker.remove:1182 
+10-19 05:23:05.740   335   361 I netd    : bandwidthRemoveInterfaceQuota(eth0) <0.67ms>
+10-19 05:23:05.745   335   361 I netd    : bandwidthSetInterfaceQuota(eth0, 9223372036854775807) <0.57ms>
+10-19 05:23:05.749   335   361 I netd    : bandwidthRemoveInterfaceQuota(tun0) <1.11ms>
+10-19 05:23:05.757  1688  2171 W AiAiEcho: LyftNotificationParser Ridesharing ETA not enabled
+10-19 05:23:05.757  1688  2171 W AiAiEcho: SmartspaceNotificationPredictor no parser can handle this notification or notification is invalid
+10-19 05:23:05.766  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:05.777  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:05.778  4904  4939 I BugleRcsEngine: [58] bqvv.c: Connected state: [1], networkType: [WIFI]
+10-19 05:23:05.785  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:05.793   521   769 E IPCThreadState: Binder transaction failure: 948719/29201/-28
+10-19 05:23:05.793   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:05.793   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=114, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.793   521   769 E IPCThreadState: Binder transaction failure: 948722/29201/-28
+10-19 05:23:05.794   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2600)
+10-19 05:23:05.794   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=63, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:05.794   521   769 E IPCThreadState: Binder transaction failure: 948723/29201/-28
+10-19 05:23:05.794   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:05.794   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=106, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.794   521   769 E IPCThreadState: Binder transaction failure: 948725/29201/-28
+10-19 05:23:05.795   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:05.795   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=112, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.796   521   769 E IPCThreadState: Binder transaction failure: 948731/29201/-28
+10-19 05:23:05.796   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2600)
+10-19 05:23:05.796   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=75, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:05.797   521   769 E IPCThreadState: Binder transaction failure: 948738/29201/-28
+10-19 05:23:05.797   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2600)
+10-19 05:23:05.797   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=61, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10156 RequestorUid: 10156 RequestorPkg: com.google.android.apps.youtube.music UnderlyingNetworks: Null] ]
+10-19 05:23:05.798   521   796 D NetworkTimeUpdateService: New default network 100; checking time.
+10-19 05:23:05.799   521   769 E IPCThreadState: Binder transaction failure: 948747/29201/-28
+10-19 05:23:05.799   521   769 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2580)
+10-19 05:23:05.799   521   769 E ConnectivityService: RemoteException caught trying to send a callback msg for NetworkRequest [ TRACK_DEFAULT id=104, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VCN_MANAGED Uid: 10139 RequestorUid: 10139 RequestorPkg: com.google.android.youtube UnderlyingNetworks: Null] ]
+10-19 05:23:05.805   521   769 D ConnectivityService: NetReassign [136 : null → 100, 134 : null → 100, 123 : null → 100, 69 : null → 100, 83 : null → 100, 121 : null → 100, 57 : null → 100, 39 : null → 100, 41 : null → 100, 115 : null → 100, 31 : null → 100, 64 : null → 100, 107 : null → 100, 96 : null → 100, 17 : null → 100, 92 : null → 100, 113 : null → 100, 138 : null → 100, 71 : null → 100, 140 : null → 100, 35 : null → 100, 73 : null → 100, 100 : null → 100, 85 : null → 100, 81 : null → 100, 76 : null → 100, 15 : null → 100, 37 : null → 100, 109 : null → 100, 51 : null → 100, 153 : null → 100, 146 : null → 100, 45 : null → 100, 118 : null → 100, 182 : null → 100, 27 : null → 100, 129 : null → 100, 62 : null → 100, 24 : null → 100, 78 : null → 100, 105 : null → 100, 7 : null → 100, 33 : null → 100, 53 : null → 100, 22 : null → 100] [c 0] [a 26] [i 3]
+10-19 05:23:05.806   335   361 I netd    : networkDestroy(113) <1.33ms>
+10-19 05:23:05.806   335   361 I resolv  : DNS cache flushed
+10-19 05:23:05.806   335   361 W resolv  : resolv_stats_set_addrs: Network 113 not found for PROTO_DOT
+10-19 05:23:05.806   335   361 W resolv  : resolv_stats_set_addrs: Network 113 not found for PROTO_DOH
+10-19 05:23:05.807   335   361 I netd    : destroyNetworkCache(113) <0.21ms>
+10-19 05:23:05.807   521   769 D ProxyTracker: sending Proxy Broadcast for [] 0 xl=
+10-19 05:23:05.822   521   548 E IPCThreadState: Binder transaction failure: 948853/29201/-28
+10-19 05:23:05.822   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:05.822   521   548 W ActivityManager: Failed to update http proxy for: com.google.android.youtube
+10-19 05:23:05.822   521   548 E IPCThreadState: Binder transaction failure: 948854/29201/-28
+10-19 05:23:05.822   521   548 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 80)
+10-19 05:23:05.822   521   548 W ActivityManager: Failed to update http proxy for: com.google.android.apps.youtube.music
+10-19 05:23:05.860  4904  4947 I BugleRcsEngine: [65] brqh.handleMessage: RcsEngineImpl[DUAL_REG]:[09e75e5f-c535]>Handler: handleMessage processing message:[NOTIFY_UPTIME_IGNORE_STATE_CHANGED] with [non-null]:RcsEngineImpl reference
+10-19 05:23:05.871   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:05.871   840   840 D StatusBarIconController: ignoring old pipeline callbacks, because the new mobile icons are enabled
+10-19 05:23:05.871   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:05.910   840   840 D StatusBarIconController: ignoring old pipeline callback because the new wifi icon is enabled
+10-19 05:23:05.971  1052  1075 I m.android.phone: Background young concurrent copying GC freed 105960(4024KB) AllocSpace objects, 0(0B) LOS objects, 37% free, 4685KB/7529KB, paused 38us,26us total 177.587ms
+10-19 05:23:05.976   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:05.978   840   886 D LocalImageResolver: Couldn't use ImageDecoder for drawable, falling back to non-resized load.
+10-19 05:23:06.064   521   530 I system_server: Background young concurrent copying GC freed 611773(20MB) AllocSpace objects, 17(340KB) LOS objects, 40% free, 30MB/51MB, paused 79us,54us total 299.022ms
+10-19 05:23:06.222  1543  1607 I DeviceStatusMonitor: DeviceStatusMonitor.handleBroadcast():122 onReceive() : Action = android.net.conn.CONNECTIVITY_CHANGE
+10-19 05:23:06.224  1543  1607 I DeviceStatusMonitor: DeviceStatusMonitor.notifyIfNetworkChanged():179 notifyIfNetworkChanged: newState = NON_METERED, airplaneModeOn = false, notifyAnyway = false
+10-19 05:23:06.224  1543  1606 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 05:23:06.224  1543  1543 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 05:23:06.225  1543  9006 I NetworkInfoNotification: NetworkInfoNotification$Listener.onReceive():93 onNetworkAvailable: networkState = NON_METERED, isAirplaneModeOn = false
+10-19 05:23:06.242  5676  9083 W ctxmgr  : [NetworkStateProducer] No state change for network connection context [CONTEXT service_id=47 ]
+10-19 05:23:06.245  4369  4469 I BugleTransport: Tachygram is disabled in RCS Configuration. Enabled transport is Dual Reg [CONTEXT ratelimit_period="5 SECONDS" skipped=1 ]
+10-19 05:23:06.294  8765  8784 I TestRunner: finished: t6_engineDiesInDozeAndTogetherWithItsWatch(com.raydocs.tono.mobile.LocalTunnelDeviceTest)
+10-19 05:23:06.312  8765  8784 I TestRunner: run finished: 1 tests, 0 failed, 0 ignored
+10-19 05:23:06.330   521   596 W WindowMagnificationMgr: requestConnection duplicated request: connect=false, mConnectionState=DISCONNECTED
+10-19 05:23:06.330   521   596 D AccessibilityManagerService: restoreCurrentUserForTestAutomationIfNeededLocked(): ignoring because device doesn't support visible background users
+10-19 05:23:06.331   521   521 E IPCThreadState: Binder transaction failure: 949113/29201/-28
+10-19 05:23:06.331   521   521 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 132)
+10-19 05:23:06.331   521   521 E IPCThreadState: Binder transaction failure: 949115/29201/-28
+10-19 05:23:06.331   521   521 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 132)
+10-19 05:23:06.331   521   521 E IPCThreadState: Binder transaction failure: 949136/29201/-28
+10-19 05:23:06.331   521   521 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 132)
+10-19 05:23:06.331   521   521 E IPCThreadState: Binder transaction failure: 949138/29201/-28
+10-19 05:23:06.331   521   521 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 132)
+10-19 05:23:06.332   521   521 E IPCThreadState: Binder transaction failure: 949159/29201/-28
+10-19 05:23:06.332   521   521 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 136)
+10-19 05:23:06.332   521   521 E IPCThreadState: Binder transaction failure: 949161/29201/-28
+10-19 05:23:06.332   521   521 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 136)
+10-19 05:23:06.332   521   521 D BatterySaverPolicy: accessibility changed to false, updating policy.
+10-19 05:23:06.334  1688  4016 I AiAiEcho: Settings changed for uri: content://settings/secure/accessibility_enabled
+10-19 05:23:06.337  1923  2267 I A       : NGA enabled in interactor.
+10-19 05:23:06.337  1923  2267 I A       : Nga state changed to NgaStateDetails{state=ENABLED, isSpecialExperience=false}
+10-19 05:23:06.344  1688  2043 I AiAiEcho: Predicting[0]: 
+10-19 05:23:06.349  1700  2177 I A       : Initializing all components
+10-19 05:23:06.349  1688  2043 I AiAiEcho: EchoTargets: 
+10-19 05:23:06.349  1688  2043 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 05:23:06.350  1700  2177 I A       : APA or Classic session decision: SessionDecision(sessionVariance=CLASSIC, platformVariance=CLASSIC, justification=CURRENT_PLATFORM_VARIANCE).
+10-19 05:23:06.352  1700  2177 I A       : [Memory] eligibility: StashEligibility{6}
+10-19 05:23:06.352  1688  2043 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 05:23:06.355  1688  2043 I AiAiEcho: Predicting[0]: 
+10-19 05:23:06.368  1700  2062 I A       : State changed: IDLE => IDLE by NGA_STATE_CHANGED and N/A with Optional.empty
+10-19 05:23:06.371  1688  2043 I AiAiEcho: EchoTargets: 
+10-19 05:23:06.371  1688  2043 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 05:23:06.371  1700  2062 I A       : Recognizer choice: (recognizer_type: 1, recognizer_mode: 1, choice_reason: 4)
+10-19 05:23:06.372  1688  2043 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 05:23:06.373  1700  2061 I A       : onIsEnabledChanged, isEnabled: false
+10-19 05:23:06.373  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.373  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.374  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.377  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.377  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.377  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.377  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.377  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.377  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.377  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.378  1700  2061 I A       : onOpaVisibilityChanged: false
+10-19 05:23:06.378  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.378  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.378  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.378  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.378  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.378  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.378  1688  2043 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface home with targets# 0 (types=[])
+10-19 05:23:06.378  1700  2061 I A       : Setting session to type: NO_SESSION
+10-19 05:23:06.379  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.379  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.379  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.380  1688  2043 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface lockscreen with targets# 0 (types=[])
+10-19 05:23:06.383  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.384  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.384  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.385  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.388  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.388  1700  2061 I A       : setNavBarVisible: GestureNavBarVisible{navbarVisible=true}
+10-19 05:23:06.388  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.390   521   596 I ActivityManager: Force stopping com.raydocs.tono.mobile.test appid=10192 user=0: finished inst
+10-19 05:23:06.884     0     0 I binder  : 521:596 ioctl 400c620e 758b5cb62930 returned -11
+10-19 05:23:06.889     0     0 I binder  : 521:596 ioctl 400c620e 758b5cb62930 returned -11
+10-19 05:23:06.403  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.403   521   596 E ActivityManager: Unable to freeze binder for 8765: -11
+10-19 05:23:06.404  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.404   521   596 I ActivityManager: Killing 8765:com.raydocs.tono.mobile.test/u0a192 (adj 0): stop com.raydocs.tono.mobile.test due to finished inst
+10-19 05:23:06.408  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.408   521   539 D DisplayManagerService: Drop pending events for gone uid 10192
+10-19 05:23:06.413   521   596 I ActivityManager: Killing 9335:com.raydocs.tono.mobile.test:watch/u0a192 (adj 905): stop com.raydocs.tono.mobile.test due to finished inst
+10-19 05:23:06.414  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.415   521   596 I ActivityManager:   Force stopping service ServiceRecord{15b9291 u0 com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.engine.TonoVpnService}
+10-19 05:23:06.415  1700  2061 W A       : Disposing empty manager. Did you forgot to subscribe observables?
+10-19 05:23:06.419  1700  2061 I A       : onDisabled. Registered: false
+10-19 05:23:06.454   336   336 I Zygote  : Process 9335 exited due to signal 9 (Killed)
+10-19 05:23:06.456   521  1657 V ActivityManager: Got obituary of 9335:com.raydocs.tono.mobile.test:watch
+10-19 05:23:06.465  1700  2062 I A       : onActiveStateChangeEvent: IDLE => IDLE
+10-19 05:23:06.466  1700  2062 I A       : #onActiveStateChangeEvent, newState: IDLE, previousState: IDLE.
+10-19 05:23:06.476  1700  2062 I A       : on opa visibility changed false
+10-19 05:23:06.477  1700  2062 I A       : on opa visibility changed false
+10-19 05:23:06.478  1700  2062 I A       : stopListening(NGA_PAUSED_UNKNOWN_REASON, NGA_CREATE), idleOverride=NOT_LISTENING
+10-19 05:23:06.490  1700  2061 I A       : Initialize
+10-19 05:23:06.491  1700  2062 I NgaEntryPointEventSendr: setupConnection
+10-19 05:23:06.494  1923  1923 I A       : Creating pss binder().
+10-19 05:23:06.504  1700  2062 I NgaEntryPointEventSendr: State changed: Disconnected => Connecting
+10-19 05:23:06.506  1700  2062 I NgaEntryPointEventSendr: onServiceConnected
+10-19 05:23:06.509   840   840 W PageIndicator: Total number of pages invalid: 0. Assuming 1 page.
+10-19 05:23:06.511  1923  2706 I A       : Calling beginBinderSession().
+10-19 05:23:06.517  1923  2706 I A       : beginBinderSession(): calling binder
+10-19 05:23:06.521  1700  2062 I NgaEntryPointEventSendr: State changed: Connecting => Ready
+10-19 05:23:06.526  1923  9213 I PBSessionCacheImpl: Deleted sessionId[8459235827448790] from persistence.
+10-19 05:23:06.546  1923  2572 I A       : Using proto config with mendel
+10-19 05:23:06.547  8753  8753 I app_process: System.exit called, status: 0
+10-19 05:23:06.547  8753  8753 I AndroidRuntime: VM exiting with result code 0.
+10-19 05:23:06.550  1923  2572 I A       : Using proto config with mendel
+10-19 05:23:06.553  1923  1923 W A       : Queue length for executor EventBus is now 11. Perhaps some tasks are too long, or the pool is too small.
+10-19 05:23:06.555   521  1657 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-19 05:23:06.557  1923  2572 I MicroDetectionState: Should stop hotword detection immediately - true
+10-19 05:23:06.560  1923  2572 I A       : Using proto config with mendel
+10-19 05:23:06.563  1923  2572 I A       : Using proto config with mendel
+10-19 05:23:06.563  1923  2572 W A       : UiCallbackStub-onGenericEvent[ServiceEvent = 241] task was not run. Callback from Service received after client was disposed.
+10-19 05:23:06.564  1700  2062 I NgaEntryPointEventSendr: State changed: Ready => Disconnected (onOpaDisconnected)
+10-19 05:23:06.584  1923  2572 W A       : UiCallbackStub-onGenericEvent[ServiceEvent = 241] task was not run. Callback from Service received after client was disposed.
+10-19 05:23:06.593  1923  2572 I PBSessionCacheImpl: Deleted sessionId[8459235827448793] from persistence.
+10-19 05:23:06.609  1923  2572 W A       : UiCallbackStub-onGenericEvent[ServiceEvent = 60] task was not run. Callback from Service received after client was disposed.
+10-19 05:23:06.651  1700  2062 I A       : Successfully initialized all components
+10-19 05:23:06.671  1923  2572 I A       : Using proto config with mendel
+10-19 05:23:06.675   521   597 V ActivityManager: Got obituary of 8765:com.raydocs.tono.mobile.test
+10-19 05:23:06.676   521   541 W ActivityManager: setHasOverlayUi called on unknown pid: 8765
+10-19 05:23:06.677   336   336 I Zygote  : Process 8765 exited due to signal 9 (Killed)
+10-19 05:23:06.678   840   887 D EGL_emulation: app_time_stats: avg=150.81ms min=5.13ms max=238.56ms count=7
+10-19 05:23:06.680  1923  2572 I A       : Using proto config with mendel
+10-19 05:23:06.856  1700  1729 I hbox:interactor: Background concurrent copying GC freed 52588(1981KB) AllocSpace objects, 7(732KB) LOS objects, 49% free, 7298KB/14MB, paused 18us,10us total 256.929ms
+10-19 05:23:07.081   521   617 D ActivityManager: freezing 8942 com.android.settings
+10-19 05:23:07.517   521  2027 I WindowManager: Using new display size: 1080x2400
+10-19 05:23:07.565  1688  1754 I AiAiEcho: Settings changed for uri: content://settings/secure/display_density_forced
+10-19 05:23:07.566  1688  2043 I AiAiEcho: Predicting[0]: 
+10-19 05:23:07.566  1688  2043 I AiAiEcho: EchoTargets: 
+10-19 05:23:07.566  1688  2043 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 05:23:07.566  1688  2043 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 05:23:07.566  1688  2043 I AiAiEcho: Predicting[0]: 
+10-19 05:23:07.566  1688  2043 I AiAiEcho: EchoTargets: 
+10-19 05:23:07.566  1688  2043 I AiAiEcho: Filtered by AiAi flag check: 
+10-19 05:23:07.566  1688  2043 I AiAiEcho: Ranked targets strategy: SORT, count: 0, ranking metadata: 
+10-19 05:23:07.568  1688  2043 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface home with targets# 0 (types=[])
+10-19 05:23:07.568  1688  2043 I AiAiEcho: #postPredictionTargets: Sending updates to UISurface lockscreen with targets# 0 (types=[])
+10-19 05:23:07.569   840   840 W PageIndicator: Total number of pages invalid: 0. Assuming 1 page.
+10-19 05:23:08.103     0     0 I logd    : logdr: UID=2000 GID=2000 PID=9442 n tail=0 logMask=99 pid=0 start=0ns deadline=0ns

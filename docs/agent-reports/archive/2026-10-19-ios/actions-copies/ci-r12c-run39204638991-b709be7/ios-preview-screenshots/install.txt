@@ -1,0 +1,4 @@
+bundle: com.raydocs.tono.ios
+container: /Users/runner/Library/Developer/CoreSimulator/Devices/E839A11B-51B4-4AD3-ACF4-A53B95B7C957/data/Containers/Bundle/Application/A9315A19-E535-4DE5-B6C8-C876C608FBB7/Tono.app
+0.1.0
+1

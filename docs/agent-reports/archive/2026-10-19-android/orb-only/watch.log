@@ -1,0 +1,1695 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 1 minute ago
+
+JOBS
+* build (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  * Unit tests, lint, debug APK and instrumentation APK
+  * Generated configs pass the pinned sing-box CLI check
+  * Name the test APK
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Restore libbox built from the pin
+  * Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 2 minutes ago
+
+JOBS
+* build (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  * Unit tests, lint, debug APK and instrumentation APK
+  * Generated configs pass the pinned sing-box CLI check
+  * Name the test APK
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Restore libbox built from the pin
+  * Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 3 minutes ago
+
+JOBS
+* build (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  * Unit tests, lint, debug APK and instrumentation APK
+  * Generated configs pass the pinned sing-box CLI check
+  * Name the test APK
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Restore libbox built from the pin
+  * Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 4 minutes ago
+
+JOBS
+* build (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Restore libbox built from the pin
+  * Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 5 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 6 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 7 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 8 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 9 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 10 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 11 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 12 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 13 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 14 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 15 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 16 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 17 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 18 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 19 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 20 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 21 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 22 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 23 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 24 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 25 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 26 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 27 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 28 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  * Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 29 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 30 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 31 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 32 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 33 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 34 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 35 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 36 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 37 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 38 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 39 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 40 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 41 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 42 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 43 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 44 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 45 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 46 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 47 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 48 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 49 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 50 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 51 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 52 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 53 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* emulator (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  * Retry once on a fresh emulator
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+X feat/android-singbox-horizon android-ci raydocs/tono#1673 · 39084210779
+Triggered via pull_request about 54 minutes ago
+
+JOBS
+✓ build in 4m7s (ID 117547272574)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Restore libbox built from the pin
+  - Build libbox from the pinned sing-box source
+  ✓ Routing lists match this desktop checkout
+  ✓ Unit tests, lint, debug APK and instrumentation APK
+  ✓ Generated configs pass the pinned sing-box CLI check
+  ✓ Name the test APK
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Restore libbox built from the pin
+  ✓ Post Run actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+X emulator in 50m42s (ID 117548047178)
+  ✓ Set up job
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  ✓ Enable KVM for the emulator
+  ✓ Write the on-device evidence script
+  ✓ Install and run on an Android 14 x86_64 emulator
+  X Retry once on a fresh emulator
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Complete job
+
+ANNOTATIONS
+X The process '/usr/bin/sh' failed with exit code 1
+emulator: .github#470
+
+X The process '/usr/bin/sh' failed with exit code 1
+emulator: .github#467
+

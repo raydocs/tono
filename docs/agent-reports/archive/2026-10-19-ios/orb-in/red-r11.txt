@@ -1,0 +1,13 @@
+== M1 heartbeat ignores graph (r10 fromTunnel)
+/home/user/workspace/repo/apps/ios/TonoKit/Tests/TonoKitTests/TunnelGraphTests.swift:30: error: TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected : XCTAssertEqual failed: ("StatusWording(titleKey: "state_connected", switchOn: true, action: TonoKit.StatusWording.Action.disconnect)") is not equal to ("StatusWording(titleKey: "state_routes_stopped", switchOn: false, action: TonoKit.StatusWording.Action.retry)") - 
+== M2 NO_REPLY assumes previous graph (r10)
+/home/user/workspace/repo/apps/ios/TonoKit/Tests/TonoKitTests/RouteApplyTests.swift:27: error: RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect : XCTAssertEqual failed: ("notApplied(code: "NO_REPLY", inEffect: Optional(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1"))))") is not equal to ("unconfirmed(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.stable, node: Optional("tokyo-1")))") - 
+/home/user/workspace/repo/apps/ios/TonoKit/Tests/TonoKitTests/RouteApplyTests.swift:28: error: RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect : XCTAssertEqual failed: ("Optional(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1")))") is not equal to ("Optional(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.stable, node: Optional("tokyo-1")))") - 
+	 Executed 7 tests, with 2 failures (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 7 tests, with 2 failures (0 unexpected) in 0.003 (0.003) seconds
+== M3 put-back try? (r10)
+/home/user/workspace/repo/apps/ios/TonoKit/Tests/TonoKitTests/RouteApplyTests.swift:46: error: RouteApplyTests.testAFailedPutBackOfTheFileIsReportedNotSwallowed : XCTAssertEqual failed: ("nil") is not equal to ("Optional(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1")))") - 
+	 Executed 7 tests, with 1 failure (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 7 tests, with 1 failure (0 unexpected) in 0.003 (0.003) seconds
+== M4 refused inputs left in file
+/home/user/workspace/repo/apps/ios/TonoKit/Tests/TonoKitTests/TunnelGraphTests.swift:22: error: TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected : XCTAssertEqual failed: ("TunnelInputs(catalogBody: "catalog", mode: TonoKit.RoutingMode.stable, selectedNode: Optional("tokyo-1"), logLevel: "warn")") is not equal to ("TunnelInputs(catalogBody: "catalog", mode: TonoKit.RoutingMode.threeTier, selectedNode: Optional("tokyo-1"), logLevel: "warn")") - 

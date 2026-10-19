@@ -1,0 +1,1342 @@
+﻿2026-10-18T20:39:45.1466500Z Current runner version: '2.337.0'
+2026-10-18T20:39:45.1491668Z ##[group]Runner Image Provisioner
+2026-10-18T20:39:45.1492615Z Hosted Compute Agent
+2026-10-18T20:39:45.1493300Z Version: 20261012.601
+2026-10-18T20:39:45.1493933Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+2026-10-18T20:39:45.1494760Z Build Date: 2026-10-12T17:48:21Z
+2026-10-18T20:39:45.1495490Z Worker ID: {c13a217b-b44f-4044-b747-72631b9229b0}
+2026-10-18T20:39:45.1496261Z Region: northcentralus
+2026-10-18T20:39:45.1497142Z Cloud: Azure
+2026-10-18T20:39:45.1497682Z ##[endgroup]
+2026-10-18T20:39:45.1499268Z ##[group]Operating System
+2026-10-18T20:39:45.1499918Z Ubuntu
+2026-10-18T20:39:45.1500507Z 24.04.5
+2026-10-18T20:39:45.1501079Z LTS
+2026-10-18T20:39:45.1501599Z ##[endgroup]
+2026-10-18T20:39:45.1502213Z ##[group]Runner Image
+2026-10-18T20:39:45.1502847Z Image: ubuntu-24.04
+2026-10-18T20:39:45.1503456Z Version: 20261012.334.1
+2026-10-18T20:39:45.1504775Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-18T20:39:45.1506429Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+2026-10-18T20:39:45.1508122Z ##[endgroup]
+2026-10-18T20:39:45.1509422Z ##[group]GITHUB_TOKEN Permissions
+2026-10-18T20:39:45.1511890Z Contents: read
+2026-10-18T20:39:45.1512590Z Metadata: read
+2026-10-18T20:39:45.1513181Z ##[endgroup]
+2026-10-18T20:39:45.1515232Z Secret source: Actions
+2026-10-18T20:39:45.1516339Z Cache mode: write
+2026-10-18T20:39:45.1517561Z Prepare workflow directory
+2026-10-18T20:39:45.1929564Z Prepare all required actions
+2026-10-18T20:39:45.1978279Z Getting action download info
+2026-10-18T20:39:45.4632498Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-18T20:39:45.5551365Z Download action repository 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' (SHA:9000827ccba6bdab643e8b6fd33ac0654aef8333)
+2026-10-18T20:39:45.9052711Z Download action repository 'reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d' (SHA:a421e43855164a8197daf9d8d40fe71c6996bb0d)
+2026-10-18T20:39:46.2300460Z Download action repository 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' (SHA:cf430e030ddbb5b0abf93d22962f4752f3646cd9)
+2026-10-18T20:39:46.8411703Z Complete job name: emulator (system)
+2026-10-18T20:39:46.9477982Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-10-18T20:39:46.9479792Z with:
+2026-10-18T20:39:46.9480602Z   fetch-depth: 1
+2026-10-18T20:39:46.9481554Z   ref: c31e69f3de12700d375d7041af91c67b654624cf
+2026-10-18T20:39:46.9483292Z   sparse-checkout: apps/android/scripts/local-tunnel
+apps/android/supply-chain/sing-box
+
+2026-10-18T20:39:46.9485052Z   sparse-checkout-cone-mode: false
+2026-10-18T20:39:46.9486120Z   repository: raydocs/tono
+2026-10-18T20:39:46.9495532Z   token: ***
+2026-10-18T20:39:46.9496379Z   ssh-strict: true
+2026-10-18T20:39:46.9497368Z   ssh-user: git
+2026-10-18T20:39:46.9498266Z   persist-credentials: true
+2026-10-18T20:39:46.9499216Z   clean: true
+2026-10-18T20:39:46.9500059Z   fetch-tags: false
+2026-10-18T20:39:46.9500953Z   show-progress: true
+2026-10-18T20:39:46.9501829Z   lfs: false
+2026-10-18T20:39:46.9502657Z   submodules: false
+2026-10-18T20:39:46.9503548Z   set-safe-directory: true
+2026-10-18T20:39:46.9504573Z   allow-unsafe-pr-checkout: false
+2026-10-18T20:39:46.9505881Z ##[endgroup]
+2026-10-18T20:39:47.0551567Z Syncing repository: raydocs/tono
+2026-10-18T20:39:47.0554840Z ##[group]Getting Git version info
+2026-10-18T20:39:47.0557052Z Working directory is '/home/runner/work/tono/tono'
+2026-10-18T20:39:47.0559440Z [command]/usr/bin/git version
+2026-10-18T20:39:47.0621920Z git version 2.55.0
+2026-10-18T20:39:47.0653688Z ##[endgroup]
+2026-10-18T20:39:47.0676931Z Temporarily overriding HOME='/home/runner/work/_temp/a5a53106-a49c-408d-8d37-2dd27788d37b' before making global git config changes
+2026-10-18T20:39:47.0681915Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-18T20:39:47.0688373Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/tono/tono
+2026-10-18T20:39:47.0740598Z Deleting the contents of '/home/runner/work/tono/tono'
+2026-10-18T20:39:47.0744513Z ##[group]Determining repository object format
+2026-10-18T20:39:47.0747582Z ##[endgroup]
+2026-10-18T20:39:47.0749976Z ##[group]Initializing the repository
+2026-10-18T20:39:47.0752422Z [command]/usr/bin/git init /home/runner/work/tono/tono
+2026-10-18T20:39:47.0868558Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-18T20:39:47.0872066Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-18T20:39:47.0875273Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-18T20:39:47.0878085Z hint: call:
+2026-10-18T20:39:47.0879440Z hint:
+2026-10-18T20:39:47.0881133Z hint: 	git config --global init.defaultBranch <name>
+2026-10-18T20:39:47.0883290Z hint:
+2026-10-18T20:39:47.0885633Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-18T20:39:47.0890149Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-18T20:39:47.0892747Z hint:
+2026-10-18T20:39:47.0894258Z hint: 	git branch -m <name>
+2026-10-18T20:39:47.0895864Z hint:
+2026-10-18T20:39:47.0898292Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-18T20:39:47.0901791Z Initialized empty Git repository in /home/runner/work/tono/tono/.git/
+2026-10-18T20:39:47.0910008Z [command]/usr/bin/git remote add origin https://github.com/raydocs/tono
+2026-10-18T20:39:47.0964061Z ##[endgroup]
+2026-10-18T20:39:47.0966992Z ##[group]Disabling automatic garbage collection
+2026-10-18T20:39:47.0969435Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-18T20:39:47.1005028Z ##[endgroup]
+2026-10-18T20:39:47.1007799Z ##[group]Setting up auth
+2026-10-18T20:39:47.1009729Z Removing SSH command configuration
+2026-10-18T20:39:47.1012589Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-18T20:39:47.1049421Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-18T20:39:47.1411704Z Removing HTTP extra header
+2026-10-18T20:39:47.1417971Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-18T20:39:47.1458960Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-18T20:39:47.1689065Z Removing includeIf entries pointing to credentials config files
+2026-10-18T20:39:47.1696327Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-18T20:39:47.1735913Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-18T20:39:47.1986491Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-18T20:39:47.2032934Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/tono/tono/.git.path /home/runner/work/_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T20:39:47.2068263Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T20:39:47.2108516Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T20:39:47.2150352Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T20:39:47.2182325Z ##[endgroup]
+2026-10-18T20:39:47.2183776Z ##[group]Fetching the repository
+2026-10-18T20:39:47.2189331Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin c31e69f3de12700d375d7041af91c67b654624cf
+2026-10-18T20:39:47.5504023Z From https://github.com/raydocs/tono
+2026-10-18T20:39:47.5505589Z  * branch            c31e69f3de12700d375d7041af91c67b654624cf -> FETCH_HEAD
+2026-10-18T20:39:47.5514375Z [command]/usr/bin/git rev-parse --verify --quiet c31e69f3de12700d375d7041af91c67b654624cf^{object}
+2026-10-18T20:39:47.5548071Z c31e69f3de12700d375d7041af91c67b654624cf
+2026-10-18T20:39:47.5559903Z ##[endgroup]
+2026-10-18T20:39:47.5563066Z ##[group]Determining the checkout info
+2026-10-18T20:39:47.5566126Z ##[endgroup]
+2026-10-18T20:39:47.5569002Z ##[group]Setting up sparse checkout
+2026-10-18T20:39:47.5571700Z [command]/usr/bin/git config core.sparseCheckout true
+2026-10-18T20:39:47.5614179Z [command]/usr/bin/git rev-parse --git-path info/sparse-checkout
+2026-10-18T20:39:47.5640273Z .git/info/sparse-checkout
+2026-10-18T20:39:47.5653875Z ##[endgroup]
+2026-10-18T20:39:47.5655578Z ##[group]Checking out the ref
+2026-10-18T20:39:47.5657798Z [command]/usr/bin/git checkout --progress --force c31e69f3de12700d375d7041af91c67b654624cf
+2026-10-18T20:39:47.8086858Z Note: switching to 'c31e69f3de12700d375d7041af91c67b654624cf'.
+2026-10-18T20:39:47.8087990Z 
+2026-10-18T20:39:47.8088776Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-18T20:39:47.8090568Z changes and commit them, and you can discard any commits you make in this
+2026-10-18T20:39:47.8092344Z state without impacting any branches by switching back to a branch.
+2026-10-18T20:39:47.8093366Z 
+2026-10-18T20:39:47.8094066Z If you want to create a new branch to retain commits you create, you may
+2026-10-18T20:39:47.8095720Z do so (now or later) by using -c with the switch command. Example:
+2026-10-18T20:39:47.8097014Z 
+2026-10-18T20:39:47.8097707Z   git switch -c <new-branch-name>
+2026-10-18T20:39:47.8098878Z 
+2026-10-18T20:39:47.8099545Z Or undo this operation with:
+2026-10-18T20:39:47.8100609Z 
+2026-10-18T20:39:47.8101234Z   git switch -
+2026-10-18T20:39:47.8101994Z 
+2026-10-18T20:39:47.8103663Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-18T20:39:47.8105325Z 
+2026-10-18T20:39:47.8106877Z HEAD is now at c31e69f Android: Compose rule only around t4, scenario switch over a plain socket, a2/a3 stop waiting for idle
+2026-10-18T20:39:47.8111040Z ##[endgroup]
+2026-10-18T20:39:47.8157406Z [command]/usr/bin/git log -1 --format=%H
+2026-10-18T20:39:47.8185328Z c31e69f3de12700d375d7041af91c67b654624cf
+2026-10-18T20:39:47.8491444Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+2026-10-18T20:39:47.8492950Z with:
+2026-10-18T20:39:47.8493768Z   name: tono-mobile-0.3.1-test-c31e69f3d
+2026-10-18T20:39:47.8494811Z   path: apk
+2026-10-18T20:39:47.8495583Z   merge-multiple: false
+2026-10-18T20:39:47.8496471Z   repository: raydocs/tono
+2026-10-18T20:39:47.8497640Z   run-id: 39163947970
+2026-10-18T20:39:47.8498483Z   skip-decompress: false
+2026-10-18T20:39:47.8499385Z   digest-mismatch: error
+2026-10-18T20:39:47.8500246Z ##[endgroup]
+2026-10-18T20:39:47.9837941Z Downloading single artifact
+2026-10-18T20:39:48.1140911Z Preparing to download the following artifacts:
+2026-10-18T20:39:48.1143738Z - tono-mobile-0.3.1-test-c31e69f3d (ID: 12150236644, Size: 45010717, Expected Digest: sha256:b97d333ade157a5942fb2bb72e2db7edd6a3862ccaa016c9d041dc8f3f701d18)
+2026-10-18T20:39:48.3517238Z Redirecting to blob download url: https://productionresultssa7.blob.core.windows.net/actions-results/9a02da16-9b61-8243-85e2-2e1644984f36/workflow-job-run-6e2fc094-3af5-5eda-a389-84301f892733/artifacts/f718ebcfe028a0c2339a495573207a4d7ff446d2d3aa827193ab8eb7308cfc89.zip
+2026-10-18T20:39:48.3519082Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+2026-10-18T20:39:48.4903321Z (node:2288) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-10-18T20:39:48.4905664Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-18T20:39:49.5424979Z SHA256 digest of downloaded artifact is b97d333ade157a5942fb2bb72e2db7edd6a3862ccaa016c9d041dc8f3f701d18
+2026-10-18T20:39:49.5426212Z Artifact download completed successfully.
+2026-10-18T20:39:49.5427129Z Total of 1 artifact(s) downloaded
+2026-10-18T20:39:49.5453970Z Download artifact has finished successfully
+2026-10-18T20:39:49.5695898Z ##[group]Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+2026-10-18T20:39:49.5696861Z with:
+2026-10-18T20:39:49.5697220Z   name: instrumentation-apk
+2026-10-18T20:39:49.5697638Z   path: apk
+2026-10-18T20:39:49.5697993Z   merge-multiple: false
+2026-10-18T20:39:49.5698408Z   repository: raydocs/tono
+2026-10-18T20:39:49.5698843Z   run-id: 39163947970
+2026-10-18T20:39:49.5699233Z   skip-decompress: false
+2026-10-18T20:39:49.5699637Z   digest-mismatch: error
+2026-10-18T20:39:49.5700026Z ##[endgroup]
+2026-10-18T20:39:49.7173920Z Downloading single artifact
+2026-10-18T20:39:49.8672093Z Preparing to download the following artifacts:
+2026-10-18T20:39:49.8672870Z - instrumentation-apk (ID: 12150281426, Size: 4416588, Expected Digest: sha256:f67ba4af1843c7e1a14d83206de411ad7edf911d404971acce8e574f5bfcfea2)
+2026-10-18T20:39:50.1705845Z Redirecting to blob download url: https://productionresultssa7.blob.core.windows.net/actions-results/9a02da16-9b61-8243-85e2-2e1644984f36/workflow-job-run-6e2fc094-3af5-5eda-a389-84301f892733/artifacts/03fd2856d8c68c693f975f4c83352e888fec0e0068c92622a3d8b7afb7303369.zip
+2026-10-18T20:39:50.1708654Z Starting download of artifact to: /home/runner/work/tono/tono/apk
+2026-10-18T20:39:50.3157682Z (node:2305) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-10-18T20:39:50.6354119Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-18T20:39:50.6354875Z SHA256 digest of downloaded artifact is f67ba4af1843c7e1a14d83206de411ad7edf911d404971acce8e574f5bfcfea2
+2026-10-18T20:39:50.6355697Z Artifact download completed successfully.
+2026-10-18T20:39:50.6356271Z Total of 1 artifact(s) downloaded
+2026-10-18T20:39:50.6359831Z Download artifact has finished successfully
+2026-10-18T20:39:50.6487432Z ##[group]Run echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+2026-10-18T20:39:50.6488411Z [36;1mecho 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules[0m
+2026-10-18T20:39:50.6489037Z [36;1msudo udevadm control --reload-rules[0m
+2026-10-18T20:39:50.6489373Z [36;1msudo udevadm trigger --name-match=kvm[0m
+2026-10-18T20:39:50.6824295Z shell: /usr/bin/bash -e {0}
+2026-10-18T20:39:50.6824661Z ##[endgroup]
+2026-10-18T20:39:50.6999942Z KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"
+2026-10-18T20:39:50.7390627Z ##[group]Run mkdir -p host-watch
+2026-10-18T20:39:50.7391020Z [36;1mmkdir -p host-watch[0m
+2026-10-18T20:39:50.7391535Z [36;1mcommand -v gdb > /dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb > /dev/null) || true[0m
+2026-10-18T20:39:50.7392518Z [36;1msudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/host-watch/core.%e.%p"[0m
+2026-10-18T20:39:50.7392998Z [36;1mcat > wrap-emulator.sh <<'SH'[0m
+2026-10-18T20:39:50.7393275Z [36;1mset -eu[0m
+2026-10-18T20:39:50.7393507Z [36;1mE="$ANDROID_HOME/emulator"[0m
+2026-10-18T20:39:50.7411358Z [36;1mgrep -q emulator-exit "$E/emulator" 2>/dev/null && exit 0[0m
+2026-10-18T20:39:50.7412081Z [36;1mmv -f "$E/emulator" "$E/emulator.real"[0m
+2026-10-18T20:39:50.7412627Z [36;1mcat > "$E/emulator" <<'W'[0m
+2026-10-18T20:39:50.7413389Z [36;1m#!/bin/bash[0m
+2026-10-18T20:39:50.7413833Z [36;1mW="$GITHUB_WORKSPACE/host-watch"[0m
+2026-10-18T20:39:50.7414381Z [36;1mulimit -c unlimited[0m
+2026-10-18T20:39:50.7414940Z [36;1mecho 0x11 > /proc/self/coredump_filter[0m
+2026-10-18T20:39:50.7415490Z [36;1m"$0.real" "$@"[0m
+2026-10-18T20:39:50.7415906Z [36;1mcode=$?[0m
+2026-10-18T20:39:50.7416822Z [36;1mecho "$(date -u +%FT%TZ) emulator exited with status $code" >> "$W/emulator-exit.txt"[0m
+2026-10-18T20:39:50.7417631Z [36;1mfor core in "$W"/core.*; do[0m
+2026-10-18T20:39:50.7418118Z [36;1m  [ -f "$core" ] || continue[0m
+2026-10-18T20:39:50.7418826Z [36;1m  exe=$(find "$(dirname "$0")/qemu" -name 'qemu-system-x86_64*' -type f | head -1)[0m
+2026-10-18T20:39:50.7420477Z [36;1m  { echo "== $core ($(du -h "$core" | cut -f1))"; timeout 300 gdb -batch -ex bt -ex 'info registers rip' -ex 'info sharedlibrary' "$exe" "$core" 2>&1 | grep -v '^\[New LWP' | head -200; } >> "$W/emulator-crash-stack.txt"[0m
+2026-10-18T20:39:50.7421956Z [36;1m  rm -f "$core"[0m
+2026-10-18T20:39:50.7422365Z [36;1mdone[0m
+2026-10-18T20:39:50.7422721Z [36;1mexit $code[0m
+2026-10-18T20:39:50.7423077Z [36;1mW[0m
+2026-10-18T20:39:50.7423492Z [36;1mchmod +x "$E/emulator"[0m
+2026-10-18T20:39:50.7423960Z [36;1mSH[0m
+2026-10-18T20:39:50.7424317Z [36;1mnohup bash -c 'while true; do[0m
+2026-10-18T20:39:50.7424911Z [36;1m  p=$(pgrep -f "[q]emu-system-x86_64" | head -1)[0m
+2026-10-18T20:39:50.7425901Z [36;1m  if [ -n "$p" ]; then echo "$(date -u +%T) pid $p rss_kb,stat,elapsed $(ps -o rss=,stat=,etime= -p "$p" | xargs) load $(cut -d" " -f1 /proc/loadavg) avail_kb $(awk "/MemAvailable/{print \$2}" /proc/meminfo)"[0m
+2026-10-18T20:39:50.7427051Z [36;1m  else echo "$(date -u +%T) no emulator process"; fi[0m
+2026-10-18T20:39:50.7427410Z [36;1m  sleep 5[0m
+2026-10-18T20:39:50.7427687Z [36;1mdone' > host-watch/emulator-watch.txt 2>&1 &[0m
+2026-10-18T20:39:50.7493140Z shell: /usr/bin/bash -e {0}
+2026-10-18T20:39:50.7493420Z ##[endgroup]
+2026-10-18T20:39:58.9651743Z 
+2026-10-18T20:39:58.9652370Z Running kernel seems to be up-to-date.
+2026-10-18T20:39:58.9652828Z 
+2026-10-18T20:39:58.9653024Z No services need to be restarted.
+2026-10-18T20:39:58.9653391Z 
+2026-10-18T20:39:58.9653520Z No containers need to be restarted.
+2026-10-18T20:39:58.9653751Z 
+2026-10-18T20:39:58.9653907Z No user sessions are running outdated binaries.
+2026-10-18T20:39:58.9654175Z 
+2026-10-18T20:39:58.9654436Z No VM guests are running outdated hypervisor (qemu) binaries on this host.
+2026-10-18T20:39:59.8324032Z kernel.core_pattern = /home/runner/work/tono/tono/host-watch/core.%e.%p
+2026-10-18T20:39:59.8382465Z ##[group]Run cat > evidence.sh <<'SH'
+2026-10-18T20:39:59.8383275Z [36;1mcat > evidence.sh <<'SH'[0m
+2026-10-18T20:39:59.8383554Z [36;1mset -euxo pipefail[0m
+2026-10-18T20:39:59.8383840Z [36;1mAPP=com.raydocs.tono.mobile.test[0m
+2026-10-18T20:39:59.8384233Z [36;1m# A retry keeps the first attempt's evidence next to the second's.[0m
+2026-10-18T20:39:59.8384764Z [36;1mif [ -d evidence ]; then mv evidence "evidence-attempt-$(date +%s)"; fi[0m
+2026-10-18T20:39:59.8385159Z [36;1mmkdir -p evidence[0m
+2026-10-18T20:39:59.8385518Z [36;1madb shell getprop ro.build.fingerprint | tee evidence/device.txt[0m
+2026-10-18T20:39:59.8386017Z [36;1madb shell getprop ro.product.cpu.abi | tee -a evidence/device.txt[0m
+2026-10-18T20:39:59.8386447Z [36;1madb shell wm size | tee -a evidence/device.txt[0m
+2026-10-18T20:39:59.8387147Z [36;1madb shell wm density | tee -a evidence/device.txt[0m
+2026-10-18T20:39:59.8387574Z [36;1madb shell settings put system screen_off_timeout 1800000[0m
+2026-10-18T20:39:59.8387954Z [36;1madb shell svc power stayon true[0m
+2026-10-18T20:39:59.8388269Z [36;1madb shell input keyevent 82 || true[0m
+2026-10-18T20:39:59.8388740Z [36;1m# Let the launcher finish its first-boot work; on swiftshader it can otherwise raise an ANR[0m
+2026-10-18T20:39:59.8389347Z [36;1m# dialog over the app. The test answers only foreign ANR dialogs and logs each one.[0m
+2026-10-18T20:39:59.8389978Z [36;1msleep 60[0m
+2026-10-18T20:39:59.8390208Z [36;1madb shell input keyevent 3[0m
+2026-10-18T20:39:59.8390609Z [36;1m# No -g: runtime permissions and VPN consent stay as on a fresh install.[0m
+2026-10-18T20:39:59.8391028Z [36;1madb install -r apk/*-test-*.apk[0m
+2026-10-18T20:39:59.8391340Z [36;1madb install -r apk/instrumentation.apk[0m
+2026-10-18T20:39:59.8391808Z [36;1m# Emulator health gate, measured before the tests: the median frame time of Tono's own[0m
+2026-10-18T20:39:59.8392443Z [36;1m# sign-in screen over 8 s. Calibration so far: emulators at 500–750 ms ran the tests at normal[0m
+2026-10-18T20:39:59.8393073Z [36;1m# speed (runs 39151329824, 39153105611); two at 900 and 950 ms ran the fixture tests three to[0m
+2026-10-18T20:39:59.8393707Z [36;1m# six times slower and hung the real-app tests (run 39153105611, tunnel shard). A first try at[0m
+2026-10-18T20:39:59.8394339Z [36;1m# 650 ms stopped healthy emulators, so the limit is 850 ms. Above it this attempt stops before[0m
+2026-10-18T20:39:59.8394865Z [36;1m# the tests and the fresh-emulator retry starts early.[0m
+2026-10-18T20:39:59.8395196Z [36;1mset +e[0m
+2026-10-18T20:39:59.8395573Z [36;1madb shell am start -W -n $APP/com.raydocs.tono.mobile.ui.MainActivity > /dev/null[0m
+2026-10-18T20:39:59.8396007Z [36;1msleep 3[0m
+2026-10-18T20:39:59.8396283Z [36;1madb shell dumpsys gfxinfo $APP reset > /dev/null[0m
+2026-10-18T20:39:59.8397107Z [36;1msleep 8[0m
+2026-10-18T20:39:59.8397569Z [36;1mmedian=$(adb shell dumpsys gfxinfo $APP | sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p' | head -1)[0m
+2026-10-18T20:39:59.8398082Z [36;1madb shell am force-stop $APP[0m
+2026-10-18T20:39:59.8398351Z [36;1mset -e[0m
+2026-10-18T20:39:59.8398913Z [36;1mecho "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 850 ms)" | tee evidence/health.txt >> evidence/summary.txt[0m
+2026-10-18T20:39:59.8399586Z [36;1mif [ -n "$median" ] && [ "$median" -gt 850 ]; then[0m
+2026-10-18T20:39:59.8400247Z [36;1m  echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 850 ms); no tests run in this attempt" >> evidence/summary.txt[0m
+2026-10-18T20:39:59.8400921Z [36;1m  timeout 60 adb logcat -d > evidence/logcat.txt || true[0m
+2026-10-18T20:39:59.8401257Z [36;1m  exit 1[0m
+2026-10-18T20:39:59.8401462Z [36;1mfi[0m
+2026-10-18T20:39:59.8401835Z [36;1m# The tunnel test's stand-in control plane, on the phone's loopback (the only address the[0m
+2026-10-18T20:39:59.8402328Z [36;1m# debug build's LocalTestServer accepts).[0m
+2026-10-18T20:39:59.8402871Z [36;1m[ "$SHARD" = tunnel ] && adb reverse tcp:28080 tcp:28080[0m
+2026-10-18T20:39:59.8403391Z [36;1m# One instrumentation call per test, pulling evidence after each, so an emulator crash[0m
+2026-10-18T20:39:59.8403966Z [36;1m# (seen on hosted runners) costs one test's evidence rather than all of it.[0m
+2026-10-18T20:39:59.8404353Z [36;1mset +e[0m
+2026-10-18T20:39:59.8404563Z [36;1mfailed=""[0m
+2026-10-18T20:39:59.8404960Z [36;1m# Streamed from the host, so an emulator that dies mid-run still leaves its last log lines.[0m
+2026-10-18T20:39:59.8405508Z [36;1madb logcat -v threadtime > evidence/logcat-live.txt 2>&1 &[0m
+2026-10-18T20:39:59.8405860Z [36;1mlogcat=$![0m
+2026-10-18T20:39:59.8406074Z [36;1mcase "$SHARD" in[0m
+2026-10-18T20:39:59.8406882Z [36;1m  system) tests="DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog[0m
+2026-10-18T20:39:59.8407867Z [36;1m  DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig[0m
+2026-10-18T20:39:59.8408813Z [36;1m  DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme[0m
+2026-10-18T20:39:59.8409587Z [36;1m  SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp[0m
+2026-10-18T20:39:59.8410412Z [36;1m  SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates" ;;[0m
+2026-10-18T20:39:59.8411483Z [36;1m  tunnel) tests="DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice[0m
+2026-10-18T20:39:59.8412359Z [36;1m  DeviceEvidenceTest#b3_fixtureAtLargeFontScale LocalTunnelDeviceTest#t2_realAppTurnsWithKeyboardAndConsentOpen[0m
+2026-10-18T20:39:59.8413252Z [36;1m  LocalTunnelDeviceTest#t1_realTunnelThroughLocalFixtureServers LocalTunnelDeviceTest#t3_realAppStatesAndSkyOnMainActivity[0m
+2026-10-18T20:39:59.8413950Z [36;1m  LocalTunnelDeviceTest#t4_realAppAtLargestSystemText" ;;[0m
+2026-10-18T20:39:59.8414684Z [36;1m  ui) tests="HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps[0m
+2026-10-18T20:39:59.8415573Z [36;1m  HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt[0m
+2026-10-18T20:39:59.8416458Z [36;1m  HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome[0m
+2026-10-18T20:39:59.8417738Z [36;1m  HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps[0m
+2026-10-18T20:39:59.8418490Z [36;1m  HorizonUiDeviceTest#u9_keyboardFocusIsVisibleAndAccessibilityActionsWork[0m
+2026-10-18T20:39:59.8419284Z [36;1m  LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable[0m
+2026-10-18T20:39:59.8420064Z [36;1m  LandscapeDeviceTest#l3_landscapeKeepsEverythingReadableAndReachable" ;;[0m
+2026-10-18T20:39:59.8420530Z [36;1m  *) echo "unknown shard $SHARD"; exit 1 ;;[0m
+2026-10-18T20:39:59.8420824Z [36;1mesac[0m
+2026-10-18T20:39:59.8421064Z [36;1mecho "shard $SHARD" > evidence/shard.txt[0m
+2026-10-18T20:39:59.8421370Z [36;1mfor c in $tests; do[0m
+2026-10-18T20:39:59.8421609Z [36;1m  t="${c#*#}"[0m
+2026-10-18T20:39:59.8422006Z [36;1m  # A pathologically slow emulator (run 39126740818: a1 took 163 s instead of ~30 s) would[0m
+2026-10-18T20:39:59.8422621Z [36;1m  # otherwise use the whole step; stop the attempt so the fresh-emulator retry has time.[0m
+2026-10-18T20:39:59.8423076Z [36;1m  if [ "$SECONDS" -gt 2100 ]; then[0m
+2026-10-18T20:39:59.8423652Z [36;1m    echo "TIME-BUDGET: attempt stopped after ${SECONDS}s before $t; later tests not run in this attempt" >> evidence/summary.txt[0m
+2026-10-18T20:39:59.8424227Z [36;1m    failed="$failed time-budget"[0m
+2026-10-18T20:39:59.8424499Z [36;1m    break[0m
+2026-10-18T20:39:59.8424723Z [36;1m  fi[0m
+2026-10-18T20:39:59.8425058Z [36;1m  rec=""[0m
+2026-10-18T20:39:59.8425344Z [36;1m  if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then[0m
+2026-10-18T20:39:59.8425844Z [36;1m    # Recorded from the host: a screenrecord started inside the test kept the run open.[0m
+2026-10-18T20:39:59.8426521Z [36;1m    adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &[0m
+2026-10-18T20:39:59.8427274Z [36;1m    rec=$![0m
+2026-10-18T20:39:59.8427483Z [36;1m  fi[0m
+2026-10-18T20:39:59.8427778Z [36;1m  if [ "$t" = t3_realAppStatesAndSkyOnMainActivity ]; then[0m
+2026-10-18T20:39:59.8428318Z [36;1m    # The real app's own motion through its states, at the emulator's real (software) frame rate.[0m
+2026-10-18T20:39:59.8428995Z [36;1m    adb shell screenrecord --time-limit 180 --bit-rate 6000000 /sdcard/Download/tono-real-motion.mp4 &[0m
+2026-10-18T20:39:59.8429471Z [36;1m    rec=$![0m
+2026-10-18T20:39:59.8429676Z [36;1m  fi[0m
+2026-10-18T20:39:59.8430057Z [36;1m  # The tunnel test is judged again from the stand-in exits' own logs, from this point on.[0m
+2026-10-18T20:39:59.8430721Z [36;1m  [ "$t" = t1_realTunnelThroughLocalFixtureServers ] && from=$(stat -c %s "$LOCAL_TUNNEL/sing-box.log")[0m
+2026-10-18T20:39:59.8431377Z [36;1m  timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \[0m
+2026-10-18T20:39:59.8432121Z [36;1m    $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"[0m
+2026-10-18T20:39:59.8432577Z [36;1m  if [ $? -eq 124 ]; then[0m
+2026-10-18T20:39:59.8433005Z [36;1m    # Hung: keep what was on screen and in front before stopping it (run 39138009249 had none).[0m
+2026-10-18T20:39:59.8433527Z [36;1m    echo "HANG: $t stopped after 600 s" >> evidence/summary.txt[0m
+2026-10-18T20:39:59.8433980Z [36;1m    timeout 30 adb exec-out screencap -p > "evidence/hang-$t.png"[0m
+2026-10-18T20:39:59.8434650Z [36;1m    timeout 30 adb shell uiautomator dump /sdcard/hang.xml > /dev/null && timeout 30 adb pull /sdcard/hang.xml "evidence/hang-$t.xml"[0m
+2026-10-18T20:39:59.8435396Z [36;1m    timeout 30 adb shell dumpsys activity top | head -300 > "evidence/hang-$t-activity.txt"[0m
+2026-10-18T20:39:59.8436134Z [36;1m    timeout 30 adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|isn.t responding' > "evidence/hang-$t-window.txt"[0m
+2026-10-18T20:39:59.8436958Z [36;1m    timeout 30 adb shell am force-stop $APP[0m
+2026-10-18T20:39:59.8437261Z [36;1m  fi[0m
+2026-10-18T20:39:59.8437631Z [36;1m  # The real-app recording ends with the test (SIGINT lets screenrecord finish the file).[0m
+2026-10-18T20:39:59.8438273Z [36;1m  [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 10 adb shell pkill -2 screenrecord[0m
+2026-10-18T20:39:59.8438873Z [36;1m  [ -n "$rec" ] && { timeout 200 tail --pid="$rec" -f /dev/null || kill "$rec"; }[0m
+2026-10-18T20:39:59.8439620Z [36;1m  grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }[0m
+2026-10-18T20:39:59.8441141Z [36;1m  timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/[0m
+2026-10-18T20:39:59.8442409Z [36;1m  [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4[0m
+2026-10-18T20:39:59.8443372Z [36;1m  [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 120 adb pull /sdcard/Download/tono-real-motion.mp4 evidence/local-real-motion.mp4[0m
+2026-10-18T20:39:59.8444084Z [36;1m  if [ "$t" = t1_realTunnelThroughLocalFixtureServers ]; then[0m
+2026-10-18T20:39:59.8444472Z [36;1m    mkdir -p evidence/local-tunnel[0m
+2026-10-18T20:39:59.8444936Z [36;1m    tail -c +$((from + 1)) "$LOCAL_TUNNEL/sing-box.log" > evidence/local-tunnel/exits.log[0m
+2026-10-18T20:39:59.8446001Z [36;1m    cp "$LOCAL_TUNNEL/control-plane.log" evidence/local-tunnel/[0m
+2026-10-18T20:39:59.8447648Z [36;1m    if python3 apps/android/scripts/local-tunnel/fixture-servers.py check evidence/local-tunnel/exits.log \[0m
+2026-10-18T20:39:59.8448985Z [36;1m        evidence/local-tunnel-requests.txt > evidence/local-tunnel-routing.txt; then[0m
+2026-10-18T20:39:59.8450024Z [36;1m      echo "PASS t1-routing-matches-exit-logs" >> evidence/summary.txt[0m
+2026-10-18T20:39:59.8450727Z [36;1m    else[0m
+2026-10-18T20:39:59.8451481Z [36;1m      echo "FAIL t1-routing-matches-exit-logs" >> evidence/summary.txt; failed="$failed t1-routing"[0m
+2026-10-18T20:39:59.8452370Z [36;1m    fi[0m
+2026-10-18T20:39:59.8452797Z [36;1m    cat evidence/local-tunnel-routing.txt[0m
+2026-10-18T20:39:59.8453316Z [36;1m  fi[0m
+2026-10-18T20:39:59.8453750Z [36;1m  # A dead emulator fails every later test with no output; say so once and stop, so the[0m
+2026-10-18T20:39:59.8454361Z [36;1m  # fresh-emulator retry starts sooner. Every test must still pass in a single session.[0m
+2026-10-18T20:39:59.8454908Z [36;1m  if [ "$(timeout 30 adb get-state 2>/dev/null)" != device ]; then[0m
+2026-10-18T20:39:59.8455475Z [36;1m    echo "DEVICE-OFFLINE after $t; later tests not run in this attempt" >> evidence/summary.txt[0m
+2026-10-18T20:39:59.8455982Z [36;1m    failed="$failed device-offline"[0m
+2026-10-18T20:39:59.8456269Z [36;1m    break[0m
+2026-10-18T20:39:59.8456475Z [36;1m  fi[0m
+2026-10-18T20:39:59.8457074Z [36;1m  # Isolation: a shade a test left open would cover the next test's app.[0m
+2026-10-18T20:39:59.8457701Z [36;1m  timeout 30 adb shell cmd statusbar collapse[0m
+2026-10-18T20:39:59.8458007Z [36;1mdone[0m
+2026-10-18T20:39:59.8458211Z [36;1mkill $logcat[0m
+2026-10-18T20:39:59.8458582Z [36;1mif [ "$SHARD" = system ] && [ "$(timeout 30 adb get-state 2>/dev/null)" = device ]; then[0m
+2026-10-18T20:39:59.8459184Z [36;1m  # Measurements only, on an emulator with a software GPU: not a phone, not a pass/fail gate.[0m
+2026-10-18T20:39:59.8459639Z [36;1m  { set +x; } 2>/dev/null[0m
+2026-10-18T20:39:59.8459893Z [36;1m  {[0m
+2026-10-18T20:39:59.8460204Z [36;1m    echo "emulator $(cat evidence/device.txt | tr '\n' ' ')"[0m
+2026-10-18T20:39:59.8460629Z [36;1m    echo "APK size: $(stat -c %s apk/*-test-*.apk) bytes"[0m
+2026-10-18T20:39:59.8460971Z [36;1m    for i in 1 2 3 4 5; do[0m
+2026-10-18T20:39:59.8461520Z [36;1m      adb shell am start -W -S -n $APP/com.raydocs.tono.mobile.ui.MainActivity | grep -E 'TotalTime|WaitTime' | tr '\n' ' '[0m
+2026-10-18T20:39:59.8462081Z [36;1m      echo[0m
+2026-10-18T20:39:59.8462291Z [36;1m      sleep 3[0m
+2026-10-18T20:39:59.8462506Z [36;1m    done[0m
+2026-10-18T20:39:59.8462774Z [36;1m    adb shell dumpsys gfxinfo $APP reset > /dev/null[0m
+2026-10-18T20:39:59.8463091Z [36;1m    sleep 10[0m
+2026-10-18T20:39:59.8463454Z [36;1m    adb shell dumpsys gfxinfo $APP | grep -E 'Total frames|Janky frames|percentile'[0m
+2026-10-18T20:39:59.8463980Z [36;1m    adb shell dumpsys meminfo $APP | grep -E 'TOTAL PSS|TOTAL RSS'[0m
+2026-10-18T20:39:59.8464358Z [36;1m  } > evidence/perf.txt 2>&1[0m
+2026-10-18T20:39:59.8464624Z [36;1m  set -x[0m
+2026-10-18T20:39:59.8464861Z [36;1m  adb shell am force-stop $APP[0m
+2026-10-18T20:39:59.8465123Z [36;1mfi[0m
+2026-10-18T20:39:59.8465477Z [36;1m# Leave the shared emulator settings as found, whatever a failed test left behind.[0m
+2026-10-18T20:39:59.8465943Z [36;1madb shell settings put system font_scale 1.0[0m
+2026-10-18T20:39:59.8466335Z [36;1madb shell settings put global animator_duration_scale 1[0m
+2026-10-18T20:39:59.8466916Z [36;1madb shell cmd uimode night no[0m
+2026-10-18T20:39:59.8467195Z [36;1madb shell wm size reset[0m
+2026-10-18T20:39:59.8467464Z [36;1madb shell wm density reset[0m
+2026-10-18T20:39:59.8467769Z [36;1madb shell settings put system user_rotation 0[0m
+2026-10-18T20:39:59.8468132Z [36;1mtimeout 60 adb logcat -d > evidence/logcat.txt[0m
+2026-10-18T20:39:59.8468443Z [36;1mls -la evidence[0m
+2026-10-18T20:39:59.8468684Z [36;1mcat evidence/summary.txt[0m
+2026-10-18T20:39:59.8468940Z [36;1mset -e[0m
+2026-10-18T20:39:59.8469152Z [36;1m[ -z "$failed" ][0m
+2026-10-18T20:39:59.8469593Z [36;1mSH[0m
+2026-10-18T20:39:59.8532298Z shell: /usr/bin/bash -e {0}
+2026-10-18T20:39:59.8532572Z ##[endgroup]
+2026-10-18T20:39:59.8711831Z ##[group]Run reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+2026-10-18T20:39:59.8712330Z with:
+2026-10-18T20:39:59.8712527Z   api-level: 34
+2026-10-18T20:39:59.8712742Z   target: google_apis
+2026-10-18T20:39:59.8712977Z   arch: x86_64
+2026-10-18T20:39:59.8713179Z   profile: pixel_6
+2026-10-18T20:39:59.8713403Z   disable-animations: false
+2026-10-18T20:39:59.8713844Z   emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T20:39:59.8714359Z   pre-emulator-launch-script: bash wrap-emulator.sh
+2026-10-18T20:39:59.8714695Z   script: SHARD=system bash evidence.sh
+2026-10-18T20:39:59.8714959Z   cores: 2
+2026-10-18T20:39:59.8715147Z   avd-name: test
+2026-10-18T20:39:59.8715365Z   force-avd-creation: true
+2026-10-18T20:39:59.8715609Z   emulator-boot-timeout: 600
+2026-10-18T20:39:59.8715858Z   emulator-port: 5554
+2026-10-18T20:39:59.8716086Z   disable-spellchecker: false
+2026-10-18T20:39:59.8716372Z   disable-linux-hw-accel: auto
+2026-10-18T20:39:59.8716902Z   enable-hw-keyboard: false
+2026-10-18T20:39:59.8717147Z   channel: stable
+2026-10-18T20:39:59.8717356Z ##[endgroup]
+2026-10-18T20:39:59.9279767Z ##[group]Configure emulator
+2026-10-18T20:39:59.9282467Z API level: 34
+2026-10-18T20:39:59.9282829Z System image API level: 34
+2026-10-18T20:39:59.9283405Z target: google_apis
+2026-10-18T20:39:59.9284114Z CPU architecture: x86_64
+2026-10-18T20:39:59.9284556Z Hardware profile: pixel_6
+2026-10-18T20:39:59.9286260Z Cores: 2
+2026-10-18T20:39:59.9286856Z RAM size: 
+2026-10-18T20:39:59.9287229Z Heap size: 
+2026-10-18T20:39:59.9287822Z SD card path or size: 
+2026-10-18T20:39:59.9288302Z Disk size: 
+2026-10-18T20:39:59.9288829Z AVD name: test
+2026-10-18T20:39:59.9289283Z force avd creation: true
+2026-10-18T20:39:59.9289780Z Emulator boot timeout: 600
+2026-10-18T20:39:59.9290544Z emulator port: 5554
+2026-10-18T20:39:59.9291317Z emulator options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T20:39:59.9292252Z disable animations: false
+2026-10-18T20:39:59.9292733Z disable spellchecker: false
+2026-10-18T20:39:59.9293252Z disable Linux hardware acceleration: false
+2026-10-18T20:39:59.9293816Z enable hardware keyboard: false
+2026-10-18T20:39:59.9294284Z Channel: 0 (stable)
+2026-10-18T20:39:59.9294894Z Script:
+2026-10-18T20:39:59.9295272Z SHARD=system bash evidence.sh
+2026-10-18T20:39:59.9296016Z Pre emulator launch script:
+2026-10-18T20:39:59.9296481Z bash wrap-emulator.sh
+2026-10-18T20:39:59.9297181Z ##[endgroup]
+2026-10-18T20:39:59.9299282Z ##[group]Install Android SDK
+2026-10-18T20:39:59.9365063Z [command]/usr/bin/sh -c \yes | sdkmanager --licenses > /dev/null
+2026-10-18T20:40:06.2389105Z Installing latest build tools, platform tools, and platform.
+2026-10-18T20:40:06.2404278Z [command]/usr/bin/sh -c \sdkmanager --install 'build-tools;37.0.0' platform-tools 'platforms;android-34'> /dev/null
+2026-10-18T20:40:07.6417740Z Installing latest emulator.
+2026-10-18T20:40:07.6431412Z [command]/usr/bin/sh -c \sdkmanager --install emulator --channel=0 > /dev/null
+2026-10-18T20:40:16.0593669Z Installing system images.
+2026-10-18T20:40:16.0608479Z [command]/usr/bin/sh -c \sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null
+2026-10-18T20:40:45.4281506Z ##[endgroup]
+2026-10-18T20:40:45.4282946Z ##[group]Create AVD
+2026-10-18T20:40:45.4283369Z Creating AVD.
+2026-10-18T20:40:45.4337222Z [command]/usr/bin/sh -c \echo no | avdmanager create avd --force -n test --package 'system-images;android-34;google_apis;x86_64' --device 'pixel_6'
+2026-10-18T20:40:46.2290770Z Loading local repository...                                                     
+2026-10-18T20:40:46.2297150Z [=========                              ] 25% Loading local repository...       
+2026-10-18T20:40:46.2298008Z [=========                              ] 25% Fetch remote repository...        
+2026-10-18T20:40:46.2298674Z [=======================================] 100% Fetch remote repository...       
+2026-10-18T20:40:46.4565567Z Auto-selecting single ABI x86_64
+2026-10-18T20:40:46.8621730Z [command]/usr/bin/sh -c \printf 'hw.cpu.ncore=2\n' >> /home/runner/.android/avd/test.avd/config.ini
+2026-10-18T20:40:46.8643529Z ##[endgroup]
+2026-10-18T20:40:46.8645645Z ##[group]Run pre emulator launch script
+2026-10-18T20:40:46.8660957Z [command]/usr/bin/sh -c bash wrap-emulator.sh
+2026-10-18T20:40:46.8834902Z ##[endgroup]
+2026-10-18T20:40:46.8837772Z ##[group]Launch Emulator
+2026-10-18T20:40:46.8838198Z Starting emulator.
+2026-10-18T20:40:46.8853883Z [command]/usr/bin/sh -c \/usr/local/lib/android/sdk/emulator/emulator -port 5554 -avd test -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none &
+2026-10-18T20:40:46.8981941Z INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+2026-10-18T20:40:46.8982659Z INFO         | Graphics backend: gfxstream
+2026-10-18T20:40:46.8983264Z INFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/
+2026-10-18T20:40:46.9422889Z INFO         | Saving last run QEMU version for the AVD to 2
+2026-10-18T20:40:46.9423785Z INFO         | Increasing RAM size to 2560MB
+2026-10-18T20:40:46.9425414Z ##############################################################################
+2026-10-18T20:40:46.9426375Z ##                        WARNING - ACTION REQUIRED                         ##
+2026-10-18T20:40:46.9427474Z ##  Consider using the '-metrics-collection' flag to help improve the       ##
+2026-10-18T20:40:46.9428385Z ##  emulator by sending anonymized usage data. Or use the '-no-metrics'     ##
+2026-10-18T20:40:46.9429265Z ##  flag to bypass this warning and turn off the metrics collection.        ##
+2026-10-18T20:40:46.9430144Z ##  In a future release this warning will turn into a one-time blocking     ##
+2026-10-18T20:40:46.9431021Z ##  prompt to ask for explicit user input regarding metrics collection.     ##
+2026-10-18T20:40:46.9431784Z ##                                                                          ##
+2026-10-18T20:40:46.9432581Z ##  Please see '-help-metrics-collection' for more details. You can use     ##
+2026-10-18T20:40:46.9433512Z ##  '-metrics-to-file' or '-metrics-to-console' flags to see what type of   ##
+2026-10-18T20:40:46.9434431Z ##  data is being collected by emulator as part of usage statistics.        ##
+2026-10-18T20:40:46.9435222Z ##############################################################################
+2026-10-18T20:40:46.9435851Z INFO         | Guest GLES Driver: Auto (ext controls)
+2026-10-18T20:40:46.9436895Z INFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swangle
+2026-10-18T20:40:46.9437761Z INFO         | Checking system compatibility:
+2026-10-18T20:40:46.9438362Z INFO         |   Checking: hasSufficientDiskSpace
+2026-10-18T20:40:46.9439034Z INFO         |      Ok: Disk space requirements to run avd: `test` are met
+2026-10-18T20:40:46.9439708Z INFO         |   Checking: hasSufficientHwGpu
+2026-10-18T20:40:46.9440376Z INFO         |      Ok: Hardware GPU compatibility checks are not required
+2026-10-18T20:40:46.9441052Z INFO         |   Checking: hasSufficientSystem
+2026-10-18T20:40:46.9441714Z INFO         |      Ok: System requirements to run avd: `test` are met
+2026-10-18T20:40:46.9443000Z WARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1
+2026-10-18T20:40:47.4147644Z ERROR        | Unable to connect to adb daemon on port: 5037
+2026-10-18T20:40:47.4163271Z INFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.2.12.db, detection is enabled for process: 3235
+2026-10-18T20:40:47.4188772Z INFO         | Initializing gfxstream backend
+2026-10-18T20:40:47.4189469Z INFO         | startOpenglesRendererImpl: gpu info
+2026-10-18T20:40:47.4190017Z INFO         | 
+2026-10-18T20:40:47.4190569Z INFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD
+2026-10-18T20:40:47.4191661Z INFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json
+2026-10-18T20:40:47.4195910Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]
+2026-10-18T20:40:47.4197328Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]
+2026-10-18T20:40:47.4198087Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]
+2026-10-18T20:40:47.4198730Z INFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so
+2026-10-18T20:40:47.4233829Z INFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0
+2026-10-18T20:40:47.4234770Z INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
+2026-10-18T20:40:47.4369593Z INFO         | Format VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16 does not support YCbCr sampler conversion
+2026-10-18T20:40:47.4423178Z INFO         | SharedLibrary::open for [libX11]
+2026-10-18T20:40:47.4424039Z WARNING      | Could not open libX11.so, try libX11.so.6
+2026-10-18T20:40:47.4424717Z INFO         | SharedLibrary::open for [libX11.so.6]
+2026-10-18T20:40:47.4425826Z INFO         | SharedLibrary::open for [libX11-xcb]
+2026-10-18T20:40:47.4426853Z WARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1
+2026-10-18T20:40:47.4427546Z INFO         | SharedLibrary::open for [libX11-xcb.so.1]
+2026-10-18T20:40:47.4516554Z INFO         | Initializing VkEmulation features:
+2026-10-18T20:40:47.4517421Z INFO         |     glInteropSupported: false
+2026-10-18T20:40:47.4517998Z INFO         |     useDeferredCommands: true
+2026-10-18T20:40:47.4518613Z INFO         |     createResourceWithRequirements: true
+2026-10-18T20:40:47.4519247Z INFO         |     useVulkanComposition: false
+2026-10-18T20:40:47.4519870Z INFO         |     useVulkanNativeSwapchain: false
+2026-10-18T20:40:47.4520483Z INFO         |     enable guestRenderDoc: false
+2026-10-18T20:40:47.4521055Z INFO         |     ASTC LDR emulation mode: Gpu
+2026-10-18T20:40:47.4521617Z INFO         |     enable ETC2 emulation: true
+2026-10-18T20:40:47.4522173Z INFO         |     enable Ycbcr emulation: false
+2026-10-18T20:40:47.4522745Z INFO         |     guestVulkanOnly: false
+2026-10-18T20:40:47.4523316Z INFO         |     useDedicatedAllocations: false
+2026-10-18T20:40:47.4523910Z INFO         |     guestVulkanMaxApiVersion: 1.3.0
+2026-10-18T20:40:47.4524551Z INFO         |     enableProtectedMemoryEmulation: false
+2026-10-18T20:40:47.4537984Z INFO         | Graphics Adapter Vendor Google (Google Inc. (Google))
+2026-10-18T20:40:47.4539174Z INFO         | Graphics Adapter Android Emulator OpenGL ES Translator (ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver-5.0.0))
+2026-10-18T20:40:47.4540128Z INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.1.0 (ANGLE 2.1.17841 git hash: 5fa2e61da947))
+2026-10-18T20:40:47.4544594Z INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_OVR_multiview2 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 GL_EXT_draw_buffers_indexed GL_EXT_clip_cull_distance 
+2026-10-18T20:40:47.4547371Z INFO         | Graphics Device Extensions N/A
+2026-10-18T20:40:47.4547722Z INFO         | Disabling sparse binding feature support
+2026-10-18T20:40:47.4574333Z ERROR        | Setting read-only feature 'GLAsyncSwap' to '0'
+2026-10-18T20:40:47.4575070Z INFO         | Feature 'GLAsyncSwap' (50) is overridden to 'disabled'
+2026-10-18T20:40:47.4578653Z INFO         | Sending adb public key [QAAAANFpEnPPcAG8fNXajBzPq9bbD6USvb7R3aHXAhxTqPrvOLEAPYLdSb9uRBgNOrWAVA2MZ9Z79XuW5E4vqbnUOFtpLozp7MjCSZYi/wSXdk1OjrMxJ1lPh4LnfNoSxCqnyWOF8sFcFM96fY35zuAaqiYpa5iw/K8uVA0Y/MjJg/oBYgsIXL8OMnpOkNY4YIZxpEwsiuPA/TsD0e4qqXDmGfCNwM57j8BW/711aWsnhe1cToHcPPFD704v9xmpLnUfzDjsn8zdTyXt9caPeUTsfVPNJo3lBwPXPV5e59AzOnZy2OrsTTJ44Tqi9ok0H/bzujVmy2rpfBKDYnSbibcLbR/ykJrbCoUW5ybfoCCQwdoJkZN+QhNDL/kkNeaRQNPvvi3HL4mm1KlKJOCqhmV/7sqOiori7FyaDP+Dk494Bp8PnZIbkpyb4UdAVK9v895EaVX/eK+Pr7nQX9n8lyRif3oF8VzZoc0D/ekbmxt8Q4yCXaHRMGRr8hosv913OAVLMjsEi9KXiJri6g7KfngJXLO0xyaUC1A/ceddV6YhfCSIppicGWMDGmQXfluvfDgNnpiO0v0qrU0oO/qSviUVRSgelwZZTMFp/phaqb40tsgcQwo9O7ky2PaxhyxLb4k7hEJ+RWy/B6NJNvPCsNlXguNNq7j75OUGj434urkjQlUXx0QhLAEAAQA= runner@unknown]
+2026-10-18T20:40:47.4581838Z INFO         | Userspace boot properties:
+2026-10-18T20:40:47.4582287Z INFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0
+2026-10-18T20:40:47.4582752Z INFO         |   androidboot.dalvik.vm.heapsize=576m
+2026-10-18T20:40:47.4583116Z INFO         |   androidboot.debug.hwui.renderer=skiagl
+2026-10-18T20:40:47.4583476Z INFO         |   androidboot.debug.sf.nobootanimation=1
+2026-10-18T20:40:47.4583814Z INFO         |   androidboot.hardware=ranchu
+2026-10-18T20:40:47.4584351Z INFO         |   androidboot.hardware.gltransport=pipe
+2026-10-18T20:40:47.4584711Z INFO         |   androidboot.hardware.vulkan=ranchu
+2026-10-18T20:40:47.4585023Z INFO         |   androidboot.logcat=*:V
+2026-10-18T20:40:47.4585333Z INFO         |   androidboot.opengles.version=196609
+2026-10-18T20:40:47.4585651Z INFO         |   androidboot.qemu=1
+2026-10-18T20:40:47.4589065Z INFO         |   androidboot.qemu.adb.pubkey=QAAAANFpEnPPcAG8fNXajBzPq9bbD6USvb7R3aHXAhxTqPrvOLEAPYLdSb9uRBgNOrWAVA2MZ9Z79XuW5E4vqbnUOFtpLozp7MjCSZYi/wSXdk1OjrMxJ1lPh4LnfNoSxCqnyWOF8sFcFM96fY35zuAaqiYpa5iw/K8uVA0Y/MjJg/oBYgsIXL8OMnpOkNY4YIZxpEwsiuPA/TsD0e4qqXDmGfCNwM57j8BW/711aWsnhe1cToHcPPFD704v9xmpLnUfzDjsn8zdTyXt9caPeUTsfVPNJo3lBwPXPV5e59AzOnZy2OrsTTJ44Tqi9ok0H/bzujVmy2rpfBKDYnSbibcLbR/ykJrbCoUW5ybfoCCQwdoJkZN+QhNDL/kkNeaRQNPvvi3HL4mm1KlKJOCqhmV/7sqOiori7FyaDP+Dk494Bp8PnZIbkpyb4UdAVK9v895EaVX/eK+Pr7nQX9n8lyRif3oF8VzZoc0D/ekbmxt8Q4yCXaHRMGRr8hosv913OAVLMjsEi9KXiJri6g7KfngJXLO0xyaUC1A/ceddV6YhfCSIppicGWMDGmQXfluvfDgNnpiO0v0qrU0oO/qSviUVRSgelwZZTMFp/phaqb40tsgcQwo9O7ky2PaxhyxLb4k7hEJ+RWy/B6NJNvPCsNlXguNNq7j75OUGj434urkjQlUXx0QhLAEAAQA= runner@unknown
+2026-10-18T20:40:47.4592260Z INFO         |   androidboot.qemu.avd_name=test
+2026-10-18T20:40:47.4592627Z INFO         |   androidboot.qemu.camera_hq_edge_processing=0
+2026-10-18T20:40:47.4593000Z INFO         |   androidboot.qemu.camera_protocol_ver=1
+2026-10-18T20:40:47.4593364Z INFO         |   androidboot.qemu.cpuvulkan.version=4206592
+2026-10-18T20:40:47.4593810Z INFO         |   androidboot.qemu.gltransport.drawFlushInterval=800
+2026-10-18T20:40:47.4594210Z INFO         |   androidboot.qemu.gltransport.name=pipe
+2026-10-18T20:40:47.4594562Z INFO         |   androidboot.qemu.hwcodec.avcdec=2
+2026-10-18T20:40:47.4594904Z INFO         |   androidboot.qemu.hwcodec.hevcdec=2
+2026-10-18T20:40:47.4595236Z INFO         |   androidboot.qemu.hwcodec.vpxdec=2
+2026-10-18T20:40:47.4595654Z INFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647
+2026-10-18T20:40:47.4596078Z INFO         |   androidboot.qemu.skin=1080x2400
+2026-10-18T20:40:47.4596399Z INFO         |   androidboot.qemu.virtiowifi=1
+2026-10-18T20:40:47.4597001Z INFO         |   androidboot.qemu.vsync=60
+2026-10-18T20:40:47.4597333Z INFO         |   androidboot.serialno=EMULATOR37X2X12X0
+2026-10-18T20:40:47.4597864Z INFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3
+2026-10-18T20:40:47.4598384Z INFO         |   androidboot.vbmeta.hash_alg=sha256
+2026-10-18T20:40:47.4598710Z INFO         |   androidboot.vbmeta.size=6656
+2026-10-18T20:40:47.4599030Z INFO         |   androidboot.veritymode=enforcing
+2026-10-18T20:40:47.4748947Z WARNING: cannnot unmap ptr 0x7f95b3401000 as it is in the protected range from 0x7f9513400000 to 0x7f95b3600000
+2026-10-18T20:40:47.4952800Z INFO         | Monitoring duration of emulator setup.
+2026-10-18T20:40:48.5014110Z INFO         | Activated packet streamer for bluetooth emulation
+2026-10-18T20:40:48.5015343Z INFO         | Successfully initialized netsim WiFi
+2026-10-18T20:40:48.5074156Z INFO         | Setting display: 0 configuration to: 1080x2400, dpi: 420x420 
+2026-10-18T20:40:48.5074810Z INFO         | setDisplayActiveConfig: id:0, 1080x2400
+2026-10-18T20:40:48.5075237Z INFO         | emulatorSetupEnvironment: Environment scene is not required
+2026-10-18T20:40:48.5148861Z INFO         | Loading snapshot 'default_boot'...
+2026-10-18T20:40:48.5150890Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+2026-10-18T20:40:48.5276097Z WARNING      | Device 'cache' does not have the requested snapshot 'default_boot'
+2026-10-18T20:40:48.5276877Z 
+2026-10-18T20:40:48.5277149Z WARNING      | Failed to load snapshot 'default_boot'
+2026-10-18T20:40:48.5278133Z USER_INFO    | The emulator is performing a cold boot without a saved state because there's no snapshot and you have configured it not to save on exit.
+2026-10-18T20:40:48.7018183Z WARNING      | Failed to process .ini file /home/runner/.android/emu-update-last-check.ini for reading.
+2026-10-18T20:40:56.8897950Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:40:56.8932604Z * daemon not running; starting now at tcp:5037
+2026-10-18T20:40:57.0652476Z * daemon started successfully
+2026-10-18T20:40:57.0665442Z adb: device offline
+2026-10-18T20:40:57.0667469Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+2026-10-18T20:40:59.0728682Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:40:59.0770005Z adb: device offline
+2026-10-18T20:40:59.0777653Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+2026-10-18T20:41:01.0841475Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:01.1317716Z 
+2026-10-18T20:41:03.1348881Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:03.1492375Z 
+2026-10-18T20:41:05.1538349Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:05.1747033Z 
+2026-10-18T20:41:07.1799508Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:07.1974898Z 
+2026-10-18T20:41:09.2048188Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:09.2269063Z 
+2026-10-18T20:41:11.2383945Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:11.2621901Z 
+2026-10-18T20:41:13.2672615Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:13.2839905Z 
+2026-10-18T20:41:15.2894188Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:15.3098973Z 
+2026-10-18T20:41:17.3165940Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:17.3343612Z 
+2026-10-18T20:41:19.3450738Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:19.3690516Z 
+2026-10-18T20:41:21.3918078Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:21.4732451Z 
+2026-10-18T20:41:22.6879933Z INFO         | Boot completed in 35763 ms
+2026-10-18T20:41:22.6881025Z INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+2026-10-18T20:41:23.4859392Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:41:23.5235861Z 1
+2026-10-18T20:41:23.5260496Z Emulator booted.
+2026-10-18T20:41:23.5357531Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell input keyevent 82
+2026-10-18T20:41:30.0918939Z ##[endgroup]
+2026-10-18T20:41:30.0959907Z [command]/usr/bin/sh -c SHARD=system bash evidence.sh
+2026-10-18T20:41:30.1059885Z + APP=com.raydocs.tono.mobile.test
+2026-10-18T20:41:30.1092610Z + '[' -d evidence ']'
+2026-10-18T20:41:30.1097240Z + mkdir -p evidence
+2026-10-18T20:41:30.1187354Z + adb shell getprop ro.build.fingerprint
+2026-10-18T20:41:30.1207924Z + tee evidence/device.txt
+2026-10-18T20:41:30.2277760Z google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+2026-10-18T20:41:30.2339345Z + adb shell getprop ro.product.cpu.abi
+2026-10-18T20:41:30.2367146Z + tee -a evidence/device.txt
+2026-10-18T20:41:30.3617747Z x86_64
+2026-10-18T20:41:30.3647602Z + adb shell wm size
+2026-10-18T20:41:30.3677458Z + tee -a evidence/device.txt
+2026-10-18T20:41:30.5659031Z Physical size: 1080x2400
+2026-10-18T20:41:30.6077898Z + tee -a evidence/device.txt
+2026-10-18T20:41:30.6080331Z + adb shell wm density
+2026-10-18T20:41:30.6917962Z Physical density: 420
+2026-10-18T20:41:30.6972265Z + adb shell settings put system screen_off_timeout 1800000
+2026-10-18T20:41:30.9198067Z + adb shell svc power stayon true
+2026-10-18T20:41:33.1177853Z + adb shell input keyevent 82
+2026-10-18T20:41:33.8292360Z + sleep 60
+2026-10-18T20:42:33.8312980Z + adb shell input keyevent 3
+2026-10-18T20:42:33.9056956Z + adb install -r apk/tono-mobile-0.3.1-test-c31e69f3d.apk
+2026-10-18T20:42:35.8718686Z Performing Streamed Install
+2026-10-18T20:42:35.8719378Z Success
+2026-10-18T20:42:35.8725307Z + adb install -r apk/instrumentation.apk
+2026-10-18T20:42:36.2458695Z Performing Streamed Install
+2026-10-18T20:42:36.2462656Z Success
+2026-10-18T20:42:36.2463558Z + set +e
+2026-10-18T20:42:36.2464704Z + adb shell am start -W -n com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.ui.MainActivity
+2026-10-18T20:42:39.2877957Z + sleep 3
+2026-10-18T20:42:42.2977857Z + adb shell dumpsys gfxinfo com.raydocs.tono.mobile.test reset
+2026-10-18T20:42:44.2996025Z + sleep 8
+2026-10-18T20:42:52.3047061Z ++ head -1
+2026-10-18T20:42:52.3079538Z ++ sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p'
+2026-10-18T20:42:52.3127381Z ++ adb shell dumpsys gfxinfo com.raydocs.tono.mobile.test
+2026-10-18T20:42:53.7099076Z + median=900
+2026-10-18T20:42:53.7099985Z + adb shell am force-stop com.raydocs.tono.mobile.test
+2026-10-18T20:42:54.2908447Z + set -e
+2026-10-18T20:42:54.2997496Z + echo 'health: sign-in screen median frame 900 ms before the tests (limit 850 ms)'
+2026-10-18T20:42:54.3027766Z + tee evidence/health.txt
+2026-10-18T20:42:54.3047202Z + '[' -n 900 ']'
+2026-10-18T20:42:54.3087167Z + '[' 900 -gt 850 ']'
+2026-10-18T20:42:54.3097425Z + echo 'HEALTH-GATE: emulator renders too slowly (median frame 900 ms > 850 ms); no tests run in this attempt'
+2026-10-18T20:42:54.3098341Z + timeout 60 adb logcat -d
+2026-10-18T20:42:55.7450649Z + exit 1
+2026-10-18T20:42:55.7491428Z ##[error]The process '/usr/bin/sh' failed with exit code 1
+2026-10-18T20:42:55.7504973Z ##[group]Terminate Emulator
+2026-10-18T20:42:55.7505443Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 emu kill
+2026-10-18T20:42:55.7536324Z OK: killing emulator, bye bye
+2026-10-18T20:42:55.7544481Z OK
+2026-10-18T20:42:55.7546097Z INFO         | Wait for emulator (pid 3235) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+2026-10-18T20:42:55.7547916Z 
+2026-10-18T20:42:55.7548576Z ##[endgroup]
+2026-10-18T20:42:58.8237772Z INFO         | Saving with gfxstream=1
+2026-10-18T20:42:58.9420488Z INFO         | Saving snapshot 'default_boot' took 3181 ms
+2026-10-18T20:42:59.5534079Z ERROR        | stop: Not implemented
+2026-10-18T20:42:59.5535206Z WARNING      | Emulator client has not yet been configured.. Call configure me first!
+2026-10-18T20:42:59.5737826Z INFO         | removeAll
+2026-10-18T20:42:59.6182830Z WARNING      | Netsim Wifi dns:///localhost:37157 is gone due to Stream removed (CANCELLED)
+2026-10-18T20:43:00.1799983Z ##[group]Run adb emu kill || true
+2026-10-18T20:43:00.1800332Z [36;1madb emu kill || true[0m
+2026-10-18T20:43:00.1800580Z [36;1msleep 5[0m
+2026-10-18T20:43:00.1800843Z [36;1mpkill -9 -f "[q]emu-system-x86_64" || true[0m
+2026-10-18T20:43:00.1801146Z [36;1msleep 3[0m
+2026-10-18T20:43:00.1801462Z [36;1mpgrep -fa "[q]emu-system-x86_64" || echo "no emulator left running"[0m
+2026-10-18T20:43:00.1866494Z shell: /usr/bin/bash -e {0}
+2026-10-18T20:43:00.1867231Z env:
+2026-10-18T20:43:00.1867558Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+2026-10-18T20:43:00.1868048Z ##[endgroup]
+2026-10-18T20:43:00.1970477Z error: could not connect to TCP port 5554: Connection refused
+2026-10-18T20:43:08.2219388Z no emulator left running
+2026-10-18T20:43:08.2295314Z ##[group]Run reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+2026-10-18T20:43:08.2295795Z with:
+2026-10-18T20:43:08.2295992Z   api-level: 34
+2026-10-18T20:43:08.2296387Z   target: google_apis
+2026-10-18T20:43:08.2296888Z   arch: x86_64
+2026-10-18T20:43:08.2297232Z   profile: pixel_6
+2026-10-18T20:43:08.2297454Z   disable-animations: false
+2026-10-18T20:43:08.2297897Z   emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T20:43:08.2298422Z   pre-emulator-launch-script: bash wrap-emulator.sh
+2026-10-18T20:43:08.2298759Z   script: SHARD=system bash evidence.sh
+2026-10-18T20:43:08.2299028Z   cores: 2
+2026-10-18T20:43:08.2299213Z   avd-name: test
+2026-10-18T20:43:08.2299434Z   force-avd-creation: true
+2026-10-18T20:43:08.2299677Z   emulator-boot-timeout: 600
+2026-10-18T20:43:08.2299921Z   emulator-port: 5554
+2026-10-18T20:43:08.2300152Z   disable-spellchecker: false
+2026-10-18T20:43:08.2300459Z   disable-linux-hw-accel: auto
+2026-10-18T20:43:08.2300711Z   enable-hw-keyboard: false
+2026-10-18T20:43:08.2300981Z   channel: stable
+2026-10-18T20:43:08.2301175Z env:
+2026-10-18T20:43:08.2301389Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+2026-10-18T20:43:08.2301699Z ##[endgroup]
+2026-10-18T20:43:08.2907182Z ##[group]Configure emulator
+2026-10-18T20:43:08.2910326Z API level: 34
+2026-10-18T20:43:08.2910969Z System image API level: 34
+2026-10-18T20:43:08.2911439Z target: google_apis
+2026-10-18T20:43:08.2928231Z CPU architecture: x86_64
+2026-10-18T20:43:08.2928965Z Hardware profile: pixel_6
+2026-10-18T20:43:08.2929446Z Cores: 2
+2026-10-18T20:43:08.2929770Z RAM size: 
+2026-10-18T20:43:08.2930095Z Heap size: 
+2026-10-18T20:43:08.2930441Z SD card path or size: 
+2026-10-18T20:43:08.2930824Z Disk size: 
+2026-10-18T20:43:08.2931158Z AVD name: test
+2026-10-18T20:43:08.2931571Z force avd creation: true
+2026-10-18T20:43:08.2931990Z Emulator boot timeout: 600
+2026-10-18T20:43:08.2932406Z emulator port: 5554
+2026-10-18T20:43:08.2933142Z emulator options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+2026-10-18T20:43:08.2933976Z disable animations: false
+2026-10-18T20:43:08.2934421Z disable spellchecker: false
+2026-10-18T20:43:08.2934882Z disable Linux hardware acceleration: false
+2026-10-18T20:43:08.2935396Z enable hardware keyboard: false
+2026-10-18T20:43:08.2935829Z Channel: 0 (stable)
+2026-10-18T20:43:08.2936176Z Script:
+2026-10-18T20:43:08.2936532Z SHARD=system bash evidence.sh
+2026-10-18T20:43:08.2937169Z Pre emulator launch script:
+2026-10-18T20:43:08.2937619Z bash wrap-emulator.sh
+2026-10-18T20:43:08.2938306Z ##[endgroup]
+2026-10-18T20:43:08.2938955Z ##[group]Install Android SDK
+2026-10-18T20:43:08.2983326Z [command]/usr/bin/sh -c \yes | sdkmanager --licenses > /dev/null
+2026-10-18T20:43:09.9784425Z Installing latest build tools, platform tools, and platform.
+2026-10-18T20:43:09.9801516Z [command]/usr/bin/sh -c \sdkmanager --install 'build-tools;37.0.0' platform-tools 'platforms;android-34'> /dev/null
+2026-10-18T20:43:11.6603629Z Installing latest emulator.
+2026-10-18T20:43:11.6620252Z [command]/usr/bin/sh -c \sdkmanager --install emulator --channel=0 > /dev/null
+2026-10-18T20:43:13.2934842Z Installing system images.
+2026-10-18T20:43:13.2951016Z [command]/usr/bin/sh -c \sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null
+2026-10-18T20:43:14.9785876Z ##[endgroup]
+2026-10-18T20:43:14.9788013Z ##[group]Create AVD
+2026-10-18T20:43:14.9788418Z Creating AVD.
+2026-10-18T20:43:14.9807662Z [command]/usr/bin/sh -c \echo no | avdmanager create avd --force -n test --package 'system-images;android-34;google_apis;x86_64' --device 'pixel_6'
+2026-10-18T20:43:15.7308012Z Loading local repository...                                                     
+2026-10-18T20:43:15.7337464Z [=========                              ] 25% Loading local repository...       
+2026-10-18T20:43:15.7367293Z [=========                              ] 25% Fetch remote repository...        
+2026-10-18T20:43:15.7387860Z [=======================================] 100% Fetch remote repository...       
+2026-10-18T20:43:16.0817863Z Auto-selecting single ABI x86_64
+2026-10-18T20:43:16.3575562Z [command]/usr/bin/sh -c \printf 'hw.cpu.ncore=2\n' >> /home/runner/.android/avd/test.avd/config.ini
+2026-10-18T20:43:16.3597829Z ##[endgroup]
+2026-10-18T20:43:16.3598612Z ##[group]Run pre emulator launch script
+2026-10-18T20:43:16.3617936Z [command]/usr/bin/sh -c bash wrap-emulator.sh
+2026-10-18T20:43:16.3666456Z ##[endgroup]
+2026-10-18T20:43:16.3669140Z ##[group]Launch Emulator
+2026-10-18T20:43:16.3669617Z Starting emulator.
+2026-10-18T20:43:16.3682782Z [command]/usr/bin/sh -c \/usr/local/lib/android/sdk/emulator/emulator -port 5554 -avd test -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none &
+2026-10-18T20:43:16.3812269Z INFO         | Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+2026-10-18T20:43:16.3812897Z INFO         | Graphics backend: gfxstream
+2026-10-18T20:43:16.3813668Z INFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/
+2026-10-18T20:43:16.4267983Z INFO         | Saving last run QEMU version for the AVD to 2
+2026-10-18T20:43:16.4268969Z INFO         | Increasing RAM size to 2560MB
+2026-10-18T20:43:16.4270360Z ##############################################################################
+2026-10-18T20:43:16.4271428Z ##                        WARNING - ACTION REQUIRED                         ##
+2026-10-18T20:43:16.4272923Z ##  Consider using the '-metrics-collection' flag to help improve the       ##
+2026-10-18T20:43:16.4292810Z ##  emulator by sending anonymized usage data. Or use the '-no-metrics'     ##
+2026-10-18T20:43:16.4293843Z ##  flag to bypass this warning and turn off the metrics collection.        ##
+2026-10-18T20:43:16.4294922Z ##  In a future release this warning will turn into a one-time blocking     ##
+2026-10-18T20:43:16.4295798Z ##  prompt to ask for explicit user input regarding metrics collection.     ##
+2026-10-18T20:43:16.4296536Z ##                                                                          ##
+2026-10-18T20:43:16.4297653Z ##  Please see '-help-metrics-collection' for more details. You can use     ##
+2026-10-18T20:43:16.4298626Z ##  '-metrics-to-file' or '-metrics-to-console' flags to see what type of   ##
+2026-10-18T20:43:16.4299569Z ##  data is being collected by emulator as part of usage statistics.        ##
+2026-10-18T20:43:16.4300320Z ##############################################################################
+2026-10-18T20:43:16.4300944Z INFO         | Guest GLES Driver: Auto (ext controls)
+2026-10-18T20:43:16.4301749Z INFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swangle
+2026-10-18T20:43:16.4302578Z INFO         | Checking system compatibility:
+2026-10-18T20:43:16.4303153Z INFO         |   Checking: hasSufficientDiskSpace
+2026-10-18T20:43:16.4303809Z INFO         |      Ok: Disk space requirements to run avd: `test` are met
+2026-10-18T20:43:16.4304493Z INFO         |   Checking: hasSufficientHwGpu
+2026-10-18T20:43:16.4305108Z INFO         |      Ok: Hardware GPU compatibility checks are not required
+2026-10-18T20:43:16.4305748Z INFO         |   Checking: hasSufficientSystem
+2026-10-18T20:43:16.4306348Z INFO         |      Ok: System requirements to run avd: `test` are met
+2026-10-18T20:43:16.4307988Z WARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1
+2026-10-18T20:43:16.5970442Z INFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.2.12.db, detection is enabled for process: 4311
+2026-10-18T20:43:16.5972528Z INFO         | Initializing gfxstream backend
+2026-10-18T20:43:16.5977880Z INFO         | startOpenglesRendererImpl: gpu info
+2026-10-18T20:43:16.5978943Z INFO         | 
+2026-10-18T20:43:16.5980808Z INFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD
+2026-10-18T20:43:16.5982524Z INFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json
+2026-10-18T20:43:16.5984266Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]
+2026-10-18T20:43:16.5986130Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]
+2026-10-18T20:43:16.5987836Z INFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]
+2026-10-18T20:43:16.5989094Z INFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so
+2026-10-18T20:43:16.6013456Z INFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0
+2026-10-18T20:43:16.6013973Z INFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation
+2026-10-18T20:43:16.6099834Z INFO         | Format VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16 does not support YCbCr sampler conversion
+2026-10-18T20:43:16.6149927Z INFO         | SharedLibrary::open for [libX11]
+2026-10-18T20:43:16.6151398Z WARNING      | Could not open libX11.so, try libX11.so.6
+2026-10-18T20:43:16.6152247Z INFO         | SharedLibrary::open for [libX11.so.6]
+2026-10-18T20:43:16.6153045Z INFO         | SharedLibrary::open for [libX11-xcb]
+2026-10-18T20:43:16.6153991Z WARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1
+2026-10-18T20:43:16.6154906Z INFO         | SharedLibrary::open for [libX11-xcb.so.1]
+2026-10-18T20:43:16.6209615Z INFO         | Initializing VkEmulation features:
+2026-10-18T20:43:16.6227924Z INFO         |     glInteropSupported: false
+2026-10-18T20:43:16.6228529Z INFO         |     useDeferredCommands: true
+2026-10-18T20:43:16.6229123Z INFO         |     createResourceWithRequirements: true
+2026-10-18T20:43:16.6229727Z INFO         |     useVulkanComposition: false
+2026-10-18T20:43:16.6230286Z INFO         |     useVulkanNativeSwapchain: false
+2026-10-18T20:43:16.6230884Z INFO         |     enable guestRenderDoc: false
+2026-10-18T20:43:16.6231431Z INFO         |     ASTC LDR emulation mode: Gpu
+2026-10-18T20:43:16.6231788Z INFO         |     enable ETC2 emulation: true
+2026-10-18T20:43:16.6232145Z INFO         |     enable Ycbcr emulation: false
+2026-10-18T20:43:16.6232464Z INFO         |     guestVulkanOnly: false
+2026-10-18T20:43:16.6232785Z INFO         |     useDedicatedAllocations: false
+2026-10-18T20:43:16.6233383Z INFO         |     guestVulkanMaxApiVersion: 1.3.0
+2026-10-18T20:43:16.6234011Z INFO         |     enableProtectedMemoryEmulation: false
+2026-10-18T20:43:16.6234727Z INFO         | Graphics Adapter Vendor Google (Google Inc. (Google))
+2026-10-18T20:43:16.6236086Z INFO         | Graphics Adapter Android Emulator OpenGL ES Translator (ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver-5.0.0))
+2026-10-18T20:43:16.6237618Z INFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.1.0 (ANGLE 2.1.17841 git hash: 5fa2e61da947))
+2026-10-18T20:43:16.6240110Z INFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_OVR_multiview2 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 GL_EXT_draw_buffers_indexed GL_EXT_clip_cull_distance 
+2026-10-18T20:43:16.6242562Z INFO         | Graphics Device Extensions N/A
+2026-10-18T20:43:16.6243171Z INFO         | Disabling sparse binding feature support
+2026-10-18T20:43:16.6252543Z ERROR        | Setting read-only feature 'GLAsyncSwap' to '0'
+2026-10-18T20:43:16.6253888Z INFO         | Feature 'GLAsyncSwap' (50) is overridden to 'disabled'
+2026-10-18T20:43:16.6262657Z INFO         | Sending adb public key [QAAAANFpEnPPcAG8fNXajBzPq9bbD6USvb7R3aHXAhxTqPrvOLEAPYLdSb9uRBgNOrWAVA2MZ9Z79XuW5E4vqbnUOFtpLozp7MjCSZYi/wSXdk1OjrMxJ1lPh4LnfNoSxCqnyWOF8sFcFM96fY35zuAaqiYpa5iw/K8uVA0Y/MjJg/oBYgsIXL8OMnpOkNY4YIZxpEwsiuPA/TsD0e4qqXDmGfCNwM57j8BW/711aWsnhe1cToHcPPFD704v9xmpLnUfzDjsn8zdTyXt9caPeUTsfVPNJo3lBwPXPV5e59AzOnZy2OrsTTJ44Tqi9ok0H/bzujVmy2rpfBKDYnSbibcLbR/ykJrbCoUW5ybfoCCQwdoJkZN+QhNDL/kkNeaRQNPvvi3HL4mm1KlKJOCqhmV/7sqOiori7FyaDP+Dk494Bp8PnZIbkpyb4UdAVK9v895EaVX/eK+Pr7nQX9n8lyRif3oF8VzZoc0D/ekbmxt8Q4yCXaHRMGRr8hosv913OAVLMjsEi9KXiJri6g7KfngJXLO0xyaUC1A/ceddV6YhfCSIppicGWMDGmQXfluvfDgNnpiO0v0qrU0oO/qSviUVRSgelwZZTMFp/phaqb40tsgcQwo9O7ky2PaxhyxLb4k7hEJ+RWy/B6NJNvPCsNlXguNNq7j75OUGj434urkjQlUXx0QhLAEAAQA= runner@unknown]
+2026-10-18T20:43:16.6269417Z INFO         | Userspace boot properties:
+2026-10-18T20:43:16.6270475Z INFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0
+2026-10-18T20:43:16.6271601Z INFO         |   androidboot.dalvik.vm.heapsize=576m
+2026-10-18T20:43:16.6272519Z INFO         |   androidboot.debug.hwui.renderer=skiagl
+2026-10-18T20:43:16.6273496Z INFO         |   androidboot.debug.sf.nobootanimation=1
+2026-10-18T20:43:16.6274295Z INFO         |   androidboot.hardware=ranchu
+2026-10-18T20:43:16.6274890Z INFO         |   androidboot.hardware.gltransport=pipe
+2026-10-18T20:43:16.6275487Z INFO         |   androidboot.hardware.vulkan=ranchu
+2026-10-18T20:43:16.6276026Z INFO         |   androidboot.logcat=*:V
+2026-10-18T20:43:16.6276814Z INFO         |   androidboot.opengles.version=196609
+2026-10-18T20:43:16.6277360Z INFO         |   androidboot.qemu=1
+2026-10-18T20:43:16.6280865Z INFO         |   androidboot.qemu.adb.pubkey=QAAAANFpEnPPcAG8fNXajBzPq9bbD6USvb7R3aHXAhxTqPrvOLEAPYLdSb9uRBgNOrWAVA2MZ9Z79XuW5E4vqbnUOFtpLozp7MjCSZYi/wSXdk1OjrMxJ1lPh4LnfNoSxCqnyWOF8sFcFM96fY35zuAaqiYpa5iw/K8uVA0Y/MjJg/oBYgsIXL8OMnpOkNY4YIZxpEwsiuPA/TsD0e4qqXDmGfCNwM57j8BW/711aWsnhe1cToHcPPFD704v9xmpLnUfzDjsn8zdTyXt9caPeUTsfVPNJo3lBwPXPV5e59AzOnZy2OrsTTJ44Tqi9ok0H/bzujVmy2rpfBKDYnSbibcLbR/ykJrbCoUW5ybfoCCQwdoJkZN+QhNDL/kkNeaRQNPvvi3HL4mm1KlKJOCqhmV/7sqOiori7FyaDP+Dk494Bp8PnZIbkpyb4UdAVK9v895EaVX/eK+Pr7nQX9n8lyRif3oF8VzZoc0D/ekbmxt8Q4yCXaHRMGRr8hosv913OAVLMjsEi9KXiJri6g7KfngJXLO0xyaUC1A/ceddV6YhfCSIppicGWMDGmQXfluvfDgNnpiO0v0qrU0oO/qSviUVRSgelwZZTMFp/phaqb40tsgcQwo9O7ky2PaxhyxLb4k7hEJ+RWy/B6NJNvPCsNlXguNNq7j75OUGj434urkjQlUXx0QhLAEAAQA= runner@unknown
+2026-10-18T20:43:16.6284118Z INFO         |   androidboot.qemu.avd_name=test
+2026-10-18T20:43:16.6284473Z INFO         |   androidboot.qemu.camera_hq_edge_processing=0
+2026-10-18T20:43:16.6284846Z INFO         |   androidboot.qemu.camera_protocol_ver=1
+2026-10-18T20:43:16.6285205Z INFO         |   androidboot.qemu.cpuvulkan.version=4206592
+2026-10-18T20:43:16.6285609Z INFO         |   androidboot.qemu.gltransport.drawFlushInterval=800
+2026-10-18T20:43:16.6286011Z INFO         |   androidboot.qemu.gltransport.name=pipe
+2026-10-18T20:43:16.6286359Z INFO         |   androidboot.qemu.hwcodec.avcdec=2
+2026-10-18T20:43:16.6287005Z INFO         |   androidboot.qemu.hwcodec.hevcdec=2
+2026-10-18T20:43:16.6287391Z INFO         |   androidboot.qemu.hwcodec.vpxdec=2
+2026-10-18T20:43:16.6287824Z INFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647
+2026-10-18T20:43:16.6288259Z INFO         |   androidboot.qemu.skin=1080x2400
+2026-10-18T20:43:16.6288579Z INFO         |   androidboot.qemu.virtiowifi=1
+2026-10-18T20:43:16.6288899Z INFO         |   androidboot.qemu.vsync=60
+2026-10-18T20:43:16.6289216Z INFO         |   androidboot.serialno=EMULATOR37X2X12X0
+2026-10-18T20:43:16.6289733Z INFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3
+2026-10-18T20:43:16.6290266Z INFO         |   androidboot.vbmeta.hash_alg=sha256
+2026-10-18T20:43:16.6290582Z INFO         |   androidboot.vbmeta.size=6656
+2026-10-18T20:43:16.6290897Z INFO         |   androidboot.veritymode=enforcing
+2026-10-18T20:43:16.6478113Z WARNING: cannnot unmap ptr 0x7faf86c01000 as it is in the protected range from 0x7faee6c00000 to 0x7faf86e00000
+2026-10-18T20:43:16.6630907Z INFO         | Monitoring duration of emulator setup.
+2026-10-18T20:43:17.6687951Z INFO         | Successfully initialized netsim WiFi
+2026-10-18T20:43:17.6689175Z INFO         | Activated packet streamer for bluetooth emulation
+2026-10-18T20:43:17.6751650Z INFO         | Setting display: 0 configuration to: 1080x2400, dpi: 420x420 
+2026-10-18T20:43:17.6752347Z INFO         | setDisplayActiveConfig: id:0, 1080x2400
+2026-10-18T20:43:17.6753030Z INFO         | emulatorSetupEnvironment: Environment scene is not required
+2026-10-18T20:43:17.6830127Z INFO         | Loading snapshot 'default_boot'...
+2026-10-18T20:43:17.6959413Z WARNING      | Device 'cache' does not have the requested snapshot 'default_boot'
+2026-10-18T20:43:17.6960145Z 
+2026-10-18T20:43:17.6960435Z WARNING      | Failed to load snapshot 'default_boot'
+2026-10-18T20:43:17.6961797Z USER_INFO    | The emulator is performing a cold boot without a saved state because there's no snapshot and you have configured it not to save on exit.
+2026-10-18T20:43:26.3748454Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:26.3783819Z adb: device offline
+2026-10-18T20:43:26.3791666Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+2026-10-18T20:43:28.3850893Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:28.3898507Z adb: device offline
+2026-10-18T20:43:28.3901718Z The process '/usr/local/lib/android/sdk/platform-tools/adb' failed with exit code 1
+2026-10-18T20:43:30.3950869Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:30.4344827Z 
+2026-10-18T20:43:32.4418332Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:32.4613696Z 
+2026-10-18T20:43:34.4666265Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:34.4831559Z 
+2026-10-18T20:43:36.4880816Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:36.5125528Z 
+2026-10-18T20:43:38.5184337Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:38.5439319Z 
+2026-10-18T20:43:40.5528518Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:40.5637799Z 
+2026-10-18T20:43:42.5691403Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:42.6003473Z 
+2026-10-18T20:43:44.6078172Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:44.6339311Z 
+2026-10-18T20:43:46.6435260Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:46.6738244Z 
+2026-10-18T20:43:48.6861353Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:48.7148666Z 
+2026-10-18T20:43:50.7233289Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed
+2026-10-18T20:43:50.9661376Z 1
+2026-10-18T20:43:50.9751102Z Emulator booted.
+2026-10-18T20:43:50.9797382Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell input keyevent 82
+2026-10-18T20:43:51.4829865Z ##[endgroup]
+2026-10-18T20:43:51.4866534Z [command]/usr/bin/sh -c SHARD=system bash evidence.sh
+2026-10-18T20:43:51.4902344Z + APP=com.raydocs.tono.mobile.test
+2026-10-18T20:43:51.4904447Z + '[' -d evidence ']'
+2026-10-18T20:43:51.4905109Z ++ date +%s
+2026-10-18T20:43:51.4920136Z + mv evidence evidence-attempt-1792356231
+2026-10-18T20:43:51.4942570Z + mkdir -p evidence
+2026-10-18T20:43:51.4966435Z + adb shell getprop ro.build.fingerprint
+2026-10-18T20:43:51.4967577Z + tee evidence/device.txt
+2026-10-18T20:43:51.5285233Z google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+2026-10-18T20:43:51.5298675Z + adb shell getprop ro.product.cpu.abi
+2026-10-18T20:43:51.5300026Z + tee -a evidence/device.txt
+2026-10-18T20:43:51.5648815Z x86_64
+2026-10-18T20:43:51.5660832Z + adb shell wm size
+2026-10-18T20:43:51.5707358Z + tee -a evidence/device.txt
+2026-10-18T20:43:51.6416804Z Physical size: 1080x2400
+2026-10-18T20:43:51.6688949Z + tee -a evidence/device.txt
+2026-10-18T20:43:51.6710637Z + adb shell wm density
+2026-10-18T20:43:51.6740470Z INFO         | Boot completed in 35266 ms
+2026-10-18T20:43:51.6748089Z INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+2026-10-18T20:43:51.9607776Z Physical density: 420
+2026-10-18T20:43:52.0000443Z + adb shell settings put system screen_off_timeout 1800000
+2026-10-18T20:43:52.3052065Z + adb shell svc power stayon true
+2026-10-18T20:43:53.6657738Z + adb shell input keyevent 82
+2026-10-18T20:44:01.9427609Z + sleep 60
+2026-10-18T20:45:01.9449764Z + adb shell input keyevent 3
+2026-10-18T20:45:02.0303158Z + adb install -r apk/tono-mobile-0.3.1-test-c31e69f3d.apk
+2026-10-18T20:45:03.9399562Z Performing Streamed Install
+2026-10-18T20:45:03.9401922Z Success
+2026-10-18T20:45:03.9404890Z + adb install -r apk/instrumentation.apk
+2026-10-18T20:45:04.2574416Z Performing Streamed Install
+2026-10-18T20:45:04.2575388Z Success
+2026-10-18T20:45:04.2588299Z + set +e
+2026-10-18T20:45:04.2590151Z + adb shell am start -W -n com.raydocs.tono.mobile.test/com.raydocs.tono.mobile.ui.MainActivity
+2026-10-18T20:45:07.9827551Z + sleep 3
+2026-10-18T20:45:10.9827806Z + adb shell dumpsys gfxinfo com.raydocs.tono.mobile.test reset
+2026-10-18T20:45:11.9967562Z + sleep 8
+2026-10-18T20:45:20.0001824Z ++ adb shell dumpsys gfxinfo com.raydocs.tono.mobile.test
+2026-10-18T20:45:20.0021779Z ++ sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p'
+2026-10-18T20:45:20.0027432Z ++ head -1
+2026-10-18T20:45:21.3459150Z + median=850
+2026-10-18T20:45:21.3497418Z + adb shell am force-stop com.raydocs.tono.mobile.test
+2026-10-18T20:45:21.7407726Z + set -e
+2026-10-18T20:45:21.7442028Z + tee evidence/health.txt
+2026-10-18T20:45:21.7467329Z + echo 'health: sign-in screen median frame 850 ms before the tests (limit 850 ms)'
+2026-10-18T20:45:21.7497383Z + '[' -n 850 ']'
+2026-10-18T20:45:21.7537097Z + '[' 850 -gt 850 ']'
+2026-10-18T20:45:21.7537837Z + '[' system = tunnel ']'
+2026-10-18T20:45:21.7566961Z + set +e
+2026-10-18T20:45:21.7597052Z + failed=
+2026-10-18T20:45:21.7597709Z + adb logcat -v threadtime
+2026-10-18T20:45:21.7604481Z + logcat=5078
+2026-10-18T20:45:21.7605144Z + case "$SHARD" in
+2026-10-18T20:45:21.7606415Z + tests='DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog
+2026-10-18T20:45:21.7608797Z   DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+2026-10-18T20:45:21.7610893Z   DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme
+2026-10-18T20:45:21.7637540Z   SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+2026-10-18T20:45:21.7667845Z   SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates'
+2026-10-18T20:45:21.7674110Z + echo 'shard system'
+2026-10-18T20:45:21.7677496Z + for c in $tests
+2026-10-18T20:45:21.7678143Z + t=a1_realSignInScreenAndLocalValidation
+2026-10-18T20:45:21.7681639Z + '[' 90 -gt 2100 ']'
+2026-10-18T20:45:21.7682247Z + rec=
+2026-10-18T20:45:21.7683106Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:45:21.7684627Z + '[' a1_realSignInScreenAndLocalValidation = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:45:21.7686499Z + '[' a1_realSignInScreenAndLocalValidation = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:45:21.7689285Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T20:45:21.7786260Z ERROR        | DisplaySurfaceGlContextHelper context was preempted by others, current=0x3, needed=0x3, thread=0x565270c24dc8
+2026-10-18T20:45:21.7790955Z ERROR        | Failed to restore previous context: 12297
+2026-10-18T20:49:49.4360178Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T20:49:49.4387050Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T20:49:49.4397378Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T20:50:13.8493136Z + '[' 0 -eq 124 ']'
+2026-10-18T20:50:13.8527772Z + '[' a1_realSignInScreenAndLocalValidation = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:50:13.8529344Z + '[' -n '' ']'
+2026-10-18T20:50:13.8531546Z + grep -q '^OK (' evidence/instrument-a1_realSignInScreenAndLocalValidation.txt
+2026-10-18T20:50:13.8533234Z + echo 'PASS a1_realSignInScreenAndLocalValidation'
+2026-10-18T20:50:13.8535938Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T20:50:14.0013429Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 2 files pulled, 0 skipped. 7.9 MB/s (436448 bytes in 0.052s)
+2026-10-18T20:50:14.0065340Z + '[' a1_realSignInScreenAndLocalValidation = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:50:14.0084236Z + '[' a1_realSignInScreenAndLocalValidation = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:50:14.0119026Z + '[' a1_realSignInScreenAndLocalValidation = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:50:14.0137415Z ++ timeout 30 adb get-state
+2026-10-18T20:50:14.0150718Z + '[' device '!=' device ']'
+2026-10-18T20:50:14.0151852Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T20:50:14.1520363Z + for c in $tests
+2026-10-18T20:50:14.1537325Z + t=a2_realSystemVpnConsentDialog
+2026-10-18T20:50:14.1557392Z + '[' 383 -gt 2100 ']'
+2026-10-18T20:50:14.1561118Z + rec=
+2026-10-18T20:50:14.1563025Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:50:14.1565353Z + '[' a2_realSystemVpnConsentDialog = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:50:14.1587218Z + '[' a2_realSystemVpnConsentDialog = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:50:14.1627705Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a2_realSystemVpnConsentDialog com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T20:52:20.1877782Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T20:52:20.1907301Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T20:52:20.1937329Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T20:55:06.0875102Z + '[' 0 -eq 124 ']'
+2026-10-18T20:55:06.0881798Z + '[' a2_realSystemVpnConsentDialog = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:55:06.0888150Z + '[' -n '' ']'
+2026-10-18T20:55:06.0948714Z + grep -q '^OK (' evidence/instrument-a2_realSystemVpnConsentDialog.txt
+2026-10-18T20:55:06.0977453Z + echo 'PASS a2_realSystemVpnConsentDialog'
+2026-10-18T20:55:06.0978835Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T20:55:06.7328271Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 4 files pulled, 0 skipped. 2.0 MB/s (860632 bytes in 0.414s)
+2026-10-18T20:55:06.8280281Z + '[' a2_realSystemVpnConsentDialog = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:55:06.8368020Z + '[' a2_realSystemVpnConsentDialog = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:55:06.8382485Z + '[' a2_realSystemVpnConsentDialog = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:55:06.8447406Z ++ timeout 30 adb get-state
+2026-10-18T20:55:06.8487098Z + '[' device '!=' device ']'
+2026-10-18T20:55:06.8547594Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T20:55:07.0794490Z + for c in $tests
+2026-10-18T20:55:07.0833000Z + t=a3_realEngineRefusesToConnectWithoutAccount
+2026-10-18T20:55:07.0867971Z + '[' 676 -gt 2100 ']'
+2026-10-18T20:55:07.0897235Z + rec=
+2026-10-18T20:55:07.0907299Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:55:07.0927405Z + '[' a3_realEngineRefusesToConnectWithoutAccount = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:55:07.0950241Z + '[' a3_realEngineRefusesToConnectWithoutAccount = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:55:07.0978166Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T20:58:06.7218832Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T20:58:06.7224824Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T20:58:06.7225501Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T20:59:16.3227712Z + '[' 0 -eq 124 ']'
+2026-10-18T20:59:16.3257536Z + '[' a3_realEngineRefusesToConnectWithoutAccount = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:59:16.3316958Z + '[' -n '' ']'
+2026-10-18T20:59:16.3317647Z + grep -q '^OK (' evidence/instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+2026-10-18T20:59:16.3407080Z + echo 'PASS a3_realEngineRefusesToConnectWithoutAccount'
+2026-10-18T20:59:16.3437358Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T20:59:16.7309626Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 6 files pulled, 0 skipped. 2.6 MB/s (1069807 bytes in 0.388s)
+2026-10-18T20:59:16.7387679Z + '[' a3_realEngineRefusesToConnectWithoutAccount = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:59:16.7417547Z + '[' a3_realEngineRefusesToConnectWithoutAccount = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:59:16.7459324Z + '[' a3_realEngineRefusesToConnectWithoutAccount = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:59:16.7477117Z ++ timeout 30 adb get-state
+2026-10-18T20:59:16.7577094Z + '[' device '!=' device ']'
+2026-10-18T20:59:16.7589707Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T20:59:16.8373528Z + for c in $tests
+2026-10-18T20:59:16.8379307Z + t=a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+2026-10-18T20:59:16.8380193Z + '[' 925 -gt 2100 ']'
+2026-10-18T20:59:16.8380673Z + rec=
+2026-10-18T20:59:16.8381341Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:59:16.8382970Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:59:16.8384598Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:59:16.8387101Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T20:59:20.4841454Z + '[' 0 -eq 124 ']'
+2026-10-18T20:59:20.4844707Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:59:20.4845943Z + '[' -n '' ']'
+2026-10-18T20:59:20.4847206Z + grep -q '^OK (' evidence/instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+2026-10-18T20:59:20.4861244Z + echo 'PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig'
+2026-10-18T20:59:20.4863954Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T20:59:20.7458729Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 7 files pulled, 0 skipped. 4.2 MB/s (1069908 bytes in 0.245s)
+2026-10-18T20:59:20.7468632Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:59:20.7470353Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:59:20.7471172Z + '[' a4_realCoreOnThisAbiAcceptsTheGeneratedConfig = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:59:20.7472363Z ++ timeout 30 adb get-state
+2026-10-18T20:59:20.7506465Z + '[' device '!=' device ']'
+2026-10-18T20:59:20.7507740Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T20:59:20.7652457Z + for c in $tests
+2026-10-18T20:59:20.7653314Z + t=a5_realAppHonoursRemoveAnimations
+2026-10-18T20:59:20.7654126Z + '[' 929 -gt 2100 ']'
+2026-10-18T20:59:20.7654550Z + rec=
+2026-10-18T20:59:20.7655137Z + '[' a5_realAppHonoursRemoveAnimations = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T20:59:20.7655950Z + '[' a5_realAppHonoursRemoveAnimations = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T20:59:20.7656799Z + '[' a5_realAppHonoursRemoveAnimations = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T20:59:20.7657921Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T21:08:45.1827785Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T21:08:45.1860859Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T21:08:45.1887171Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T21:09:20.7685442Z + '[' 124 -eq 124 ']'
+2026-10-18T21:09:20.7705164Z + echo 'HANG: a5_realAppHonoursRemoveAnimations stopped after 600 s'
+2026-10-18T21:09:20.7757340Z + timeout 30 adb exec-out screencap -p
+2026-10-18T21:09:24.0366073Z + timeout 30 adb shell uiautomator dump /sdcard/hang.xml
+2026-10-18T21:09:28.5960213Z + timeout 30 adb pull /sdcard/hang.xml evidence/hang-a5_realAppHonoursRemoveAnimations.xml
+2026-10-18T21:09:28.8312861Z /sdcard/hang.xml: 1 file pulled, 0 skipped. 0.3 MB/s (7926 bytes in 0.029s)
+2026-10-18T21:09:28.8417222Z + timeout 30 adb shell dumpsys activity top
+2026-10-18T21:09:28.8426777Z + head -300
+2026-10-18T21:09:29.6508074Z + timeout 30 adb shell dumpsys window
+2026-10-18T21:09:29.6545293Z + grep -E 'mCurrentFocus|mFocusedApp|isn.t responding'
+2026-10-18T21:09:29.7317841Z + timeout 30 adb shell am force-stop com.raydocs.tono.mobile.test
+2026-10-18T21:09:29.9105527Z + '[' a5_realAppHonoursRemoveAnimations = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:09:29.9106408Z + '[' -n '' ']'
+2026-10-18T21:09:29.9139268Z + grep -q '^OK (' evidence/instrument-a5_realAppHonoursRemoveAnimations.txt
+2026-10-18T21:09:29.9167547Z + echo 'FAIL a5_realAppHonoursRemoveAnimations'
+2026-10-18T21:09:29.9186999Z + failed=' a5_realAppHonoursRemoveAnimations'
+2026-10-18T21:09:29.9217316Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T21:09:30.3151784Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 10 files pulled, 0 skipped. 3.8 MB/s (1484969 bytes in 0.368s)
+2026-10-18T21:09:30.3237445Z + '[' a5_realAppHonoursRemoveAnimations = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T21:09:30.3267631Z + '[' a5_realAppHonoursRemoveAnimations = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:09:30.3269057Z + '[' a5_realAppHonoursRemoveAnimations = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T21:09:30.3297071Z ++ timeout 30 adb get-state
+2026-10-18T21:09:30.3356969Z + '[' device '!=' device ']'
+2026-10-18T21:09:30.3387115Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T21:09:30.4027795Z + for c in $tests
+2026-10-18T21:09:30.4057203Z + t=a6_realAppUnderSystemLightAndDarkTheme
+2026-10-18T21:09:30.4077137Z + '[' 1539 -gt 2100 ']'
+2026-10-18T21:09:30.4099957Z + rec=
+2026-10-18T21:09:30.4116091Z + '[' a6_realAppUnderSystemLightAndDarkTheme = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T21:09:30.4118428Z + '[' a6_realAppUnderSystemLightAndDarkTheme = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:09:30.4119625Z + '[' a6_realAppUnderSystemLightAndDarkTheme = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T21:09:30.4122009Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T21:11:42.4080556Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T21:11:42.4107167Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T21:11:42.4108339Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T21:18:13.7927753Z + '[' 0 -eq 124 ']'
+2026-10-18T21:18:13.7987998Z + '[' a6_realAppUnderSystemLightAndDarkTheme = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:18:13.8046964Z + '[' -n '' ']'
+2026-10-18T21:18:13.8047864Z + grep -q '^OK (' evidence/instrument-a6_realAppUnderSystemLightAndDarkTheme.txt
+2026-10-18T21:18:13.8107016Z + echo 'PASS a6_realAppUnderSystemLightAndDarkTheme'
+2026-10-18T21:18:13.8117637Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T21:18:14.0920836Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 13 files pulled, 0 skipped. 6.8 MB/s (1897196 bytes in 0.266s)
+2026-10-18T21:18:14.1037628Z + '[' a6_realAppUnderSystemLightAndDarkTheme = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T21:18:14.1100750Z + '[' a6_realAppUnderSystemLightAndDarkTheme = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:18:14.1163565Z + '[' a6_realAppUnderSystemLightAndDarkTheme = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T21:18:14.1203855Z ++ timeout 30 adb get-state
+2026-10-18T21:18:14.1232374Z + '[' device '!=' device ']'
+2026-10-18T21:18:14.1239178Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T21:18:14.1854736Z ERROR        | DisplaySurfaceGlContextHelper context was preempted by others, current=0x3, needed=0x3, thread=0x56527a8c37c8
+2026-10-18T21:18:14.1877316Z ERROR        | Failed to restore previous context: 12297
+2026-10-18T21:18:14.3398196Z + for c in $tests
+2026-10-18T21:18:14.3437355Z + t=s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+2026-10-18T21:18:14.3484230Z + '[' 2063 -gt 2100 ']'
+2026-10-18T21:18:14.3528427Z + rec=
+2026-10-18T21:18:14.3578820Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T21:18:14.3637529Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:18:14.3647725Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T21:18:14.3708347Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T21:18:21.5903834Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T21:18:21.5904270Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T21:18:21.5904647Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T21:18:34.9717922Z + '[' 0 -eq 124 ']'
+2026-10-18T21:18:34.9759541Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:18:34.9837343Z + '[' -n '' ']'
+2026-10-18T21:18:34.9867568Z + grep -q '^OK (' evidence/instrument-s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp.txt
+2026-10-18T21:18:34.9897624Z + echo 'PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp'
+2026-10-18T21:18:34.9927662Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T21:18:35.0460333Z ERROR        | DisplaySurfaceGlContextHelper context was preempted by others, current=0x3, needed=0x3, thread=0x565258e048c8
+2026-10-18T21:18:35.0461903Z ERROR        | Failed to restore previous context: 12297
+2026-10-18T21:18:35.2143835Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 17 files pulled, 0 skipped. 21.8 MB/s (2272852 bytes in 0.099s)
+2026-10-18T21:18:35.2163742Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T21:18:35.2187940Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:18:35.2205668Z + '[' s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T21:18:35.2216201Z ++ timeout 30 adb get-state
+2026-10-18T21:18:35.2247010Z + '[' device '!=' device ']'
+2026-10-18T21:18:35.2247555Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T21:18:35.3175155Z + for c in $tests
+2026-10-18T21:18:35.3197734Z + t=s2_realWidgetInAndroidsWidgetHost
+2026-10-18T21:18:35.3227142Z + '[' 2084 -gt 2100 ']'
+2026-10-18T21:18:35.3227761Z + rec=
+2026-10-18T21:18:35.3257375Z + '[' s2_realWidgetInAndroidsWidgetHost = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T21:18:35.3287421Z + '[' s2_realWidgetInAndroidsWidgetHost = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:18:35.3317495Z + '[' s2_realWidgetInAndroidsWidgetHost = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T21:18:35.3319737Z + timeout 600 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost com.raydocs.tono.mobile.test.test/androidx.test.runner.AndroidJUnitRunner
+2026-10-18T21:18:40.1928229Z s_glBindAttribLocation: bind attrib 0 name position
+2026-10-18T21:18:40.1930334Z s_glBindAttribLocation: bind attrib 1 name color
+2026-10-18T21:18:40.1931123Z s_glBindAttribLocation: bind attrib 2 name localCoord
+2026-10-18T21:22:34.5237555Z + '[' 0 -eq 124 ']'
+2026-10-18T21:22:34.5238514Z + '[' s2_realWidgetInAndroidsWidgetHost = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:22:34.5239312Z + '[' -n '' ']'
+2026-10-18T21:22:34.5240177Z + grep -q '^OK (' evidence/instrument-s2_realWidgetInAndroidsWidgetHost.txt
+2026-10-18T21:22:34.5263827Z + echo 'PASS s2_realWidgetInAndroidsWidgetHost'
+2026-10-18T21:22:34.5265312Z + timeout 120 adb pull /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/. evidence/
+2026-10-18T21:22:34.8926306Z /sdcard/Android/data/com.raydocs.tono.mobile.test/files/evidence/./: 20 files pulled, 0 skipped. 8.7 MB/s (2521057 bytes in 0.277s)
+2026-10-18T21:22:34.8957858Z + '[' s2_realWidgetInAndroidsWidgetHost = b2_fixtureMotionRecordedOnDevice ']'
+2026-10-18T21:22:34.8959063Z + '[' s2_realWidgetInAndroidsWidgetHost = t3_realAppStatesAndSkyOnMainActivity ']'
+2026-10-18T21:22:34.8959854Z + '[' s2_realWidgetInAndroidsWidgetHost = t1_realTunnelThroughLocalFixtureServers ']'
+2026-10-18T21:22:34.8960477Z ++ timeout 30 adb get-state
+2026-10-18T21:22:34.9003021Z + '[' device '!=' device ']'
+2026-10-18T21:22:34.9017851Z + timeout 30 adb shell cmd statusbar collapse
+2026-10-18T21:22:35.1260266Z + for c in $tests
+2026-10-18T21:22:35.1277616Z + t=s3_fixtureWidgetAndNotificationStates
+2026-10-18T21:22:35.1278408Z + '[' 2324 -gt 2100 ']'
+2026-10-18T21:22:35.1279599Z + echo 'TIME-BUDGET: attempt stopped after 2324s before s3_fixtureWidgetAndNotificationStates; later tests not run in this attempt'
+2026-10-18T21:22:35.1280704Z + failed=' a5_realAppHonoursRemoveAnimations time-budget'
+2026-10-18T21:22:35.1281407Z + break
+2026-10-18T21:22:35.1281819Z + kill 5078
+2026-10-18T21:22:35.1297648Z + '[' system = system ']'
+2026-10-18T21:22:35.1298215Z ++ timeout 30 adb get-state
+2026-10-18T21:22:35.1369659Z + '[' device = device ']'
+2026-10-18T21:23:15.7897758Z + adb shell am force-stop com.raydocs.tono.mobile.test
+2026-10-18T21:23:16.0530204Z + adb shell settings put system font_scale 1.0
+2026-10-18T21:23:16.5437960Z + adb shell settings put global animator_duration_scale 1
+2026-10-18T21:23:16.6227779Z + adb shell cmd uimode night no
+2026-10-18T21:23:16.6917658Z Night mode: no
+2026-10-18T21:23:16.6977091Z + adb shell wm size reset
+2026-10-18T21:23:16.9119046Z + adb shell wm density reset
+2026-10-18T21:23:17.1248751Z + adb shell settings put system user_rotation 0
+2026-10-18T21:23:17.2777535Z + timeout 60 adb logcat -d
+2026-10-18T21:23:17.7563891Z + ls -la evidence
+2026-10-18T21:23:17.7583205Z total 29308
+2026-10-18T21:23:17.7583652Z drwxr-xr-x 2 runner runner     4096 Oct 18 21:23 .
+2026-10-18T21:23:17.7584286Z drwxr-xr-x 8 runner runner     4096 Oct 18 20:43 ..
+2026-10-18T21:23:17.7584918Z -rw-r--r-- 1 runner runner      136 Oct 18 20:43 device.txt
+2026-10-18T21:23:17.7586098Z -rw-r--r-- 1 runner runner    26554 Oct 18 21:09 hang-a5_realAppHonoursRemoveAnimations-activity.txt
+2026-10-18T21:23:17.7587454Z -rw-r--r-- 1 runner runner      218 Oct 18 21:09 hang-a5_realAppHonoursRemoveAnimations-window.txt
+2026-10-18T21:23:17.7588546Z -rw-r--r-- 1 runner runner   224571 Oct 18 21:09 hang-a5_realAppHonoursRemoveAnimations.png
+2026-10-18T21:23:17.7589340Z -rw-r--r-- 1 runner runner     7926 Oct 18 21:09 hang-a5_realAppHonoursRemoveAnimations.xml
+2026-10-18T21:23:17.7590150Z -rw-r--r-- 1 runner runner       75 Oct 18 20:45 health.txt
+2026-10-18T21:23:17.7591361Z -rw-r--r-- 1 runner runner      768 Oct 18 20:50 instrument-a1_realSignInScreenAndLocalValidation.txt
+2026-10-18T21:23:17.7592341Z -rw-r--r-- 1 runner runner      752 Oct 18 20:55 instrument-a2_realSystemVpnConsentDialog.txt
+2026-10-18T21:23:17.7593395Z -rw-r--r-- 1 runner runner      780 Oct 18 20:59 instrument-a3_realEngineRefusesToConnectWithoutAccount.txt
+2026-10-18T21:23:17.7594670Z -rw-r--r-- 1 runner runner      782 Oct 18 20:59 instrument-a4_realCoreOnThisAbiAcceptsTheGeneratedConfig.txt
+2026-10-18T21:23:17.7595962Z -rw-r--r-- 1 runner runner      358 Oct 18 20:59 instrument-a5_realAppHonoursRemoveAnimations.txt
+2026-10-18T21:23:17.7597367Z -rw-r--r-- 1 runner runner      770 Oct 18 21:18 instrument-a6_realAppUnderSystemLightAndDarkTheme.txt
+2026-10-18T21:23:17.7598684Z -rw-r--r-- 1 runner runner      821 Oct 18 21:18 instrument-s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp.txt
+2026-10-18T21:23:17.7599975Z -rw-r--r-- 1 runner runner      778 Oct 18 21:22 instrument-s2_realWidgetInAndroidsWidgetHost.txt
+2026-10-18T21:23:17.7600890Z -rw-r--r-- 1 runner runner 14507669 Oct 18 21:22 logcat-live.txt
+2026-10-18T21:23:17.7601580Z -rw-r--r-- 1 runner runner 12596585 Oct 18 21:23 logcat.txt
+2026-10-18T21:23:17.7602246Z -rw-r--r-- 1 runner runner      719 Oct 18 21:23 perf.txt
+2026-10-18T21:23:17.7602935Z -rw-r--r-- 1 runner runner   207033 Oct 18 21:22 real-01-signin.png
+2026-10-18T21:23:17.7603579Z -rw-r--r-- 1 runner runner   229415 Oct 18 21:22 real-02-signin-invalid-email.png
+2026-10-18T21:23:17.7604082Z -rw-r--r-- 1 runner runner   217128 Oct 18 21:22 real-03-system-vpn-consent.png
+2026-10-18T21:23:17.7604588Z -rw-r--r-- 1 runner runner   207056 Oct 18 21:22 real-04-after-consent.png
+2026-10-18T21:23:17.7605143Z -rw-r--r-- 1 runner runner   206917 Oct 18 21:22 real-05-connect-without-account-stays-signed-out.png
+2026-10-18T21:23:17.7605677Z -rw-r--r-- 1 runner runner     2258 Oct 18 21:22 real-05-services.txt
+2026-10-18T21:23:17.7606114Z -rw-r--r-- 1 runner runner   207472 Oct 18 21:22 real-06-motion.png
+2026-10-18T21:23:17.7606549Z -rw-r--r-- 1 runner runner   207475 Oct 18 21:22 real-07-remove-animations.png
+2026-10-18T21:23:17.7607771Z -rw-r--r-- 1 runner runner    84444 Oct 18 21:22 real-08-quick-settings-tile.png
+2026-10-18T21:23:17.7608716Z -rw-r--r-- 1 runner runner    84459 Oct 18 21:22 real-08b-quick-settings-full.png
+2026-10-18T21:23:17.7609592Z -rw-r--r-- 1 runner runner   206669 Oct 18 21:22 real-09-tile-opens-sign-in.png
+2026-10-18T21:23:17.7610069Z -rw-r--r-- 1 runner runner    41307 Oct 18 21:22 real-10-widget.png
+2026-10-18T21:23:17.7610539Z -rw-r--r-- 1 runner runner   206828 Oct 18 21:22 real-10b-widget-opens-sign-in.png
+2026-10-18T21:23:17.7611034Z -rw-r--r-- 1 runner runner   205789 Oct 18 21:22 real-11-system-light-theme.png
+2026-10-18T21:23:17.7611524Z -rw-r--r-- 1 runner runner   206343 Oct 18 21:22 real-12-system-dark-theme.png
+2026-10-18T21:23:17.7611951Z -rw-r--r-- 1 runner runner      101 Oct 18 21:22 real-core.txt
+2026-10-18T21:23:17.7612336Z -rw-r--r-- 1 runner runner      114 Oct 18 21:22 real-motion.txt
+2026-10-18T21:23:17.7612710Z -rw-r--r-- 1 runner runner       84 Oct 18 21:22 real-tile.txt
+2026-10-18T21:23:17.7613286Z -rw-r--r-- 1 runner runner       70 Oct 18 21:22 real-widget.txt
+2026-10-18T21:23:17.7613676Z -rw-r--r-- 1 runner runner       13 Oct 18 20:45 shard.txt
+2026-10-18T21:23:17.7614032Z -rw-r--r-- 1 runner runner      619 Oct 18 21:22 summary.txt
+2026-10-18T21:23:17.7614529Z -rw-r--r-- 1 runner runner       95 Oct 18 21:22 theme-report.txt
+2026-10-18T21:23:17.7614981Z + cat evidence/summary.txt
+2026-10-18T21:23:17.7615588Z health: sign-in screen median frame 850 ms before the tests (limit 850 ms)
+2026-10-18T21:23:17.7616300Z PASS a1_realSignInScreenAndLocalValidation
+2026-10-18T21:23:17.7617149Z PASS a2_realSystemVpnConsentDialog
+2026-10-18T21:23:17.7617682Z PASS a3_realEngineRefusesToConnectWithoutAccount
+2026-10-18T21:23:17.7618292Z PASS a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+2026-10-18T21:23:17.7618940Z HANG: a5_realAppHonoursRemoveAnimations stopped after 600 s
+2026-10-18T21:23:17.7619425Z FAIL a5_realAppHonoursRemoveAnimations
+2026-10-18T21:23:17.7619756Z PASS a6_realAppUnderSystemLightAndDarkTheme
+2026-10-18T21:23:17.7620160Z PASS s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+2026-10-18T21:23:17.7620547Z PASS s2_realWidgetInAndroidsWidgetHost
+2026-10-18T21:23:17.7621114Z TIME-BUDGET: attempt stopped after 2324s before s3_fixtureWidgetAndNotificationStates; later tests not run in this attempt
+2026-10-18T21:23:17.7621673Z + set -e
+2026-10-18T21:23:17.7621939Z + '[' -z ' a5_realAppHonoursRemoveAnimations time-budget' ']'
+2026-10-18T21:23:17.7624168Z ##[error]The process '/usr/bin/sh' failed with exit code 1
+2026-10-18T21:23:17.7625551Z ##[group]Terminate Emulator
+2026-10-18T21:23:17.7639038Z [command]/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 emu kill
+2026-10-18T21:23:17.7674323Z OK: killing emulator, bye bye
+2026-10-18T21:23:17.7674682Z OK
+2026-10-18T21:23:17.7676080Z INFO         | Wait for emulator (pid 4311) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+2026-10-18T21:23:17.7677826Z 
+2026-10-18T21:23:17.7678516Z ##[endgroup]
+2026-10-18T21:23:21.1268785Z INFO         | Saving with gfxstream=1
+2026-10-18T21:23:21.2405249Z INFO         | Saving snapshot 'default_boot' took 3466 ms
+2026-10-18T21:23:22.1825589Z ERROR        | stop: Not implemented
+2026-10-18T21:23:22.1826454Z WARNING      | Emulator client has not yet been configured.. Call configure me first!
+2026-10-18T21:23:22.2028721Z INFO         | removeAll
+2026-10-18T21:23:22.2830890Z WARNING      | Netsim Wifi dns:///localhost:42667 is gone due to Stream removed (CANCELLED)
+2026-10-18T21:23:23.1989001Z ##[group]Run mkdir -p evidence/host
+2026-10-18T21:23:23.1989361Z [36;1mmkdir -p evidence/host[0m
+2026-10-18T21:23:23.1989732Z [36;1msudo dmesg -T 2>&1 | tail -300 > evidence/host/dmesg.txt || true[0m
+2026-10-18T21:23:23.1990157Z [36;1mfree -m > evidence/host/free.txt || true[0m
+2026-10-18T21:23:23.1990490Z [36;1mnproc >> evidence/host/free.txt || true[0m
+2026-10-18T21:23:23.1990930Z [36;1mcp -r /tmp/android-runner/emu-crash-*.db evidence/host/ 2>/dev/null || true[0m
+2026-10-18T21:23:23.1991407Z [36;1mcp host-watch/*.txt evidence/host/ 2>/dev/null || true[0m
+2026-10-18T21:23:23.1991813Z [36;1mls -laR evidence/host > evidence/host/listing.txt || true[0m
+2026-10-18T21:23:23.2070317Z shell: /usr/bin/bash -e {0}
+2026-10-18T21:23:23.2070580Z env:
+2026-10-18T21:23:23.2070809Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+2026-10-18T21:23:23.2071105Z ##[endgroup]
+2026-10-18T21:23:23.2438030Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+2026-10-18T21:23:23.2438463Z with:
+2026-10-18T21:23:23.2438697Z   name: android-emulator-evidence-system
+2026-10-18T21:23:23.2439009Z   path: evidence/
+evidence-attempt-*/
+
+2026-10-18T21:23:23.2439286Z   retention-days: 90
+2026-10-18T21:23:23.2439518Z   if-no-files-found: warn
+2026-10-18T21:23:23.2439756Z   compression-level: 6
+2026-10-18T21:23:23.2439976Z   overwrite: false
+2026-10-18T21:23:23.2440202Z   include-hidden-files: false
+2026-10-18T21:23:23.2440443Z   archive: true
+2026-10-18T21:23:23.2440642Z env:
+2026-10-18T21:23:23.2440856Z   ANDROID_AVD_HOME: /home/runner/.android/avd
+2026-10-18T21:23:23.2441138Z ##[endgroup]
+2026-10-18T21:23:23.4073243Z With the provided path, there will be 49 files uploaded
+2026-10-18T21:23:23.4074467Z Artifact name is valid!
+2026-10-18T21:23:23.4074862Z Root directory input is valid!
+2026-10-18T21:23:23.6325303Z Uploading artifact: android-emulator-evidence-system.zip
+2026-10-18T21:23:23.6367515Z Beginning upload of artifact content to blob storage
+2026-10-18T21:23:24.6922382Z Uploaded bytes 7453183
+2026-10-18T21:23:24.7263307Z Finished uploading artifact content to blob storage!
+2026-10-18T21:23:24.7264424Z SHA256 digest of uploaded artifact is fe44f793dceae28ae3db7355c11ea4216ea654ee744a415b14778f2bb82e3f1e
+2026-10-18T21:23:24.7265233Z Finalizing artifact upload
+2026-10-18T21:23:24.9854046Z Artifact android-emulator-evidence-system successfully finalized. Artifact ID 12150473964
+2026-10-18T21:23:24.9855756Z Artifact android-emulator-evidence-system has been successfully uploaded! Final size is 7453183 bytes. Artifact ID is 12150473964
+2026-10-18T21:23:24.9859695Z Artifact download URL: https://github.com/raydocs/tono/actions/runs/39163947970/artifacts/12150473964
+2026-10-18T21:23:25.0064961Z Post job cleanup.
+2026-10-18T21:23:25.0932435Z [command]/usr/bin/git version
+2026-10-18T21:23:25.0976076Z git version 2.55.0
+2026-10-18T21:23:25.1013921Z Temporarily overriding HOME='/home/runner/work/_temp/da1d5946-3238-441a-96dc-5a0790924995' before making global git config changes
+2026-10-18T21:23:25.1015409Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-18T21:23:25.1019381Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/tono/tono
+2026-10-18T21:23:25.1052005Z Removing SSH command configuration
+2026-10-18T21:23:25.1058998Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-18T21:23:25.1095598Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-18T21:23:25.1402209Z Removing HTTP extra header
+2026-10-18T21:23:25.1410543Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-18T21:23:25.1449375Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-18T21:23:25.1703750Z Removing includeIf entries pointing to credentials config files
+2026-10-18T21:23:25.1710341Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-18T21:23:25.1752061Z includeif.gitdir:/home/runner/work/tono/tono/.git.path
+2026-10-18T21:23:25.1753059Z includeif.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path
+2026-10-18T21:23:25.1754072Z includeif.gitdir:/github/workspace/.git.path
+2026-10-18T21:23:25.1755252Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-18T21:23:25.1762205Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/tono/tono/.git.path
+2026-10-18T21:23:25.1794816Z /home/runner/work/_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T21:23:25.1805294Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/tono/tono/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-74efa155\-c2ea\-4fba\-955c\-2619b0d5416e\.config
+2026-10-18T21:23:25.1849435Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path
+2026-10-18T21:23:25.1890450Z /home/runner/work/_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T21:23:25.1900964Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/tono/tono/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-74efa155\-c2ea\-4fba\-955c\-2619b0d5416e\.config
+2026-10-18T21:23:25.1937850Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-18T21:23:25.1963835Z /github/runner_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T21:23:25.1971526Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-74efa155\-c2ea\-4fba\-955c\-2619b0d5416e\.config
+2026-10-18T21:23:25.2017844Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-18T21:23:25.2041605Z /github/runner_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config
+2026-10-18T21:23:25.2050082Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-74efa155\-c2ea\-4fba\-955c\-2619b0d5416e\.config
+2026-10-18T21:23:25.2091185Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-18T21:23:25.2341197Z Removing credentials config '/home/runner/work/_temp/git-credentials-74efa155-c2ea-4fba-955c-2619b0d5416e.config'
+2026-10-18T21:23:25.2492553Z Cleaning up orphan processes
+2026-10-18T21:23:25.2890449Z Terminate orphan process: pid (2856) (bash)
+2026-10-18T21:23:25.2969573Z Terminate orphan process: pid (3419) (adb)
+2026-10-18T21:23:25.3046390Z Terminate orphan process: pid (10930) (sleep)

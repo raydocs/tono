@@ -1,0 +1,14 @@
+{
+  "component": "sing-box libbox (Apple)",
+  "version": "1.15.0-alpha.12",
+  "sourceCommit": "25b0d5ea3e466d246c708ac0f20d0448110e566c",
+  "license": "GPL-3.0-or-later (with upstream name-use restriction)",
+  "go": "go1.26.8 (upstream go_ios_cpu_features.patch applied)",
+  "gomobile": "github.com/sagernet/gomobile@v0.1.13",
+  "xcode": "Xcode 26.6 Build version 17F113",
+  "iphoneosSDK": "26.5",
+  "targets": "ios,iossimulator",
+  "iosDeploymentTarget": "16.0",
+  "tags": "with_quic,with_utls,with_clash_api,with_low_memory,badlinkname,tfogo_checklinkname0",
+  "xcframeworkTreeSha256": "4add4d228990eca7e58e2090f60e31c8c08639c92cccd91da1e6d0dcb501efff"
+}

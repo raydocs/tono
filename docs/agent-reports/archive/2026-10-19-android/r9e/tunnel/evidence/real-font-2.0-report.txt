@@ -1,0 +1,1 @@
+real MainActivity at font scale 2.0: no text cut off, every control ≥ 48 dp and labelled on sign-in, the code step, Home (not connected, Connected, partly working, failed), Details and Settings

@@ -1,0 +1,6 @@
+stand-in scenario: normal
+consent: Android's VPN dialog answered OK
+stand-in scenario: home-down
+stand-in scenario: catalog-unavailable
+stand-in scenario: normal
+stand-in scenario: normal

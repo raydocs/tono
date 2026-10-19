@@ -1,0 +1,47 @@
+INSTRUMENTATION_STATUS: class=com.raydocs.tono.mobile.SystemSurfacesDeviceTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stream=
+com.raydocs.tono.mobile.SystemSurfacesDeviceTest:
+INSTRUMENTATION_STATUS: test=s3_fixtureWidgetAndNotificationStates
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.raydocs.tono.mobile.SystemSurfacesDeviceTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertNotNull(Assert.java:713)
+	at org.junit.Assert.assertNotNull(Assert.java:723)
+	at com.raydocs.tono.mobile.SystemSurfacesDeviceTest.s3_fixtureWidgetAndNotificationStates(SystemSurfacesDeviceTest.kt:197)
+
+INSTRUMENTATION_STATUS: stream=
+Error in s3_fixtureWidgetAndNotificationStates(com.raydocs.tono.mobile.SystemSurfacesDeviceTest):
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertNotNull(Assert.java:713)
+	at org.junit.Assert.assertNotNull(Assert.java:723)
+	at com.raydocs.tono.mobile.SystemSurfacesDeviceTest.s3_fixtureWidgetAndNotificationStates(SystemSurfacesDeviceTest.kt:197)
+
+INSTRUMENTATION_STATUS: test=s3_fixtureWidgetAndNotificationStates
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_RESULT: stream=
+
+Time: 19.432
+There was 1 failure:
+1) s3_fixtureWidgetAndNotificationStates(com.raydocs.tono.mobile.SystemSurfacesDeviceTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertNotNull(Assert.java:713)
+	at org.junit.Assert.assertNotNull(Assert.java:723)
+	at com.raydocs.tono.mobile.SystemSurfacesDeviceTest.s3_fixtureWidgetAndNotificationStates(SystemSurfacesDeviceTest.kt:197)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
+
+
+INSTRUMENTATION_CODE: -1

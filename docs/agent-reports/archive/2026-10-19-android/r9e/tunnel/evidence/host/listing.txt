@@ -1,0 +1,40 @@
+evidence/host:
+total 76
+drwxr-xr-x 3 runner runner  4096 Oct 19 06:51 .
+drwxr-xr-x 4 runner runner  4096 Oct 19 06:51 ..
+-rw-r--r-- 1 runner runner 28487 Oct 19 06:51 dmesg.txt
+drwx------ 6 runner runner  4096 Oct 19 06:51 emu-crash-37.2.12.db
+-rw-r--r-- 1 runner runner   153 Oct 19 06:51 emulator-exit.txt
+-rw-r--r-- 1 runner runner 26299 Oct 19 06:51 emulator-watch.txt
+-rw-r--r-- 1 runner runner   209 Oct 19 06:51 free.txt
+-rw-r--r-- 1 runner runner     0 Oct 19 06:51 listing.txt
+
+evidence/host/emu-crash-37.2.12.db:
+total 28
+drwx------ 6 runner runner 4096 Oct 19 06:51 .
+drwxr-xr-x 3 runner runner 4096 Oct 19 06:51 ..
+drwx------ 2 runner runner 4096 Oct 19 06:51 attachments
+drwx------ 2 runner runner 4096 Oct 19 06:51 completed
+drwx------ 2 runner runner 4096 Oct 19 06:51 new
+drwx------ 2 runner runner 4096 Oct 19 06:51 pending
+-rw------- 1 runner runner   40 Oct 19 06:51 settings.dat
+
+evidence/host/emu-crash-37.2.12.db/attachments:
+total 8
+drwx------ 2 runner runner 4096 Oct 19 06:51 .
+drwx------ 6 runner runner 4096 Oct 19 06:51 ..
+
+evidence/host/emu-crash-37.2.12.db/completed:
+total 8
+drwx------ 2 runner runner 4096 Oct 19 06:51 .
+drwx------ 6 runner runner 4096 Oct 19 06:51 ..
+
+evidence/host/emu-crash-37.2.12.db/new:
+total 8
+drwx------ 2 runner runner 4096 Oct 19 06:51 .
+drwx------ 6 runner runner 4096 Oct 19 06:51 ..
+
+evidence/host/emu-crash-37.2.12.db/pending:
+total 8
+drwx------ 2 runner runner 4096 Oct 19 06:51 .
+drwx------ 6 runner runner 4096 Oct 19 06:51 ..

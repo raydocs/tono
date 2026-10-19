@@ -1,0 +1,3 @@
+cloud www.youtube.com HTTP 200
+home api.anthropic.com HTTP 404
+direct example.com HTTP 200

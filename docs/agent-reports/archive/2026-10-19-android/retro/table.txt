@@ -1,0 +1,455 @@
+
+## 39058787871 06a182ef8 attempts=1 failure created 2026-10-17T18:35:42Z ended 2026-10-17T18:36:20Z wall 0.6 min
+   commit: feat(android): sing-box test client in apps/android with emulator CI (draft)
+   a1 build              failure   18:35:44–18:36:19   0.6 min
+   a1 emulator           skipped   18:36:20–18:36:19  -0.0 min
+
+## 39059188204 441191c37 attempts=1 failure created 2026-10-17T18:41:15Z ended 2026-10-17T18:44:46Z wall 3.5 min
+   commit: fix(android-ci): install NDK without a SIGPIPE pipeline
+   a1 build              failure   18:41:17–18:44:45   3.5 min
+   a1 emulator           skipped   18:44:46–18:44:45  -0.0 min
+
+## 39059785843 bda5d8650 attempts=1 failure created 2026-10-17T18:49:24Z ended 2026-10-17T18:54:29Z wall 5.1 min
+   commit: fix(android-ci): pass an absolute libbox output path to gomobile
+   a1 build              failure   18:49:26–18:54:28   5.0 min
+   a1 emulator           skipped   18:54:28–18:54:28   0.0 min
+
+## 39060855116 1a459dd6a attempts=1 failure created 2026-10-17T19:04:23Z ended 2026-10-17T19:19:14Z wall 14.8 min
+   commit: fix(android-ci): verification metadata for two POMs CI resolves
+   a1 build              success   19:04:25–19:11:58   7.5 min
+   a1 emulator           failure   19:11:59–19:19:13   7.2 min
+      emu1: boot 27s frame -ms; booted→terminate 5.7 min; PASS 0 FAIL 0 junit ['Tests run: 6,  Failures: 4']
+
+## 39062471656 837854af6 attempts=1 failure created 2026-10-17T19:26:25Z ended 2026-10-17T19:47:01Z wall 20.6 min
+   commit: fix(android-ci): keep foreign ANR dialogs off the evidence; settle launcher; idle copy
+   a1 build              success   19:26:28–19:30:55   4.5 min
+   a1 emulator           failure   19:30:58–19:47:00  16.0 min
+      emu1: boot 37s frame -ms; booted→terminate 13.9 min; PASS 0 FAIL 0
+
+## 39064087305 839474c16 attempts=1 cancelled created 2026-10-17T19:49:10Z ended 2026-10-17T20:38:15Z wall 49.1 min
+   commit: fix(android-ci): consent/connect from the foreground activity; keep evidence after failure
+   a1 build              success   19:49:12–19:53:09   4.0 min
+   a1 emulator           cancelled 19:53:11–20:38:14  45.0 min
+      emu1: boot 28s frame -; no terminate; PASS 0 FAIL 0
+
+## 39067869043 3b1553f2c attempts=1 failure created 2026-10-17T20:42:42Z ended 2026-10-17T21:10:08Z wall 27.4 min
+   commit: fix(android-ci): bounded adb calls and failure diagnostics
+   a1 build              success   20:42:44–20:47:10   4.4 min
+   a1 emulator           failure   20:47:12–21:10:07  22.9 min
+      emu1: boot 40s frame -ms; booted→terminate 21.3 min; PASS 0 FAIL 0
+
+## 39070167582 de2f7b23c attempts=1 failure created 2026-10-17T21:15:25Z ended 2026-10-17T21:30:44Z wall 15.3 min
+   commit: fix(android-ci): consent for a result, short UiAutomator idle waits, font-scale renders; t
+   a1 build              success   21:15:27–21:18:32   3.1 min
+   a1 emulator           failure   21:18:34–21:30:44  12.2 min
+      emu1: boot 28s frame -ms; booted→terminate 10.5 min; PASS 0 FAIL 0 junit ['Tests run: 7,  Failures: 1']
+
+## 39071385293 748651ffb attempts=1 failure created 2026-10-17T21:32:39Z ended 2026-10-17T21:47:11Z wall 14.5 min
+   commit: fix(android-ci): wait for the system to record VPN consent
+   a1 build              success   21:32:41–21:36:55   4.2 min
+   a1 emulator           failure   21:36:57–21:47:10  10.2 min
+      emu1: boot 39s frame -ms; booted→terminate 8.7 min; PASS 0 FAIL 0
+
+## 39072500471 c7fa5cbbf attempts=1 failure created 2026-10-17T21:48:46Z ended 2026-10-17T22:42:33Z wall 53.8 min
+   commit: fix(android): opaque Details sheet, capsule arrow timing; CI: AOSP emulator image, one bou
+   a1 build              success   21:48:49–21:51:59   3.2 min
+   a1 emulator           failure   21:52:01–22:42:32  50.5 min
+      emu1: boot 31s frame -ms; booted→terminate 27.5 min; PASS 0 FAIL 0
+      emu2: boot 31s frame -ms; booted→terminate 21.1 min; PASS 0 FAIL 0
+
+## 39076280350 9ae2e30ba attempts=1 failure created 2026-10-17T22:44:25Z ended 2026-10-17T23:57:06Z wall 72.7 min
+   commit: fix(android-ci): per-test instrumentation with incremental evidence pulls
+   a1 build              success   22:44:27–22:48:08   3.7 min
+   a1 emulator           failure   22:48:10–23:57:06  68.9 min
+      emu1: boot 47s frame -ms; booted→terminate 27.5 min; PASS 6 FAIL 1 ['b2_fixtureMotionRecordedOnDevice']
+      emu2: boot 47s frame -ms; booted→terminate 38.7 min; PASS 6 FAIL 1 ['b2_fixtureMotionRecordedOnDevice']
+
+## 39081051696 3582b8693 attempts=1 success created 2026-10-17T23:58:56Z ended 2026-10-18T00:28:59Z wall 30.1 min
+   commit: fix(android-ci): record the motion clip from the host
+   a1 build              success   23:58:58–00:02:33   3.6 min
+   a1 emulator           success   00:02:35–00:28:58  26.4 min
+      emu1: boot 33s frame -ms; booted→terminate 24.7 min; PASS 7 FAIL 0
+
+## 39084210779 605df82a5 attempts=1 failure created 2026-10-18T00:49:53Z ended 2026-10-18T01:44:46Z wall 54.9 min
+   commit: feat(android): accessibility, largest text and Remove animations, checked on device
+   a1 build              success   00:49:55–00:54:02   4.1 min
+   a1 emulator           failure   00:54:04–01:44:46  50.7 min
+      emu1: boot 27s frame -ms; booted→terminate 22.9 min; PASS 9 FAIL 3 ['b2_fixtureMotionRecordedOnDevice', 'u1_accessibilityContractAndAtfOnEveryScreen', 'u2_primaryControlActsThroughRealTaps']
+      emu2: boot 28s frame -ms; booted→terminate 25.6 min; PASS 9 FAIL 3 ['b1_fixtureStatesRenderedOnDevice', 'u1_accessibilityContractAndAtfOnEveryScreen', 'u2_primaryControlActsThroughRealTaps']
+
+## 39088253119 b393e1961 attempts=1 failure created 2026-10-18T01:56:03Z ended 2026-10-18T02:32:47Z wall 36.7 min
+   commit: feat(android): Quick Settings tile, widget, stop notification, consent explanation
+   a1 build              success   01:56:05–02:00:49   4.7 min
+   a1 emulator           failure   02:00:50–02:32:46  31.9 min
+      emu1: boot 29s frame -ms; booted→terminate 14.9 min; PASS 16 FAIL 3 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp', 'u4_glassBlursTheSceneBehindIt', 'u6_screenReaderOrderAndLabelsOnHome']
+      emu2: boot 28s frame -ms; booted→terminate 14.7 min; PASS 16 FAIL 3 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp', 'u4_glassBlursTheSceneBehindIt', 'u6_screenReaderOrderAndLabelsOnHome']
+
+## 39091119944 99a5b3876 attempts=1 failure created 2026-10-18T02:43:44Z ended 2026-10-18T03:12:09Z wall 28.4 min
+   commit: fix(android): per-glass blur over the shared scene; device test diagnostics
+   a1 build              success   02:43:47–02:48:46   5.0 min
+   a1 emulator           failure   02:48:48–03:12:08  23.3 min
+      emu1: boot 38s frame -ms; booted→terminate 11.3 min; PASS 16 FAIL 3 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp', 'u4_glassBlursTheSceneBehindIt', 'u6_screenReaderOrderAndLabelsOnHome']
+      emu2: boot 38s frame -ms; booted→terminate 9.7 min; PASS 16 FAIL 3 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp', 'u4_glassBlursTheSceneBehindIt', 'u6_screenReaderOrderAndLabelsOnHome']
+
+## 39093079011 043c269cc attempts=1 failure created 2026-10-18T03:17:12Z ended 2026-10-18T03:38:30Z wall 21.3 min
+   commit: test(android): TalkBack-style labels, relative blur check, full Quick Settings panel
+   a1 build              success   03:17:14–03:22:03   4.8 min
+   a1 emulator           failure   03:22:05–03:38:29  16.4 min
+      emu1: boot 29s frame -ms; booted→terminate 6.7 min; PASS 8 FAIL 11 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp', 'b1_fixtureStatesRenderedOnDevice', 'b2_fixtureMotionRecordedOnDevice', 'b3_fixtureAtLargeFontScale', 'u1_accessibilityContractAndAtfOnEveryScreen', 'u2_primaryControlActsThroughRealTaps', 'u3_swipeUpOnTheDockOpensDetails', 'u4_glassBlursTheSceneBehindIt', 'u5_consentExplainedBeforeTheSystemDialog', 'u6_screenReaderOrderAndLabelsOnHome', 'l1_largestSystemTextIsNeverCutOff']
+      emu2: boot 30s frame -ms; booted→terminate 7.4 min; PASS 18 FAIL 1 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp']
+
+## 39095195211 cc2ab8602 attempts=1 success created 2026-10-18T03:53:27Z ended 2026-10-18T04:09:41Z wall 16.2 min
+   commit: fix(android): tile re-reads shared status when Quick Settings opens; timer announced once
+   a1 build              success   03:53:29–03:58:26   5.0 min
+   a1 emulator           success   03:58:28–04:09:40  11.2 min
+      emu1: boot 34s frame -ms; booted→terminate 9.3 min; PASS 19 FAIL 0
+
+## 39096335793 43b6b40ab attempts=1 success created 2026-10-18T04:13:16Z ended 2026-10-18T04:32:56Z wall 19.7 min
+   commit: test(android): screenshots wait for a drawn window; changelog records run 39095195211
+   a1 build              success   04:13:18–04:18:05   4.8 min
+   a1 emulator           success   04:18:07–04:32:56  14.8 min
+      emu1: boot 50s frame -ms; booted→terminate 12.3 min; PASS 19 FAIL 0
+
+## 39097660644 2ade6a112 attempts=1 success created 2026-10-18T04:36:06Z ended 2026-10-18T04:51:11Z wall 15.1 min
+   commit: test(android): tint-independent blur check, Chinese copy, real widget tap, frame-by-frame 
+   a1 build              success   04:36:08–04:41:15   5.1 min
+   a1 emulator           success   04:41:17–04:51:10   9.9 min
+      emu1: boot 27s frame -ms; booted→terminate 8.2 min; PASS 21 FAIL 0
+
+## 39098920328 0a65ffd10 attempts=1 success created 2026-10-18T04:58:17Z ended 2026-10-18T05:15:02Z wall 16.8 min
+   commit: fix(android): timer keeps its last value while fading out; exit countries follow the app l
+   a1 build              success   04:58:19–05:02:17   4.0 min
+   a1 emulator           success   05:02:19–05:15:01  12.7 min
+      emu1: boot 35s frame -ms; booted→terminate 10.3 min; PASS 21 FAIL 0
+
+## 39100236753 6ed8f7b2e attempts=2 failure created 2026-10-18T05:20:54Z ended 2026-10-18T06:14:12Z wall 53.3 min
+   commit: fix(android): UI language from the resources the strings use, so bottom sheets match
+   a1 emulator           failure   05:25:32–05:47:06  21.6 min
+      emu1: boot 41s frame -ms; booted→terminate 10.1 min; PASS 9 FAIL 12 ['s3_fixtureWidgetAndNotificationStates', 'b2_fixtureMotionRecordedOnDevice', 'b3_fixtureAtLargeFontScale', 'u1_accessibilityContractAndAtfOnEveryScreen', 'u2_primaryControlActsThroughRealTaps', 'u3_swipeUpOnTheDockOpensDetails', 'u4_glassBlursTheSceneBehindIt', 'u5_consentExplainedBeforeTheSystemDialog', 'u6_screenReaderOrderAndLabelsOnHome', 'u7_simplifiedChineseCopyFitsEveryScreen', 'u8_motionFrameByFrameAt60fps', 'l1_largestSystemTextIsNeverCutOff']
+      emu2: boot 41s frame -ms; booted→terminate 8.9 min; PASS 9 FAIL 12 ['s3_fixtureWidgetAndNotificationStates', 'b2_fixtureMotionRecordedOnDevice', 'b3_fixtureAtLargeFontScale', 'u1_accessibilityContractAndAtfOnEveryScreen', 'u2_primaryControlActsThroughRealTaps', 'u3_swipeUpOnTheDockOpensDetails', 'u4_glassBlursTheSceneBehindIt', 'u5_consentExplainedBeforeTheSystemDialog', 'u6_screenReaderOrderAndLabelsOnHome', 'u7_simplifiedChineseCopyFitsEveryScreen', 'u8_motionFrameByFrameAt60fps', 'l1_largestSystemTextIsNeverCutOff']
+   a2 build              success   05:20:56–05:25:30   4.6 min
+   a2 emulator           failure   05:49:16–06:14:11  24.9 min
+      emu1: boot 38s frame -ms; booted→terminate 11.1 min; PASS 18 FAIL 3 ['s3_fixtureWidgetAndNotificationStates', 'b3_fixtureAtLargeFontScale', 'u8_motionFrameByFrameAt60fps']
+      emu2: boot 38s frame -ms; booted→terminate 11.2 min; PASS 18 FAIL 3 ['s3_fixtureWidgetAndNotificationStates', 'b3_fixtureAtLargeFontScale', 'u8_motionFrameByFrameAt60fps']
+
+## 39103789541 ddc3d343f attempts=1 failure created 2026-10-18T06:22:10Z ended 2026-10-18T06:44:25Z wall 22.2 min
+   commit: test(android): shade closed for real between tests, frame capture retried, offline emulato
+   a1 build              success   06:22:12–06:26:00   3.8 min
+   a1 emulator           failure   06:26:02–06:44:24  18.4 min
+      emu1: boot 27s frame -ms; booted→terminate 8.1 min; PASS 20 FAIL 1 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp']
+      emu2: boot 26s frame -ms; booted→terminate 8.1 min; PASS 20 FAIL 1 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp']
+
+## 39105266597 c53eba6a5 attempts=1 failure created 2026-10-18T06:47:04Z ended 2026-10-18T07:17:47Z wall 30.7 min
+   commit: test(android): tile test reopens Quick Settings until the full panel shows subtitles
+   a1 build              success   06:47:07–06:52:04   5.0 min
+   a1 emulator           failure   06:52:06–07:17:46  25.7 min
+      emu1: boot 40s frame -ms; booted→terminate 11.0 min; PASS 13 FAIL 1 ['u2_primaryControlActsThroughRealTaps'] OFFLINE
+      emu2: boot 38s frame -ms; booted→terminate 12.4 min; PASS 19 FAIL 1 ['u8_motionFrameByFrameAt60fps'] OFFLINE
+
+## 39107244599 0a9854421 attempts=1 cancelled created 2026-10-18T07:19:43Z ended 2026-10-18T07:27:09Z wall 7.4 min
+   commit: ci(android): keep emulator crash reports, host dmesg and memory when an emulator dies
+   a1 build              success   07:19:46–07:23:31   3.8 min
+   a1 emulator           cancelled 07:23:33–07:27:09   3.6 min
+      emu1: boot 39s frame -; no terminate; PASS 1 FAIL 0
+
+## 39107701498 a3587a91b attempts=1 success created 2026-10-18T07:27:05Z ended 2026-10-18T07:44:35Z wall 17.5 min
+   commit: docs(agent-reports): independent mobile UI reviews (Opus 5.5, GPT-6.1 Sol) verbatim
+   a1 build              success   07:27:12–07:32:12   5.0 min
+   a1 emulator           success   07:32:14–07:44:35  12.3 min
+      emu1: boot 33s frame -ms; booted→terminate 10.6 min; PASS 21 FAIL 0
+
+## 39108918669 519afc078 attempts=1 success created 2026-10-18T07:46:19Z ended 2026-10-18T08:02:33Z wall 16.2 min
+   commit: feat(android): round 5 from two independent reviews — Settings in the dock, shorter copy, 
+   a1 build              success   07:46:22–07:50:25   4.0 min
+   a1 emulator (system)  success   07:50:27–07:57:25   7.0 min
+      emu1: boot 27s frame -ms; booted→terminate 5.4 min; PASS 12 FAIL 0
+   a1 emulator (ui)      success   07:50:28–08:02:33  12.1 min
+      emu1: boot 40s frame -ms; booted→terminate 3.7 min; PASS 1 FAIL 1 ['u2_primaryControlActsThroughRealTaps'] OFFLINE
+      emu2: boot 39s frame -ms; booted→terminate 5.3 min; PASS 9 FAIL 0
+
+## 39113180638 e426d7d87 attempts=1 cancelled created 2026-10-18T08:53:14Z ended 2026-10-18T08:55:23Z wall 2.1 min
+   commit: feat(android): round 6 — a real tunnel against local stand-ins, keyboard focus, other scre
+   a1 build              cancelled 08:53:16–08:55:22   2.1 min
+   a1 emulator           cancelled 08:55:22–08:55:22   0.0 min
+
+## 39113297176 91dbbc07e attempts=1 failure created 2026-10-18T08:55:04Z ended 2026-10-18T09:19:28Z wall 24.4 min
+   commit: test(android): local tunnel test waits for the code field and scrolls to Sign out
+   a1 build              success   08:55:24–09:00:16   4.9 min
+   a1 emulator (system)  failure   09:00:19–09:19:27  19.1 min
+      emu1: boot 35s frame -ms; booted→terminate 8.2 min; PASS 10 FAIL 1 ['b2_fixtureMotionRecordedOnDevice'] OFFLINE
+      emu2: boot 34s frame -ms; booted→terminate 8.2 min; PASS 12 FAIL 2 ['t1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs']
+   a1 emulator (ui)      failure   09:00:18–09:11:23  11.1 min
+      emu1: boot 37s frame -ms; booted→terminate 3.3 min; PASS 0 FAIL 1 ['u1_accessibilityContractAndAtfOnEveryScreen'] OFFLINE
+      emu2: boot 36s frame -ms; booted→terminate 5.2 min; PASS 7 FAIL 1 ['u8_motionFrameByFrameAt60fps'] OFFLINE
+
+## 39115256726 fdb85d28e attempts=1 failure created 2026-10-18T09:25:12Z ended 2026-10-18T10:25:52Z wall 60.7 min
+   commit: ci(android): emulator SIGSEGV evidence and swangle renderer; local-server mark read from t
+   a1 build              success   09:25:15–09:30:02   4.8 min
+   a1 emulator (system)  failure   09:30:04–10:25:52  55.8 min
+      emu1: boot 31s frame -ms; booted→terminate 25.0 min; PASS 12 FAIL 2 ['t1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs']
+      emu2: boot 30s frame -ms; booted→terminate 27.9 min; PASS 11 FAIL 3 ['a2_realSystemVpnConsentDialog', 't1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs']
+   a1 emulator (ui)      failure   09:30:04–09:46:38  16.6 min
+      emu1: boot 30s frame -ms; booted→terminate 6.7 min; PASS 10 FAIL 2 ['u9_keyboardFocusIsVisibleAndAccessibilityActionsWork', 'l3_landscapeKeepsEverythingReadableAndReachable']
+      emu2: boot 30s frame -ms; booted→terminate 7.0 min; PASS 10 FAIL 2 ['u9_keyboardFocusIsVisibleAndAccessibilityActionsWork', 'l3_landscapeKeepsEverythingReadableAndReachable']
+
+## 39120135343 9c38bd3a7 attempts=1 failure created 2026-10-18T10:39:50Z ended 2026-10-18T11:44:45Z wall 64.9 min
+   commit: Android: local-test mark reachable by screen readers; device-test fixes from run 391152567
+   a1 build              success   10:39:52–10:43:44   3.9 min
+   a1 emulator (system)  failure   10:43:46–11:44:44  61.0 min
+      emu1: boot 34s frame -ms; booted→terminate 32.2 min; PASS 13 FAIL 1 ['t1_realTunnelThroughLocalFixtureServers']
+      emu2: boot 34s frame -ms; booted→terminate 25.7 min; PASS 13 FAIL 1 ['t1_realTunnelThroughLocalFixtureServers']
+   a1 emulator (ui)      failure   10:43:46–11:07:45  24.0 min
+      emu1: boot 44s frame -ms; booted→terminate 10.3 min; PASS 10 FAIL 2 ['u9_keyboardFocusIsVisibleAndAccessibilityActionsWork', 'l3_landscapeKeepsEverythingReadableAndReachable']
+      emu2: boot 44s frame -ms; booted→terminate 10.7 min; PASS 10 FAIL 2 ['u9_keyboardFocusIsVisibleAndAccessibilityActionsWork', 'l3_landscapeKeepsEverythingReadableAndReachable']
+
+## 39125018322 b1798beca attempts=1 cancelled created 2026-10-18T11:52:57Z ended 2026-10-18T11:55:55Z wall 3.0 min
+   commit: Android: device-test fixes from run 39120135343; landscape withdrawn as unverified
+   a1 build              cancelled 11:53:00–11:55:55   2.9 min
+   a1 emulator           cancelled 11:55:55–11:55:55   0.0 min
+
+## 39125188504 62fee220c attempts=1 success created 2026-10-18T11:55:38Z ended 2026-10-18T12:15:15Z wall 19.6 min
+   commit: Android: t1 asserts the Details sheet opened before its screenshot; perf.txt without shell
+   a1 build              success   11:55:57–11:59:57   4.0 min
+   a1 emulator (system)  success   11:59:59–12:15:14  15.2 min
+      emu1: boot 27s frame -ms; booted→terminate 13.3 min; PASS 14 FAIL 0
+   a1 emulator (ui)      success   12:00:00–12:09:22   9.4 min
+      emu1: boot 30s frame -ms; booted→terminate 7.1 min; PASS 11 FAIL 0
+
+## 39126740818 8b07d8406 attempts=1 failure created 2026-10-18T12:18:34Z ended 2026-10-18T14:14:06Z wall 115.5 min
+   commit: Changelog: round 6 device results (run 39125188504, 24/24 first attempt)
+   a1 build              success   12:18:37–12:23:32   4.9 min
+   a1 emulator (system)  failure   12:23:34–14:14:05 110.5 min
+      emu1: boot 37s frame -; no terminate; PASS 3 FAIL 7 ['a3_realEngineRefusesToConnectWithoutAccount', 'a5_realAppHonoursRemoveAnimations', 'a6_realAppUnderSystemLightAndDarkTheme', 's1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp', 's2_realWidgetInAndroidsWidgetHost', 's3_fixtureWidgetAndNotificationStates', 'b1_fixtureStatesRenderedOnDevice']
+      emu2: boot 11s frame -; no terminate; PASS 10 FAIL 2 ['a2_realSystemVpnConsentDialog', 'b1_fixtureStatesRenderedOnDevice']
+   a1 emulator (ui)      success   12:23:35–12:34:22  10.8 min
+      emu1: boot 43s frame -ms; booted→terminate 8.2 min; PASS 11 FAIL 0
+
+## 39135197245 2d6540d33 attempts=1 failure created 2026-10-18T14:15:43Z ended 2026-10-18T14:51:15Z wall 35.5 min
+   commit: Android: landscape back on the device (rotate with the window in front); emulator retry no
+   a1 build              success   14:15:46–14:20:48   5.0 min
+   a1 emulator (system)  success   14:20:50–14:51:15  30.4 min
+      emu1: boot 33s frame -ms; booted→terminate 28.5 min; PASS 14 FAIL 0
+   a1 emulator (ui)      failure   14:20:50–14:43:04  22.2 min
+      emu1: boot 36s frame -ms; booted→terminate 9.8 min; PASS 11 FAIL 1 ['l3_landscapeKeepsEverythingReadableAndReachable']
+      emu2: boot 37s frame -ms; booted→terminate 9.7 min; PASS 11 FAIL 1 ['l3_landscapeKeepsEverythingReadableAndReachable']
+
+## 39138009249 bf449391f attempts=2 success created 2026-10-18T14:53:25Z ended 2026-10-18T16:37:28Z wall 104.0 min
+   commit: Android: sign-in fits landscape and large text (found by l3 on the device)
+   a1 emulator (system)  failure   14:58:41–16:22:34  83.9 min
+      emu1: boot 39s frame -ms; booted→terminate 37.4 min; PASS 1 FAIL 2 ['a2_realSystemVpnConsentDialog', 'a3_realEngineRefusesToConnectWithoutAccount']
+      emu2: boot 36s frame -ms; booted→terminate 43.5 min; PASS 10 FAIL 0
+   a1 emulator (ui)      success   14:58:41–15:08:16   9.6 min
+      emu1: boot 31s frame -ms; booted→terminate 7.5 min; PASS 12 FAIL 0
+   a2 build              success   14:53:27–14:58:39   5.2 min
+   a2 emulator (system)  success   16:24:00–16:37:28  13.5 min
+      emu1: boot 27s frame -ms; booted→terminate 11.5 min; PASS 14 FAIL 0
+   a2 emulator (ui)      success   14:58:41–15:08:16   9.6 min
+      emu1: boot 31s frame -ms; booted→terminate 7.5 min; PASS 12 FAIL 0
+
+## 39148942470 789cff2db attempts=1 cancelled created 2026-10-18T17:18:07Z ended 2026-10-18T17:49:27Z wall 31.3 min
+   commit: Agent reports: round 6 blind reviews of Android #1673 (bf449391), verbatim, beside the sea
+   a1 build              success   17:18:09–17:23:01   4.9 min
+   a1 emulator (system)  cancelled 17:23:02–17:49:26  26.4 min
+      emu1: boot 37s frame -; no terminate; PASS 5 FAIL 0
+   a1 emulator (ui)      success   17:23:02–17:34:17  11.2 min
+      emu1: boot 37s frame -ms; booted→terminate 9.5 min; PASS 12 FAIL 0
+
+## 39151329824 3ae965608 attempts=1 failure created 2026-10-18T17:49:21Z ended 2026-10-18T18:08:38Z wall 19.3 min
+   commit: Android: engine death never leaves "Connected" on screen; real-app landscape and consent a
+   a1 build              success   17:49:29–17:54:40   5.2 min
+   a1 emulator (system)  failure   17:54:42–18:00:29   5.8 min
+      emu1: boot 37s frame -ms; booted→terminate 1.5 min; PASS 0 FAIL 0 GATE
+      emu2: boot 34s frame -ms; booted→terminate 1.7 min; PASS 0 FAIL 0 GATE
+   a1 emulator (tunnel)  failure   17:54:43–18:00:33   5.8 min
+      emu1: boot 36s frame -ms; booted→terminate 1.5 min; PASS 0 FAIL 0 GATE
+      emu2: boot 37s frame -ms; booted→terminate 1.6 min; PASS 0 FAIL 0 GATE
+   a1 emulator (ui)      failure   17:54:42–18:08:37  13.9 min
+      emu1: boot 37s frame -ms; booted→terminate 9.1 min; PASS 11 FAIL 1 ['l3_landscapeKeepsEverythingReadableAndReachable']
+      emu2: boot 38s frame -ms; booted→terminate 1.6 min; PASS 0 FAIL 0 GATE
+
+## 39153105611 0724e96a3 attempts=1 failure created 2026-10-18T18:12:35Z ended 2026-10-18T19:32:24Z wall 79.8 min
+   commit: Android: sheets stop below the status bar; emulator health recorded, not gated
+   a1 build              success   18:12:38–18:18:03   5.4 min
+   a1 emulator (system)  success   18:18:06–18:35:40  17.6 min
+      emu1: boot 33s frame 500ms; booted→terminate 14.4 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  failure   18:18:10–19:32:23  74.2 min
+      emu1: boot 36s frame 950ms; booted→terminate 40.3 min; PASS 2 FAIL 4 ['b3_fixtureAtLargeFontScale', 't2_realAppTurnsWithKeyboardAndConsentOpen', 't1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs'] HANG ['b3_fixtureAtLargeFontScale', 't2_realAppTurnsWithKeyboardAndConsentOpen', 't1_realTunnelThroughLocalFixtureServers']
+      emu2: boot 37s frame 900ms; booted→terminate 31.1 min; PASS 3 FAIL 3 ['t2_realAppTurnsWithKeyboardAndConsentOpen', 't1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs'] HANG ['t2_realAppTurnsWithKeyboardAndConsentOpen']
+   a1 emulator (ui)      success   18:18:06–18:29:47  11.7 min
+      emu1: boot 36s frame 750ms; booted→terminate 9.9 min; PASS 12 FAIL 0
+
+## 39159687608 780352f7d attempts=1 failure created 2026-10-18T19:38:27Z ended 2026-10-18T20:24:09Z wall 45.7 min
+   commit: Android: real-app states and largest text on MainActivity, health gate at 850 ms, device t
+   a1 build              success   19:38:29–19:43:33   5.1 min
+   a1 emulator (system)  failure   19:43:35–20:24:08  40.5 min
+      emu1: boot 38s frame 1000ms; booted→terminate 1.5 min; PASS 0 FAIL 0 GATE
+      emu2: boot 37s frame 800ms; booted→terminate 36.2 min; PASS 5 FAIL 1 ['a3_realEngineRefusesToConnectWithoutAccount'] HANG ['a3_realEngineRefusesToConnectWithoutAccount']
+   a1 emulator (tunnel)  failure   19:43:34–20:20:15  36.7 min
+      emu1: boot 37s frame 750ms; booted→terminate 11.1 min; PASS 3 FAIL 5 ['t2_realAppTurnsWithKeyboardAndConsentOpen', 't1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs', 't3_realAppStatesAndSkyOnMainActivity', 't4_realAppAtLargestSystemText']
+      emu2: boot 37s frame 800ms; booted→terminate 22.6 min; PASS 2 FAIL 6 ['b3_fixtureAtLargeFontScale', 't2_realAppTurnsWithKeyboardAndConsentOpen', 't1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs', 't3_realAppStatesAndSkyOnMainActivity', 't4_realAppAtLargestSystemText'] HANG ['b3_fixtureAtLargeFontScale']
+   a1 emulator (ui)      success   19:43:35–19:51:18   7.7 min
+      emu1: boot 26s frame 300ms; booted→terminate 6.0 min; PASS 12 FAIL 0
+
+## 39163947970 c31e69f3d attempts=1 failure created 2026-10-18T20:34:50Z ended 2026-10-18T21:23:27Z wall 48.6 min
+   commit: Android: Compose rule only around t4, scenario switch over a plain socket, a2/a3 stop wait
+   a1 build              success   20:34:52–20:39:42   4.8 min
+   a1 emulator (system)  failure   20:39:44–21:23:26  43.7 min
+      emu1: boot 37s frame 900ms; booted→terminate 1.5 min; PASS 0 FAIL 0 GATE
+      emu2: boot 34s frame 850ms; booted→terminate 39.5 min; PASS 7 FAIL 1 ['a5_realAppHonoursRemoveAnimations'] HANG ['a5_realAppHonoursRemoveAnimations']
+   a1 emulator (tunnel)  failure   20:39:44–21:10:18  30.6 min
+      emu1: boot 30s frame 550ms; booted→terminate 12.2 min; PASS 4 FAIL 4 ['t2_realAppTurnsWithKeyboardAndConsentOpen', 't1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs', 't3_realAppStatesAndSkyOnMainActivity']
+      emu2: boot 31s frame 550ms; booted→terminate 15.5 min; PASS 4 FAIL 4 ['t2_realAppTurnsWithKeyboardAndConsentOpen', 't1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs', 't3_realAppStatesAndSkyOnMainActivity']
+   a1 emulator (ui)      success   20:39:44–20:49:16   9.5 min
+      emu1: boot 33s frame 650ms; booted→terminate 7.7 min; PASS 12 FAIL 0
+
+## 39167725741 f740b67f0 attempts=2 failure created 2026-10-18T21:24:52Z ended 2026-10-18T21:58:44Z wall 33.9 min
+   commit: Android: tests answer the notification prompt, scrim not counted under the cutout, health 
+   a1 emulator (system)  success   21:29:53–21:48:32  18.6 min
+      emu1: boot 31s frame 600ms; booted→terminate 16.6 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  failure   21:29:54–21:36:44   6.8 min
+      emu1: boot 36s frame 850ms; booted→terminate 1.6 min; PASS 0 FAIL 0 GATE
+      emu2: boot 37s frame 900ms; booted→terminate 1.6 min; PASS 0 FAIL 0 GATE
+   a1 emulator (ui)      failure   21:29:54–21:36:17   6.4 min
+      emu1: boot 47s frame 900ms; booted→terminate 1.6 min; PASS 0 FAIL 0 GATE
+      emu2: boot 45s frame 1000ms; booted→terminate 1.7 min; PASS 0 FAIL 0 GATE
+   a2 build              success   21:24:54–21:29:51   5.0 min
+   a2 emulator (system)  success   21:29:53–21:48:32  18.6 min
+      emu1: boot 31s frame 600ms; booted→terminate 16.6 min; PASS 9 FAIL 0
+   a2 emulator (tunnel)  failure   21:49:06–21:58:43   9.6 min
+      emu1: boot 37s frame 850ms; booted→terminate 1.5 min; PASS 0 FAIL 0 GATE
+   a2 emulator (ui)      failure   21:49:07–21:55:06   6.0 min
+      emu1: boot 34s frame 950ms; booted→terminate 1.5 min; PASS 0 FAIL 0 GATE
+      emu2: boot 36s frame 950ms; booted→terminate 1.6 min; PASS 0 FAIL 0 GATE
+
+## 39170392763 ae2a2eb36 attempts=1 failure created 2026-10-18T22:01:26Z ended 2026-10-18T22:35:22Z wall 33.9 min
+   commit: Android: tests not about motion run with Remove animations, motion tests launch still, gat
+   a1 build              success   22:01:32–22:05:52   4.3 min
+   a1 emulator (system)  success   22:05:54–22:12:51   7.0 min
+      emu1: boot 31s frame 600ms; booted→terminate 5.0 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  failure   22:05:55–22:35:21  29.4 min
+      emu1: boot 37s frame 950ms; booted→terminate 12.8 min; PASS 7 FAIL 1 ['t4_realAppAtLargestSystemText']
+      emu2: boot 37s frame 900ms; booted→terminate 13.8 min; PASS 6 FAIL 2 ['t1_realTunnelThroughLocalFixtureServers', 't3_realAppStatesAndSkyOnMainActivity']
+   a1 emulator (ui)      success   22:05:54–22:26:29  20.6 min
+      emu1: boot 37s frame 850ms; booted→terminate 8.8 min; PASS 11 FAIL 1 ['u1_accessibilityContractAndAtfOnEveryScreen']
+      emu2: boot 37s frame 900ms; booted→terminate 8.9 min; PASS 12 FAIL 0
+      FLAKY (passed on retry)
+
+## 39173982324 579dfe7f6 attempts=1 failure created 2026-10-18T22:50:37Z ended 2026-10-18T23:16:22Z wall 25.8 min
+   commit: Android: engine death replaces a stale Connected notification and revives the engine; UI s
+   a1 build              success   22:50:39–22:55:25   4.8 min
+   a1 emulator (system)  success   22:55:27–23:01:11   5.7 min
+      emu1: boot 28s frame 450ms; booted→terminate 3.8 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  failure   22:55:27–23:16:21  20.9 min
+      emu1: boot 30s frame 600ms; booted→terminate 9.2 min; PASS 7 FAIL 1 ['t1_realTunnelThroughLocalFixtureServers']
+      emu2: boot 30s frame 550ms; booted→terminate 8.8 min; PASS 7 FAIL 1 ['t1_realTunnelThroughLocalFixtureServers']
+   a1 emulator (ui)      success   22:55:27–23:06:33  11.1 min
+      emu1: boot 39s frame 800ms; booted→terminate 9.2 min; PASS 12 FAIL 0
+
+## 39176556620 c18daa3db attempts=1 success created 2026-10-18T23:26:56Z ended 2026-10-18T23:46:39Z wall 19.7 min
+   commit: Android: reviving the engine binds afresh, returning to the app revives a lost engine
+   a1 build              success   23:26:58–23:31:38   4.7 min
+   a1 emulator (system)  success   23:31:40–23:46:38  15.0 min
+      emu1: boot 35s frame 750ms; booted→terminate 4.8 min; PASS 8 FAIL 1 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp']
+      emu2: boot 34s frame 850ms; booted→terminate 7.5 min; PASS 9 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (tunnel)  success   23:31:41–23:44:54  13.2 min
+      emu1: boot 37s frame 850ms; booted→terminate 11.3 min; PASS 8 FAIL 0
+   a1 emulator (ui)      success   23:31:40–23:39:58   8.3 min
+      emu1: boot 27s frame 300ms; booted→terminate 5.2 min; PASS 12 FAIL 0
+
+## 39180203368 da80c3f97 attempts=1 success created 2026-10-19T00:18:43Z ended 2026-10-19T00:39:30Z wall 20.8 min
+   commit: Android #1673 round 7: archive both blind reviews verbatim beside the sealed self-assessme
+   a1 build              success   00:18:45–00:23:48   5.0 min
+   a1 emulator (system)  success   00:23:51–00:39:29  15.6 min
+      emu1: boot 37s frame 800ms; booted→terminate 6.7 min; PASS 8 FAIL 1 ['a5_realAppHonoursRemoveAnimations']
+      emu2: boot 37s frame 800ms; booted→terminate 5.2 min; PASS 9 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (tunnel)  success   00:23:50–00:33:24   9.6 min
+      emu1: boot 30s frame 450ms; booted→terminate 6.7 min; PASS 8 FAIL 0
+   a1 emulator (ui)      success   00:23:50–00:33:09   9.3 min
+      emu1: boot 33s frame 650ms; booted→terminate 7.3 min; PASS 12 FAIL 0
+
+## 39181991820 90da84e24 attempts=1 success created 2026-10-19T00:42:39Z ended 2026-10-19T01:01:05Z wall 18.4 min
+   commit: Android: the notification checks itself when the engine dies with no app open; catalog-una
+   a1 build              success   00:42:42–00:47:47   5.1 min
+   a1 emulator (system)  success   00:47:49–00:55:01   7.2 min
+      emu1: boot 34s frame 550ms; booted→terminate 5.1 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  success   00:47:49–01:01:05  13.3 min
+      emu1: boot 36s frame 850ms; booted→terminate 11.4 min; PASS 9 FAIL 0
+   a1 emulator (ui)      success   00:47:49–00:58:14  10.4 min
+      emu1: boot 37s frame 750ms; booted→terminate 8.2 min; PASS 12 FAIL 0
+
+## 39184008733 1cb5b59bb attempts=1 success created 2026-10-19T01:09:04Z ended 2026-10-19T01:44:03Z wall 35.0 min
+   commit: Android: t5 counts the kill only once the old engine process is gone and the tunnel down
+   a1 build              success   01:09:06–01:14:21   5.2 min
+   a1 emulator (system)  success   01:14:23–01:20:31   6.1 min
+      emu1: boot 28s frame 400ms; booted→terminate 3.9 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  success   01:14:24–01:44:02  29.6 min
+      emu1: boot 37s frame 950ms; booted→terminate 13.6 min; PASS 7 FAIL 2 ['t1_realTunnelThroughLocalFixtureServers', 't1-routing-matches-exit-logs']
+      emu2: boot 36s frame 800ms; booted→terminate 13.2 min; PASS 9 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (ui)      success   01:14:24–01:23:08   8.7 min
+      emu1: boot 30s frame 600ms; booted→terminate 6.7 min; PASS 12 FAIL 0
+
+## 39190910753 aac04f327 attempts=1 failure created 2026-10-19T02:38:21Z ended 2026-10-19T02:54:39Z wall 16.3 min
+   commit: Android: the engine's notification turns honest the moment the engine dies (watch process 
+   a1 build              success   02:38:24–02:43:33   5.2 min
+   a1 emulator (system)  success   02:43:35–02:49:23   5.8 min
+      emu1: boot 26s frame 450ms; booted→terminate 4.0 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  failure   02:43:35–02:51:01   7.4 min
+      emu1: boot 45s frame 1050ms; booted→terminate 1.5 min; PASS 0 FAIL 0 GATE
+      emu2: boot 42s frame 1200ms; booted→terminate 1.6 min; PASS 0 FAIL 0 GATE
+   a1 emulator (ui)      success   02:43:35–02:54:39  11.1 min
+      emu1: boot 39s frame 950ms; booted→terminate 9.0 min; PASS 12 FAIL 0
+
+## 39193223160 7d5589578 attempts=1 failure created 2026-10-19T03:08:09Z ended 2026-10-19T03:53:22Z wall 45.2 min
+   commit: Android: reflection glow under the sun only and narrower; glass sheen and caustic in one f
+   a1 build              success   03:08:11–03:12:53   4.7 min
+   a1 emulator (system)  success   03:12:55–03:25:41  12.8 min
+      emu1: boot 36s frame 750ms; booted→terminate 4.8 min; PASS 8 FAIL 1 ['a5_realAppHonoursRemoveAnimations']
+      emu2: boot 37s frame 850ms; booted→terminate 5.3 min; PASS 9 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (tunnel)  failure   03:12:55–03:53:22  40.5 min
+      emu1: boot 35s frame 850ms; booted→terminate 15.8 min; PASS 9 FAIL 1 ['t6_engineDiesInDozeAndTogetherWithItsWatch']
+      emu2: boot 35s frame 850ms; booted→terminate 22.0 min; PASS 7 FAIL 3 ['b2_fixtureMotionRecordedOnDevice', 't3_realAppStatesAndSkyOnMainActivity', 't6_engineDiesInDozeAndTogetherWithItsWatch'] HANG ['b2_fixtureMotionRecordedOnDevice']
+   a1 emulator (ui)      success   03:12:55–03:23:46  10.8 min
+      emu1: boot 36s frame 950ms; booted→terminate 9.2 min; PASS 12 FAIL 0
+
+## 39197246583 e7626a84e attempts=1 failure created 2026-10-19T03:59:14Z ended 2026-10-19T04:48:51Z wall 49.6 min
+   commit: Android: a restarting engine replaces the dead one's re-posted notification first; t6 free
+   a1 build              success   03:59:16–04:03:12   3.9 min
+   a1 emulator (system)  success   04:03:14–04:13:41  10.4 min
+      emu1: boot 26s frame 350ms; booted→terminate 4.2 min; PASS 8 FAIL 1 ['s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp']
+      emu2: boot 27s frame 350ms; booted→terminate 3.8 min; PASS 9 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (tunnel)  failure   04:03:14–04:48:50  45.6 min
+      emu1: boot 45s frame 950ms; booted→terminate 20.0 min; PASS 8 FAIL 2 ['t3_realAppStatesAndSkyOnMainActivity', 't6_engineDiesInDozeAndTogetherWithItsWatch'] HANG ['t3_realAppStatesAndSkyOnMainActivity']
+      emu2: boot 45s frame 1000ms; booted→terminate 21.9 min; PASS 8 FAIL 2 ['b2_fixtureMotionRecordedOnDevice', 't6_engineDiesInDozeAndTogetherWithItsWatch'] HANG ['b2_fixtureMotionRecordedOnDevice']
+   a1 emulator (ui)      success   04:03:14–04:14:09  10.9 min
+      emu1: boot 36s frame 950ms; booted→terminate 9.1 min; PASS 12 FAIL 0
+
+## 39202302351 048b2a274 attempts=1 success created 2026-10-19T05:00:23Z ended 2026-10-19T05:23:18Z wall 22.9 min
+   commit: Android: the watch logs every engine death and replaces Android's re-posted claim; motion 
+   a1 build              success   05:00:25–05:05:05   4.7 min
+   a1 emulator (system)  success   05:05:08–05:18:06  13.0 min
+      emu1: boot 37s frame 900ms; booted→terminate 5.3 min; PASS 8 FAIL 1 ['a5_realAppHonoursRemoveAnimations']
+      emu2: boot 37s frame 800ms; booted→terminate 4.7 min; PASS 9 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (tunnel)  success   05:05:08–05:23:17  18.1 min
+      emu1: boot 45s frame 1050ms; booted→terminate 1.7 min; PASS 0 FAIL 0 GATE
+      emu2: boot 44s frame 950ms; booted→terminate 13.3 min; PASS 10 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (ui)      success   05:05:08–05:15:57  10.8 min
+      emu1: boot 36s frame 850ms; booted→terminate 8.8 min; PASS 12 FAIL 0
+
+## 39209120069 f769fc43b attempts=1 success created 2026-10-19T06:18:08Z ended 2026-10-19T06:51:23Z wall 33.2 min
+   commit: Android: the re-post check is process-wide and stops at a new engine's first status write;
+   a1 build              success   06:18:10–06:23:23   5.2 min
+   a1 emulator (system)  success   06:23:25–06:28:58   5.5 min
+      emu1: boot 27s frame 350ms; booted→terminate 3.8 min; PASS 9 FAIL 0
+   a1 emulator (tunnel)  success   06:23:25–06:51:22  27.9 min
+      emu1: boot 36s frame 800ms; booted→terminate 12.7 min; PASS 9 FAIL 1 ['t1_realTunnelThroughLocalFixtureServers']
+      emu2: boot 35s frame 900ms; booted→terminate 12.4 min; PASS 10 FAIL 0
+      FLAKY (passed on retry)
+   a1 emulator (ui)      success   06:23:25–06:34:18  10.9 min
+      emu1: boot 36s frame 800ms; booted→terminate 9.0 min; PASS 12 FAIL 0

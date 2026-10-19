@@ -1,0 +1,39 @@
++0000 2026-10-19 06:43:19 INFO [4263993532 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:51056
++0000 2026-10-19 06:43:19 INFO [4263993532 81ms] inbound/vless[cloud-in]: [0] inbound connection to www.cloudflare.com:443
++0000 2026-10-19 06:43:19 INFO [4263993532 81ms] outbound/direct[direct]: outbound connection to www.cloudflare.com:443
++0000 2026-10-19 06:43:19 INFO [3873598234 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:51062
++0000 2026-10-19 06:43:19 INFO [3873598234 529ms] inbound/vless[cloud-in]: [0] inbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:19 INFO [3873598234 529ms] outbound/direct[direct]: outbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:19 INFO [3696671814 0ms] inbound/socks[home-in]: inbound connection from 198.20.0.11:38792
++0000 2026-10-19 06:43:19 INFO [3696671814 4ms] inbound/socks[home-in]: [home-dc779c] inbound connection to claude.ai:443
++0000 2026-10-19 06:43:19 INFO [3696671814 4ms] outbound/direct[direct]: outbound connection to claude.ai:443
++0000 2026-10-19 06:43:24 INFO [2683051245 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:51072
++0000 2026-10-19 06:43:25 INFO [2615962672 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:52058
++0000 2026-10-19 06:43:25 INFO [2683051245 379ms] inbound/vless[cloud-in]: [0] inbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:25 INFO [2683051245 379ms] outbound/direct[direct]: outbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:25 INFO [551175024 0ms] inbound/socks[home-in]: inbound connection from 198.20.0.11:43568
++0000 2026-10-19 06:43:25 INFO [551175024 3ms] inbound/socks[home-in]: [home-dc779c] inbound connection to android.googleapis.com:443
++0000 2026-10-19 06:43:25 INFO [551175024 3ms] outbound/direct[direct]: outbound connection to android.googleapis.com:443
++0000 2026-10-19 06:43:25 INFO [2615962672 92ms] inbound/vless[cloud-in]: [0] inbound connection to www.youtube.com:443
++0000 2026-10-19 06:43:25 INFO [2615962672 92ms] outbound/direct[direct]: outbound connection to www.youtube.com:443
++0000 2026-10-19 06:43:25 INFO [3845830968 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:52072
++0000 2026-10-19 06:43:26 INFO [3845830968 531ms] inbound/vless[cloud-in]: [0] inbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:26 INFO [3845830968 531ms] outbound/direct[direct]: outbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:26 INFO [1136202826 0ms] inbound/socks[home-in]: inbound connection from 198.20.0.11:43582
++0000 2026-10-19 06:43:26 INFO [1136202826 11ms] inbound/socks[home-in]: [home-dc779c] inbound connection to api.anthropic.com:443
++0000 2026-10-19 06:43:26 INFO [1136202826 11ms] outbound/direct[direct]: outbound connection to api.anthropic.com:443
++0000 2026-10-19 06:43:26 INFO [501639346 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:52084
++0000 2026-10-19 06:43:26 INFO [501639346 292ms] inbound/vless[cloud-in]: [0] inbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:26 INFO [501639346 292ms] outbound/direct[direct]: outbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:26 INFO [3283191521 0ms] inbound/socks[home-in]: inbound connection from 198.20.0.11:43596
++0000 2026-10-19 06:43:26 INFO [3283191521 3ms] inbound/socks[home-in]: [home-dc779c] inbound connection to mtalk.google.com:5228
++0000 2026-10-19 06:43:26 INFO [3283191521 3ms] outbound/direct[direct]: outbound connection to mtalk.google.com:5228
++0000 2026-10-19 06:43:39 INFO [1456534376 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:53016
++0000 2026-10-19 06:43:40 INFO [1456534376 504ms] inbound/vless[cloud-in]: [0] inbound connection to www.cloudflare.com:443
++0000 2026-10-19 06:43:40 INFO [1456534376 504ms] outbound/direct[direct]: outbound connection to www.cloudflare.com:443
++0000 2026-10-19 06:43:40 INFO [545028318 0ms] inbound/vless[cloud-in]: inbound connection from 198.20.0.10:53032
++0000 2026-10-19 06:43:41 INFO [545028318 503ms] inbound/vless[cloud-in]: [0] inbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:41 INFO [545028318 503ms] outbound/direct[direct]: outbound connection to 198.20.0.11:21080
++0000 2026-10-19 06:43:41 INFO [797846510 0ms] inbound/socks[home-in]: inbound connection from 198.20.0.11:41052
++0000 2026-10-19 06:43:41 INFO [797846510 2ms] inbound/socks[home-in]: [home-dc779c] inbound connection to claude.ai:443
++0000 2026-10-19 06:43:41 INFO [797846510 2ms] outbound/direct[direct]: outbound connection to claude.ai:443

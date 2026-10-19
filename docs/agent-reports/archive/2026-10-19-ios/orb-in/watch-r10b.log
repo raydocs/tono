@@ -1,0 +1,720 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push less than a minute ago
+
+JOBS
+* TonoKit + sing-box route checks (Linux) (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  * TonoKit tests
+  * Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  * TonoKit tests (macOS)
+  * Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 1 minute ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  * Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 2 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 3 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 4 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 5 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 6 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 8 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 9 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  * XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 10 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 11 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  * Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 12 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  * Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 13 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 14 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 15 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 16 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 17 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 18 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 19 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 20 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 21 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 22 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 23 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* feat/ios-singbox-horizon iOS CI raydocs/tono#1672 · 39152384717
+Triggered via push about 24 minutes ago
+
+JOBS
+✓ TonoKit + sing-box route checks (Linux) in 1m20s (ID 117748496689)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Swift toolchain
+  ✓ Desktop routing contract is in sync
+  ✓ TonoKit tests
+  ✓ Pinned sing-box CLI accepts the graphs and routes them fail-closed
+  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Complete job
+* Libbox + Xcode build + simulator preview (macOS) (ID 117748497004)
+  ✓ Set up job
+  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  ✓ Toolchain
+  ✓ TonoKit tests (macOS)
+  ✓ Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  ✓ Build Libbox.xcframework from the pinned sing-box source
+  ✓ XcodeGen (pinned source build)
+  ✓ Build for devices (Release, unsigned)
+  ✓ Build for the simulator (Debug)
+  * Design preview screenshots (simulator, fixture lines, no tunnel)
+  * UI tests + accessibility audit (simulator, fixture preview)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  * Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+failed to get jobs: HTTP 401: Bad credentials (https://api.github.com/repos/raydocs/tono/actions/runs/39152384717/jobs?per_page=100)
+Try authenticating with:  gh auth login -h github.com

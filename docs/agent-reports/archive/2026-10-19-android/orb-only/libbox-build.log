@@ -1,0 +1,1926 @@
+Note: switching to '25b0d5ea3e466d246c708ac0f20d0448110e566c'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+go: downloading github.com/sagernet/gomobile v0.1.13
+go: downloading golang.org/x/tools v0.36.0
+go: downloading golang.org/x/mod v0.27.0
+go: downloading golang.org/x/sync v0.16.0
+all modules verified
+internal/unsafeheader
+internal/goarch
+internal/unsafeheader
+internal/goarch
+internal/cpu
+internal/abi
+internal/abi
+internal/cpu
+internal/bytealg
+internal/bytealg
+internal/byteorder
+internal/chacha8rand
+internal/byteorder
+internal/coverage/rtcov
+internal/chacha8rand
+internal/coverage/rtcov
+internal/godebugs
+internal/godebugs
+internal/goexperiment
+internal/goexperiment
+internal/goos
+internal/goos
+internal/profilerecord
+internal/runtime/atomic
+internal/profilerecord
+internal/runtime/syscall/linux
+internal/runtime/atomic
+internal/runtime/syscall/linux
+math/bits
+internal/runtime/exithook
+internal/runtime/gc
+internal/strconv
+math/bits
+internal/runtime/sys
+internal/runtime/exithook
+internal/runtime/gc
+internal/strconv
+internal/runtime/sys
+internal/runtime/gc/scan
+internal/runtime/gc/scan
+internal/runtime/cgroup
+internal/asan
+internal/asan
+internal/msan
+internal/msan
+internal/race
+internal/race
+internal/runtime/math
+internal/runtime/pprof/label
+internal/runtime/math
+internal/runtime/maps
+internal/stringslite
+internal/runtime/maps
+internal/runtime/cgroup
+internal/trace/tracev2
+cmp
+math
+internal/runtime/pprof/label
+internal/stringslite
+internal/trace/tracev2
+cmp
+math
+runtime
+runtime
+unicode/utf8
+sync/atomic
+unicode/utf8
+internal/sync
+sync/atomic
+internal/synctest
+unicode
+internal/sync
+internal/synctest
+unicode
+unicode/utf16
+crypto/internal/fips140/alias
+crypto/internal/fips140deps/byteorder
+crypto/internal/fips140deps/cpu
+crypto/internal/constanttime
+crypto/internal/fips140/subtle
+crypto/subtle
+unicode/utf16
+crypto/internal/boring/sig
+crypto/internal/fips140/alias
+crypto/internal/fips140deps/byteorder
+container/list
+crypto/internal/fips140deps/cpu
+crypto/internal/constanttime
+vendor/golang.org/x/crypto/cryptobyte/asn1
+crypto/internal/fips140/subtle
+vendor/golang.org/x/crypto/internal/alias
+internal/nettrace
+encoding
+golang.org/x/crypto/internal/alias
+crypto/subtle
+filippo.io/hpke/internal/byteorder
+crypto/internal/boring/sig
+log/internal
+golang.org/x/net/internal/iana
+github.com/sagernet/sing-tun/gtcpip/seqnum
+github.com/sagernet/sing/common/debug
+github.com/sagernet/sing-box/constant/goos
+container/list
+github.com/sagernet/sing/common/x/collections
+github.com/sagernet/sing/common/abx/internal
+github.com/sagernet/sing/common/x/constraints
+vendor/golang.org/x/crypto/cryptobyte/asn1
+github.com/klauspost/compress
+github.com/klauspost/compress/internal/cpuinfo
+vendor/golang.org/x/crypto/internal/alias
+internal/nettrace
+github.com/klauspost/compress/internal/le
+encoding
+github.com/metacubex/utls/dicttls
+golang.org/x/crypto/internal/alias
+filippo.io/hpke/internal/byteorder
+log/internal
+golang.org/x/net/internal/iana
+github.com/metacubex/utls/internal/byteorder
+github.com/sagernet/sing-tun/gtcpip/seqnum
+github.com/metacubex/utls/internal/cpu
+github.com/sagernet/sing/common/debug
+github.com/sagernet/sing-box/constant/goos
+github.com/sagernet/sing/common/x/collections
+github.com/metacubex/utls/internal/fips140tls
+github.com/sagernet/sing/common/abx/internal
+golang.org/x/crypto/cryptobyte/asn1
+github.com/sagernet/sing/common/x/constraints
+github.com/sagernet/quic-go/internal/utils/ringbuffer
+github.com/klauspost/compress
+log/slog/internal
+google.golang.org/protobuf/internal/flags
+github.com/klauspost/compress/internal/le
+google.golang.org/grpc/serviceconfig
+github.com/metacubex/utls/dicttls
+google.golang.org/protobuf/internal/set
+google.golang.org/grpc/encoding/internal
+github.com/gobwas/pool/internal/pmath
+golang.org/x/exp/constraints
+github.com/coder/websocket/internal/util
+github.com/metacubex/utls/internal/byteorder
+github.com/zeebo/blake3/internal/alg/compress/compress_sse41
+github.com/metacubex/utls/internal/cpu
+github.com/zeebo/blake3/internal/alg/hash/hash_avx2
+github.com/metacubex/utls/internal/fips140tls
+golang.org/x/crypto/cryptobyte/asn1
+github.com/sagernet/quic-go/internal/utils/ringbuffer
+log/slog/internal
+google.golang.org/protobuf/internal/flags
+google.golang.org/grpc/serviceconfig
+google.golang.org/protobuf/internal/set
+google.golang.org/grpc/encoding/internal
+github.com/gobwas/pool/internal/pmath
+golang.org/x/exp/constraints
+github.com/coder/websocket/internal/util
+iter
+internal/reflectlite
+sync
+slices
+errors
+internal/bisect
+strconv
+iter
+internal/reflectlite
+sync
+io
+reflect
+internal/oserror
+path
+slices
+errors
+internal/bisect
+strconv
+internal/godebug
+io
+reflect
+internal/oserror
+path
+syscall
+internal/godebug
+syscall
+time
+time
+internal/fmtsort
+internal/syscall/unix
+internal/syscall/execenv
+io/fs
+internal/poll
+internal/fmtsort
+internal/filepathlite
+internal/testlog
+internal/syscall/unix
+internal/syscall/execenv
+internal/testlog
+io/fs
+os
+internal/poll
+internal/filepathlite
+os
+fmt
+fmt
+bytes
+runtime/cgo
+strings
+bytes
+runtime/cgo
+bufio
+strings
+sort
+bufio
+sort
+compress/flate
+github.com/sagernet/gomobile/internal/mobileinit
+compress/flate
+encoding/binary
+encoding/binary
+github.com/sagernet/gomobile/bind/seq
+hash
+hash/crc32
+path/filepath
+hash
+github.com/sagernet/gomobile/internal/mobileinit
+hash/crc32
+archive/zip
+github.com/sagernet/gomobile/bind/java
+path/filepath
+github.com/sagernet/gomobile/bind/seq
+compress/gzip
+archive/zip
+context
+crypto
+crypto/internal/fips140deps/godebug
+crypto/internal/fips140
+crypto/internal/impl
+crypto/internal/fips140/sha3
+crypto/internal/fips140/sha256
+crypto/internal/fips140/sha512
+crypto/internal/fips140deps/time
+crypto/internal/entropy/v1.0.0
+crypto/internal/sysrand
+math/rand/v2
+crypto/internal/fips140/hmac
+crypto/internal/randutil
+crypto/internal/fips140/check
+math/rand
+github.com/sagernet/gomobile/bind/java
+crypto/internal/fips140/aes
+compress/gzip
+crypto/fips140
+math/big
+context
+crypto/internal/fips140/drbg
+crypto
+crypto/internal/fips140deps/godebug
+crypto/internal/impl
+crypto/internal/fips140deps/time
+crypto/internal/fips140/aes/gcm
+crypto/internal/fips140
+crypto/internal/entropy/v1.0.0
+crypto/internal/fips140/sha256
+crypto/internal/fips140/sha3
+crypto/internal/fips140only
+crypto/internal/fips140/sha512
+crypto/cipher
+crypto/internal/sysrand
+math/rand/v2
+crypto/internal/fips140/hmac
+crypto/internal/fips140/check
+crypto/internal/boring
+crypto/internal/fips140/aes
+crypto/internal/rand
+crypto/fips140
+crypto/internal/randutil
+crypto/sha256
+math/rand
+crypto/aes
+crypto/des
+crypto/internal/fips140/drbg
+crypto/internal/fips140/nistec/fiat
+math/big
+crypto/internal/fips140/aes/gcm
+crypto/internal/fips140only
+crypto/cipher
+crypto/rand
+crypto/internal/fips140/edwards25519/field
+crypto/internal/boring/bbig
+crypto/internal/boring
+crypto/internal/fips140/bigmod
+crypto/internal/rand
+crypto/sha256
+crypto/aes
+crypto/des
+weak
+crypto/internal/fips140cache
+crypto/sha3
+crypto/internal/fips140/nistec/fiat
+crypto/internal/fips140hash
+crypto/sha512
+crypto/internal/fips140/nistec
+internal/saferio
+encoding/asn1
+crypto/rand
+crypto/internal/fips140/edwards25519/field
+crypto/internal/boring/bbig
+crypto/internal/fips140/nistec
+vendor/golang.org/x/crypto/cryptobyte
+crypto/internal/fips140/bigmod
+crypto/internal/fips140/edwards25519
+crypto/internal/fips140/ecdh
+weak
+crypto/internal/fips140cache
+crypto/ecdh
+crypto/sha3
+crypto/elliptic
+crypto/internal/fips140hash
+crypto/sha512
+crypto/internal/fips140/ecdsa
+crypto/internal/fips140/ed25519
+internal/saferio
+encoding/asn1
+crypto/ed25519
+crypto/ecdsa
+crypto/internal/fips140/ecdh
+crypto/ecdh
+crypto/internal/fips140/hkdf
+crypto/elliptic
+crypto/hkdf
+crypto/internal/fips140/ecdsa
+crypto/hmac
+crypto/internal/fips140/mlkem
+vendor/golang.org/x/crypto/cryptobyte
+crypto/internal/fips140/edwards25519
+crypto/mlkem
+vendor/golang.org/x/crypto/chacha20
+vendor/golang.org/x/crypto/internal/poly1305
+crypto/internal/fips140/ed25519
+vendor/golang.org/x/sys/cpu
+crypto/ed25519
+crypto/ecdsa
+crypto/internal/fips140/tls12
+crypto/internal/fips140/tls13
+vendor/golang.org/x/crypto/chacha20poly1305
+crypto/md5
+crypto/internal/fips140/hkdf
+crypto/hpke
+crypto/hkdf
+crypto/hmac
+crypto/rc4
+crypto/internal/fips140/rsa
+crypto/internal/fips140/mlkem
+crypto/sha1
+crypto/mlkem
+crypto/tls/internal/fips140tls
+crypto/dsa
+vendor/golang.org/x/crypto/chacha20
+crypto/rsa
+encoding/hex
+crypto/x509/pkix
+encoding/base64
+vendor/golang.org/x/crypto/internal/poly1305
+crypto/internal/fips140/tls12
+encoding/pem
+vendor/golang.org/x/crypto/chacha20poly1305
+crypto/internal/fips140/tls13
+maps
+vendor/golang.org/x/net/dns/dnsmessage
+internal/singleflight
+crypto/md5
+crypto/hpke
+unique
+crypto/rc4
+crypto/internal/fips140/rsa
+net/netip
+crypto/sha1
+hash/adler32
+crypto/tls/internal/fips140tls
+compress/zlib
+crypto/dsa
+debug/dwarf
+encoding/hex
+crypto/x509/pkix
+crypto/rsa
+encoding/base64
+encoding/pem
+maps
+vendor/golang.org/x/net/dns/dnsmessage
+internal/singleflight
+unique
+net/netip
+net/url
+internal/zstd
+hash/adler32
+compress/zlib
+debug/elf
+debug/dwarf
+net/url
+debug/macho
+net
+internal/zstd
+debug/pe
+debug/elf
+debug/plan9obj
+internal/xcoff
+runtime/debug
+debug/buildinfo
+encoding/json
+debug/macho
+net
+debug/pe
+debug/plan9obj
+internal/xcoff
+runtime/debug
+filippo.io/age/internal/bech32
+debug/buildinfo
+filippo.io/age/internal/format
+encoding/json
+golang.org/x/crypto/chacha20
+golang.org/x/crypto/internal/poly1305
+golang.org/x/sys/cpu
+golang.org/x/crypto/chacha20poly1305
+crypto/x509
+filippo.io/age/internal/stream
+filippo.io/hpke/crypto
+filippo.io/hpke/crypto/ecdh
+filippo.io/hpke
+filippo.io/age/internal/bech32
+filippo.io/age/internal/format
+golang.org/x/crypto/curve25519
+golang.org/x/crypto/chacha20
+golang.org/x/crypto/hkdf
+crypto/internal/fips140/pbkdf2
+golang.org/x/crypto/internal/poly1305
+crypto/pbkdf2
+golang.org/x/crypto/pbkdf2
+golang.org/x/crypto/chacha20poly1305
+golang.org/x/crypto/scrypt
+regexp/syntax
+filippo.io/age/internal/stream
+filippo.io/hpke/crypto
+filippo.io/hpke/crypto/ecdh
+filippo.io/hpke
+crypto/tls
+crypto/x509
+regexp
+golang.org/x/crypto/curve25519
+golang.org/x/crypto/hkdf
+crypto/internal/fips140/pbkdf2
+crypto/pbkdf2
+golang.org/x/crypto/pbkdf2
+golang.org/x/crypto/scrypt
+regexp/syntax
+filippo.io/age
+github.com/mdlayher/netlink/nlenc
+golang.org/x/net/bpf
+regexp
+golang.org/x/sync/errgroup
+crypto/tls
+golang.org/x/sys/unix
+filippo.io/age
+github.com/mdlayher/netlink/nlenc
+golang.org/x/net/bpf
+golang.org/x/sync/errgroup
+golang.org/x/sys/unix
+github.com/mdlayher/socket
+log
+encoding/base32
+github.com/mdlayher/netlink
+golang.org/x/net/internal/socket
+github.com/mdlayher/socket
+golang.org/x/net/ipv4
+log
+golang.org/x/net/ipv6
+github.com/mdlayher/netlink
+vendor/golang.org/x/text/transform
+github.com/miekg/dns
+vendor/golang.org/x/text/unicode/bidi
+encoding/base32
+golang.org/x/net/internal/socket
+vendor/golang.org/x/text/transform
+vendor/golang.org/x/text/unicode/bidi
+vendor/golang.org/x/text/secure/bidirule
+vendor/golang.org/x/text/unicode/norm
+golang.org/x/net/ipv4
+golang.org/x/net/ipv6
+vendor/golang.org/x/text/secure/bidirule
+vendor/golang.org/x/text/unicode/norm
+github.com/miekg/dns
+vendor/golang.org/x/net/idna
+net/textproto
+vendor/golang.org/x/net/http/httpguts
+vendor/golang.org/x/net/idna
+vendor/golang.org/x/net/http/httpproxy
+vendor/golang.org/x/net/http2/hpack
+mime
+net/textproto
+vendor/golang.org/x/net/http/httpguts
+vendor/golang.org/x/net/http/httpproxy
+vendor/golang.org/x/net/http2/hpack
+mime/quotedprintable
+mime/multipart
+mime
+net/http/httptrace
+net/http/internal
+net/http/internal/ascii
+net/http/internal/httpcommon
+net/http
+mime/quotedprintable
+mime/multipart
+net/http/httptrace
+net/http/internal
+net/http/internal/ascii
+net/http/internal/httpcommon
+net/http
+github.com/sagernet/sing/common
+github.com/sagernet/sing/common/format
+github.com/sagernet/sing/common/logger
+github.com/sagernet/sing-box/common/taskmonitor
+github.com/sagernet/sing-tun/internal/tschecksum
+github.com/sagernet/sing-tun/gtcpip/checksum
+github.com/google/btree
+github.com/sagernet/sing-tun/gtcpip
+github.com/sagernet/sing-tun/gtcpip/header
+github.com/sagernet/sing/common
+github.com/sagernet/sing/common/format
+github.com/sagernet/sing/common/logger
+github.com/sagernet/sing-box/common/taskmonitor
+golang.org/x/sys/cpu
+github.com/sagernet/sing-tun/internal/tschecksum
+github.com/sagernet/sing-tun/gtcpip/checksum
+github.com/google/btree
+github.com/sagernet/sing/common/x/list
+github.com/sagernet/sing/common/binary
+github.com/sagernet/sing-tun/gtcpip
+github.com/sagernet/sing-tun/gtcpip/header
+github.com/logrusorgru/aurora
+go4.org/netipx
+github.com/sagernet/sing/common/x/list
+github.com/sagernet/sing/common/binary
+github.com/sagernet/sing/common/json/internal/contextjson
+github.com/logrusorgru/aurora
+github.com/go-chi/chi/v5
+github.com/sagernet/sing/common/exceptions
+github.com/sagernet/sing/common/buf
+go4.org/netipx
+github.com/sagernet/sing/common/metadata
+github.com/sagernet/sing/common/task
+github.com/sagernet/sing-box/common/ipset
+github.com/sagernet/sing/common/network
+github.com/sagernet/sing/common/json
+github.com/sagernet/sing/common/json/internal/contextjson
+github.com/sagernet/sing/common/byteformats
+github.com/go-chi/chi/v5
+github.com/sagernet/sing/common/x/linkedhashmap
+github.com/sagernet/sing/common/control
+github.com/sagernet/sing/common/exceptions
+github.com/sagernet/sing/common/json/badjson
+github.com/sagernet/sing/common/buf
+github.com/sagernet/sing/common/metadata
+github.com/sagernet/sing/common/bufio
+github.com/sagernet/sing/common/json/badoption/internal/my_time
+github.com/sagernet/sing/common/network
+github.com/sagernet/sing/common/json/badoption
+github.com/sagernet/sing-box/schema
+github.com/sagernet/sing/common/control
+github.com/sagernet/sing/common/task
+github.com/sagernet/sing-box/common/ipset
+github.com/sagernet/sing/common/json
+github.com/sagernet/sing/common/bufio
+github.com/sagernet/sing/common/byteformats
+github.com/sagernet/sing/common/auth
+github.com/sagernet/sing/service
+github.com/sagernet/sing/common/observable
+container/heap
+github.com/sagernet/sing/common/x/linkedhashmap
+encoding/xml
+github.com/sagernet/sing/common/json/badjson
+github.com/sagernet/sing-box/common/tlsspoof
+github.com/sagernet/sing/common/varbin
+github.com/sagernet/sing/common/json/badoption/internal/my_time
+github.com/sagernet/sing/common/json/badoption
+github.com/sagernet/sing/common/uot
+github.com/sagernet/sing-box/schema
+github.com/sagernet/sing/common/rw
+github.com/sagernet/sing-box/constant
+github.com/sagernet/sing/common/domain
+github.com/sagernet/sing/service/filemanager
+github.com/florianl/go-nfqueue/v2/internal/unix
+github.com/sagernet/sing-box/option
+github.com/florianl/go-nfqueue/v2
+github.com/fsnotify/fsnotify/internal
+github.com/sagernet/sing/common/auth
+github.com/fsnotify/fsnotify
+github.com/sagernet/sing/service
+github.com/sagernet/sing-box/common/tlsspoof
+github.com/sagernet/sing/common/varbin
+github.com/sagernet/fswatch
+github.com/vishvananda/netns
+github.com/sagernet/sing/common/uot
+github.com/sagernet/netlink/nl
+github.com/sagernet/sing/common/rw
+github.com/sagernet/sing/common/domain
+github.com/sagernet/sing-box/constant
+github.com/sagernet/sing/common/observable
+github.com/sagernet/sing-box/option
+github.com/sagernet/sing/service/filemanager
+container/heap
+io/ioutil
+encoding/xml
+github.com/sagernet/netlink
+github.com/florianl/go-nfqueue/v2/internal/unix
+github.com/florianl/go-nfqueue/v2
+github.com/fsnotify/fsnotify/internal
+github.com/fsnotify/fsnotify
+github.com/sagernet/fswatch
+github.com/vishvananda/netns
+github.com/sagernet/netlink/nl
+io/ioutil
+github.com/sagernet/netlink
+github.com/sagernet/sing-box/log
+github.com/mdlayher/netlink/nltest
+github.com/sagernet/nftables/binaryutil
+github.com/sagernet/nftables/internal/parseexprfunc
+github.com/sagernet/nftables/alignedbuff
+github.com/sagernet/nftables/userdata
+github.com/sagernet/sing/common/abx
+github.com/sagernet/sing/common/canceler
+github.com/sagernet/nftables/xt
+github.com/sagernet/sing/common/memory
+github.com/sagernet/nftables/expr
+github.com/sagernet/sing/common/pipe
+github.com/sagernet/sing/common/ranges
+os/exec
+github.com/sagernet/sing-box/log
+github.com/sagernet/nftables
+github.com/sagernet/sing/common/shell
+github.com/sagernet/sing/contrab/freelru
+github.com/sagernet/sing/contrab/maphash
+golang.org/x/exp/slices
+github.com/mdlayher/netlink/nltest
+hash/maphash
+github.com/sagernet/nftables/binaryutil
+github.com/sagernet/nftables/internal/parseexprfunc
+github.com/sagernet/nftables/alignedbuff
+github.com/sagernet/nftables/xt
+github.com/sagernet/sing-tun
+github.com/sagernet/nftables/expr
+github.com/sagernet/sing-box/common/jni
+github.com/sagernet/nftables/userdata
+github.com/database64128/netx-go
+github.com/sagernet/nftables
+github.com/database64128/tfo-go/v2
+github.com/sagernet/sing/common/abx
+github.com/sagernet/sing/common/canceler
+github.com/sagernet/sing-box/common/redir
+github.com/sagernet/sing/common/memory
+github.com/sagernet/sing/common/pipe
+os/user
+github.com/godbus/dbus/v5
+github.com/sagernet/sing/common/ranges
+os/exec
+github.com/sagernet/sing/contrab/freelru
+github.com/sagernet/sing/contrab/maphash
+github.com/sagernet/sing/common/shell
+golang.org/x/exp/slices
+hash/maphash
+github.com/sagernet/sing-tun
+github.com/sagernet/sing-box/common/jni
+github.com/database64128/netx-go
+github.com/database64128/tfo-go/v2
+golang.org/x/mod/semver
+github.com/sagernet/sing-box/common/redir
+github.com/sagernet/sing-box/common/badversion
+os/user
+golang.org/x/text/internal/tag
+github.com/godbus/dbus/v5
+golang.org/x/text/internal/language
+golang.org/x/text/internal/language/compact
+golang.org/x/text/language
+github.com/sagernet/sing-box/experimental/locale
+github.com/sagernet/sing-box/experimental/deprecated
+github.com/sagernet/sing/service/pause
+runtime/metrics
+text/tabwriter
+runtime/pprof
+golang.org/x/mod/semver
+github.com/sagernet/sing-box/common/badversion
+golang.org/x/text/internal/tag
+golang.org/x/text/internal/language
+github.com/sagernet/sing-box/service/powerreport
+golang.org/x/text/internal/language/compact
+golang.org/x/text/language
+github.com/sagernet/quic-go/quicvarint
+github.com/sagernet/quic-go/internal/protocol
+github.com/sagernet/quic-go/internal/monotime
+github.com/sagernet/sing-box/experimental/locale
+github.com/sagernet/quic-go/monotime
+github.com/sagernet/quic-go/congestion
+github.com/sagernet/sing-box/experimental/deprecated
+github.com/sagernet/quic-go/internal/utils
+github.com/sagernet/sing/service/pause
+github.com/sagernet/quic-go/internal/qerr
+runtime/metrics
+github.com/sagernet/quic-go/internal/wire
+text/tabwriter
+runtime/pprof
+github.com/sagernet/quic-go/qlogwriter/jsontext
+github.com/sagernet/quic-go/qlogwriter
+github.com/sagernet/quic-go/qlog
+github.com/sagernet/sing-box/service/powerreport
+github.com/sagernet/quic-go/internal/congestion
+github.com/sagernet/quic-go/quicvarint
+github.com/sagernet/quic-go/internal/ackhandler
+github.com/sagernet/quic-go/internal/protocol
+github.com/sagernet/quic-go/internal/monotime
+github.com/sagernet/quic-go/monotime
+github.com/sagernet/quic-go/congestion
+github.com/sagernet/quic-go/internal/utils
+github.com/sagernet/quic-go/internal/qerr
+github.com/andybalholm/brotli/matchfinder
+github.com/sagernet/quic-go/internal/wire
+github.com/andybalholm/brotli
+github.com/sagernet/sing-box/adapter
+github.com/sagernet/quic-go/qlogwriter/jsontext
+github.com/sagernet/quic-go/qlogwriter
+github.com/sagernet/quic-go/qlog
+github.com/sagernet/sing-box/adapter/certificate
+github.com/sagernet/quic-go/internal/congestion
+github.com/sagernet/sing-box/adapter/endpoint
+github.com/sagernet/quic-go/internal/ackhandler
+github.com/sagernet/sing-box/adapter
+github.com/sagernet/sing-box/adapter/inbound
+github.com/andybalholm/brotli/matchfinder
+github.com/andybalholm/brotli
+github.com/sagernet/sing-box/adapter/outbound
+github.com/sagernet/sing-box/adapter/service
+github.com/sagernet/sing-box/adapter/certificate
+github.com/sagernet/sing-box/adapter/endpoint
+github.com/sagernet/sing-box/common/certificate
+github.com/sagernet/sing-box/adapter/inbound
+github.com/sagernet/sing-box/common/settings
+github.com/sagernet/sing-box/adapter/outbound
+github.com/sagernet/sing-box/common/listener
+github.com/klauspost/compress/fse
+github.com/klauspost/compress/huff0
+github.com/sagernet/sing-box/adapter/service
+github.com/klauspost/compress/internal/snapref
+github.com/sagernet/sing-box/common/dialer
+github.com/klauspost/compress/zstd/internal/xxhash
+github.com/klauspost/compress/zstd
+github.com/sagernet/sing-box/common/certificate
+github.com/sagernet/sing-box/common/settings
+github.com/sagernet/sing-box/common/listener
+github.com/klauspost/compress/fse
+github.com/klauspost/compress/huff0
+github.com/metacubex/utls/internal/boring
+golang.org/x/crypto/cryptobyte
+github.com/klauspost/compress/internal/snapref
+github.com/sagernet/sing-box/common/dialer
+github.com/metacubex/utls/internal/hkdf
+github.com/klauspost/compress/zstd/internal/xxhash
+github.com/metacubex/utls/internal/hpke
+github.com/klauspost/compress/zstd
+golang.org/x/crypto/sha3
+github.com/metacubex/utls/internal/helper
+github.com/metacubex/utls/internal/quicvarint/protocol
+github.com/metacubex/utls/internal/quicvarint
+github.com/metacubex/utls/internal/ratelimit
+github.com/metacubex/utls/internal/mlkem
+github.com/metacubex/utls/internal/tls12
+github.com/metacubex/utls/internal/tls13
+github.com/sagernet/quic-go/internal/utils/linkedlist
+github.com/sagernet/quic-go/internal/utils/tree
+golang.org/x/net/http2/hpack
+github.com/metacubex/utls
+github.com/quic-go/qpack
+golang.org/x/text/transform
+golang.org/x/text/unicode/bidi
+golang.org/x/text/secure/bidirule
+golang.org/x/text/unicode/norm
+github.com/metacubex/utls/internal/boring
+golang.org/x/crypto/cryptobyte
+github.com/metacubex/utls/internal/helper
+github.com/metacubex/utls/internal/hkdf
+github.com/metacubex/utls/internal/hpke
+golang.org/x/crypto/sha3
+golang.org/x/net/idna
+github.com/metacubex/utls/internal/quicvarint/protocol
+github.com/metacubex/utls/internal/mlkem
+github.com/metacubex/utls/internal/quicvarint
+github.com/metacubex/utls/internal/ratelimit
+github.com/metacubex/utls/internal/tls12
+github.com/metacubex/utls/internal/tls13
+golang.org/x/net/http/httpguts
+github.com/sagernet/quic-go/internal/utils/linkedlist
+github.com/metacubex/utls
+github.com/sagernet/quic-go/internal/utils/tree
+log/slog/internal/buffer
+golang.org/x/net/http2/hpack
+log/slog
+github.com/quic-go/qpack
+golang.org/x/text/transform
+golang.org/x/text/unicode/bidi
+github.com/sagernet/sing/common/tls
+embed
+golang.org/x/text/secure/bidirule
+net/http/cookiejar
+golang.org/x/text/unicode/norm
+golang.org/x/net/publicsuffix
+github.com/sagernet/sing-box/common/tlsfragment
+github.com/sagernet/sing-box/common/compatible
+github.com/sagernet/sing-box/common/badhttp
+github.com/sagernet/sing-box/common/ja3
+github.com/sagernet/sing-box/common/sniff/internal/qtls
+github.com/sagernet/sing-box/common/sniff
+golang.org/x/net/idna
+github.com/sagernet/sing-box/common/srs
+golang.org/x/net/http/httpguts
+log/slog/internal/buffer
+log/slog
+github.com/sagernet/sing-box/experimental/clashmode
+github.com/sagernet/sing/common/tls
+embed
+github.com/sagernet/quic-go/internal/handshake
+net/http/cookiejar
+golang.org/x/net/publicsuffix
+github.com/sagernet/sing-box/common/tlsfragment
+github.com/sagernet/sing-box/common/compatible
+github.com/sagernet/sing-box/common/badhttp
+github.com/sagernet/sing-box/common/ja3
+github.com/sagernet/quic-go
+github.com/sagernet/sing-box/common/sniff/internal/qtls
+github.com/sagernet/sing-box/common/sniff
+github.com/sagernet/sing-box/common/srs
+github.com/sagernet/sing-box/common/badtls
+github.com/sagernet/sing-box/common/ktls
+github.com/sagernet/sing-box/route/rule
+github.com/sagernet/sing-box/experimental/clashmode
+github.com/sagernet/quic-go/internal/handshake
+github.com/sagernet/quic-go
+github.com/sagernet/sing-box/common/badtls
+github.com/sagernet/sing-box/common/ktls
+github.com/sagernet/quic-go/http3/qlog
+github.com/sagernet/quic-go/http3
+github.com/sagernet/sing-box/route/rule
+hash/fnv
+github.com/sagernet/sing/common/ntp
+github.com/sagernet/sing-box/dns
+flag
+go.uber.org/multierr
+go.uber.org/zap/internal/pool
+go.uber.org/zap/buffer
+go.uber.org/zap/internal/bufferpool
+go.uber.org/zap/internal/color
+go.uber.org/zap/internal/exit
+go.uber.org/zap/zapcore
+go.uber.org/zap/internal
+go.uber.org/zap/internal/stacktrace
+go.uber.org/zap
+github.com/sagernet/quic-go/http3/qlog
+github.com/sagernet/quic-go/http3
+hash/fnv
+github.com/sagernet/sing-box/dns
+golang.org/x/net/internal/httpcommon
+golang.org/x/net/internal/httpsfv
+golang.org/x/net/http2
+github.com/sagernet/sing/common/ntp
+flag
+go.uber.org/multierr
+go.uber.org/zap/internal/pool
+go.uber.org/zap/buffer
+go.uber.org/zap/internal/bufferpool
+go.uber.org/zap/internal/color
+go.uber.org/zap/internal/exit
+go.uber.org/zap/zapcore
+github.com/sagernet/sing-box/common/netns
+database/sql/driver
+database/sql
+github.com/sagernet/sing-box/common/tls
+go.uber.org/zap/internal
+go.uber.org/zap/internal/stacktrace
+go.uber.org/zap
+github.com/gofrs/uuid/v5
+github.com/sagernet/sing/common/cleanup
+github.com/sagernet/sing-box/common/trafficcontrol
+golang.org/x/net/internal/httpcommon
+golang.org/x/net/internal/httpsfv
+github.com/sagernet/sing-anytls
+github.com/sagernet/sing-box/common/netns
+golang.org/x/net/http2
+database/sql/driver
+github.com/sagernet/sing-box/common/httpclient
+github.com/hashicorp/yamux
+database/sql
+github.com/sagernet/sing/common/atomic
+github.com/sagernet/sing/common/baderror
+github.com/sagernet/smux
+github.com/sagernet/sing-mux
+github.com/gofrs/uuid/v5
+github.com/sagernet/sing/common/cleanup
+github.com/sagernet/sing-quic
+github.com/sagernet/sing-box/common/trafficcontrol
+golang.org/x/crypto/blake2b
+github.com/sagernet/sing-box/common/tls
+github.com/sagernet/sing-anytls
+golang.org/x/crypto/argon2
+github.com/sagernet/sing-box/experimental
+github.com/sagernet/bbolt/errors
+github.com/sagernet/bbolt/internal/common
+github.com/sagernet/sing-snell
+github.com/sagernet/bbolt/internal/freelist
+github.com/sagernet/bbolt
+github.com/sagernet/sing-box/common/urltest
+github.com/sagernet/sing-tun/ping
+github.com/hashicorp/yamux
+github.com/sagernet/sing/common/atomic
+github.com/sagernet/sing/common/baderror
+github.com/sagernet/smux
+github.com/sagernet/sing/common/udpnat2
+github.com/sagernet/sing-mux
+github.com/sagernet/sing-box/experimental/cachefile
+github.com/sagernet/sing-box/protocol/direct
+github.com/jsimonetti/rtnetlink/internal/unix
+github.com/sagernet/sing-box/common/httpclient
+github.com/jsimonetti/rtnetlink
+github.com/sagernet/sing-box/common/interrupt
+github.com/sagernet/sing-quic
+github.com/sagernet/sing-box/common/process
+golang.org/x/crypto/blake2b
+github.com/sagernet/sing-box/protocol/dns
+golang.org/x/crypto/argon2
+github.com/sagernet/sing-snell
+github.com/sagernet/sing-box/experimental
+github.com/sagernet/bbolt/errors
+github.com/sagernet/bbolt/internal/common
+github.com/sagernet/sing/common/replay
+github.com/sagernet/sing-vmess
+github.com/sagernet/sing/common/bufio/deadline
+github.com/sagernet/bbolt/internal/freelist
+github.com/sagernet/sing-box/common/urltest
+github.com/sagernet/bbolt
+github.com/sagernet/sing-tun/ping
+github.com/sagernet/sing/common/winpowrprof
+html
+internal/profile
+github.com/sagernet/sing/common/udpnat2
+github.com/sagernet/sing-box/route
+runtime/trace
+net/http/pprof
+github.com/sagernet/sing-box/experimental/cachefile
+github.com/sagernet/sing-box/common/networkquality
+github.com/sagernet/sing-box/protocol/direct
+github.com/jsimonetti/rtnetlink/internal/unix
+github.com/jsimonetti/rtnetlink
+github.com/sagernet/sing-box/common/interrupt
+github.com/sagernet/sing-box/common/stun
+github.com/sagernet/sing/common/batch
+github.com/sagernet/sing-box/common/process
+github.com/sagernet/sing-box/protocol/group
+github.com/sagernet/sing-box/protocol/dns
+github.com/sagernet/sing/common/replay
+github.com/sagernet/sing-vmess
+github.com/sagernet/sing/common/bufio/deadline
+github.com/sagernet/sing-box/service/oomkiller
+github.com/sagernet/sing/common/winpowrprof
+html
+internal/profile
+github.com/sagernet/sing-box/route
+runtime/trace
+golang.org/x/crypto/blowfish
+net/http/pprof
+golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
+golang.org/x/crypto/ssh
+github.com/sagernet/sing-box/common/networkquality
+github.com/sagernet/sing-box/common/stun
+github.com/sagernet/sing/common/batch
+github.com/sagernet/sing-box/protocol/group
+github.com/sagernet/sing-box/service/oomkiller
+github.com/sagernet/sing-box
+golang.org/x/crypto/blowfish
+golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
+golang.org/x/crypto/ssh
+golang.org/x/crypto/ssh/agent
+golang.org/x/net/internal/timeseries
+text/template/parse
+text/template
+html/template
+github.com/sagernet/sing-box
+golang.org/x/net/trace
+google.golang.org/grpc/backoff
+google.golang.org/grpc/grpclog/internal
+golang.org/x/crypto/ssh/agent
+google.golang.org/grpc/grpclog
+google.golang.org/grpc/connectivity
+google.golang.org/grpc/attributes
+google.golang.org/grpc/internal/credentials
+google.golang.org/grpc/internal/envconfig
+google.golang.org/protobuf/internal/detrand
+google.golang.org/protobuf/internal/errors
+golang.org/x/net/internal/timeseries
+google.golang.org/protobuf/encoding/protowire
+google.golang.org/protobuf/internal/pragma
+text/template/parse
+google.golang.org/protobuf/reflect/protoreflect
+text/template
+go/token
+google.golang.org/protobuf/internal/encoding/messageset
+google.golang.org/protobuf/internal/genid
+google.golang.org/protobuf/internal/order
+google.golang.org/protobuf/internal/strs
+google.golang.org/protobuf/reflect/protoregistry
+google.golang.org/protobuf/runtime/protoiface
+google.golang.org/grpc/internal
+google.golang.org/protobuf/proto
+google.golang.org/grpc/metadata
+google.golang.org/grpc/stats
+google.golang.org/grpc/experimental/stats
+google.golang.org/grpc/balancer/pickfirst/internal
+google.golang.org/grpc/internal/grpclog
+google.golang.org/protobuf/internal/encoding/json
+google.golang.org/grpc/credentials
+html/template
+google.golang.org/protobuf/internal/descfmt
+google.golang.org/grpc/internal/channelz
+google.golang.org/grpc/resolver
+google.golang.org/grpc/internal/balancer/weight
+google.golang.org/protobuf/internal/descopts
+google.golang.org/protobuf/internal/editiondefaults
+google.golang.org/protobuf/internal/encoding/text
+google.golang.org/grpc/channelz
+google.golang.org/grpc/balancer
+google.golang.org/grpc/balancer/base
+golang.org/x/net/trace
+google.golang.org/protobuf/internal/encoding/defval
+google.golang.org/protobuf/encoding/prototext
+google.golang.org/protobuf/internal/filedesc
+google.golang.org/protobuf/internal/protolazy
+google.golang.org/protobuf/internal/version
+google.golang.org/grpc/balancer/endpointsharding
+google.golang.org/grpc/backoff
+google.golang.org/grpc/grpclog/internal
+google.golang.org/grpc/codes
+google.golang.org/grpc/credentials/insecure
+google.golang.org/grpc/grpclog
+google.golang.org/grpc/internal/grpcutil
+google.golang.org/grpc/mem
+google.golang.org/grpc/connectivity
+google.golang.org/grpc/attributes
+google.golang.org/grpc/internal/credentials
+google.golang.org/grpc/encoding
+google.golang.org/grpc/internal/envconfig
+google.golang.org/grpc/internal/backoff
+google.golang.org/protobuf/internal/detrand
+google.golang.org/grpc/internal/balancer/gracefulswitch
+google.golang.org/protobuf/internal/errors
+google.golang.org/protobuf/encoding/protowire
+google.golang.org/grpc/internal/balancerload
+google.golang.org/grpc/internal/buffer
+google.golang.org/protobuf/internal/pragma
+google.golang.org/grpc/internal/grpcsync
+google.golang.org/protobuf/reflect/protoreflect
+go/token
+google.golang.org/grpc/internal/idle
+google.golang.org/protobuf/encoding/protojson
+google.golang.org/protobuf/internal/encoding/tag
+google.golang.org/protobuf/internal/impl
+google.golang.org/grpc/internal
+google.golang.org/grpc/metadata
+google.golang.org/grpc/stats
+google.golang.org/protobuf/internal/encoding/messageset
+google.golang.org/protobuf/internal/genid
+google.golang.org/protobuf/internal/order
+google.golang.org/protobuf/internal/strs
+google.golang.org/protobuf/reflect/protoregistry
+google.golang.org/grpc/internal/metadata
+google.golang.org/grpc/internal/serviceconfig
+google.golang.org/protobuf/runtime/protoiface
+google.golang.org/grpc/internal/resolver
+google.golang.org/grpc/experimental/stats
+google.golang.org/grpc/internal/proxyattributes
+google.golang.org/protobuf/proto
+google.golang.org/grpc/balancer/pickfirst/internal
+google.golang.org/grpc/internal/stats
+google.golang.org/grpc/internal/grpclog
+google.golang.org/protobuf/internal/encoding/json
+google.golang.org/grpc/internal/syscall
+google.golang.org/grpc/credentials
+google.golang.org/grpc/internal/transport/networktype
+google.golang.org/grpc/keepalive
+google.golang.org/protobuf/internal/descfmt
+google.golang.org/grpc/peer
+google.golang.org/grpc/internal/channelz
+google.golang.org/grpc/tap
+net/http/httputil
+google.golang.org/grpc/resolver
+google.golang.org/grpc/channelz
+google.golang.org/grpc/internal/balancer/weight
+google.golang.org/grpc/balancer
+google.golang.org/protobuf/internal/descopts
+google.golang.org/protobuf/internal/editiondefaults
+google.golang.org/protobuf/internal/encoding/text
+google.golang.org/grpc/balancer/base
+google.golang.org/grpc/internal/resolver/passthrough
+google.golang.org/grpc/internal/resolver/unix
+google.golang.org/protobuf/internal/protolazy
+google.golang.org/grpc/balancer/grpclb/state
+google.golang.org/grpc/internal/resolver/dns/internal
+google.golang.org/protobuf/internal/encoding/defval
+google.golang.org/grpc/internal/resolver/dns
+google.golang.org/protobuf/encoding/prototext
+google.golang.org/protobuf/internal/filedesc
+google.golang.org/grpc/resolver/dns
+golang.org/x/sync/semaphore
+github.com/sagernet/sing-box/dns/transport
+google.golang.org/protobuf/internal/version
+google.golang.org/grpc/balancer/endpointsharding
+google.golang.org/grpc/codes
+google.golang.org/grpc/credentials/insecure
+google.golang.org/grpc/internal/grpcutil
+google.golang.org/grpc/mem
+google.golang.org/grpc/encoding
+google.golang.org/protobuf/encoding/protojson
+google.golang.org/protobuf/internal/encoding/tag
+google.golang.org/protobuf/internal/impl
+github.com/sagernet/sing-box/dns/transport/hosts
+google.golang.org/grpc/internal/backoff
+github.com/sagernet/sing-box/dns/transport/local/systemconfig
+google.golang.org/grpc/internal/balancer/gracefulswitch
+github.com/sagernet/sing-box/dns/transport/mdns
+google.golang.org/grpc/internal/balancerload
+google.golang.org/grpc/internal/buffer
+google.golang.org/grpc/internal/grpcsync
+google.golang.org/protobuf/internal/filetype
+google.golang.org/grpc/internal/idle
+google.golang.org/grpc/internal/metadata
+google.golang.org/protobuf/runtime/protoimpl
+google.golang.org/grpc/internal/serviceconfig
+google.golang.org/protobuf/protoadapt
+google.golang.org/grpc/internal/resolver
+google.golang.org/grpc/internal/pretty
+google.golang.org/grpc/internal/proxyattributes
+google.golang.org/grpc/internal/stats
+google.golang.org/grpc/balancer/pickfirst
+google.golang.org/grpc/internal/syscall
+google.golang.org/grpc/internal/transport/networktype
+google.golang.org/grpc/keepalive
+google.golang.org/grpc/peer
+google.golang.org/grpc/tap
+net/http/httputil
+google.golang.org/grpc/balancer/roundrobin
+google.golang.org/grpc/encoding/proto
+google.golang.org/protobuf/types/known/durationpb
+google.golang.org/protobuf/types/known/timestamppb
+google.golang.org/protobuf/types/known/anypb
+google.golang.org/grpc/binarylog/grpc_binarylog_v1
+google.golang.org/grpc/internal/resolver/passthrough
+google.golang.org/genproto/googleapis/rpc/status
+google.golang.org/grpc/internal/resolver/unix
+google.golang.org/grpc/balancer/grpclb/state
+google.golang.org/grpc/internal/status
+google.golang.org/protobuf/types/descriptorpb
+google.golang.org/grpc/internal/resolver/dns/internal
+google.golang.org/grpc/internal/resolver/dns
+google.golang.org/grpc/status
+google.golang.org/grpc/internal/binarylog
+google.golang.org/grpc/resolver/dns
+golang.org/x/sync/semaphore
+github.com/sagernet/sing-box/dns/transport
+google.golang.org/grpc/internal/transport
+google.golang.org/protobuf/internal/editionssupport
+google.golang.org/protobuf/types/gofeaturespb
+google.golang.org/protobuf/reflect/protodesc
+github.com/sagernet/sing-box/dns/transport/hosts
+google.golang.org/protobuf/types/known/emptypb
+github.com/sagernet/sing-box/dns/transport/local
+github.com/sagernet/sing-box/dns/transport/local/systemconfig
+github.com/sagernet/sing-box/dns/transport/mdns
+google.golang.org/grpc/internal/resolver/delegatingresolver
+google.golang.org/grpc
+google.golang.org/protobuf/internal/filetype
+google.golang.org/protobuf/runtime/protoimpl
+google.golang.org/protobuf/protoadapt
+google.golang.org/protobuf/types/known/durationpb
+google.golang.org/grpc/internal/pretty
+google.golang.org/grpc/balancer/pickfirst
+google.golang.org/grpc/encoding/proto
+google.golang.org/protobuf/types/known/timestamppb
+google.golang.org/grpc/binarylog/grpc_binarylog_v1
+github.com/sagernet/sing-box/experimental/libbox/internal/oomprofile
+google.golang.org/protobuf/types/known/anypb
+google.golang.org/grpc/balancer/roundrobin
+google.golang.org/protobuf/types/descriptorpb
+google.golang.org/genproto/googleapis/rpc/status
+github.com/sagernet/sing-box/experimental/libbox/internal/procfs
+google.golang.org/grpc/internal/status
+github.com/sagernet/sing-box/experimental/libbox/internal/runtimeinfo
+google.golang.org/grpc/status
+google.golang.org/grpc/internal/binarylog
+github.com/sagernet/sing-box/dns/transport/fakeip
+github.com/sagernet/sing-box/dns/transport/quic
+google.golang.org/grpc/internal/transport
+google.golang.org/protobuf/internal/editionssupport
+google.golang.org/protobuf/types/gofeaturespb
+google.golang.org/protobuf/reflect/protodesc
+google.golang.org/grpc/health/grpc_health_v1
+google.golang.org/grpc/health
+google.golang.org/grpc/reflection/grpc_reflection_v1
+google.golang.org/protobuf/types/known/emptypb
+github.com/sagernet/sing-box/dns/transport/local
+google.golang.org/grpc/reflection/grpc_reflection_v1alpha
+expvar
+github.com/go-chi/chi/v5/middleware
+google.golang.org/grpc/reflection/internal
+google.golang.org/grpc/internal/resolver/delegatingresolver
+google.golang.org/grpc/reflection
+google.golang.org/grpc
+github.com/sagernet/sing-box/daemon
+github.com/ajg/form
+github.com/go-chi/render
+github.com/sagernet/cors
+github.com/gobwas/httphead
+github.com/sagernet/sing-box/experimental/libbox/internal/oomprofile
+github.com/gobwas/pool
+github.com/gobwas/pool/pbufio
+github.com/sagernet/ws
+github.com/sagernet/sing-box/experimental/libbox/internal/procfs
+github.com/sagernet/sing-box/experimental/libbox/internal/runtimeinfo
+github.com/sagernet/sing-box/dns/transport/fakeip
+github.com/sagernet/sing-box/dns/transport/quic
+github.com/gobwas/pool/pbytes
+github.com/sagernet/ws/wsutil
+google.golang.org/grpc/health/grpc_health_v1
+google.golang.org/grpc/health
+github.com/sagernet/sing-box/experimental/clashapi
+google.golang.org/grpc/reflection/grpc_reflection_v1
+google.golang.org/grpc/reflection/grpc_reflection_v1alpha
+expvar
+google.golang.org/grpc/reflection/internal
+google.golang.org/grpc/reflection
+github.com/go-chi/chi/v5/middleware
+github.com/sagernet/sing-box/daemon
+github.com/ajg/form
+github.com/sagernet/sing-box/common/uot
+github.com/sagernet/sing-box/protocol/anytls
+github.com/go-chi/render
+github.com/sagernet/cors
+github.com/gobwas/httphead
+github.com/gobwas/pool
+github.com/gobwas/pool/pbufio
+github.com/sagernet/ws
+github.com/gobwas/pool/pbytes
+github.com/sagernet/sing-box/protocol/block
+github.com/sagernet/ws/wsutil
+github.com/sagernet/sing-box/protocol/bridge
+github.com/sagernet/sing-box/experimental/clashapi
+golang.org/x/net/http2/h2c
+github.com/sagernet/sing-box/transport/v2rayhttp
+github.com/sagernet/sing-quic/congestion_meta2
+github.com/sagernet/sing-box/transport/http
+github.com/sagernet/sing-box/common/uot
+github.com/sagernet/sing-box/protocol/anytls
+github.com/sagernet/sing-box/protocol/block
+github.com/sagernet/sing-box/protocol/bridge
+github.com/sagernet/sing-quic/hysteria/congestion
+github.com/sagernet/sing/common/cache
+github.com/sagernet/sing-quic/hysteria
+github.com/sagernet/sing-box/protocol/http
+golang.org/x/net/http2/h2c
+github.com/sagernet/sing-box/transport/v2rayhttp
+github.com/sagernet/sing-quic/hysteria2/internal/protocol
+github.com/sagernet/sing-quic/congestion_meta2
+github.com/huin/goupnp/httpu
+github.com/sagernet/sing-box/protocol/hysteria
+github.com/huin/goupnp/scpd
+github.com/huin/goupnp/soap
+github.com/sagernet/sing-box/transport/http
+github.com/huin/goupnp/ssdp
+github.com/huin/goupnp
+github.com/huin/goupnp/dcps/internetgateway1
+github.com/huin/goupnp/dcps/internetgateway2
+github.com/jackpal/go-nat-pmp
+github.com/koron/go-ssdp/internal/ssdplog
+github.com/koron/go-ssdp/internal/multicast
+github.com/koron/go-ssdp
+github.com/google/gopacket/routing
+github.com/sagernet/sing-quic/hysteria/congestion
+github.com/sagernet/sing-quic/hysteria2/internal/stun
+github.com/sagernet/sing/common/cache
+github.com/libp2p/go-netroute
+golang.org/x/sync/singleflight
+github.com/sagernet/sing-quic/hysteria
+github.com/sagernet/sing-box/common/iponly
+github.com/libp2p/go-nat
+github.com/sagernet/sing-box/common/kernelports
+github.com/sagernet/sing-box/transport/device
+github.com/sagernet/sing-quic/hysteria2/realm
+github.com/sagernet/sing-box/protocol/http
+github.com/sagernet/sing-quic/hysteria2
+github.com/sagernet/sing-quic/hysteria2/internal/protocol
+github.com/sagernet/sing-box/protocol/hysteria
+github.com/huin/goupnp/httpu
+github.com/huin/goupnp/scpd
+github.com/huin/goupnp/soap
+github.com/huin/goupnp/ssdp
+github.com/huin/goupnp
+github.com/sagernet/sing-box/transport/masque
+github.com/huin/goupnp/dcps/internetgateway1
+github.com/sagernet/sing-box/protocol/hysteria2
+github.com/huin/goupnp/dcps/internetgateway2
+github.com/jackpal/go-nat-pmp
+github.com/koron/go-ssdp/internal/ssdplog
+github.com/koron/go-ssdp/internal/multicast
+github.com/koron/go-ssdp
+github.com/google/gopacket/routing
+github.com/sagernet/sing-quic/hysteria2/internal/stun
+golang.org/x/sync/singleflight
+github.com/libp2p/go-netroute
+github.com/sagernet/sing-box/common/iponly
+github.com/libp2p/go-nat
+github.com/sagernet/sing-box/common/kernelports
+github.com/sagernet/sing-quic/hysteria2/realm
+github.com/sagernet/sing-box/transport/device
+github.com/sagernet/sing/protocol/socks/socks4
+github.com/sagernet/sing-box/protocol/masque
+github.com/sagernet/sing/protocol/socks/socks5
+github.com/sagernet/sing-quic/hysteria2
+github.com/sagernet/sing/protocol/socks
+github.com/sagernet/sing-box/protocol/mixed
+github.com/sagernet/sing-box/protocol/naive
+github.com/sagernet/sing-box/protocol/hysteria2
+github.com/sagernet/sing-box/transport/masque
+github.com/sagernet/sing-quic/congestion_meta1
+github.com/sagernet/sing-box/protocol/naive/quic
+github.com/sagernet/sing-box/protocol/redirect
+github.com/sagernet/sing-box/common/mux
+github.com/sagernet/sing/common/random
+github.com/sagernet/sing-box/transport/simple-obfs
+github.com/sagernet/sing-box/transport/v2raygrpclite
+github.com/sagernet/sing-box/protocol/masque
+github.com/sagernet/sing/protocol/socks/socks4
+github.com/sagernet/sing/protocol/socks/socks5
+github.com/sagernet/sing-box/transport/v2rayhttpupgrade
+github.com/sagernet/sing/protocol/socks
+github.com/sagernet/sing-box/transport/v2raywebsocket
+github.com/sagernet/sing/common/udpnat
+github.com/sagernet/sing-shadowsocks
+github.com/sagernet/sing-box/transport/v2ray
+github.com/sagernet/sing-box/protocol/mixed
+github.com/sagernet/sing-shadowsocks/shadowaead
+github.com/sagernet/sing-box/transport/sip003
+github.com/sagernet/sing-box/protocol/naive
+github.com/klauspost/cpuid/v2
+github.com/sagernet/sing-shadowsocks2/cipher
+github.com/sagernet/sing-shadowsocks2/internal/legacykey
+github.com/sagernet/sing-shadowsocks2/internal/shadowio
+github.com/sagernet/sing-shadowsocks2/shadowaead
+lukechampine.com/blake3/guts
+github.com/sagernet/sing-shadowsocks2/shadowstream
+github.com/sagernet/sing-quic/congestion_meta1
+lukechampine.com/blake3/bao
+github.com/sagernet/sing-shadowtls
+github.com/sagernet/sing-box/protocol/naive/quic
+lukechampine.com/blake3
+github.com/sagernet/sing-shadowsocks/shadowaead_2022
+github.com/sagernet/sing-box/protocol/redirect
+github.com/sagernet/sing-shadowsocks2/shadowaead_2022
+github.com/sagernet/sing-shadowsocks2
+github.com/sagernet/sing-box/protocol/shadowtls
+github.com/sagernet/sing-box/common/mux
+github.com/sagernet/sing-box/protocol/shadowsocks
+github.com/sagernet/sing/common/random
+github.com/sagernet/sing-box/transport/simple-obfs
+github.com/sagernet/sing-box/transport/v2raygrpclite
+github.com/sagernet/sing-snell/internal/reuse
+github.com/sagernet/sing-box/transport/v2rayhttpupgrade
+github.com/sagernet/sing-snell/snellv4
+github.com/sagernet/sing-box/transport/v2raywebsocket
+github.com/sagernet/sing/common/udpnat
+github.com/sagernet/sing-shadowsocks
+github.com/sagernet/sing-box/transport/v2ray
+github.com/sagernet/sing-shadowsocks/shadowaead
+github.com/sagernet/sing-box/transport/sip003
+github.com/sagernet/sing-snell/snellv5
+github.com/sagernet/sing-snell/snellv6
+github.com/klauspost/cpuid/v2
+github.com/sagernet/sing-shadowsocks2/cipher
+github.com/sagernet/sing-shadowsocks2/internal/legacykey
+github.com/sagernet/sing-shadowsocks2/internal/shadowio
+github.com/sagernet/sing-box/protocol/socks
+github.com/sagernet/sing-shadowsocks2/shadowaead
+github.com/sagernet/sing-shadowsocks2/shadowstream
+lukechampine.com/blake3/guts
+lukechampine.com/blake3/bao
+lukechampine.com/blake3
+github.com/sagernet/sing-shadowtls
+github.com/sagernet/sing-shadowsocks/shadowaead_2022
+github.com/sagernet/sing-box/protocol/ssh
+github.com/sagernet/sing-box/protocol/snell
+github.com/sagernet/sing-shadowsocks2/shadowaead_2022
+github.com/sagernet/sing-shadowsocks2
+github.com/sagernet/sing-box/protocol/shadowtls
+github.com/cretz/bine/torutil/ed25519/internal/edwards25519
+github.com/sagernet/sing-box/protocol/shadowsocks
+golang.org/x/crypto/ed25519
+github.com/cretz/bine/torutil/ed25519
+github.com/cretz/bine/torutil
+github.com/cretz/bine/control
+github.com/cretz/bine/process
+golang.org/x/net/internal/socks
+github.com/sagernet/sing-box/common/proxybridge
+golang.org/x/net/proxy
+github.com/sagernet/sing-snell/internal/reuse
+github.com/sagernet/sing-box/transport/trojan
+github.com/cretz/bine/tor
+github.com/sagernet/sing-snell/snellv4
+github.com/sagernet/sing-box/protocol/tor
+github.com/sagernet/sing-box/protocol/trojan
+github.com/sagernet/sing-snell/snellv5
+github.com/sagernet/sing-snell/snellv6
+github.com/sagernet/sing-quic/tuic
+github.com/sagernet/sing-box/protocol/tun
+github.com/sagernet/sing-box/protocol/socks
+github.com/sagernet/sing-box/protocol/ssh
+github.com/sagernet/sing-box/protocol/snell
+github.com/sagernet/sing-box/protocol/tuic
+github.com/sagernet/sing-vmess/packetaddr
+github.com/cretz/bine/torutil/ed25519/internal/edwards25519
+github.com/sagernet/sing-vmess/vless
+golang.org/x/crypto/ed25519
+github.com/cretz/bine/torutil/ed25519
+github.com/cretz/bine/torutil
+golang.org/x/net/internal/socks
+github.com/cretz/bine/control
+github.com/sagernet/sing-box/protocol/vless
+github.com/cretz/bine/process
+golang.org/x/net/proxy
+github.com/sagernet/sing-box/common/proxybridge
+github.com/sagernet/sing-box/protocol/vmess
+github.com/cretz/bine/tor
+github.com/sagernet/sing-box/transport/trojan
+github.com/sagernet/sing-box/protocol/tor
+github.com/sagernet/sing-box/protocol/trojan
+github.com/coder/websocket/internal/errd
+github.com/coder/websocket
+github.com/sagernet/sing-quic/tuic
+github.com/caddyserver/certmagic/internal/atomicfile
+github.com/sagernet/sing-box/service/api
+github.com/sagernet/sing-box/protocol/tun
+github.com/caddyserver/zerossl
+github.com/libdns/libdns
+github.com/mholt/acmez/v3/acme
+github.com/mholt/acmez/v3
+github.com/sagernet/sing-box/protocol/tuic
+github.com/zeebo/blake3/internal/consts
+github.com/sagernet/sing-vmess/packetaddr
+github.com/zeebo/blake3/internal/alg/compress/compress_pure
+github.com/zeebo/blake3/internal/alg/compress
+github.com/zeebo/blake3/internal/utils
+github.com/sagernet/sing-vmess/vless
+github.com/zeebo/blake3/internal/alg/hash/hash_pure
+github.com/zeebo/blake3/internal/alg/hash
+github.com/zeebo/blake3/internal/alg
+github.com/zeebo/blake3
+go.uber.org/zap/exp/zapslog
+golang.org/x/crypto/ocsp
+github.com/sagernet/sing-box/protocol/vless
+github.com/caddyserver/certmagic
+github.com/sagernet/sing-box/protocol/vmess
+github.com/coder/websocket/internal/errd
+github.com/coder/websocket
+github.com/caddyserver/certmagic/internal/atomicfile
+github.com/caddyserver/zerossl
+github.com/sagernet/sing-box/service/api
+github.com/libdns/libdns
+github.com/mholt/acmez/v3/acme
+github.com/sagernet/sing-box/service/origin_ca
+github.com/sagernet/sing-box/service/resolved
+github.com/mholt/acmez/v3
+github.com/sagernet/sing-box/service/ssmapi
+github.com/zeebo/blake3/internal/consts
+github.com/zeebo/blake3/internal/alg/compress/compress_pure
+github.com/zeebo/blake3/internal/alg/compress/compress_sse41
+github.com/zeebo/blake3/internal/alg/compress
+github.com/zeebo/blake3/internal/utils
+github.com/zeebo/blake3/internal/alg/hash/hash_pure
+github.com/zeebo/blake3/internal/alg/hash/hash_avx2
+github.com/zeebo/blake3/internal/alg/hash
+github.com/zeebo/blake3/internal/alg
+github.com/zeebo/blake3
+go.uber.org/zap/exp/zapslog
+golang.org/x/crypto/ocsp
+github.com/caddyserver/certmagic
+github.com/sagernet/sing-box/transport/v2rayquic
+github.com/creack/pty
+github.com/sagernet/sing-box/protocol/tailscale/tailssh
+github.com/sagernet/sing-tun/dnsinfo
+os/signal
+github.com/sagernet/sing-box/service/resolved
+github.com/sagernet/sing-box/include
+github.com/sagernet/sing-box/service/origin_ca
+github.com/sagernet/sing-box/service/ssmapi
+github.com/sagernet/sing-box/transport/v2rayquic
+github.com/sagernet/sing-box/experimental/libbox
+github.com/creack/pty
+github.com/sagernet/sing-box/protocol/tailscale/tailssh
+github.com/sagernet/sing-tun/dnsinfo
+os/signal
+github.com/sagernet/sing-box/include
+github.com/sagernet/sing-box/experimental/libbox
+github.com/sagernet/sing-box/build/amd64/libbox
+github.com/sagernet/sing-box/build/arm64/libbox
+aar: AndroidManifest.xml
+aar: proguard.txt
+aar: classes.jar
+jar: META-INF/MANIFEST.MF
+jar: go/Seq$GoObject.class
+jar: go/Seq$GoRef.class
+jar: go/Seq$GoRefQueue$1.class
+jar: go/Seq$GoRefQueue.class
+jar: go/Seq$Proxy.class
+jar: go/Seq$Ref.class
+jar: go/Seq$RefMap.class
+jar: go/Seq$RefTracker.class
+jar: go/Seq.class
+jar: go/Universe$proxyerror.class
+jar: go/Universe.class
+jar: go/error.class
+jar: io/nekohasekai/libbox/AndroidVPNType.class
+jar: io/nekohasekai/libbox/AutoRedirectHandler.class
+jar: io/nekohasekai/libbox/AutoRedirectSession.class
+jar: io/nekohasekai/libbox/BridgeOptions.class
+jar: io/nekohasekai/libbox/BridgeSession.class
+jar: io/nekohasekai/libbox/CommandClient.class
+jar: io/nekohasekai/libbox/CommandClientHandler.class
+jar: io/nekohasekai/libbox/CommandClientOptions.class
+jar: io/nekohasekai/libbox/CommandServer.class
+jar: io/nekohasekai/libbox/CommandServerHandler.class
+jar: io/nekohasekai/libbox/Connection.class
+jar: io/nekohasekai/libbox/ConnectionEvent.class
+jar: io/nekohasekai/libbox/ConnectionEventIterator.class
+jar: io/nekohasekai/libbox/ConnectionEvents.class
+jar: io/nekohasekai/libbox/ConnectionIterator.class
+jar: io/nekohasekai/libbox/ConnectionOwner.class
+jar: io/nekohasekai/libbox/Connections.class
+jar: io/nekohasekai/libbox/DeprecatedNote.class
+jar: io/nekohasekai/libbox/DeprecatedNoteIterator.class
+jar: io/nekohasekai/libbox/ErrorMessage.class
+jar: io/nekohasekai/libbox/ExchangeContext.class
+jar: io/nekohasekai/libbox/FDroidMirror.class
+jar: io/nekohasekai/libbox/FDroidMirrorIterator.class
+jar: io/nekohasekai/libbox/FDroidPingResult.class
+jar: io/nekohasekai/libbox/FDroidPingResultIterator.class
+jar: io/nekohasekai/libbox/FDroidUpdateInfo.class
+jar: io/nekohasekai/libbox/Func.class
+jar: io/nekohasekai/libbox/HTTPClient.class
+jar: io/nekohasekai/libbox/HTTPRequest.class
+jar: io/nekohasekai/libbox/HTTPResponse.class
+jar: io/nekohasekai/libbox/HTTPResponseWriteToProgressHandler.class
+jar: io/nekohasekai/libbox/ImportRemoteProfile.class
+jar: io/nekohasekai/libbox/Int32Iterator.class
+jar: io/nekohasekai/libbox/InterfaceUpdateListener.class
+jar: io/nekohasekai/libbox/Libbox$proxyAutoRedirectHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyAutoRedirectSession.class
+jar: io/nekohasekai/libbox/Libbox$proxyBridgeSession.class
+jar: io/nekohasekai/libbox/Libbox$proxyCommandClientHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyCommandServerHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyConnectionEventIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyConnectionIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyDeprecatedNoteIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyFDroidMirrorIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyFDroidPingResultIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyFunc.class
+jar: io/nekohasekai/libbox/Libbox$proxyHTTPClient.class
+jar: io/nekohasekai/libbox/Libbox$proxyHTTPRequest.class
+jar: io/nekohasekai/libbox/Libbox$proxyHTTPResponse.class
+jar: io/nekohasekai/libbox/Libbox$proxyHTTPResponseWriteToProgressHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyInt32Iterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyInterfaceUpdateListener.class
+jar: io/nekohasekai/libbox/Libbox$proxyLocalDNSTransport.class
+jar: io/nekohasekai/libbox/Libbox$proxyLogIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyNeighborEntryIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyNeighborUpdateListener.class
+jar: io/nekohasekai/libbox/Libbox$proxyNetworkInterfaceIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyNetworkQualityTestHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyOnDemandRule.class
+jar: io/nekohasekai/libbox/Libbox$proxyOnDemandRuleIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyOpenConnectAuthFormChoiceIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyOpenConnectAuthFormFieldIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyOpenConnectEndpointStatusIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyOpenConnectStatusHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyOpenVPNEndpointStatusIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyOpenVPNStatusHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyOutboundGroupItemIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyOutboundGroupIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyPlatformInterface.class
+jar: io/nekohasekai/libbox/Libbox$proxyProfilePreviewIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyRoutePrefixIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxySTUNTestHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyShellSession.class
+jar: io/nekohasekai/libbox/Libbox$proxyStringIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyTaildropDownloadHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyTaildropFileIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyTaildropInboxHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyTaildropReceivingFileIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyTaildropSendHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyTailscaleEndpointStatusIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyTailscalePeerIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyTailscalePingHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyTailscaleSSHHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyTailscaleStatusHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyTailscaleUserGroupIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyTunOptions.class
+jar: io/nekohasekai/libbox/Libbox$proxyUSBIPServerStatusHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyUSBIPServerStatusIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyUSBLocalDeviceInfoIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyUSBLocalProviderHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyUSBProviderHandler.class
+jar: io/nekohasekai/libbox/Libbox$proxyUSBSharedDeviceInterfaceIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyUSBSharedDeviceIterator.class
+jar: io/nekohasekai/libbox/Libbox$proxyXPCDialer.class
+jar: io/nekohasekai/libbox/Libbox.class
+jar: io/nekohasekai/libbox/LocalDNSTransport.class
+jar: io/nekohasekai/libbox/LogEntry.class
+jar: io/nekohasekai/libbox/LogIterator.class
+jar: io/nekohasekai/libbox/NeighborEntry.class
+jar: io/nekohasekai/libbox/NeighborEntryIterator.class
+jar: io/nekohasekai/libbox/NeighborSubscription.class
+jar: io/nekohasekai/libbox/NeighborUpdateListener.class
+jar: io/nekohasekai/libbox/NetworkInterface.class
+jar: io/nekohasekai/libbox/NetworkInterfaceIterator.class
+jar: io/nekohasekai/libbox/NetworkQualityProgress.class
+jar: io/nekohasekai/libbox/NetworkQualityResult.class
+jar: io/nekohasekai/libbox/NetworkQualityTest.class
+jar: io/nekohasekai/libbox/NetworkQualityTestHandler.class
+jar: io/nekohasekai/libbox/NetworkQualityTestSession.class
+jar: io/nekohasekai/libbox/Notification.class
+jar: io/nekohasekai/libbox/OnDemandRule.class
+jar: io/nekohasekai/libbox/OnDemandRuleIterator.class
+jar: io/nekohasekai/libbox/OpenConnectAuthChallenge.class
+jar: io/nekohasekai/libbox/OpenConnectAuthForm.class
+jar: io/nekohasekai/libbox/OpenConnectAuthFormChoice.class
+jar: io/nekohasekai/libbox/OpenConnectAuthFormChoiceIterator.class
+jar: io/nekohasekai/libbox/OpenConnectAuthFormField.class
+jar: io/nekohasekai/libbox/OpenConnectAuthFormFieldIterator.class
+jar: io/nekohasekai/libbox/OpenConnectAuthResponse.class
+jar: io/nekohasekai/libbox/OpenConnectBrowserRequest.class
+jar: io/nekohasekai/libbox/OpenConnectBrowserResult.class
+jar: io/nekohasekai/libbox/OpenConnectEndpointStatus.class
+jar: io/nekohasekai/libbox/OpenConnectEndpointStatusIterator.class
+jar: io/nekohasekai/libbox/OpenConnectFormValues.class
+jar: io/nekohasekai/libbox/OpenConnectStatusHandler.class
+jar: io/nekohasekai/libbox/OpenConnectStatusSubscription.class
+jar: io/nekohasekai/libbox/OpenConnectStatusUpdate.class
+jar: io/nekohasekai/libbox/OpenConnectTunnelInfo.class
+jar: io/nekohasekai/libbox/OpenVPNChallenge.class
+jar: io/nekohasekai/libbox/OpenVPNChallengeResponse.class
+jar: io/nekohasekai/libbox/OpenVPNEndpointStatus.class
+jar: io/nekohasekai/libbox/OpenVPNEndpointStatusIterator.class
+jar: io/nekohasekai/libbox/OpenVPNStatusHandler.class
+jar: io/nekohasekai/libbox/OpenVPNStatusSubscription.class
+jar: io/nekohasekai/libbox/OpenVPNStatusUpdate.class
+jar: io/nekohasekai/libbox/OpenVPNTunnelInfo.class
+jar: io/nekohasekai/libbox/OutboundGroup.class
+jar: io/nekohasekai/libbox/OutboundGroupItem.class
+jar: io/nekohasekai/libbox/OutboundGroupItemIterator.class
+jar: io/nekohasekai/libbox/OutboundGroupIterator.class
+jar: io/nekohasekai/libbox/OverrideOptions.class
+jar: io/nekohasekai/libbox/PProfServer.class
+jar: io/nekohasekai/libbox/PlatformInterface.class
+jar: io/nekohasekai/libbox/PlatformUser.class
+jar: io/nekohasekai/libbox/ProcessInfo.class
+jar: io/nekohasekai/libbox/ProfileContent.class
+jar: io/nekohasekai/libbox/ProfileContentRequest.class
+jar: io/nekohasekai/libbox/ProfileDecoder.class
+jar: io/nekohasekai/libbox/ProfileEncoder.class
+jar: io/nekohasekai/libbox/ProfilePreview.class
+jar: io/nekohasekai/libbox/ProfilePreviewIterator.class
+jar: io/nekohasekai/libbox/RemoteConnectionOptions.class
+jar: io/nekohasekai/libbox/RoutePrefix.class
+jar: io/nekohasekai/libbox/RoutePrefixIterator.class
+jar: io/nekohasekai/libbox/STUNTest.class
+jar: io/nekohasekai/libbox/STUNTestHandler.class
+jar: io/nekohasekai/libbox/STUNTestProgress.class
+jar: io/nekohasekai/libbox/STUNTestResult.class
+jar: io/nekohasekai/libbox/STUNTestSession.class
+jar: io/nekohasekai/libbox/SetupOptions.class
+jar: io/nekohasekai/libbox/ShellSession.class
+jar: io/nekohasekai/libbox/StatusMessage.class
+jar: io/nekohasekai/libbox/StringBox.class
+jar: io/nekohasekai/libbox/StringIterator.class
+jar: io/nekohasekai/libbox/SystemProxyStatus.class
+jar: io/nekohasekai/libbox/TaildropDownloadHandler.class
+jar: io/nekohasekai/libbox/TaildropDownloadSession.class
+jar: io/nekohasekai/libbox/TaildropFile.class
+jar: io/nekohasekai/libbox/TaildropFileIterator.class
+jar: io/nekohasekai/libbox/TaildropInbox.class
+jar: io/nekohasekai/libbox/TaildropInboxHandler.class
+jar: io/nekohasekai/libbox/TaildropInboxSubscription.class
+jar: io/nekohasekai/libbox/TaildropReceivingFile.class
+jar: io/nekohasekai/libbox/TaildropReceivingFileIterator.class
+jar: io/nekohasekai/libbox/TaildropSendHandler.class
+jar: io/nekohasekai/libbox/TaildropSendOptions.class
+jar: io/nekohasekai/libbox/TaildropSendSession.class
+jar: io/nekohasekai/libbox/TailscaleEndpointStatus.class
+jar: io/nekohasekai/libbox/TailscaleEndpointStatusIterator.class
+jar: io/nekohasekai/libbox/TailscalePeer.class
+jar: io/nekohasekai/libbox/TailscalePeerIterator.class
+jar: io/nekohasekai/libbox/TailscalePingHandler.class
+jar: io/nekohasekai/libbox/TailscalePingResult.class
+jar: io/nekohasekai/libbox/TailscalePingSession.class
+jar: io/nekohasekai/libbox/TailscaleSSHHandler.class
+jar: io/nekohasekai/libbox/TailscaleSSHOptions.class
+jar: io/nekohasekai/libbox/TailscaleSSHSession.class
+jar: io/nekohasekai/libbox/TailscaleStatusHandler.class
+jar: io/nekohasekai/libbox/TailscaleStatusSubscription.class
+jar: io/nekohasekai/libbox/TailscaleStatusUpdate.class
+jar: io/nekohasekai/libbox/TailscaleUserGroup.class
+jar: io/nekohasekai/libbox/TailscaleUserGroupIterator.class
+jar: io/nekohasekai/libbox/TunOptions.class
+jar: io/nekohasekai/libbox/USBDeviceDescriptor.class
+jar: io/nekohasekai/libbox/USBIPServerStatus.class
+jar: io/nekohasekai/libbox/USBIPServerStatusHandler.class
+jar: io/nekohasekai/libbox/USBIPServerStatusIterator.class
+jar: io/nekohasekai/libbox/USBIPServerStatusSubscription.class
+jar: io/nekohasekai/libbox/USBIPServerStatusUpdate.class
+jar: io/nekohasekai/libbox/USBIsoPacket.class
+jar: io/nekohasekai/libbox/USBLocalDeviceInfo.class
+jar: io/nekohasekai/libbox/USBLocalDeviceInfoIterator.class
+jar: io/nekohasekai/libbox/USBLocalProvidedDevice.class
+jar: io/nekohasekai/libbox/USBLocalProviderHandler.class
+jar: io/nekohasekai/libbox/USBLocalProviderManager.class
+jar: io/nekohasekai/libbox/USBProviderHandler.class
+jar: io/nekohasekai/libbox/USBProviderSession.class
+jar: io/nekohasekai/libbox/USBSharedDevice.class
+jar: io/nekohasekai/libbox/USBSharedDeviceInterface.class
+jar: io/nekohasekai/libbox/USBSharedDeviceInterfaceIterator.class
+jar: io/nekohasekai/libbox/USBSharedDeviceIterator.class
+jar: io/nekohasekai/libbox/USBURBRequest.class
+jar: io/nekohasekai/libbox/USBURBResponse.class
+jar: io/nekohasekai/libbox/WIFIState.class
+jar: io/nekohasekai/libbox/XPCDialer.class
+aar: jni/arm64-v8a/libbox.so
+aar: jni/x86_64/libbox.so
+aar: R.txt
+aar: res/
+jar: META-INF/MANIFEST.MF
+jar: go/Seq.java
+jar: go/Universe.java
+jar: go/error.java
+jar: io/nekohasekai/libbox/AndroidVPNType.java
+jar: io/nekohasekai/libbox/AutoRedirectHandler.java
+jar: io/nekohasekai/libbox/AutoRedirectSession.java
+jar: io/nekohasekai/libbox/BridgeOptions.java
+jar: io/nekohasekai/libbox/BridgeSession.java
+jar: io/nekohasekai/libbox/CommandClient.java
+jar: io/nekohasekai/libbox/CommandClientHandler.java
+jar: io/nekohasekai/libbox/CommandClientOptions.java
+jar: io/nekohasekai/libbox/CommandServer.java
+jar: io/nekohasekai/libbox/CommandServerHandler.java
+jar: io/nekohasekai/libbox/Connection.java
+jar: io/nekohasekai/libbox/ConnectionEvent.java
+jar: io/nekohasekai/libbox/ConnectionEventIterator.java
+jar: io/nekohasekai/libbox/ConnectionEvents.java
+jar: io/nekohasekai/libbox/ConnectionIterator.java
+jar: io/nekohasekai/libbox/ConnectionOwner.java
+jar: io/nekohasekai/libbox/Connections.java
+jar: io/nekohasekai/libbox/DeprecatedNote.java
+jar: io/nekohasekai/libbox/DeprecatedNoteIterator.java
+jar: io/nekohasekai/libbox/ErrorMessage.java
+jar: io/nekohasekai/libbox/ExchangeContext.java
+jar: io/nekohasekai/libbox/FDroidMirror.java
+jar: io/nekohasekai/libbox/FDroidMirrorIterator.java
+jar: io/nekohasekai/libbox/FDroidPingResult.java
+jar: io/nekohasekai/libbox/FDroidPingResultIterator.java
+jar: io/nekohasekai/libbox/FDroidUpdateInfo.java
+jar: io/nekohasekai/libbox/Func.java
+jar: io/nekohasekai/libbox/HTTPClient.java
+jar: io/nekohasekai/libbox/HTTPRequest.java
+jar: io/nekohasekai/libbox/HTTPResponse.java
+jar: io/nekohasekai/libbox/HTTPResponseWriteToProgressHandler.java
+jar: io/nekohasekai/libbox/ImportRemoteProfile.java
+jar: io/nekohasekai/libbox/Int32Iterator.java
+jar: io/nekohasekai/libbox/InterfaceUpdateListener.java
+jar: io/nekohasekai/libbox/Libbox.java
+jar: io/nekohasekai/libbox/LocalDNSTransport.java
+jar: io/nekohasekai/libbox/LogEntry.java
+jar: io/nekohasekai/libbox/LogIterator.java
+jar: io/nekohasekai/libbox/NeighborEntry.java
+jar: io/nekohasekai/libbox/NeighborEntryIterator.java
+jar: io/nekohasekai/libbox/NeighborSubscription.java
+jar: io/nekohasekai/libbox/NeighborUpdateListener.java
+jar: io/nekohasekai/libbox/NetworkInterface.java
+jar: io/nekohasekai/libbox/NetworkInterfaceIterator.java
+jar: io/nekohasekai/libbox/NetworkQualityProgress.java
+jar: io/nekohasekai/libbox/NetworkQualityResult.java
+jar: io/nekohasekai/libbox/NetworkQualityTest.java
+jar: io/nekohasekai/libbox/NetworkQualityTestHandler.java
+jar: io/nekohasekai/libbox/NetworkQualityTestSession.java
+jar: io/nekohasekai/libbox/Notification.java
+jar: io/nekohasekai/libbox/OnDemandRule.java
+jar: io/nekohasekai/libbox/OnDemandRuleIterator.java
+jar: io/nekohasekai/libbox/OpenConnectAuthChallenge.java
+jar: io/nekohasekai/libbox/OpenConnectAuthForm.java
+jar: io/nekohasekai/libbox/OpenConnectAuthFormChoice.java
+jar: io/nekohasekai/libbox/OpenConnectAuthFormChoiceIterator.java
+jar: io/nekohasekai/libbox/OpenConnectAuthFormField.java
+jar: io/nekohasekai/libbox/OpenConnectAuthFormFieldIterator.java
+jar: io/nekohasekai/libbox/OpenConnectAuthResponse.java
+jar: io/nekohasekai/libbox/OpenConnectBrowserRequest.java
+jar: io/nekohasekai/libbox/OpenConnectBrowserResult.java
+jar: io/nekohasekai/libbox/OpenConnectEndpointStatus.java
+jar: io/nekohasekai/libbox/OpenConnectEndpointStatusIterator.java
+jar: io/nekohasekai/libbox/OpenConnectFormValues.java
+jar: io/nekohasekai/libbox/OpenConnectStatusHandler.java
+jar: io/nekohasekai/libbox/OpenConnectStatusSubscription.java
+jar: io/nekohasekai/libbox/OpenConnectStatusUpdate.java
+jar: io/nekohasekai/libbox/OpenConnectTunnelInfo.java
+jar: io/nekohasekai/libbox/OpenVPNChallenge.java
+jar: io/nekohasekai/libbox/OpenVPNChallengeResponse.java
+jar: io/nekohasekai/libbox/OpenVPNEndpointStatus.java
+jar: io/nekohasekai/libbox/OpenVPNEndpointStatusIterator.java
+jar: io/nekohasekai/libbox/OpenVPNStatusHandler.java
+jar: io/nekohasekai/libbox/OpenVPNStatusSubscription.java
+jar: io/nekohasekai/libbox/OpenVPNStatusUpdate.java
+jar: io/nekohasekai/libbox/OpenVPNTunnelInfo.java
+jar: io/nekohasekai/libbox/OutboundGroup.java
+jar: io/nekohasekai/libbox/OutboundGroupItem.java
+jar: io/nekohasekai/libbox/OutboundGroupItemIterator.java
+jar: io/nekohasekai/libbox/OutboundGroupIterator.java
+jar: io/nekohasekai/libbox/OverrideOptions.java
+jar: io/nekohasekai/libbox/PProfServer.java
+jar: io/nekohasekai/libbox/PlatformInterface.java
+jar: io/nekohasekai/libbox/PlatformUser.java
+jar: io/nekohasekai/libbox/ProcessInfo.java
+jar: io/nekohasekai/libbox/ProfileContent.java
+jar: io/nekohasekai/libbox/ProfileContentRequest.java
+jar: io/nekohasekai/libbox/ProfileDecoder.java
+jar: io/nekohasekai/libbox/ProfileEncoder.java
+jar: io/nekohasekai/libbox/ProfilePreview.java
+jar: io/nekohasekai/libbox/ProfilePreviewIterator.java
+jar: io/nekohasekai/libbox/RemoteConnectionOptions.java
+jar: io/nekohasekai/libbox/RoutePrefix.java
+jar: io/nekohasekai/libbox/RoutePrefixIterator.java
+jar: io/nekohasekai/libbox/STUNTest.java
+jar: io/nekohasekai/libbox/STUNTestHandler.java
+jar: io/nekohasekai/libbox/STUNTestProgress.java
+jar: io/nekohasekai/libbox/STUNTestResult.java
+jar: io/nekohasekai/libbox/STUNTestSession.java
+jar: io/nekohasekai/libbox/SetupOptions.java
+jar: io/nekohasekai/libbox/ShellSession.java
+jar: io/nekohasekai/libbox/StatusMessage.java
+jar: io/nekohasekai/libbox/StringBox.java
+jar: io/nekohasekai/libbox/StringIterator.java
+jar: io/nekohasekai/libbox/SystemProxyStatus.java
+jar: io/nekohasekai/libbox/TaildropDownloadHandler.java
+jar: io/nekohasekai/libbox/TaildropDownloadSession.java
+jar: io/nekohasekai/libbox/TaildropFile.java
+jar: io/nekohasekai/libbox/TaildropFileIterator.java
+jar: io/nekohasekai/libbox/TaildropInbox.java
+jar: io/nekohasekai/libbox/TaildropInboxHandler.java
+jar: io/nekohasekai/libbox/TaildropInboxSubscription.java
+jar: io/nekohasekai/libbox/TaildropReceivingFile.java
+jar: io/nekohasekai/libbox/TaildropReceivingFileIterator.java
+jar: io/nekohasekai/libbox/TaildropSendHandler.java
+jar: io/nekohasekai/libbox/TaildropSendOptions.java
+jar: io/nekohasekai/libbox/TaildropSendSession.java
+jar: io/nekohasekai/libbox/TailscaleEndpointStatus.java
+jar: io/nekohasekai/libbox/TailscaleEndpointStatusIterator.java
+jar: io/nekohasekai/libbox/TailscalePeer.java
+jar: io/nekohasekai/libbox/TailscalePeerIterator.java
+jar: io/nekohasekai/libbox/TailscalePingHandler.java
+jar: io/nekohasekai/libbox/TailscalePingResult.java
+jar: io/nekohasekai/libbox/TailscalePingSession.java
+jar: io/nekohasekai/libbox/TailscaleSSHHandler.java
+jar: io/nekohasekai/libbox/TailscaleSSHOptions.java
+jar: io/nekohasekai/libbox/TailscaleSSHSession.java
+jar: io/nekohasekai/libbox/TailscaleStatusHandler.java
+jar: io/nekohasekai/libbox/TailscaleStatusSubscription.java
+jar: io/nekohasekai/libbox/TailscaleStatusUpdate.java
+jar: io/nekohasekai/libbox/TailscaleUserGroup.java
+jar: io/nekohasekai/libbox/TailscaleUserGroupIterator.java
+jar: io/nekohasekai/libbox/TunOptions.java
+jar: io/nekohasekai/libbox/USBDeviceDescriptor.java
+jar: io/nekohasekai/libbox/USBIPServerStatus.java
+jar: io/nekohasekai/libbox/USBIPServerStatusHandler.java
+jar: io/nekohasekai/libbox/USBIPServerStatusIterator.java
+jar: io/nekohasekai/libbox/USBIPServerStatusSubscription.java
+jar: io/nekohasekai/libbox/USBIPServerStatusUpdate.java
+jar: io/nekohasekai/libbox/USBIsoPacket.java
+jar: io/nekohasekai/libbox/USBLocalDeviceInfo.java
+jar: io/nekohasekai/libbox/USBLocalDeviceInfoIterator.java
+jar: io/nekohasekai/libbox/USBLocalProvidedDevice.java
+jar: io/nekohasekai/libbox/USBLocalProviderHandler.java
+jar: io/nekohasekai/libbox/USBLocalProviderManager.java
+jar: io/nekohasekai/libbox/USBProviderHandler.java
+jar: io/nekohasekai/libbox/USBProviderSession.java
+jar: io/nekohasekai/libbox/USBSharedDevice.java
+jar: io/nekohasekai/libbox/USBSharedDeviceInterface.java
+jar: io/nekohasekai/libbox/USBSharedDeviceInterfaceIterator.java
+jar: io/nekohasekai/libbox/USBSharedDeviceIterator.java
+jar: io/nekohasekai/libbox/USBURBRequest.java
+jar: io/nekohasekai/libbox/USBURBResponse.java
+jar: io/nekohasekai/libbox/WIFIState.java
+jar: io/nekohasekai/libbox/XPCDialer.java
+built /home/user/workspace/repo/.amp/in/libbox-out/libbox.aar

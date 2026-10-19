@@ -1,0 +1,219 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :android:routing:preBuild UP-TO-DATE
+> Task :android:routing:preDebugBuild UP-TO-DATE
+> Task :android:routing:generateDebugResources UP-TO-DATE
+> Task :android:routing:packageDebugResources UP-TO-DATE
+> Task :android:routing:processDebugNavigationResources UP-TO-DATE
+> Task :android:routing:parseDebugLocalResources UP-TO-DATE
+> Task :android:routing:generateDebugRFile UP-TO-DATE
+> Task :android:routing:compileDebugKotlin UP-TO-DATE
+> Task :android:routing:javaPreCompileDebug UP-TO-DATE
+> Task :android:routing:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:routing:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :android:routing:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:routing:preDebugUnitTestBuild UP-TO-DATE
+> Task :android:routing:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :android:routing:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :android:routing:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :android:routing:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :android:routing:processDebugJavaRes UP-TO-DATE
+> Task :android:routing:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :android:routing:testDebugUnitTest UP-TO-DATE
+> Task :android:routing:test UP-TO-DATE
+> Task :android:domain:preBuild UP-TO-DATE
+> Task :android:domain:preDebugBuild UP-TO-DATE
+> Task :android:domain:generateDebugResources UP-TO-DATE
+> Task :android:domain:packageDebugResources UP-TO-DATE
+> Task :android:domain:processDebugNavigationResources UP-TO-DATE
+> Task :android:domain:parseDebugLocalResources UP-TO-DATE
+> Task :android:domain:generateDebugRFile UP-TO-DATE
+> Task :android:domain:compileDebugKotlin UP-TO-DATE
+> Task :android:domain:javaPreCompileDebug UP-TO-DATE
+> Task :android:domain:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:domain:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :android:domain:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:verifyLibbox
+> Task :android:mobile:preBuild
+> Task :android:mobile:preDebugBuild
+> Task :android:mobile:compileDebugAidl UP-TO-DATE
+> Task :android:mobile:generateDebugBuildConfig UP-TO-DATE
+> Task :android:mobile:generateDebugResources UP-TO-DATE
+> Task :android:mobile:packageDebugResources UP-TO-DATE
+> Task :android:security:preBuild UP-TO-DATE
+> Task :android:security:preDebugBuild UP-TO-DATE
+> Task :android:security:processDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:processDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:parseDebugLocalResources UP-TO-DATE
+> Task :android:mobile:generateDebugRFile UP-TO-DATE
+> Task :android:domain:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:security:generateDebugResources UP-TO-DATE
+> Task :android:security:packageDebugResources UP-TO-DATE
+> Task :android:security:parseDebugLocalResources UP-TO-DATE
+> Task :android:security:generateDebugRFile UP-TO-DATE
+> Task :android:security:compileDebugKotlin UP-TO-DATE
+> Task :android:security:javaPreCompileDebug UP-TO-DATE
+> Task :android:security:compileDebugJavaWithJavac NO-SOURCE
+> Task :android:security:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :android:mobile:compileDebugKotlin UP-TO-DATE
+> Task :android:mobile:javaPreCompileDebug UP-TO-DATE
+> Task :android:mobile:compileDebugJavaWithJavac UP-TO-DATE
+> Task :android:domain:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:domain:compileDebugLibraryResources UP-TO-DATE
+> Task :android:domain:writeDebugAarMetadata UP-TO-DATE
+> Task :android:routing:writeDebugAarMetadata UP-TO-DATE
+> Task :android:security:writeDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:checkDebugAarMetadata UP-TO-DATE
+> Task :android:mobile:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:mobile:compileDebugNavigationResources UP-TO-DATE
+> Task :android:mobile:mergeDebugResources UP-TO-DATE
+> Task :android:mobile:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :android:domain:extractDeepLinksDebug UP-TO-DATE
+> Task :android:domain:processDebugManifest UP-TO-DATE
+> Task :android:mobile:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:extractDeepLinksDebug UP-TO-DATE
+> Task :android:routing:processDebugManifest UP-TO-DATE
+> Task :android:security:extractDeepLinksDebug UP-TO-DATE
+> Task :android:security:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugMainManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifest UP-TO-DATE
+> Task :android:mobile:processDebugManifestForPackage UP-TO-DATE
+> Task :android:routing:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:routing:compileDebugLibraryResources UP-TO-DATE
+> Task :android:security:mapDebugSourceSetPaths UP-TO-DATE
+> Task :android:security:compileDebugLibraryResources UP-TO-DATE
+> Task :android:mobile:processDebugResources UP-TO-DATE
+> Task :android:mobile:bundleDebugClassesToRuntimeJar UP-TO-DATE
+> Task :android:mobile:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :android:mobile:preDebugUnitTestBuild
+> Task :android:mobile:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :android:mobile:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :android:mobile:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :android:domain:generateDebugAssets UP-TO-DATE
+> Task :android:domain:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:generateDebugAssets UP-TO-DATE
+> Task :android:routing:generateDebugAssets UP-TO-DATE
+> Task :android:routing:mergeDebugAssets UP-TO-DATE
+> Task :android:security:generateDebugAssets UP-TO-DATE
+> Task :android:security:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:mergeDebugAssets UP-TO-DATE
+> Task :android:mobile:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :android:mobile:mergeDebugUnitTestManifest UP-TO-DATE
+> Task :android:mobile:processDebugUnitTestManifest UP-TO-DATE
+> Task :android:mobile:generateDebugUnitTestConfig UP-TO-DATE
+> Task :android:mobile:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :android:security:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :android:security:processDebugJavaRes UP-TO-DATE
+> Task :android:mobile:testDebugUnitTest
+> Task :android:domain:checkDebugAarMetadata UP-TO-DATE
+> Task :android:domain:extractDebugAnnotations UP-TO-DATE
+> Task :android:domain:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :android:domain:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :android:domain:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :android:domain:prepareDebugArtProfile UP-TO-DATE
+> Task :android:domain:prepareLintJarForPublish UP-TO-DATE
+> Task :android:domain:mergeDebugJavaResource UP-TO-DATE
+> Task :android:domain:syncDebugLibJars UP-TO-DATE
+> Task :android:domain:bundleDebugLocalLintAar UP-TO-DATE
+> Task :android:domain:createFullJarDebug UP-TO-DATE
+> Task :android:domain:preDebugAndroidTestBuild UP-TO-DATE
+> Task :android:domain:writeDebugLintModelMetadata UP-TO-DATE
+> Task :android:domain:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :android:domain:extractProguardFiles UP-TO-DATE
+> Task :android:domain:generateDebugLintModel UP-TO-DATE
+> Task :android:domain:preDebugUnitTestBuild UP-TO-DATE
+> Task :android:domain:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :android:domain:lintAnalyzeDebug UP-TO-DATE
+> Task :android:domain:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :android:domain:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :android:routing:checkDebugAarMetadata UP-TO-DATE
+> Task :android:routing:extractDebugAnnotations
+> Task :android:routing:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :android:routing:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :android:routing:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :android:routing:prepareDebugArtProfile UP-TO-DATE
+> Task :android:routing:prepareLintJarForPublish UP-TO-DATE
+> Task :android:routing:mergeDebugJavaResource UP-TO-DATE
+> Task :android:routing:syncDebugLibJars
+> Task :android:routing:bundleDebugLocalLintAar
+> Task :android:security:checkDebugAarMetadata UP-TO-DATE
+> Task :android:security:extractDebugAnnotations UP-TO-DATE
+> Task :android:security:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :android:security:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :android:security:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :android:security:prepareDebugArtProfile UP-TO-DATE
+> Task :android:security:prepareLintJarForPublish UP-TO-DATE
+> Task :android:security:mergeDebugJavaResource UP-TO-DATE
+> Task :android:security:syncDebugLibJars UP-TO-DATE
+> Task :android:security:bundleDebugLocalLintAar UP-TO-DATE
+> Task :android:mobile:preDebugAndroidTestBuild SKIPPED
+> Task :android:routing:createFullJarDebug
+> Task :android:routing:writeDebugLintModelMetadata UP-TO-DATE
+> Task :android:security:createFullJarDebug UP-TO-DATE
+> Task :android:security:writeDebugLintModelMetadata UP-TO-DATE
+> Task :android:mobile:generateDebugAndroidTestLintModel
+> Task :android:mobile:extractProguardFiles UP-TO-DATE
+> Task :android:routing:extractProguardFiles UP-TO-DATE
+> Task :android:routing:generateDebugLintModel
+> Task :android:security:extractProguardFiles UP-TO-DATE
+> Task :android:security:generateDebugLintModel UP-TO-DATE
+> Task :android:mobile:generateDebugLintReportModel
+> Task :android:mobile:generateDebugUnitTestLintModel
+> Task :android:security:lintAnalyzeDebug UP-TO-DATE
+> Task :android:mobile:lintAnalyzeDebugAndroidTest
+> Task :android:mobile:lintAnalyzeDebugUnitTest
+> Task :android:routing:preDebugAndroidTestBuild UP-TO-DATE
+> Task :android:routing:generateDebugAndroidTestLintModel
+> Task :android:routing:generateDebugUnitTestLintModel
+> Task :android:routing:lintAnalyzeDebugAndroidTest
+> Task :android:routing:lintAnalyzeDebugUnitTest
+> Task :android:security:preDebugAndroidTestBuild UP-TO-DATE
+> Task :android:security:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :android:security:preDebugUnitTestBuild UP-TO-DATE
+> Task :android:security:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :android:security:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :android:security:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :android:mobile:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :android:mobile:compressDebugAssets UP-TO-DATE
+> Task :android:mobile:generateDebugGlobalSynthetics UP-TO-DATE
+> Task :android:mobile:mergeDebugJavaResource
+> Task :android:mobile:checkDebugDuplicateClasses UP-TO-DATE
+> Task :android:mobile:desugarDebugFileDependencies UP-TO-DATE
+> Task :android:mobile:mergeExtDexDebug UP-TO-DATE
+> Task :android:routing:bundleLibRuntimeToDirDebug
+> Task :android:security:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :android:domain:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :android:mobile:mergeLibDexDebug
+> Task :android:routing:lintAnalyzeDebug
+> Task :android:mobile:dexBuilderDebug
+> Task :android:mobile:mergeProjectDexDebug
+> Task :android:domain:mergeDebugJniLibFolders UP-TO-DATE
+> Task :android:domain:mergeDebugNativeLibs NO-SOURCE
+> Task :android:domain:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :android:mobile:mergeDebugJniLibFolders UP-TO-DATE
+> Task :android:routing:mergeDebugJniLibFolders UP-TO-DATE
+> Task :android:routing:mergeDebugNativeLibs NO-SOURCE
+> Task :android:routing:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :android:security:mergeDebugJniLibFolders UP-TO-DATE
+> Task :android:security:mergeDebugNativeLibs NO-SOURCE
+> Task :android:security:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :android:mobile:mergeDebugNativeLibs UP-TO-DATE
+> Task :android:mobile:stripDebugDebugSymbols UP-TO-DATE
+> Task :android:mobile:validateSigningDebug UP-TO-DATE
+> Task :android:mobile:writeDebugAppMetadata UP-TO-DATE
+> Task :android:mobile:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :android:mobile:packageDebug
+> Task :android:mobile:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :android:mobile:assembleDebug
+> Task :android:mobile:lintAnalyzeDebug
+
+> Task :android:mobile:lintReportDebug
+Wrote HTML report to file:///home/user/workspace/repo/android/mobile/build/reports/lint-results-debug.html
+Wrote SARIF report to file:///home/user/workspace/repo/android/mobile/build/reports/lint-results-debug.sarif
+
+> Task :android:mobile:lintDebug
+
+BUILD SUCCESSFUL in 1m 30s
+178 actionable tasks: 26 executed, 152 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.1/userguide/configuration_cache_enabling.html

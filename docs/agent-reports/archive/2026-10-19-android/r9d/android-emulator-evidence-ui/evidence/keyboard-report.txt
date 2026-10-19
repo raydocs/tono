@@ -1,0 +1,9 @@
+Tab 1 → primary; ring pixels changed on "primary": 72 %
+Tab 2 → exit; ring pixels changed on "exit": 74 %
+Tab 3 → settings; ring pixels changed on "settings": 33 %
+Tab 4 → details; ring pixels changed on "details": 50 %
+Shift+Tab ×3, Enter → disconnect
+ACTION_CLICK "Disconnect" → disconnect
+ACTION_CLICK "Tokyo" → refreshCatalog
+ACTION_CLICK "Details" → "Video" shown: true
+ACTION_CLICK "Settings" → "Settings" shown: true

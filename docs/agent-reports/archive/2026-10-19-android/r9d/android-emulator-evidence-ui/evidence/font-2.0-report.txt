@@ -1,0 +1,1 @@
+font_scale 2.0: no text ellipsized or clipped in 8 home states, sign-in, details and settings
