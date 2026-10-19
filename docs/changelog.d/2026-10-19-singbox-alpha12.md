@@ -1,0 +1,12 @@
+## 2026-10-19 · sing-box 核心从 alpha.9 升到 alpha.12
+- 归属：ops 计划（sing-box 分阶段，不是客户发布门）；macOS 安装针、Windows 安装针与打包门、CI 的 sing-box 校验。属于 [#1684](https://github.com/raydocs/tono/issues/1684)，叠在 [#1685](https://github.com/raydocs/tono/pull/1685) 上，PR [#1686](https://github.com/raydocs/tono/pull/1686)。
+- 来源：基线 `claude/win-direct-rule-proof`（alpha.9）；分支 `claude/singbox-alpha12`；未合 main。上游 `v1.15.0-alpha.12` / `25b0d5ea3e466d246c708ac0f20d0448110e566c`（2026-10-11）。构建配方不变：Go 1.27.1、`CGO_ENABLED=0`、tags `with_gvisor,with_quic,with_utls,with_clash_api`、`-mod=readonly -trimpath`、无补丁。横幅 `1.15.0-alpha.12-tono-a12.1`。
+- 缺陷修复：无。
+- 新增/优化：无客户可见的新功能，只换核心。alpha.9 到 alpha.12 之间与 Tono 相关的上游变化：sing-tun 升到 `v0.9.7-0.20261009022811-5c2edb183cc9`（Windows TUN 和 kernelports 端口池，取代 `reservation_windows.go`）；hysteria2 去掉 `UDPFragmentDefault`，修复零 UDP 校验和（`a0d775ea`），并加了协议输入校验（`52f9bad0`、`2993177e`）；修复缓冲写缓存文件后的 FakeIP 存储一致性（`b1dbabc4`）；DNS 服务器变化时重置网络（`78d44d52`）；修复 tun 在没有 `auto_route` 时 DNS 模式不一致（`194ebd18`）。路由规则 `String()` 与 Clash `/rules` 代码在 alpha.9 和 alpha.12 之间没有差异，所以没有改行为代码。
+- 工程与测试：新增 `tooling/scripts/sing-box/candidates/v1.15.0-alpha.12.json`（`go.mod`/`go.sum` 原始字节 SHA-256 `a63e52e2d5a48befdaeee61a15a556404e5a82677bc412fe2ae181a5fd63f8c2` / `3ff3e2f3b13951037b1d4109e7f32500943c232aa959bb96b7a757ffcd810cb8`）；三个清单来自托管 CI 的 `certify.py build`（[run 39201733821](https://github.com/raydocs/tono/actions/runs/39201733821)），按字节提交到 `manifests/alpha12/`，不是本机构建。所有 alpha.9 针脚（准备脚本、Windows 摘要门、安装器、打包门、测试、CI）和只对已固定版本成立的提示文字改到 alpha.12。`sing-box-alpha9-check.yml` 保留文件名，内容检查 alpha.12 的 linux 重建、与已提交清单 `cmp`，再用 `clash_rules.py check` 重放 `/rules`。连接基准的 stock 客户端也换到 alpha.12 tarball（SHA-256 `b107528ec7d989333d986573c097d840b9ef1afa9bb177f8eb03e0767f370514`）。alpha.9 的候选、清单和 `/rules` 夹具保留为历史记录。
+- 验证：见下方摘要（二进制和清单 SHA-256）。本机只跑了 Python 与 Node 测试，没有编核心、没有 cargo、没有 xcodebuild。
+  - darwin-arm64：二进制 `a4e886fde02f76f2c7ed12d1d00bb6fe50346475e73a1d1a815952279319f3f5`，清单 `2448557fedbd7a59a8efffc9d5caf5e00815edac14f1042ef942e8b6d3c080cb`。
+  - windows-amd64-v2：二进制 `4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7`，清单 `16620ed7f66e99873f603939eb17b3a3cdda08600fca1a4f98c99fb4e4a9cdf2`。
+  - linux-amd64-v2（仅离线校验）：二进制 `0106597a0e3a4ae2ecaaf1105b8109bc33ec9d7779a28143304172f40ec5ca19`，清单 `e6783fc0fb635f2d4cb7e413f3754c31fa9589c2bb88a4dc90e2575d5e5f13b2`。
+- 候选/发布：仅源码，无新候选。Windows 安装器、打包门和 workflow 只认新的 Windows 摘要，所以旧候选包不能再通过这些门。
+- 剩余限制：macOS PF 与 Windows WFP 的真机认证没做。hysteria2 的行为变化（去掉分片默认值、零校验和修复、输入校验）需要真机和真实节点测试，不能凭 CI 声称没有回归。

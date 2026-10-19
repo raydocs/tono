@@ -39,6 +39,6 @@ sh "$repo/tooling/scripts/build-sing-box.sh" verify \
   --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.12.json" \
   --go "$work/go/bin/go" --target darwin-arm64 \
   --binary "$work/darwin/sing-box" --manifest "$work/darwin/manifest.json" \
-  --manifest-sha256 4932227756b774f2132f272878d554574584c7ebb69454c3c3ae44ccd1e1a40c
-echo "ab0187a774e2515e7e6761e23ece0b656818cb4c31c983070b3fd023db172258  $work/darwin/sing-box" | sha256sum -c -
+  --manifest-sha256 2448557fedbd7a59a8efffc9d5caf5e00815edac14f1042ef942e8b6d3c080cb
+echo "a4e886fde02f76f2c7ed12d1d00bb6fe50346475e73a1d1a815952279319f3f5  $work/darwin/sing-box" | sha256sum -c -
 install -m 755 "$work/darwin/sing-box" "$repo/apps/macos/Tono/Resources/sing-box"

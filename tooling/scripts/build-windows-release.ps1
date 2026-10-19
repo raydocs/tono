@@ -70,7 +70,7 @@ if (-not (Test-Path -LiteralPath $singBoxPath -PathType Leaf)) {
     throw "Pinned sing-box sidecar is missing: $singBoxPath"
 }
 $singBoxSha256 = (Get-FileHash -LiteralPath $singBoxPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$expectedSingBox = 'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
+$expectedSingBox = '4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7'
 if ($singBoxSha256 -ne $expectedSingBox) {
     throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.12 digest $expectedSingBox"
 }

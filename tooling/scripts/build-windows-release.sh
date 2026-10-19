@@ -46,7 +46,7 @@ echo "pinning core digest for the Service: $TONO_CORE_SHA256"
 printf '%s\n' "$TONO_CORE_SHA256" > "$app_root/src-tauri/resources/core-sha256.txt"
 
 sing_box_sidecar="$app_root/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe"
-expected_sing_box="b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027"
+expected_sing_box="4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7"
 if [[ ! -f $sing_box_sidecar ]]; then
   echo "sing-box sidecar missing, cannot pin alpha.12: $sing_box_sidecar" >&2
   exit 1

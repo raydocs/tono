@@ -822,7 +822,7 @@ const SING_BOX_BINARY_NAME: &str = "sing-box.exe";
 
 /// Windows sing-box v1.15.0-alpha.12-tono-a12.1. The only digest this installer will publish.
 const SING_BOX_ALPHA9_SHA256: &str =
-    "b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027";
+    "4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7";
 
 fn admit_sing_box_pin(pin: Option<&str>) -> Result<Option<[u8; 32]>, Error> {
     let Some(value) = pin.map(str::trim).filter(|value| !value.is_empty()) else {

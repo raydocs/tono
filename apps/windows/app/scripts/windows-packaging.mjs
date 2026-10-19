@@ -39,7 +39,7 @@ export const STABLE_EXTERNAL_BINS = Object.freeze([
  * A different digest is not this product's core.
  */
 export const WINDOWS_SING_BOX_SHA256 =
-  'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
+  '4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7'
 
 export const FORBIDDEN_PAYLOAD_NAME_PATTERNS = Object.freeze([
   /verge-mihomo/i,

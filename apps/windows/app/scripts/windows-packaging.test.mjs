@@ -1083,7 +1083,7 @@ test('Windows release stops when a native preflight command fails', () => {
   )
   assert.match(serviceBlock, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
   assert.match(serviceBlock, /\$env:TONO_SING_BOX_SHA256 = \$singBoxSha256/)
-  assert.match(serviceBlock, /b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027/)
+  assert.match(serviceBlock, /4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7/)
   assert.match(serviceBlock, /GITHUB_ENV/)
   assert.match(serviceBlock, /core-sha256\.txt/)
   assert.match(serviceBlock, /tono-service\.exe/)
