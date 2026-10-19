@@ -43,7 +43,8 @@ struct SettingsView: View {
                             .padding(.top, 8)
                         } label: {
                             Text(L.t("routing_scope_title")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
-                                .frame(minHeight: 44, alignment: .leading)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
                         .tint(TonoColor.textSecondary)
                         .accessibilityIdentifier("scopeDisclosure")
@@ -74,7 +75,8 @@ struct SettingsView: View {
                             .padding(.top, 8)
                         } label: {
                             Text(L.t("system_how_title")).tonoFont(15, .medium, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
-                                .frame(minHeight: 44, alignment: .leading)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
                         .tint(TonoColor.textSecondary)
                         Text(L.t("system_limit")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
