@@ -171,6 +171,39 @@ Round 8 (after the round-7 blind reviews, `docs/agent-reports/2026-10-19-android
   working and failed connect. CI now uploads the JVM test XML (`routing/`, `mobile/build/test-results/`)
   next to the HTML, and restores animations before `perf.txt` measures frames.
 
+Round 9 (after the round-8 blind reviews, `docs/agent-reports/2026-10-19-android-r8-*` in raydocs/tono):
+- **The notification turns honest when the engine dies, not up to a minute later.** Round 8's alarm
+  left the notification saying Connected for about 57 s with no VPN network (t5, run 39184008733).
+  Now, while a tunnel is up or starting, the engine stays bound to a small service in its own process
+  (`:watch`) and hands it a binder that lives in the engine's process. When the engine's process
+  dies, the binder dies with it and the watch hears it at once; it replaces the notification (with
+  *Status unknown* if Android still lists a VPN network at that instant, then *Tono stopped · No VPN
+  network* once it is gone) and asks the tile and widget to look again. The binding keeps the watch's
+  process at the engine's priority, so it is there to hear it, and nothing depends on the app's main
+  process or an open screen. The open app does the same when it loses its binding.
+- **Backstop.** If the watch's process dies together with the engine, the alarm the engine keeps
+  re-arming still fires and starts a fresh watch process. The heartbeat is now 10 s (was 30 s) and
+  the alarm 20 s ahead (was 40 s), so with the phone awake that window is about 10–35 s; a shared
+  record now counts as stale after 30 s (was 90 s), and the widget looks again 40 s after the last
+  live status (was 100 s).
+- **Fault injection.** t5 (no app open) now allows a tunnel claim without a VPN network for at most
+  3 s after the VPN network is seen gone, sampled every 100 ms, and requires the replacement to come
+  from the watch's process (its log line and pid); the status the tile and widget read may never say
+  Connected without a VPN network. t6 repeats the fault in forced deep Doze (`dumpsys deviceidle
+  force-idle deep`, checked with `get deep` = `IDLE`) with the same 3 s limit, and with the watch
+  killed in the same instant as the engine, where the alarm must start a fresh watch process and
+  replace the notification (window measured, asserted below 60 s).
+- **Failed no longer looks like connecting.** On a failed connect the sun sets below the horizon and
+  only its ember afterglow stays; connecting keeps a rising half sun. The sea's reflection is a soft
+  column of light with uneven glints instead of a regular ladder of lines.
+- **Glass.** The rim is lit from above and fades along the sides instead of one uniform outline on
+  every pill, and a faint warm caustic runs along the bottom edge.
+- **Sign-in.** The code field takes focus when it appears, so the keyboard is up without another tap.
+  At large text sizes the sign-in screen leaves the moon out: the introduction reached its place.
+- **Checks.** The cutout check also counts unlabelled controls (it still leaves out the local-test-
+  server mark and the full-window "Close sheet" scrim), and t2 checks Details at 270° too. A missing
+  code step in the device tests now leaves a screenshot and window dump.
+
 ## Where it lives
 
 `rw8/Tono-droid` (Amp) is the source; `scripts/export-android-monorepo.sh <raydocs/tono checkout>`
@@ -283,8 +316,9 @@ internal test builds.
 - `./gradlew :android:routing:test` — catalog admission and routing policy (16 tests).
 - `./gradlew :android:mobile:testDebugUnitTest` — HTTP framing, token refresh, error mapping,
   cross-process snapshot, the engine link (death, restart, return from the background), the
-  notification watchdog, Home and accessibility contracts: 49 tests discovered, 17 of them
-  (screenshot and motion renders, opt-in with `-Ptono.screenshots`) skipped by default, so 32 run.
+  notification watchdog and engine-death replacement, Home and accessibility contracts: 51 tests
+  discovered, 17 of them (screenshot and motion renders, opt-in with `-Ptono.screenshots`) skipped
+  by default, so 34 run.
 - `scripts/routing/check-singbox-configs.sh android/routing/build/singbox-configs` — real
   `sing-box check` (pinned linux CLI, same commit) on generated configs.
 - `scripts/routing/engine-route-harness.py` — real engine, stub cloud/Home, fail-closed checks.
@@ -328,13 +362,16 @@ internal test builds.
       the app goes to the home screen and back, and must show Connected again without passing
       through *Status unknown*. This is the app in front; the 1.5 s grace was only exercised with
       animations removed, and the first frame on return is checked from the screen, not recorded.
-    - The same fault with no app open (t5, see Round 8): the notification must stop claiming a
-      tunnel within 90 s, replaced by the watchdog when Android keeps it and does not restart the
-      engine. The app's main process is alive (it hosts the test) and the phone is awake.
+    - The same fault with no app open (t5, see Round 9): the notification may claim a tunnel
+      without a VPN network for at most 3 s after the VPN network is seen gone, replaced by the
+      watch process. The app's main process is alive (it hosts the test) but takes no part.
+    - t6: the same in forced deep Doze (3 s limit), and with the watch killed together with the
+      engine (the alarm starts a fresh watch; window measured, asserted below 60 s).
     - The real app turned to landscape (t2): the code step with the on-screen keyboard up, typed
-      digits kept, the code field above the keyboard; Home and Details at 90° and Home at 270° with
-      no control under the camera cutout (Android must report a non-empty cutout; only the sheet's
-      full-window scrim is left out); Tono's consent explanation still open after turning back.
+      digits kept, the code field above the keyboard; Home and Details at 90° and at 270° with no
+      labelled node or unlabelled control under the camera cutout (Android must report a non-empty
+      cutout; the local-test-server mark and the sheet's full-window "Close sheet" scrim are left
+      out); Tono's consent explanation still open after turning back.
     - The real app's states on `MainActivity` (t3): idle, connecting, Connected, partly working
       (the stand-in Home exit down → *Home didn't answer*, VPN still up) and failed (catalog
       unavailable → no VPN, Retry). The sky's luminance is asserted per state, and the run is
@@ -366,12 +403,15 @@ internal test builds.
   - The tile, widget and notifications have only been seen signed out (real) or with fixture states.
 - Landscape on a phone; the emulator checks are above (a fixture host in l3, the real app in t2).
 - The widget redraws when the engine publishes, when the open app sees the engine die, or on its
-  own check, an inexact non-waking alarm set 100 s after the last live status. That is not a strict
-  bound: Android may run it later, and not before the phone is next awake.
-- The notification watchdog in the true background: t5 kills the engine with no app screen open,
-  but the app's main process is alive (it hosts the test) and the phone is awake. With the main
-  process gone, the alarm has to start it; under Doze or app standby restrictions the alarm runs
-  later. Neither is exercised on a device; the 10–70 s figure assumes an awake phone.
+  own check, an inexact non-waking alarm set 40 s after the last live status. That is not a strict
+  bound: Android may run it later, and not before the phone is next awake. A widget placed on a
+  home screen while the engine dies has not been run on a device; t5/t6 check the status it reads.
+- The engine-death replacement on devices: the watch's binder-death path is exercised awake and in
+  forced deep Doze on the emulator, with the app's main process alive (it hosts the tests, though it
+  plays no part). When the watch dies together with the engine, only the alarm remains: about
+  10–35 s with the phone awake, later under Doze, app standby buckets or OEM background limits
+  (only the awake case is exercised). Real phones, OEM process killers and the screen-off-then-on
+  moment are not exercised.
 - Real hardware. The CI emulator renders in software (SwiftShader/ANGLE, about 5 fps under the animated
   scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured. The blur
   itself does render there (stripes behind glass drop to 0.1 %), but its look on a phone panel has

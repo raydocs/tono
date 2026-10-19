@@ -8,10 +8,11 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import com.raydocs.tono.mobile.engine.EngineSnapshot
-import com.raydocs.tono.mobile.engine.TonoNotifications
 import com.raydocs.tono.mobile.engine.TonoVpnService
 import com.raydocs.tono.mobile.ipc.ITonoEngine
 import com.raydocs.tono.mobile.ipc.ITonoEngineListener
+import com.raydocs.tono.mobile.surface.NotificationWatchdog
+import com.raydocs.tono.mobile.surface.PublicStatusStore
 import com.raydocs.tono.mobile.surface.SystemSurfaces
 import com.raydocs.tono.routing.Json
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,8 +92,10 @@ class EngineClient(private val context: Context) {
             // after Android has had time to drop the dead tunnel's VPN network.
             SystemSurfaces.refresh(context)
             main.postDelayed({ SystemSurfaces.refresh(context) }, 2_000)
-            // Android can leave the dead engine's notification up, still saying Connected.
-            runCatching { TonoNotifications.replaceAfterEngineLoss(context) }
+            // Android can leave the dead engine's notification up, still saying Connected (the watch
+            // process does the same; whichever runs first, both say the same).
+            runCatching { NotificationWatchdog.engineDied(context, PublicStatusStore.vpnPresent(context)) }
+            main.postDelayed({ runCatching { NotificationWatchdog.confirmStopped(context, PublicStatusStore.vpnPresent(context)) } }, 2_000)
             main.removeCallbacks(revive)
             main.postDelayed(revive, 3_000)
         }

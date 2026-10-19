@@ -14,6 +14,7 @@ import com.raydocs.tono.mobile.ipc.ITonoEngine
 import com.raydocs.tono.mobile.ipc.ITonoEngineListener
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -62,8 +63,8 @@ class EngineClientTest {
         // The engine's ongoing notification, as its process left it.
         val nm = app.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(TonoNotifications.CHANNEL, "t", NotificationManager.IMPORTANCE_LOW))
-        nm.notify(TonoNotifications.ONGOING_ID, Notification.Builder(app, TonoNotifications.CHANNEL).setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle(app.getString(R.string.state_connected)).setOngoing(true).build())
+        val pi = android.app.PendingIntent.getActivity(app, 0, android.content.Intent(), android.app.PendingIntent.FLAG_IMMUTABLE)
+        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.ongoing(app, connected, pi, pi))
 
         connection().onServiceDisconnected(name)
         assertEquals(EngineLink.LOST, client.link.value)
@@ -71,7 +72,7 @@ class EngineClientTest {
         assertEquals(Phase.CONNECTED, client.snapshot.value?.phase)
         // Android may leave the dead engine's notification up; it must stop saying Connected.
         val title = nm.activeNotifications.single { it.id == TonoNotifications.ONGOING_ID }.notification.extras.getCharSequence(Notification.EXTRA_TITLE)
-        assertEquals(app.getString(R.string.surface_unknown), title.toString())
+        assertTrue(title.toString(), title.toString() in setOf(app.getString(R.string.surface_unknown), app.getString(R.string.notif_stopped_title)))
 
         // Commands have no binder to go to; a stop request still reaches the engine's service.
         client.command("recheck")

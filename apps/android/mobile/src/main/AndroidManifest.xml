@@ -75,9 +75,15 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/tono_widget_info" />
         </receiver>
-        <!-- Keeps the engine's notification honest after the engine's process died (alarm from the engine). -->
+        <!-- Keep the engine's notification honest after the engine's process died: the watch hears the
+             engine's binder die; the alarm (armed by the engine) is the backstop. Own small process. -->
+        <service
+            android:name=".surface.EngineWatchService"
+            android:exported="false"
+            android:process=":watch" />
         <receiver
             android:name=".surface.NotificationWatchdog$Receiver"
+            android:process=":watch"
             android:exported="false" />
     </application>
 </manifest>

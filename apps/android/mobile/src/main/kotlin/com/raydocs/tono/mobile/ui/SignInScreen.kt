@@ -45,6 +45,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -70,7 +75,9 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
     var email by rememberSaveable { mutableStateOf(login.email) }
     var code by rememberSaveable { mutableStateOf("") }
     val codeStep = login.challengeId != null
-    BackdropHost(scene = { SeaScene(SkyState.NIGHT, Modifier.fillMaxSize(), horizon = 0.44f) }, modifier = Modifier.fillMaxSize().background(TonoColors.Night)) {
+    // At large text sizes the introduction reaches the moon's place (review: the moon sat on its second line).
+    val largeText = LocalDensity.current.fontScale >= 1.5f
+    BackdropHost(scene = { SeaScene(SkyState.NIGHT, Modifier.fillMaxSize(), horizon = 0.44f, moon = !largeText) }, modifier = Modifier.fillMaxSize().background(TonoColors.Night)) {
         val card: @Composable (Modifier) -> Unit = { modifier ->
             Glass(RoundedCornerShape(28.dp), modifier.widthIn(max = 560.dp).fillMaxWidth(), tintAlpha = 0.52f) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -91,6 +98,9 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
                                 PrimaryButton(stringResource(if (login.busy) R.string.signin_sending else R.string.signin_send), { onSend(email) }, enabled = !login.busy && email.isNotBlank())
                             } else {
                                 Text(stringResource(R.string.signin_code_sent, login.email), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
+                                // The code field takes focus when it appears, so the keyboard is up without another tap.
+                                val codeFocus = remember { FocusRequester() }
+                                LaunchedEffect(Unit) { runCatching { codeFocus.requestFocus() } }
                                 OutlinedTextField(
                                     value = code,
                                     onValueChange = { v -> code = v.filter(Char::isDigit).take(6); if (code.length == 6 && !login.busy) onVerify(code) },
@@ -101,7 +111,7 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
                                     keyboardActions = KeyboardActions(onDone = { if (!login.busy) onVerify(code) }),
                                     colors = fieldColors(),
                                     textStyle = MaterialTheme.typography.headlineSmall,
-                                    modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.SmsOtpCode },
+                                    modifier = Modifier.fillMaxWidth().focusRequester(codeFocus).semantics { contentType = ContentType.SmsOtpCode },
                                 )
                                 PrimaryButton(stringResource(if (login.busy) R.string.signin_verifying else R.string.signin_verify), { onVerify(code) }, enabled = !login.busy && code.length == 6)
                                 TextButton(onClick = { code = ""; onChangeEmail() }, modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp)) {

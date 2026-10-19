@@ -67,7 +67,7 @@ data class SurfaceView(val state: SurfaceState, val status: PublicStatus?)
 
 object SurfaceRules {
     /** The engine rewrites the status at least this often while a tunnel is up or starting. */
-    const val HEARTBEAT_MS = 30_000L
+    const val HEARTBEAT_MS = 10_000L
     const val STALE_MS = 3 * HEARTBEAT_MS
 
     /**

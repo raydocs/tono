@@ -64,4 +64,24 @@ class NotificationWatchdogTest {
         // Android still has a VPN network, so the state cannot be vouched for either way.
         assertEquals(app.getString(R.string.surface_unknown), title())
     }
+
+    @Test fun engineDeathReplacesAnyClaimAtOnceAndSaysStoppedOnceTheVpnIsGone() {
+        postEngineNotification(Phase.CONNECTED)
+        // Android has not dropped the dead tunnel's VPN network yet: no claim either way.
+        assertEquals(Phase.CONNECTED, NotificationWatchdog.engineDied(app, vpnPresent = true))
+        assertEquals(app.getString(R.string.surface_unknown), title())
+        assertEquals(false, NotificationWatchdog.confirmStopped(app, vpnPresent = true))
+        assertEquals(true, NotificationWatchdog.confirmStopped(app, vpnPresent = false))
+        assertEquals(app.getString(R.string.notif_stopped_title), title())
+    }
+
+    @Test fun engineDeathLeavesARestartedEnginesNotificationAndANormalStopAlone() {
+        // A normal stop removed the engine's notification: nothing to replace.
+        assertNull(NotificationWatchdog.engineDied(app, vpnPresent = false))
+        assertEquals(0, nm.activeNotifications.count { it.id == TonoNotifications.ONGOING_ID })
+        // A restarted engine already posted its own: a late confirmation must not overwrite it.
+        postEngineNotification(Phase.CONNECTING)
+        assertEquals(false, NotificationWatchdog.confirmStopped(app, vpnPresent = false))
+        assertEquals(app.getString(R.string.state_connecting), title())
+    }
 }

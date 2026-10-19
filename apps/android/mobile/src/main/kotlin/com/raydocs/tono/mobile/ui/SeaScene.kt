@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import kotlin.math.PI
@@ -32,11 +34,12 @@ enum class SkyState { NIGHT, DAWN, RISING, DAY, DUSK_WARNING, EMBER }
 
 /**
  * Portrait adaptation of the desktop sea scene: sky, sun or moon, horizon and a glittering
- * reflection. Purely decorative (no semantics); state text lives in the UI above it.
+ * reflection. Purely decorative (no semantics); state text lives in the UI above it. [moon]: false
+ * where text could reach the moon's place (sign-in at large text sizes).
  * Only alpha/position animate; reduced motion renders the destination statically.
  */
 @Composable
-fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47f) {
+fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47f, moon: Boolean = true) {
     val reduce = LocalReduceMotion.current
     val target = when (sky) {
         SkyState.NIGHT -> 0f
@@ -56,6 +59,9 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         else -> TonoMotion.ambient
     }
     val sunRise by animateFloatAsState(target, spec, label = "sun")
+    // Failed: the sun has set (only its afterglow stays), so the frame cannot be read as a half-risen
+    // connecting sun (review: the two looked alike with a half disc on both).
+    val disc by animateFloatAsState(if (sky == SkyState.EMBER) 0f else 1f, spec, label = "disc")
     val warn by animateFloatAsState(if (sky == SkyState.DUSK_WARNING || sky == SkyState.EMBER) 1f else 0f, if (reduce) tween(0) else TonoMotion.ambient, label = "warn")
     // Reduced motion runs no infinite animation at all (also saves battery); values stay at rest.
     val still = remember { mutableFloatStateOf(0f) }
@@ -102,11 +108,16 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
                 )
                 val core = lerp(TonoColors.SunCore, Color(0xFFFFC08A), warn)
                 val edge = lerp(TonoColors.SunEdge, TonoColors.Ember, warn)
-                drawCircle(Brush.verticalGradient(listOf(core, TonoColors.SunMid, edge), startY = sunY - sunR, endY = sunY + sunR), radius = sunR, center = Offset(sunX, sunY))
+                // Setting below the horizon as well as fading, as a real sunset does.
+                val discY = sunY + (1f - disc) * sunR * 1.1f
+                if (disc > 0.01f) drawCircle(
+                    Brush.verticalGradient(listOf(core, TonoColors.SunMid, edge), startY = discY - sunR, endY = discY + sunR),
+                    radius = sunR, center = Offset(sunX, discY), alpha = disc,
+                )
             }
         }
         // Moon while disconnected (desktop night/login scenes use a crescent).
-        val moonAlpha = (1f - t * 6f).coerceIn(0f, 1f)
+        val moonAlpha = if (moon) (1f - t * 6f).coerceIn(0f, 1f) else 0f
         if (moonAlpha > 0f) crescent(Offset(size.width * 0.80f, horizonY * 0.66f), size.minDimension * 0.055f, moonAlpha)
 
         // Sea.
@@ -117,7 +128,7 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         drawLine(lerp(Color(0x33B8C4FF), Color(0x66FFD2A0), t), Offset(0f, horizonY), Offset(size.width, horizonY), strokeWidth = 1.2f)
 
         // Reflection column: horizontal glints whose drift is the only ambient motion.
-        val reflectAlpha = if (t > 0.02f) t.coerceAtMost(1f) else moonAlpha * 0.35f
+        val reflectAlpha = if (t > 0.02f) t.coerceAtMost(1f) * (0.35f + 0.65f * disc) else moonAlpha * 0.35f
         val reflectX = if (t > 0.02f) sunX else size.width * 0.80f
         val reflectColor = if (t > 0.02f) lerp(TonoColors.SunMid, TonoColors.Ember, warn) else TonoColors.Moon
         reflection(reflectX, horizonY, reflectAlpha, reflectColor, if (reduce) 0f else drift, sunR)
@@ -136,17 +147,34 @@ private fun DrawScope.crescent(center: Offset, r: Float, alpha: Float) {
 private fun DrawScope.reflection(x: Float, horizonY: Float, alpha: Float, color: Color, drift: Float, sunR: Float) {
     if (alpha <= 0f) return
     val depth = size.height - horizonY
-    val rows = 46
+    // A soft column of light under the sun first, so the glints read as light on water, not a ladder.
+    scale(scaleX = 0.42f, scaleY = 1f, pivot = Offset(x, horizonY)) {
+        drawCircle(
+            Brush.radialGradient(listOf(color.copy(alpha = 0.20f * alpha), Color.Transparent), Offset(x, horizonY), depth * 0.55f),
+            radius = depth * 0.55f, center = Offset(x, horizonY), blendMode = BlendMode.Screen,
+        )
+    }
+    val rows = 58
+    val tau = 2 * PI.toFloat()
     for (i in 0 until rows) {
         val p = i / rows.toFloat()
-        val y = horizonY + 4f + p * p * depth * 0.95f
-        val width = sunR * (0.5f + p * 2.6f) * (0.6f + 0.4f * sin((i * 1.7f + drift * 2 * PI.toFloat() * 3)).let { it * it })
-        val offset = sin((i * 2.3f + drift * 2 * PI.toFloat() * 5)) * sunR * 0.25f * p
-        val a = alpha * (1f - p) * (0.35f + 0.5f * ((i * 37) % 11) / 11f)
-        drawLine(
-            color.copy(alpha = a.coerceIn(0f, 1f)),
-            Offset(x - width / 2 + offset, y), Offset(x + width / 2 + offset, y),
-            strokeWidth = 1.5f + p * 2.5f, blendMode = BlendMode.Screen,
-        )
+        val y = horizonY + 3f + p * p * depth * 0.95f
+        val span = sunR * (0.45f + p * 2.8f)
+        val sway = sin(i * 2.3f + drift * tau * 5) * sunR * 0.22f * p
+        // Each row breaks into a few glints of uneven length (fixed per row, so it does not flicker).
+        val pieces = 2 + (i * 7) % 3
+        for (k in 0 until pieces) {
+            val h = ((i * 131 + k * 71) % 97) / 97f
+            if (h < 0.18f && k > 0) continue
+            val centre = -0.5f + (k + 0.5f) / pieces + (h - 0.5f) * 0.18f
+            val len = span / pieces * (0.35f + 0.65f * h) * (0.7f + 0.3f * sin(i * 1.7f + k + drift * tau * 3).let { it * it })
+            val cx = x + sway + centre * span
+            val a = alpha * (1f - p) * (1f - p * 0.3f) * (0.25f + 0.6f * h)
+            drawLine(
+                color.copy(alpha = a.coerceIn(0f, 1f)),
+                Offset(cx - len / 2, y), Offset(cx + len / 2, y),
+                strokeWidth = (1.2f + p * 2.4f) * (0.7f + 0.6f * h), cap = StrokeCap.Round, blendMode = BlendMode.Screen,
+            )
+        }
     }
 }

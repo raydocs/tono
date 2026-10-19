@@ -32,6 +32,7 @@ object SystemSurfaces {
         last = next
         // Pushed back on every write while a tunnel is up or starting; fires only if the engine stops writing.
         runCatching { NotificationWatchdog.arm(context, live = s.phase in TUNNEL_PHASES) }
+        runCatching { EngineWatch.keep(context, live = s.phase in TUNNEL_PHASES) }
         val wasStale = previous != null && nowMs - previous.updatedAtMs > SurfaceRules.STALE_MS
         if (changed || wasStale) refresh(context)
     }

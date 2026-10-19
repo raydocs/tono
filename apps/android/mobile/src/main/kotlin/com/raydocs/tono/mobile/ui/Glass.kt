@@ -21,7 +21,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RadialGradientShader
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -60,7 +64,8 @@ fun BackdropHost(scene: @Composable () -> Unit, modifier: Modifier = Modifier, c
 
 /**
  * Tono glass: blurred backdrop (API 31+, RenderEffect), a smoked tint that keeps text at AA
- * contrast, a top-lit specular rim and a faint inner sheen. Below API 31 there is no blur, so the
+ * contrast, a rim lit from above that fades along the sides, a faint inner sheen and a warm caustic
+ * along the bottom edge. Below API 31 there is no blur, so the
  * tint is denser rather than faking frosted glass.
  */
 @Composable
@@ -93,8 +98,24 @@ fun Glass(
                 // Top sheen and a soft lower shade give the surface a lit volume over the blurred sea;
                 // with only the tint, reviewers saw dark rimmed pills rather than glass.
                 .background(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.13f * rim), 0.45f to Color.White.copy(alpha = 0.02f * rim), 1f to Color.Black.copy(alpha = 0.12f)))
-                .border(1.dp, Brush.verticalGradient(listOf(rimColor.copy(alpha = 0.40f * rim), rimColor.copy(alpha = 0.08f * rim), rimColor.copy(alpha = 0.16f * rim))), shape),
+                // Light enters through the bottom edge, warmed by the sun behind the glass (a refracted
+                // caustic rather than a second fixed rim).
+                .background(Brush.verticalGradient(0.78f to Color.Transparent, 1f to TonoColors.SunMid.copy(alpha = 0.10f * rim)))
+                .border(1.dp, rimBrush(rimColor, rim), shape),
         )
         content()
     }
+}
+
+/**
+ * The rim catches light where the glass faces up and towards the middle and fades along the sides,
+ * so a row of small pills does not repeat one uniform outline.
+ */
+private fun rimBrush(color: Color, rim: Float) = object : ShaderBrush() {
+    override fun createShader(size: Size): Shader = RadialGradientShader(
+        center = Offset(size.width / 2, 0f),
+        radius = maxOf(size.width * 0.72f, 1f),
+        colors = listOf(color.copy(alpha = 0.46f * rim), color.copy(alpha = 0.16f * rim), color.copy(alpha = 0.07f * rim)),
+        colorStops = listOf(0f, 0.6f, 1f),
+    )
 }
