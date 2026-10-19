@@ -473,7 +473,7 @@ nonisolated struct HelperManager {
             return nil
         }
         if envelope.protectedFault == true {
-            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+            LocalNetworkDevicesSync.recordHelperReportedFault()
             return true
         }
         return false
@@ -1104,7 +1104,7 @@ nonisolated struct HelperManager {
         let result = try sendRequest(method: "GET", path: "/killswitch/status")
         let reply = try requireKillSwitchSuccess(result, operation: "status")
         if (try? JSONDecoder().decode(Envelope.self, from: result.body))?.protectedFault == true {
-            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+            LocalNetworkDevicesSync.recordHelperReportedFault()
         }
         // A status query loads nothing, so it can never have flushed anything;
         // dropping the field here keeps callers from reading a stale "no" as a

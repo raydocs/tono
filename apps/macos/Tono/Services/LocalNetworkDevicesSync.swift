@@ -146,6 +146,17 @@ nonisolated enum LocalNetworkDevicesSync {
 
     static var fault: Fault? { lock.withLock { faultValue } }
 
+    /// The helper's status reports a held protected fault. An AI Home
+    /// session's fault is the AI Home one; a fault already classified as
+    /// that is kept.
+    static func recordHelperReportedFault(aiHomeSession: Bool = KillSwitchService.readAIHomeSession()) {
+        lock.withLock {
+            if case .aiHomeProtection = faultValue { return }
+            faultValue = aiHomeSession
+                ? .aiHomeProtection("reported by the helper") : .helper("reported by the helper")
+        }
+    }
+
     /// The held fault belongs to AI Home, not to the local network setting.
     static var faultIsAIHomeProtection: Bool {
         if case .aiHomeProtection = fault { return true }

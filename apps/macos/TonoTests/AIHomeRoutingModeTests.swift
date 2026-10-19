@@ -10,6 +10,7 @@ final class AIHomeRoutingModeTests: XCTestCase {
     private var savedSession = KillSwitchService.readAIHomeSession
     private var savedReader = LocalNetworkDevicesSync.readStoredSetting
     private var savedKey: Any?
+    private var savedStrict: Any?
 
     override func setUp() {
         super.setUp()
@@ -18,6 +19,8 @@ final class AIHomeRoutingModeTests: XCTestCase {
         savedSession = KillSwitchService.readAIHomeSession
         savedReader = LocalNetworkDevicesSync.readStoredSetting
         savedKey = AppProfile.defaults.object(forKey: SettingsKey.aiHomeRoutingSession)
+        savedStrict = AppProfile.defaults.object(forKey: "strictRoutingSessionIntent")
+        AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
         LocalNetworkDevicesSync.readStoredSetting = { false }
         LocalNetworkDevicesSync.resetForTesting()
     }
@@ -30,6 +33,8 @@ final class AIHomeRoutingModeTests: XCTestCase {
         LocalNetworkDevicesSync.resetForTesting()
         if let savedKey { AppProfile.defaults.set(savedKey, forKey: SettingsKey.aiHomeRoutingSession) }
         else { AppProfile.defaults.removeObject(forKey: SettingsKey.aiHomeRoutingSession) }
+        if let savedStrict { AppProfile.defaults.set(savedStrict, forKey: "strictRoutingSessionIntent") }
+        else { AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent") }
         super.tearDown()
     }
 
@@ -108,6 +113,44 @@ final class AIHomeRoutingModeTests: XCTestCase {
         }
         XCTAssertEqual(LocalNetworkDevicesSync.fault, .helper("block-all installed"))
         XCTAssertFalse(LocalNetworkDevicesSync.faultIsAIHomeProtection)
+    }
+
+    @MainActor
+    func testRelaunchRestoresOneSessionModeEverywhereAndStrictWins() {
+        let production = savedSession
+        AppProfile.defaults.set(true, forKey: SettingsKey.aiHomeRoutingSession)
+        XCTAssertEqual(DesktopRoutingModeAdmission.persistedSession(), "ai-home")
+        XCTAssertEqual(ConnectionCoordinator().capturedRoutingMode, "ai-home",
+                       "reconnect admission keeps the AI Home session, not the next preference")
+        XCTAssertEqual(CoreRuntimeManager().routingMode, "ai-home")
+        XCTAssertTrue(production())
+
+        // A leftover AI Home record under strict intent: three-tier everywhere,
+        // and the arm does not ask for a scope the helper would refuse.
+        AppProfile.defaults.set(true, forKey: "strictRoutingSessionIntent")
+        XCTAssertEqual(DesktopRoutingModeAdmission.persistedSession(), "three-tier")
+        XCTAssertEqual(ConnectionCoordinator().capturedRoutingMode, "three-tier")
+        XCTAssertEqual(CoreRuntimeManager().routingMode, "three-tier")
+        XCTAssertFalse(production())
+        AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
+
+        let coordinator = ConnectionCoordinator()
+        coordinator.retireCapturedRoutingMode()
+        XCTAssertNil(coordinator.capturedRoutingMode)
+        XCTAssertNil(DesktopRoutingModeAdmission.persistedSession(), "an explicit release ends the AI Home record")
+        XCTAssertFalse(production())
+    }
+
+    func testHelperReportedFaultKeepsTheAIHomeClassification() {
+        LocalNetworkDevicesSync.recordHelperReportedFault(aiHomeSession: true)
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .aiHomeProtection("reported by the helper"))
+        LocalNetworkDevicesSync.recordFault(.aiHomeProtection("block-all installed"))
+        LocalNetworkDevicesSync.recordHelperReportedFault(aiHomeSession: false)
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .aiHomeProtection("block-all installed"),
+                       "a status poll does not turn the AI Home fault back into a LAN fault")
+        LocalNetworkDevicesSync.resetForTesting()
+        LocalNetworkDevicesSync.recordHelperReportedFault(aiHomeSession: false)
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .helper("reported by the helper"))
     }
 
     @MainActor

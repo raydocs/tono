@@ -14,6 +14,14 @@ enum DesktopRoutingModeAdmission {
     static func requireAvailable(_ persisted: Any?) throws {
         _ = try capture(persisted)
     }
+    /// The session mode saved for relaunch and recovery; nil when none is
+    /// held. Strict intent wins over a leftover AI Home record, as it does in
+    /// the helper, so the runtime, the coordinator and the arm agree.
+    nonisolated static func persistedSession() -> String? {
+        if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") { return "three-tier" }
+        if AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession) { return "ai-home" }
+        return nil
+    }
     /// The owned graph a captured mode compiles; nil for Stable.
     static func ownedGraph(_ mode: String) -> ThreeTierRoutingContract.Variant? {
         switch mode {
@@ -185,8 +193,7 @@ final class CoreRuntimeManager {
     private(set) var runtimeConfigSHA256: String?
     private let configWriter = RuntimeConfigWriter()
     private let fakeIPRotation = SingBoxFakeIPRotation()
-    private(set) var routingMode = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") ? "three-tier"
-        : AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession) ? "ai-home" : "stable"
+    private(set) var routingMode = DesktopRoutingModeAdmission.persistedSession() ?? "stable"
     private var routingInterface: String?
 
     func captureRoutingMode(_ mode: String, physicalInterface: String?) throws {

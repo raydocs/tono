@@ -11,8 +11,7 @@ final class ConnectionCoordinator {
     var connectAttemptID: UUID?
     /// Session intent survives automatic teardown/recovery, including failures
     /// before the runtime is built. Only an explicit release ends this choice.
-    var capturedRoutingMode: String? = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
-        ? "three-tier" : nil
+    var capturedRoutingMode: String? = DesktopRoutingModeAdmission.persistedSession()
     var protectionOperationGeneration: UInt64 = 0
     private(set) var disconnectSequence: Task<Void, Never>?
     private var disconnectRequestID = 0
@@ -70,8 +69,16 @@ final class ConnectionCoordinator {
     /// internet. Nothing is awaited: the release service ends the old
     /// writers, and the earlier session's late helper requests carry its
     /// generation. Teardowns still queued cannot publish over the result.
-    func beginPreemptiveRelease() {
+    /// An explicit release ends the session's mode. The AI Home record goes
+    /// with it: a later arm is a new connect's, which captures again. Strict
+    /// intent stays until Restore internet is confirmed.
+    func retireCapturedRoutingMode() {
         capturedRoutingMode = nil
+        AppProfile.defaults.removeObject(forKey: SettingsKey.aiHomeRoutingSession)
+    }
+
+    func beginPreemptiveRelease() {
+        retireCapturedRoutingMode()
         bumpGeneration()
         cancelConnectionTasks()
         cancelReconnectTasks()
@@ -125,7 +132,7 @@ final class ConnectionCoordinator {
         disconnectRequestID &+= 1
         let requestID = disconnectRequestID
         let disposition = releaseDisposition ?? (releaseIntent ? .explicit : .preserve)
-        if disposition == .explicit { capturedRoutingMode = nil }
+        if disposition == .explicit { retireCapturedRoutingMode() }
         if disposition == .explicit { explicitReleaseDominatesQuit = true }
         disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence

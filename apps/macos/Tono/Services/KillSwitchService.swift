@@ -74,7 +74,7 @@ nonisolated enum KillSwitchService {
     /// Whether this arm belongs to an AI Home session (decision 130). Tests
     /// replace it.
     static var readAIHomeSession: () -> Bool = {
-        AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession)
+        DesktopRoutingModeAdmission.persistedSession() == "ai-home"
     }
 
     /// Helper IPC boundary of `arm`. Production delivers the prepared

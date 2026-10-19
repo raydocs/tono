@@ -21,3 +21,10 @@
   记为单独的 AI 家宽保护故障，同样保持连接并等用户操作，提示「Tono 无法应用 AI 家宽保护，因此 AI 流量保持拦截」。
 - 测试：两个旧测试文件（`OptionalPolicyTests`、`PinRefreshKeepSessionTests`）的 arm 回复补上 `aiHomeScoped` 字段，修复编译；
   新增 AI 家宽故障归类测试。
+
+2026-10-19 续（Codex 审查 PR3：approve-with-fixes，三项 minor）：
+- 会话模式统一由 `DesktopRoutingModeAdmission.persistedSession()` 读取（严格意图优先，其次 AI 家宽记录）。runtime、重连 coordinator
+  与 arm 共用这一份，重启 App 后自动重连保留原 AI 家宽会话，不再改读新偏好；残留的 AI 家宽记录在严格意图下不再让 arm 要求 AI 范围。
+- 显式释放（断开并恢复网络、预先恢复网络）时一并清除 AI 家宽会话记录（`retireCapturedRoutingMode`）；严格意图仍保留到恢复确认。
+- helper 状态查询报告受保护故障时，AI 家宽会话记为 AI 家宽保护故障，已归类的 AI 家宽故障不会被改回局域网故障（`recordHelperReportedFault`）。
+- 测试：重启恢复与严格优先、显式释放清除记录、状态查询保持故障归类。
