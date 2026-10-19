@@ -218,7 +218,8 @@ struct SettingsView: View {
     /// AI Home routes and passes the LAN whatever the setting says.
     private var aiHomeLANAlwaysOn: Bool {
         (desktopRoutingMode == "ai-home" && appState.managedCatalogRouting?.homeSocks5 != nil)
-            || appState.coreRuntime.routingMode == "ai-home"
+            || (appState.coreRuntime.routingMode == "ai-home"
+                && appState.connectionCoordinator.capturedRoutingMode == "ai-home")
     }
 
     private var preferencesCard: some View {

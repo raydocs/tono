@@ -16,12 +16,17 @@ enum DesktopRoutingModeAdmission {
         _ = try capture(persisted)
     }
     /// The session mode saved for relaunch and recovery; nil when none is
-    /// held. Strict intent wins over a leftover AI Home record, as it does in
-    /// the helper, so the runtime, the coordinator and the arm agree.
+    /// held. Strict intent wins over a leftover record, as it does in the
+    /// helper, so the runtime, the coordinator and the arm agree. A session
+    /// armed by a build before the record existed ran Stable, then the only
+    /// default, and keeps it.
     nonisolated static func persistedSession() -> String? {
         if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") { return "three-tier" }
-        if AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession) { return "ai-home" }
-        return nil
+        if let mode = AppProfile.defaults.string(forKey: SettingsKey.routingSession),
+           SettingsKey.desktopRoutingModeOptions.contains(mode) {
+            return mode
+        }
+        return KillSwitchService.isArmed ? "stable" : nil
     }
     /// AI Home needs the account's Home line. Without one the session runs
     /// Stable, which is what such an account had before AI Home existed.
@@ -215,7 +220,7 @@ final class CoreRuntimeManager {
         }
         routingMode = mode
         routingInterface = physicalInterface
-        AppProfile.defaults.set(mode == "ai-home", forKey: SettingsKey.aiHomeRoutingSession)
+        AppProfile.defaults.set(mode, forKey: SettingsKey.routingSession)
     }
 
     /// Config directory for the owned sing-box runtime.
