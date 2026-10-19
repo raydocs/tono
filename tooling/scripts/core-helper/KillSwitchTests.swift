@@ -2609,13 +2609,30 @@ extension KillSwitchManager {
         check("widening-tightening-wiring", tightening.unconfirmed
             && !failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .rejected).unconfirmed
             && failedArmTightening(localNetwork: true, next: whole, previous: whole, load: .notIssued)
-                == (true, "Allow local network devices off"))
+                == (true, "Allow local network devices off", false))
         let widened = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
                                 tighteningUnconfirmed: tightening.unconfirmed, faultSubject: tightening.subject,
                                 faultHeld: &fault, release: {}, installStricterBlock: { stricterInstalled = true }, persist: { nil })
         check("widening-failure-installs-stricter-block", stricterInstalled && fault
             && (widened.error as? HelperFailure)?.code == localNetworkFaultCode
             && (widened.error as? HelperFailure)?.message.hasPrefix("Could not apply AI Home protection:") == true)
+        // A retry with the LAN baseline unknown is both a LAN tightening and
+        // a widening: the widening's subject, and so the AI hold, wins.
+        check("widening-wins-over-lan-tightening",
+              failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown)
+                == (true, aiHomeFaultSubject, true))
+        let retry = failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown)
+        var retryHeld = 0
+        var retryFault = false
+        let retried = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
+                                tighteningUnconfirmed: retry.unconfirmed, faultSubject: retry.subject, faultHeld: &retryFault,
+                                release: {}, installStricterBlock: {
+                                    try installTighteningBarrier(holdingAI: retry.holdsAI,
+                                                                 install: { throw HelperFailure.system("pf") },
+                                                                 applyAIHold: { retryHeld += 1 })
+                                }, persist: { nil })
+        check("lan-and-widening-stop-core-holds-ai", retryHeld == 1 && retryFault
+            && ((retried.error as? HelperFailure)?.message ?? "").contains("other traffic may not be blocked"))
         // When the stricter block cannot be installed either, the AI hold is
         // applied and the message does not claim the block.
         struct InstallFailed: Error {}

@@ -580,7 +580,7 @@ final class KillSwitchManager {
                 faultHeld: &faultHeld,
                 installStricterBlock: {
                     try Self.installTighteningBarrier(
-                        holdingAI: tightening.subject == Self.aiHomeFaultSubject,
+                        holdingAI: tightening.holdsAI,
                         install: { try Self.installEmergencyBlock(allowedUID: uid) }
                     )
                 }
@@ -1030,18 +1030,19 @@ final class KillSwitchManager {
 
     /// The tightening `arm` hands `failedArm`: a failed LAN tightening, or a
     /// switch to AI Home whose load may have committed, and what the fault
-    /// message names.
+    /// message names. A widening wins when both hold (a retry after a failed
+    /// widening leaves the LAN baseline unknown): its residue is the AI-only
+    /// ruleset, which needs the AI hold and the honest message.
     static func failedArmTightening(
         localNetwork: Bool,
         next: KillSwitchState,
         previous: KillSwitchState?,
         load: KernelLoadOutcome
-    ) -> (unconfirmed: Bool, subject: String) {
-        if localNetwork { return (true, "Allow local network devices off") }
+    ) -> (unconfirmed: Bool, subject: String, holdsAI: Bool) {
         if aiHomeWideningMayBeLoaded(next: next, previous: previous, load: load) {
-            return (true, aiHomeFaultSubject)
+            return (true, aiHomeFaultSubject, true)
         }
-        return (false, "Allow local network devices off")
+        return (localNetwork, "Allow local network devices off", false)
     }
 
     static let aiHomeFaultSubject = "AI Home protection"
