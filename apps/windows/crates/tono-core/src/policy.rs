@@ -166,9 +166,6 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "zhimg.com",
     "goofish.com",
     "1688.com",
-    "10086.cn",
-    "cmecloud.cn",
-    "miit.gov.cn",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac

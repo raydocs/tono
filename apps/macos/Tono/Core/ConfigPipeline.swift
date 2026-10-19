@@ -169,9 +169,6 @@ nonisolated struct ConfigPipeline {
             DirectDomainSuffix(host: "zhimg.com", ports: [80, 443]),
             DirectDomainSuffix(host: "goofish.com", ports: [80, 443]),
             DirectDomainSuffix(host: "1688.com", ports: [80, 443]),
-            DirectDomainSuffix(host: "10086.cn", ports: [80, 443]),
-            DirectDomainSuffix(host: "cmecloud.cn", ports: [80, 443]),
-            DirectDomainSuffix(host: "miit.gov.cn", ports: [80, 443]),
         ]
 
         var effectiveWebDomainSuffixes: [DirectDomainSuffix] {
