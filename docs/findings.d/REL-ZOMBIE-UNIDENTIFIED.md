@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| REL-ZOMBIE-UNIDENTIFIED | macOS 恢复互联网的进程检查把未回收的僵尸进程读成 unknown，并把本机任何一个可执行文件被删除/替换的进程当成「无法识别」，标记全部组件 busy，之后连接一直被拒 | in-PR | 待开 | 高·实机 | root 进程、平台二进制、以及读不到用户 id 或签名状态的进程仍按无法识别处理；修复前已卡住的机器仍要再点一次「恢复正常网络」 |
+| REL-ZOMBIE-UNIDENTIFIED | macOS 恢复互联网的进程检查把未回收的僵尸进程读成 unknown，并把本机任何一个可执行文件被删除/替换的进程当成「无法识别」，标记全部组件 busy，之后连接一直被拒 | in-PR | [#1691](https://github.com/raydocs/tono/pull/1691) | 高·实机 | root 进程、平台二进制、以及读不到用户 id 或签名状态的进程仍按无法识别处理；修复前已卡住的机器仍要再点一次「恢复正常网络」 |
 
 一位客户的实机（macOS 26.6.2，0.0.77 build 78）：9 个僵尸进程与 17 个可执行文件已被替换的存活进程，连接在「准备安全组件」被拒。
 僵尸：`ReleaseProcessTable.state` 用 `PROC_PIDTBSDINFO` arg=0，XNU `proc_pidinfo` 只在 arg 非零时回落到 `proc_find_zombref`，
