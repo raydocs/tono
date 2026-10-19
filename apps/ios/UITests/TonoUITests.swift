@@ -808,6 +808,8 @@ final class TonoUITests: XCTestCase {
         var offscreen: [(String, XCUIElement)] = []
         var settle: [(String, XCUIElement)] = []
         var dumped = false
+        // Every flag not counted as a failure, by why, so a green audit states what it waived.
+        var waived: [String: Int] = [:]
         do {
             try app.performAccessibilityAudit { issue in
                 let element = issue.element
@@ -828,7 +830,7 @@ final class TonoUITests: XCTestCase {
                 if issue.auditType == .contrast, let element, case let (ratio, note)? = Self.decidingContrast(element) {
                     let verdict = ratio >= 4.5 ? "PASSES" : "FAILS"
                     print(line + " | measured \(note) \(verdict) WCAG AA")
-                    if ratio >= 4.5 { return true }
+                    if ratio >= 4.5 { waived["contrast re-measured at 4.5:1 or more", default: 0] += 1; return true }
                     // The audit changes the text size while it runs, so a frame read here can belong to
                     // another layout than the pixels (Details' Settings row read 1.2:1 at the place
                     // the larger text had moved it, run 39156608142). Measured again once the audit
@@ -838,10 +840,12 @@ final class TonoUITests: XCTestCase {
                 }
                 if atLargestSize, issue.auditType == .textClipped {
                     print(line + " | prediction past the largest size; see the AX5 capture")
+                    waived["text-clipped prediction past AX5", default: 0] += 1
                     return true
                 }
                 if fixedSizeWidgets, issue.auditType == .textClipped || issue.auditType == .dynamicType {
                     print(line + " | fixed-size widget card, Dynamic Type capped at xxxLarge; see the AX5 capture")
+                    waived["widget card capped at xxxLarge (\(issue.auditType == .textClipped ? "text clipped" : "dynamic type"))", default: 0] += 1
                     return true
                 }
                 print(line)
@@ -862,6 +866,7 @@ final class TonoUITests: XCTestCase {
             found.append("AUDIT \(name): audit error \(error)")
         }
         if !unattributed.isEmpty {
+            waived["unattributed, settled by the sweep below", default: 0] += unattributed.count
             let sweep = Self.sweep(app, name: name)
             print("SWEEP \(name): \(unattributed.count) unattributed flag(s); checked \(sweep.checked) texts/controls, "
                   + "\(sweep.failures.count) below 4.5:1 or under 44x44 pt")
@@ -874,7 +879,7 @@ final class TonoUITests: XCTestCase {
             let result = m.map { "after the audit: measured \($0.note) \($0.ratio >= 4.5 ? "PASSES" : "FAILS") WCAG AA" }
                 ?? "after the audit: not on screen to measure"
             print(line + " | " + result)
-            if (m?.ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
+            if (m?.ratio ?? 0) < 4.5 { found.append(line + " | " + result) } else { waived["contrast re-measured after the audit at 4.5:1 or more", default: 0] += 1 }
         }
         for (line, element) in offscreen {
             let window = app.windows.firstMatch.frame
@@ -885,8 +890,10 @@ final class TonoUITests: XCTestCase {
             let result = m.map { "measured \($0.note) \($0.ratio >= 4.5 ? "PASSES" : "FAILS") WCAG AA" }
                 ?? "could not scroll into view"
             print(line + " | " + result)
-            if (m?.ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
+            if (m?.ratio ?? 0) < 4.5 { found.append(line + " | " + result) } else { waived["contrast off screen, re-measured after scrolling", default: 0] += 1 }
         }
+        print("AUDIT \(name) waived: " + (waived.isEmpty ? "none" : waived.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }.joined(separator: ", "))
+              + "; failures \(found.count)")
         return found
     }
 
