@@ -9,6 +9,8 @@ import TonoKit
 struct SeaScene: View {
     let sky: SkyState
     var horizon: CGFloat = 0.44
+    /// Off where text scrolls over the moon's place in the sky (sign-in at accessibility sizes).
+    var moon = true
     @Environment(\.tonoReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -17,7 +19,7 @@ struct SeaScene: View {
             SeaCanvas(sunRise: sky.sunRise, warn: sky.warning ? 1 : 0, horizon: horizon,
                       drift: reduceMotion ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
                       breath: [.dawn, .rising, .reconnecting].contains(sky) && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
-                      animateStars: !reduceMotion,
+                      animateStars: !reduceMotion, moon: moon,
                       scan: sky == .reconnecting && !reduceMotion ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
         }
         .animation(reduceMotion ? nil : (sky == .day ? TonoMotion.arrival : TonoMotion.ambient), value: sky)
@@ -34,6 +36,7 @@ private struct SeaCanvas: View, Animatable {
     let drift: Double
     let breath: Double
     let animateStars: Bool
+    let moon: Bool
     /// Position (0 at the horizon … 1 at the bottom) of the light travelling down the reflection.
     var scan: Double? = nil
 
@@ -92,7 +95,7 @@ private struct SeaCanvas: View, Animatable {
 
             // Crescent moon while disconnected.
             let moonAlpha = min(max(1 - t * 3, 0), 1)
-            if moonAlpha > 0 {
+            if moon, moonAlpha > 0 {
                 let c = CGPoint(x: size.width * 0.78, y: horizonY * 0.66)
                 let r = min(size.width, size.height) * 0.055
                 ctx.fill(Path(ellipseIn: CGRect(x: c.x - r * 4, y: c.y - r * 4, width: r * 8, height: r * 8)),
@@ -117,7 +120,7 @@ private struct SeaCanvas: View, Animatable {
 
             // Reflection: horizontal glints whose drift is the only ambient motion.
             let sunUp = t > 0.02
-            let alpha = sunUp ? min(t, 1) : moonAlpha * 0.35
+            let alpha = sunUp ? min(t, 1) : moon ? moonAlpha * 0.35 : 0
             guard alpha > 0 else { return }
             let x = sunUp ? sunX : size.width * 0.78
             let color = sunUp ? mix(TonoColor.sunMid, TonoColor.ember, warn) : TonoColor.moon

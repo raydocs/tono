@@ -5,18 +5,24 @@ import SwiftUI
 /// Rows built like Details' Settings row with text at known contrast (a wide, sparse row; see
 /// `testContrastMeasureFailsLowContrastTextInASparseRow`), and two primary capsules for the local
 /// label measurement: round 11's white label over the translucent sunrise fill (must fail) and the
-/// real `ActionCapsule` while preparing (see `testLocalLabelMeasureFailsTheRound11FillAndPassesTheNewOne`).
+/// real `ActionCapsule` while preparing (see `testLocalLabelMeasureFailsTheRound11FillAndPassesTheNewOne`),
+/// on their own screen (`-TonoPreviewContrastProbeCapsules`) so the rows stay laid out as calibrated.
 struct ContrastProbe: View {
+    let capsules: Bool
+
     var body: some View {
         VStack(spacing: 16) {
-            // On the card (smokeHigh at 50% over night, about #161622) white 0.41 is 3.24:1 and white
-            // 0.49 is 4.42:1 (sRGB compositing; round 11's review recomputed them).
-            row("Probe", Color(white: 0.41), id: "probe3")
-            row("Probe", Color(white: 0.49), id: "probe4")
-            row("Probe", TonoColor.textPrimary, id: "probePrimary")
-            round11Fill.accessibilityIdentifier("probeOldFill")
-            ActionCapsule(phase: .preparing, connectedSince: nil) { _ in }
-                .accessibilityIdentifier("probeNewFill")
+            if capsules {
+                round11Fill.accessibilityIdentifier("probeOldFill")
+                ActionCapsule(phase: .preparing, connectedSince: nil) { _ in }
+                    .accessibilityIdentifier("probeNewFill")
+            } else {
+                // On the card (smokeHigh at 50% over night, about #161622) white 0.41 is 3.24:1 and
+                // white 0.49 is 4.42:1 (sRGB compositing; round 11's review recomputed them).
+                row("Probe", Color(white: 0.41), id: "probe3")
+                row("Probe", Color(white: 0.49), id: "probe4")
+                row("Probe", TonoColor.textPrimary, id: "probePrimary")
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

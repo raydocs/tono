@@ -670,7 +670,8 @@ final class TonoUITests: XCTestCase {
     /// pixels (round 11's reviews: a whole-element median is not the background on a gradient).
     /// Glyph cores are pixels within 12 of an ink in every channel; the text band is the rows that
     /// hold them; each core is compared with the mean of the non-glyph pixels in its own column
-    /// 2-5 px above and, separately, 2-5 px below the band, and the worse side counts. Returns the
+    /// 2-5 px above and, separately, 2-5 px below the band (both inside the element), and the worse
+    /// side counts. Returns the
     /// median over the cores and the share under 4.5:1; nil when no glyph core is found.
     @MainActor static func labelContrast(_ element: XCUIElement, inks: [(Int, Int, Int)]) -> (median: Double, below: Double, cores: Int)? {
         guard let cg = element.screenshot().image.cgImage else { return nil }
@@ -704,9 +705,10 @@ final class TonoUITests: XCTestCase {
         for y in top...bottom {
             for x in 0..<w where core(x, y) {
                 let l = lum(x, y)
-                let sides = [side(x, Array((top - 5)...(top - 2))), side(x, Array((bottom + 2)...(bottom + 5)))].compactMap { $0 }
-                guard !sides.isEmpty else { continue }
-                ratios.append(sides.map { (max(l, $0) + 0.05) / (min(l, $0) + 0.05) }.min()!)
+                // Both sides inside the element: a band at its edge is another element's text
+                // reaching in (a widget title's descenders over the line under it), not this label.
+                guard let above = side(x, Array((top - 5)...(top - 2))), let below = side(x, Array((bottom + 2)...(bottom + 5))) else { continue }
+                ratios.append([above, below].map { (max(l, $0) + 0.05) / (min(l, $0) + 0.05) }.min()!)
             }
         }
         guard !ratios.isEmpty else { return nil }
@@ -734,7 +736,9 @@ final class TonoUITests: XCTestCase {
     /// "Cancel" over the translucent sunrise fill must fail (both reviews measured 3.0-3.9:1 on the
     /// real capsule), and the real capsule while preparing must pass.
     @MainActor func testLocalLabelMeasureFailsTheRound11FillAndPassesTheNewOne() {
-        let app = launch("CONNECTED", ["-TonoPreviewContrastProbe"])
+        let app = launch("CONNECTED", ["-TonoPreviewContrastProbe", "-TonoPreviewContrastProbeCapsules"])
+        sleep(2)
+        save(XCUIScreen.main.screenshot(), "contrast-probe-capsules")
         for (id, passes) in [("probeOldFill", false), ("probeNewFill", true)] {
             let capsule = app.descendants(matching: .any)[id]
             XCTAssertTrue(capsule.waitForExistence(timeout: 6), id)
@@ -777,6 +781,8 @@ final class TonoUITests: XCTestCase {
     /// measurement that passes everything cannot go unnoticed.
     @MainActor func testContrastMeasureFailsLowContrastTextInASparseRow() {
         let app = launch("CONNECTED", ["-TonoPreviewContrastProbe"])
+        sleep(1)
+        save(XCUIScreen.main.screenshot(), "contrast-probe-rows")
         for (id, passes) in [("probe3", false), ("probe4", false), ("probePrimary", true)] {
             let row = app.descendants(matching: .any)[id]
             XCTAssertTrue(row.waitForExistence(timeout: 6), id)

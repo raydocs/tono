@@ -14,7 +14,9 @@ struct SignInView: View {
     var body: some View {
         ZStack {
             TonoColor.night.ignoresSafeArea()
-            SeaScene(sky: .night, horizon: 0.44)
+            // At accessibility sizes the intro scrolls up into the sky, where its subtitle crossed the
+            // bright crescent (AX5 sweep, round 12: 2.8:1 against the local background); no moon there.
+            SeaScene(sky: .night, horizon: 0.44, moon: !typeSize.isAccessibilitySize)
             if typeSize.isAccessibilitySize {
                 BottomScroll { VStack(alignment: .leading, spacing: 16) { intro; form } }
             } else {

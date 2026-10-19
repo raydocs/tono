@@ -86,6 +86,7 @@ shot "a11y-largest-text-en-details" en DEGRADED details
 shot "a11y-largest-text-en-settings" en DEGRADED settings
 shot "a11y-largest-text-en-idle" en IDLE
 shot "a11y-largest-text-en-onboarding" en SIGNED_OUT "" -TonoPreviewOnboarding
+shot "a11y-largest-text-en-signin" en SIGNED_OUT
 shot "a11y-largest-text-en-primer" en NEEDS_PERMISSION primer
 shot "a11y-largest-text-en-widgets" en CONNECTED "" -TonoPreviewWidgets
 shot "a11y-largest-text-en-widgets-routes-stopped" en CONNECTED "" -TonoPreviewWidgets -TonoPreviewWidgetsRoutes
