@@ -854,6 +854,24 @@ class LocalTunnelDeviceTest {
             if (restartedAt >= 0 && vpnDown >= 0 && vpn && phase == Phase.CONNECTED.name) { reconnectedAt = t; break }
             Thread.sleep(if (t < 15_000) 100 else 500)
         }
+        // Once a restarted engine is connected again, nothing may take its Connected away: the watch's
+        // re-post check (10 s from the death) did so in run 39202302351. Watched for 12 s more.
+        var afterReconnect = ""
+        if (reconnectedAt >= 0) {
+            var wrongFrom = -1L; var worst = 0L; var wrongTitle: String? = null
+            val until = SystemClock.elapsedRealtime() + 12_000
+            while (SystemClock.elapsedRealtime() < until) {
+                val t = SystemClock.elapsedRealtime() - killed
+                val (title, phase) = ongoingNotice()
+                val wrong = vpnUp() && PublicStatusStore.current(context).state == SurfaceState.CONNECTED && phase != Phase.CONNECTED.name
+                if (wrong && wrongFrom < 0) { wrongFrom = t; wrongTitle = title }
+                if (!wrong && wrongFrom >= 0) { worst = maxOf(worst, t - wrongFrom); wrongFrom = -1 }
+                Thread.sleep(200)
+            }
+            if (wrongFrom >= 0) worst = maxOf(worst, SystemClock.elapsedRealtime() - killed - wrongFrom)
+            afterReconnect = if (worst == 0L) "kept saying Connected" else "did not say Connected for up to ${worst}ms (\"$wrongTitle\")"
+            if (worst >= 1_000) lies += "the reconnected engine's notification $afterReconnect"
+        }
         val watchdogLog = shell("logcat -d -s TonoWatchdog:I").lines().filter { "TonoWatchdog" in it }
         note("$tag: engine killed (pids $doomed${if (withWatch) ", watch pids $watchBefore killed first" else ""}); old process gone after ${diedAt}ms; " +
             "VPN network gone after ${vpnDown}ms; notification stopped claiming a tunnel after ${honestAt}ms" +
@@ -864,6 +882,7 @@ class LocalTunnelDeviceTest {
             .forEach { note("$tag: ActivityManager: ${it.trim()}") }
         samples.forEach { note("$tag: $it") }
         if (removedByAndroid) note("$tag: Android removed the notification with the process (nothing left to replace)")
+        if (afterReconnect.isNotEmpty()) note("$tag: for 12 s after the reconnect the notification $afterReconnect")
         if (restartClaimFrom >= 0) {
             val held = (if (restartClaimEnd >= 0) restartClaimEnd else SystemClock.elapsedRealtime() - killed) - restartClaimFrom
             note("$tag: Android re-posted the dead engine's ${Phase.CONNECTED.name}/${Phase.DEGRADED.name} notification for the restarted engine, without a VPN network: seen from ${restartClaimFrom}ms, gone by ${restartClaimEnd}ms (at most ${held}ms, sampled)")

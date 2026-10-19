@@ -203,16 +203,20 @@ class DeviceEvidenceTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
                 assertNotNull("sign-in screen", find(By.text(text(R.string.signin_title)), 20_000))
+                // Each change shows from the next frame drawn after it; at 750–1200 ms a frame (run
+                // 39202302351, first system attempt) 1.5 s was about one frame, and the still pair
+                // caught the scene's last moving frame (0.23 % changed). A fixed 4 s, not a retry.
+                val settle = 4_000L
                 scale("1") // motion on while the app is running
-                Thread.sleep(1_500)
+                Thread.sleep(settle)
                 val (m1, m2) = frames(1_500)
                 val moving = diff(m1, m2)
                 scale("0") // while the app is running
-                Thread.sleep(1_500)
+                Thread.sleep(settle)
                 val (s1, s2) = frames(1_500)
                 val still = diff(s1, s2)
                 scale("1") // and back, still without a restart
-                Thread.sleep(1_500)
+                Thread.sleep(settle)
                 val (r1, r2) = frames(1_500)
                 val resumed = diff(r1, r2)
                 File(out, "real-06-motion.png").outputStream().use { m1.compress(Bitmap.CompressFormat.PNG, 100, it) }

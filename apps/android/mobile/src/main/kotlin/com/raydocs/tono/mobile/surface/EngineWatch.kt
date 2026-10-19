@@ -64,21 +64,12 @@ object EngineWatch {
  * replaced at once ([NotificationWatchdog.engineDied]), and the tile and widget are asked to look
  * again. If Android still lists a VPN network at that moment (it takes a moment to drop the dead
  * tunnel's), the replacement says "Status unknown" and turns into "Tono stopped" once it is gone.
- * For 10 s after, or until a new engine registers, a tunnel claim Android re-posts for a restarted
- * engine is replaced too.
+ * For 10 s after, or until a new engine shows it is alive, a tunnel claim Android re-posts for a
+ * restarted engine is replaced too ([RepostGuard]).
  */
 class EngineWatchService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var watched: IBinder? = null
-    /** Uptime until which a re-posted tunnel claim is replaced (see [NotificationWatchdog.restartRepost]). */
-    private var repostUntil = 0L
-    private val repostCheck = object : Runnable {
-        override fun run() {
-            if (SystemClock.uptimeMillis() > repostUntil) return
-            NotificationWatchdog.restartRepost(this@EngineWatchService)
-            main.postDelayed(this, 100)
-        }
-    }
     private val recipient = IBinder.DeathRecipient { main.post { engineDied() } }
     private val messenger = Messenger(Handler(Looper.getMainLooper()) { msg ->
         when (msg.what) {
@@ -93,7 +84,7 @@ class EngineWatchService : Service() {
     private fun watch(engine: IBinder?) {
         release()
         // An engine registered: from here its notification is its own.
-        repostUntil = 0L
+        RepostGuard.stop()
         engine ?: return
         try {
             engine.linkToDeath(recipient, 0)
@@ -115,11 +106,46 @@ class EngineWatchService : Service() {
         Log.i(NotificationWatchdog.TAG, "engine died: the watch heard its binder die (VPN network $vpn)")
         NotificationWatchdog.engineDied(this, vpn)
         // If Android restarts the engine, it first re-posts the dead engine's notification.
-        repostUntil = SystemClock.uptimeMillis() + 10_000
-        main.removeCallbacks(repostCheck)
-        main.post(repostCheck)
+        RepostGuard.start(this)
         if (vpn != false) for (delay in longArrayOf(1_000, 2_000, 4_000, 8_000)) {
             main.postDelayed({ NotificationWatchdog.confirmStopped(this, PublicStatusStore.vpnPresent(this)) }, delay)
         }
+    }
+}
+
+/**
+ * After an engine's death: replaces a tunnel claim Android re-posts for a restarted engine
+ * ([NotificationWatchdog.restartRepost]) every 100 ms, for 10 s or until a new engine shows it is
+ * alive (it registers with the watch, or writes the shared status). Process-wide, not per service
+ * instance: the engine was the watch service's only client, so Android destroys that instance when
+ * the engine dies and makes a new one for the restarted engine (run 39202302351: a per-instance
+ * check outlived its instance and replaced the restarted engine's own Connected 6 s later).
+ */
+private object RepostGuard {
+    private val main = Handler(Looper.getMainLooper())
+    private var app: Context? = null
+    private var until = 0L
+    private var diedAtMs = 0L
+    private val check = object : Runnable {
+        override fun run() {
+            val context = app ?: return
+            if (SystemClock.uptimeMillis() > until) return
+            if ((PublicStatusStore.read(context)?.updatedAtMs ?: 0L) > diedAtMs) { stop(); return }
+            NotificationWatchdog.restartRepost(context)
+            main.postDelayed(this, 100)
+        }
+    }
+
+    fun start(context: Context) {
+        app = context.applicationContext
+        diedAtMs = System.currentTimeMillis()
+        until = SystemClock.uptimeMillis() + 10_000
+        main.removeCallbacks(check)
+        main.post(check)
+    }
+
+    fun stop() {
+        until = 0L
+        main.removeCallbacks(check)
     }
 }

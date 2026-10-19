@@ -202,10 +202,14 @@ Round 9 (after the round-8 blind reviews, `docs/agent-reports/2026-10-19-android
   new process starts, before any of Tono's code runs (run 39193223160: "Connected" with no VPN
   network for about 0.2 s; run 39197246583, in Doze: 0.4–0.7 s, until the new engine's first step
   replaced it). Now the watch, having heard the death, also replaces a re-posted Connected or Partly
-  working claim (checking every 100 ms for 10 s, or until a new engine registers with it; a
-  restarted engine says Connecting first and registers before it can be connected), and the new
-  engine process still replaces any leftover claim in its first step. t5/t6 hold a re-posted claim
-  without a VPN network to under 1 s (measured up to the first sample without it). The watch now
+  working claim (checking every 100 ms for 10 s, or until a new engine shows it is alive: its first
+  shared-status write or its registration with the watch, both long before it can be connected), and
+  the new engine process still replaces any leftover claim in its first step. t5/t6 hold a re-posted
+  claim without a VPN network to under 1 s (measured up to the first sample without it), and once a
+  restarted engine is connected again its notification must say Connected for the next 12 s. That
+  last check came from run 39202302351: green, but its t6 log showed the first version of the
+  re-post check (kept per service instance; Android destroys the watch's instance when its only
+  client, the engine, dies) replacing the reconnected engine's own Connected 6 s after the death. The watch now
   logs every death it hears, also when there is nothing left to replace (run 39197246583 failed t6
   on that: Android had removed the notification itself, so the watch had nothing to replace and
   logged nothing).
@@ -214,6 +218,9 @@ Round 9 (after the round-8 blind reviews, `docs/agent-reports/2026-10-19-android
   the round's heavier reflection left the emulator's main thread none. The reflection is back to
   about the earlier stroke count (28 rows of two glints instead of 46 rows of two or three, no round
   caps, the glow without a blend mode), and the motion tests turn motion off just before closing.
+  a5 now waits 4 s (was 1.5 s) after each change of the animation setting before comparing frames:
+  at 750–1200 ms a frame, its first attempt in run 39202302351 caught the last moving frame in the
+  still pair (0.23 % of the scene changed); the retry measured 0.
 - **Failed no longer looks like connecting.** On a failed connect the sun sets below the horizon and
   only its ember afterglow stays; connecting keeps a rising half sun. The sea's reflection is a soft
   column of light (under the sun only, kept narrow: the first, wider version coincided with slower

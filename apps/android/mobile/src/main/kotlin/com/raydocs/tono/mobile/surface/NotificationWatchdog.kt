@@ -100,8 +100,9 @@ object NotificationWatchdog {
      * Between an engine's death and the next engine registering with the watch: Android re-posts a
      * crashed engine's last notification when it restarts the service, before the new process runs any
      * code (runs 39197246583: "Connected" for 0.4–0.7 s with no VPN network until [engineStarting]).
-     * Only a tunnel-up claim is replaced: a restarted engine says Connecting first and registers
-     * before it can be connected, so a Connected or Partly working claim here is the dead engine's.
+     * Only a tunnel-up claim is replaced, and only until a new engine shows it is alive (the caller
+     * stops at its first shared-status write or registration, both long before it can be connected),
+     * so a Connected or Partly working claim here is the dead engine's.
      */
     fun restartRepost(context: Context): Phase? {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return null
