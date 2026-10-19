@@ -547,7 +547,7 @@ extension AppState {
                 case .failed(let failure):
                     self.lastClassifiedFailure = failure
                     domesticOnly = await self.proveIndependentDomesticPath(
-                        enabled: capturedRoutingMode == "three-tier"
+                        enabled: capturedRoutingMode == "three-tier" || capturedRoutingMode == "ai-home"
                     )
                     try Task.checkCancellation()
                     guard generation == self.connectionCoordinator.protectionOperationGeneration else { return }
@@ -2178,7 +2178,8 @@ extension AppState {
             // died. Require protected fake-IP DNS and certificate-checked TLS,
             // never controller/IPC success, before sparing this live Core.
             let domesticAlive = await self.proveIndependentDomesticPath(
-                enabled: AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent"),
+                enabled: AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+                    || self.coreRuntime.routingMode == "ai-home",
                 probe: domesticProbe
             )
             guard !Task.isCancelled, self.isConnected else { return .stopMonitoring }

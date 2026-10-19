@@ -29,7 +29,7 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
 
     nonisolated private static func reply(echo: Bool?) -> KillSwitchService.ArmReply {
         (armed: true, wanted: true, live: true, healed: false,
-         flushedStates: false, killedHosts: 0, localNetworkDevices: echo)
+         flushedStates: false, killedHosts: 0, localNetworkDevices: echo, aiHomeScoped: nil)
     }
 
     private func armSession() throws {

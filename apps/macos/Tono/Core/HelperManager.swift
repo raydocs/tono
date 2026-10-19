@@ -42,6 +42,9 @@ nonisolated struct HelperManager {
         /// What the committed ruleset enforces for "Allow local network
         /// devices" (D7). Absent from a helper older than the setting.
         let allowLocalNetworkDevices: Bool?
+        /// Whether the committed ruleset is the AI Home scope. Absent from a
+        /// helper older than 4.52.60.
+        let aiHomeScoped: Bool?
         /// The helper holds the A29 protected fault (also after it restarted
         /// in the same boot). Absent from older helpers.
         let protectedFault: Bool?
@@ -470,7 +473,7 @@ nonisolated struct HelperManager {
             return nil
         }
         if envelope.protectedFault == true {
-            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+            LocalNetworkDevicesSync.recordHelperReportedFault()
             return true
         }
         return false
@@ -999,6 +1002,12 @@ nonisolated struct HelperManager {
         enabled ? ["allowLocalNetworkDevices": true] : [:]
     }
 
+    /// The arm request's AI Home scope, present only for an AI Home session
+    /// (helper 4.52.60). Absent means the whole-host kill switch.
+    static func aiHomeArmFields(_ scoped: Bool) -> [String: Any] {
+        scoped ? ["aiHomeScoped": true] : [:]
+    }
+
     static func armKillSwitch(
         apiHosts: [String]? = nil,
         exitNodeHints: [String]? = nil,
@@ -1013,11 +1022,13 @@ nonisolated struct HelperManager {
         reviewedBundleDirect: Bool,
         // No default either: the caller records which value the helper
         // committed (`LocalNetworkDevicesSync`).
-        allowLocalNetworkDevices: Bool
+        allowLocalNetworkDevices: Bool,
+        aiHomeScoped: Bool
     ) throws -> KillSwitchService.ArmReply {
         var object: [String: Any] = [:]
         if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
         object.merge(localNetworkDevicesArmFields(allowLocalNetworkDevices)) { _, setting in setting }
+        object.merge(aiHomeArmFields(aiHomeScoped)) { _, setting in setting }
         if let apiHosts { object["apiHosts"] = apiHosts }
         if let exitNodeHints { object["exitHints"] = exitNodeHints }
         if let tunnelInterfaces { object["tunnelInterfaces"] = tunnelInterfaces }
@@ -1052,11 +1063,11 @@ nonisolated struct HelperManager {
             object: object
         )
         let reply = try requireKillSwitchSuccess(result, operation: "arm")
-        let enforced = (try? JSONDecoder().decode(Envelope.self, from: result.body))?
-            .allowLocalNetworkDevices
+        let envelope = try? JSONDecoder().decode(Envelope.self, from: result.body)
         return (
             reply.armed, reply.wanted, reply.live, reply.healed,
-            reply.flushedStates, reply.killedHosts, enforced
+            reply.flushedStates, reply.killedHosts, envelope?.allowLocalNetworkDevices,
+            envelope?.aiHomeScoped
         )
     }
 
@@ -1093,7 +1104,7 @@ nonisolated struct HelperManager {
         let result = try sendRequest(method: "GET", path: "/killswitch/status")
         let reply = try requireKillSwitchSuccess(result, operation: "status")
         if (try? JSONDecoder().decode(Envelope.self, from: result.body))?.protectedFault == true {
-            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+            LocalNetworkDevicesSync.recordHelperReportedFault()
         }
         // A status query loads nothing, so it can never have flushed anything;
         // dropping the field here keeps callers from reading a stale "no" as a

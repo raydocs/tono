@@ -6,13 +6,29 @@ import Observation
 enum DesktopRoutingModeAdmission {
     static func capture(_ persisted: Any?) throws -> String {
         guard let persisted else { return "stable" }
-        guard let mode = persisted as? String, ["stable", "three-tier"].contains(mode) else {
+        guard let mode = persisted as? String, SettingsKey.desktopRoutingModeOptions.contains(mode) else {
             throw CoreRuntimeError.startFailed("Invalid desktopRoutingMode; connection refused.")
         }
         return mode
     }
     static func requireAvailable(_ persisted: Any?) throws {
         _ = try capture(persisted)
+    }
+    /// The session mode saved for relaunch and recovery; nil when none is
+    /// held. Strict intent wins over a leftover AI Home record, as it does in
+    /// the helper, so the runtime, the coordinator and the arm agree.
+    nonisolated static func persistedSession() -> String? {
+        if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") { return "three-tier" }
+        if AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession) { return "ai-home" }
+        return nil
+    }
+    /// The owned graph a captured mode compiles; nil for Stable.
+    static func ownedGraph(_ mode: String) -> ThreeTierRoutingContract.Variant? {
+        switch mode {
+        case "three-tier": .threeTier
+        case "ai-home": .aiHome
+        default: nil
+        }
     }
 }
 
@@ -32,11 +48,11 @@ private actor RuntimeConfigWriter {
         routingMode: String, physicalInterface: String?
     ) throws -> String {
         let document = try fakeIPRotation.document(installed: installedDigest, keeping: keepsInstalled) { slot in
-            if routingMode == "three-tier" {
+            if let variant = DesktopRoutingModeAdmission.ownedGraph(routingMode) {
                 guard let physicalInterface else { throw CoreRuntimeError.startFailed("No physical interface for strict routing.") }
                 return try ConfigPipeline.buildThreeTierSingBoxRuntime(
                     overlay: overlay, nodes: customNodes, physicalInterface: physicalInterface,
-                    fakeIPSlot: slot
+                    fakeIPSlot: slot, variant: variant
                 ).runtimeJSON
             }
             return try ConfigPipeline.buildSingBoxRuntime(
@@ -177,7 +193,7 @@ final class CoreRuntimeManager {
     private(set) var runtimeConfigSHA256: String?
     private let configWriter = RuntimeConfigWriter()
     private let fakeIPRotation = SingBoxFakeIPRotation()
-    private(set) var routingMode = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") ? "three-tier" : "stable"
+    private(set) var routingMode = DesktopRoutingModeAdmission.persistedSession() ?? "stable"
     private var routingInterface: String?
 
     func captureRoutingMode(_ mode: String, physicalInterface: String?) throws {
@@ -187,6 +203,7 @@ final class CoreRuntimeManager {
         }
         routingMode = mode
         routingInterface = physicalInterface
+        AppProfile.defaults.set(mode == "ai-home", forKey: SettingsKey.aiHomeRoutingSession)
     }
 
     /// Config directory for the owned sing-box runtime.

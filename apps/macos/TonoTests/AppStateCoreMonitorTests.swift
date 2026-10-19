@@ -359,7 +359,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
             return (
                 armed: true, wanted: true, live: true,
                 healed: false, flushedStates: false, killedHosts: 0,
-                localNetworkDevices: LocalNetworkDevicesSync.desired.allow
+                localNetworkDevices: LocalNetworkDevicesSync.desired.allow, aiHomeScoped: nil
             )
         }
         var state = AppState.CoreMonitorState()
