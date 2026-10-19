@@ -10,6 +10,8 @@ the TUN inbound becomes a loopback mixed inbound and nothing needs privileges.
 import argparse
 import json
 from pathlib import Path
+import secrets
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,43 +20,53 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / "tooling/scripts/sing-box/fixtures/alpha9-clash-rules.json"
-CONTROLLER = "127.0.0.1:29391"
 
 
-def unprivileged(runtime):
+def free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def unprivileged(runtime, controller, secret):
     runtime = json.loads(json.dumps(runtime))
     for inbound in runtime.get("inbounds", []):
         if inbound["type"] == "tun":
             tag = inbound["tag"]
             inbound.clear()
-            inbound.update({"type": "mixed", "tag": tag, "listen": "127.0.0.1", "listen_port": 29300})
+            inbound.update({"type": "mixed", "tag": tag, "listen": "127.0.0.1", "listen_port": free_port()})
         elif inbound.get("listen_port") == 53:
-            inbound["listen_port"] = 29353
+            inbound["listen_port"] = free_port()
     for outbound in runtime.get("outbounds", []):
         outbound.pop("bind_interface", None)
     runtime["route"].pop("auto_detect_interface", None)
     runtime["route"].pop("default_interface", None)
-    runtime["experimental"]["clash_api"]["external_controller"] = CONTROLLER
+    runtime["experimental"]["clash_api"]["external_controller"] = controller
+    runtime["experimental"]["clash_api"]["secret"] = secret
     return runtime
 
 
 def live_rules(binary, runtime):
-    secret = runtime["experimental"]["clash_api"].get("secret", "")
+    # A fresh port and secret per replay: a leftover core cannot answer for this one.
+    controller = f"127.0.0.1:{free_port()}"
+    secret = secrets.token_urlsafe(24)
     with tempfile.TemporaryDirectory() as work:
         config = Path(work) / "runtime.json"
-        config.write_text(json.dumps(unprivileged(runtime)))
+        config.write_text(json.dumps(unprivileged(runtime, controller, secret)))
         core = subprocess.Popen(
             [binary, "run", "-c", str(config)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
         try:
             request = urllib.request.Request(
-                f"http://{CONTROLLER}/rules", headers={"Authorization": f"Bearer {secret}"}
+                f"http://{controller}/rules", headers={"Authorization": f"Bearer {secret}"}
             )
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline and core.poll() is None:
                 try:
                     with urllib.request.urlopen(request, timeout=2) as response:
                         rules = json.loads(response.read())["rules"]
+                    if core.poll() is not None:
+                        break
                     return [{"type": r["type"], "payload": r["payload"], "proxy": r["proxy"]} for r in rules]
                 except OSError:
                     time.sleep(0.2)
