@@ -111,7 +111,8 @@ func runReleaseSelfTests() -> Bool {
     // Real kernel: a dead worker's children are found by session and ended.
     check(deadWorkerSessionIsEnded(), "dead worker session is ended before admission")
     check(unreapedZombieIsGone(), "an unreaped zombie is gone, not unknown")
-    check(deletedForeignExecutableIsIdentified(in: directory), "a deleted non-platform executable is not unidentified")
+    check(deletedExecutableIsUnidentified(asUser: true) == false, "a user's deleted non-platform executable is not unidentified")
+    check(deletedExecutableIsUnidentified(asUser: false) == true, "a root process with a deleted executable stays unidentified")
 
     // Outcome: only clean, settled, finished readback is restored.
     let clean = ReleaseReport.Component(name: "pf", readback: "restored", risk: "settled", detail: nil)
@@ -389,40 +390,62 @@ private func unreapedZombieIsGone() -> Bool {
 }
 
 /// An app updated while it runs keeps executing a file that no longer has a
-/// path. Re-signed ad hoc, the copy is not platform code, so it cannot be one
-/// of the commands a release ends and must not be reported as unidentified.
-private func deletedForeignExecutableIsIdentified(in directory: String) -> Bool {
+/// path. Copied from `/bin/sleep` and re-signed ad hoc, so it is not platform
+/// code; `asUser` runs it as nobody through sudo, otherwise it runs as root.
+/// Answers whether the release scan named it as unidentified, or nil when the
+/// setup did not hold (the copy must be alive, listed and pathless).
+private func deletedExecutableIsUnidentified(asUser: Bool) -> Bool? {
+    var template = Array("/private/tmp/tono-release-exe.XXXXXX".utf8CString)
+    guard mkdtemp(&template) != nil else { return nil }
+    let directory = String(cString: template)
+    defer { try? FileManager.default.removeItem(atPath: directory) }
     let copy = directory + "/updated-app"
-    guard (try? FileManager.default.copyItem(atPath: "/bin/sleep", toPath: copy)) != nil else { return false }
+    guard chmod(directory, 0o755) == 0,
+          (try? FileManager.default.copyItem(atPath: "/bin/sleep", toPath: copy)) != nil,
+          chmod(copy, 0o755) == 0 else { return nil }
     let signer = Process()
     signer.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
     signer.arguments = ["--force", "--sign", "-", copy]
     signer.standardOutput = FileHandle.nullDevice
     signer.standardError = FileHandle.nullDevice
-    guard (try? signer.run()) != nil else { return false }
+    guard (try? signer.run()) != nil else { return nil }
     signer.waitUntilExit()
-    guard signer.terminationStatus == 0 else { return false }
-    let argv: [UnsafeMutablePointer<CChar>?] = [strdup(copy), strdup("30"), nil]
+    guard signer.terminationStatus == 0 else { return nil }
+    let launcher = asUser ? "/usr/bin/sudo" : copy
+    let words = asUser ? ["sudo", "-n", "-u", "nobody", "--", copy, "30"] : [copy, "30"]
+    let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
     defer { argv.forEach { free($0) } }
-    var pid: pid_t = 0
-    guard posix_spawn(&pid, copy, nil, nil, argv, nil) == 0 else { return false }
-    defer {
-        kill(pid, SIGKILL)
-        var status: Int32 = 0
-        waitpid(pid, &status, 0)
+    var spawned: pid_t = 0
+    guard posix_spawn(&spawned, launcher, nil, nil, argv, nil) == 0 else { return nil }
+    // sudo runs the command as its child; find the process executing the copy.
+    var target: pid_t = 0
+    for _ in 0..<40 where target == 0 {
+        usleep(50_000)
+        target = (ReleaseProcessTable.listPIDs() ?? []).first { pid in
+            (pid == spawned || ReleaseProcessTable.parent(of: pid) == spawned)
+                && ReleaseProcessTable.path(of: pid) == copy
+        } ?? 0
     }
-    usleep(300_000)
-    guard unlink(copy) == 0, ReleaseProcessTable.path(of: pid) == nil else {
-        fputs("release deleted executable \(pid): path still readable\n", stderr)
-        return false
+    defer {
+        if target > 0 { kill(target, SIGKILL) }
+        kill(spawned, SIGKILL)
+        var status: Int32 = 0
+        waitpid(spawned, &status, 0)
+    }
+    guard target > 0, unlink(copy) == 0, ReleaseProcessTable.path(of: target) == nil,
+          case .alive(_) = ReleaseProcessTable.state(of: target),
+          ReleaseProcessTable.listPIDs()?.contains(target) == true else {
+        fputs("release deleted executable \(target): setup did not hold\n", stderr)
+        return nil
     }
     let observeOnly = ReleaseProcesses(state: { ReleaseProcessTable.state(of: $0) },
                                        groupMembers: { ReleaseProcessTable.members(session: $0, group: $1) },
                                        bootSession: { "boot" }, kill: { _ in })
     let outcome = ReleaseChildren.end(processes: observeOnly)
+    guard !outcome.failures.contains(where: { $0.contains("could not be listed") }) else { return nil }
     let named = outcome.failures.contains { failure in
-        failure.split(whereSeparator: { !$0.isNumber }).contains(Substring(String(pid)))
+        failure.split(whereSeparator: { !$0.isNumber }).contains(Substring(String(target)))
     }
-    if named { fputs("release deleted executable \(pid): \(outcome.failures)\n", stderr) }
-    return !named
+    fputs("release deleted executable \(target) as \(asUser ? "nobody" : "root"): named \(named)\n", stderr)
+    return named
 }

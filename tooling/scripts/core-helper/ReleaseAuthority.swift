@@ -503,13 +503,21 @@ enum ReleaseProcessTable {
         return pid_t(info.pbi_ppid)
     }
 
-    /// Whether the kernel marks `pid`'s running code as Apple platform code,
-    /// or nil when its status could not be read. The flag is set at exec from
-    /// the code signature, so the process cannot claim it.
-    static func isPlatformBinary(_ pid: pid_t) -> Bool? {
+    /// True only when the kernel shows `pid` can be neither a command a
+    /// release ends nor a Tono writer: none of its user ids is root (every
+    /// Tono writer runs as root) and its running code is not platform code
+    /// (every command a release ends is). Both are kernel state set at exec,
+    /// not claims the process makes. Any read that fails answers false.
+    static func cannotWrite(_ pid: pid_t) -> Bool {
+        var info = proc_bsdinfo()
+        let size = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        }
+        guard size == MemoryLayout<proc_bsdinfo>.size,
+              info.pbi_uid != 0, info.pbi_ruid != 0, info.pbi_svuid != 0 else { return false }
         var flags: UInt32 = 0
-        guard csops(pid, csOpsStatus, &flags, MemoryLayout<UInt32>.size) == 0 else { return nil }
-        return flags & csPlatformBinary != 0
+        guard csops(pid, csOpsStatus, &flags, MemoryLayout<UInt32>.size) == 0 else { return false }
+        return flags & csPlatformBinary == 0
     }
 
     static func path(of pid: pid_t) -> String? {
