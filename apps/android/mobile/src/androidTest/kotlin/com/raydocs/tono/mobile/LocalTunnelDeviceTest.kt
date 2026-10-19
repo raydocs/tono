@@ -729,8 +729,8 @@ class LocalTunnelDeviceTest {
             com.raydocs.tono.mobile.engine.TonoNotifications.claimedPhase(n.notification)?.name
     }
 
-    private fun engineProcessAlive(): Boolean = context.getSystemService(ActivityManager::class.java)
-        .runningAppProcesses.orEmpty().any { it.processName == "${context.packageName}:vpn" }
+    private fun enginePids(): Set<Int> = context.getSystemService(ActivityManager::class.java)
+        .runningAppProcesses.orEmpty().filter { it.processName == "${context.packageName}:vpn" }.map { it.pid }.toSet()
 
     /** Android's notification shade, captured for evidence, then closed. */
     private fun shadeShot(name: String, expect: String) {
@@ -791,8 +791,14 @@ class LocalTunnelDeviceTest {
             note("t5: MainActivity closed (no activity left, ViewModel cleared, no app binding to the engine); home screen in front")
             shell("logcat -c")
 
-            assertTrue("an engine process to kill", killEngineProcess() > 0)
+            val doomed = enginePids()
+            assertTrue("an engine process to kill", doomed.isNotEmpty())
+            doomed.forEach { Process.killProcess(it) }
             val killed = SystemClock.elapsedRealtime()
+            // The kill only counts once it is seen: the old process gone and the tunnel with it (run
+            // 39181991820 sampled the engine still alive right after the signal and took that as a
+            // reconnect). A restart is a :vpn process with a new pid.
+            var diedAt = -1L
             var vpnDown = -1L
             var honestAt = -1L
             var restartedAt = -1L
@@ -804,28 +810,36 @@ class LocalTunnelDeviceTest {
                 val t = SystemClock.elapsedRealtime() - killed
                 val vpn = vpnUp()
                 val (title, phase) = ongoingNotice()
-                val alive = engineProcessAlive()
+                val pids = enginePids()
+                val alive = (pids - doomed).isNotEmpty()
+                if (diedAt < 0 && pids.none { it in doomed }) diedAt = t
+                if (diedAt < 0 && t > 10_000) break
                 if (!vpn && vpnDown < 0) vpnDown = t
                 if (alive && restartedAt < 0) restartedAt = t
                 val claiming = phase != null && phase in claims
                 if (!vpn && claiming) claimedAfterDeath = true
                 if (!vpn && claiming && t > NotificationWatchdogBoundMs) lies += "${t}ms notification \"$title\" ($phase) without a VPN network"
-                if (honestAt < 0 && !claiming) honestAt = t
+                if (honestAt < 0 && !claiming && diedAt >= 0) honestAt = t
                 if (samples.isEmpty() || samples.last().substringAfter(' ') != "vpn=$vpn title=$title phase=$phase engine=$alive") samples += "${t}ms vpn=$vpn title=$title phase=$phase engine=$alive"
                 if (honestAt >= 0 && t - honestAt > 10_000) break
                 // If Android does restart the engine, it reconnects (the user still wants the tunnel).
-                if (restartedAt >= 0 && vpn && phase == Phase.CONNECTED.name) { reconnectedAt = t; break }
+                if (restartedAt >= 0 && vpnDown >= 0 && vpn && phase == Phase.CONNECTED.name) { reconnectedAt = t; break }
                 Thread.sleep(500)
             }
             val watchdogLog = shell("logcat -d -s TonoWatchdog:I").lines().filter { "replaced" in it }
-            note("t5: engine killed; VPN network gone after ${vpnDown}ms; notification stopped claiming a tunnel after ${honestAt}ms; " +
+            note("t5: engine killed (pids $doomed); old process gone after ${diedAt}ms; VPN network gone after ${vpnDown}ms; notification stopped claiming a tunnel after ${honestAt}ms; " +
                 "Android restarted the engine: ${if (restartedAt >= 0) "after ${restartedAt}ms, reconnected after ${reconnectedAt}ms" else "no (within the window)"}")
             note("t5: watchdog log: ${watchdogLog.ifEmpty { listOf("none") }}")
+            // Android's own account of the death and any restart it scheduled.
+            shell("logcat -d -b main,system -s ActivityManager:I").lines().filter { ":vpn" in it || "TonoVpnService" in it }.take(10)
+                .forEach { note("t5: ActivityManager: ${it.trim()}") }
             samples.forEach { note("t5: $it") }
             lies.take(10).forEach { note("t5: $it") }
             val finalTitle = ongoingNotice().first
             if (finalTitle != null) shadeShot("local-20-no-app-shade-after-death", finalTitle)
             if (lies.isNotEmpty() || honestAt < 0) diagnose("local-t5-notification")
+            assertTrue("the killed engine process went away within 10 s", diedAt >= 0)
+            assertTrue("the tunnel went down with the engine", vpnDown >= 0)
             assertTrue("the engine's notification stopped claiming a tunnel, or a restarted engine reconnected", honestAt >= 0 || reconnectedAt >= 0)
             assertTrue("no Connected notification without a VPN network beyond ${NotificationWatchdogBoundMs}ms: $lies", lies.isEmpty())
             note("t5: notification still claimed a tunnel after the VPN network went: $claimedAfterDeath; final title: $finalTitle")
