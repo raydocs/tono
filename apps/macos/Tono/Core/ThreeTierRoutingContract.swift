@@ -2711,6 +2711,18 @@ nonisolated enum ThreeTierRoutingContract {
     }
     """#
 
+    /// The IPv4 prefixes AI Home sends Home, read from its own graph, so the
+    /// helper's AI-scoped PF block holds exactly what the graph protects.
+    static let aiHomeHeldCIDRs: [String] = {
+        guard let template = try? JSONSerialization.jsonObject(with: Data(aiHomeTemplateJSON.utf8)) as? [String: Any],
+              let rules = (template["route"] as? [String: Any])?["rules"] as? [[String: Any]] else { return [] }
+        var cidrs: [String] = []
+        for rule in rules where rule["outbound"] as? String == "$home_target" {
+            for cidr in rule["ip_cidr"] as? [String] ?? [] where !cidrs.contains(cidr) { cidrs.append(cidr) }
+        }
+        return cidrs
+    }()
+
     static func isThreeTierRuntime(_ runtime: [String: Any]) -> Bool {
         carries(runtime, homeDNS: homeDNS, direct: direct)
     }

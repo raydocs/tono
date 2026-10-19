@@ -34,6 +34,7 @@ let killSwitchArmFields = Set([
     "bootstrapPins",
     "reviewedBundleDirect",
     "allowLocalNetworkDevices",
+    "aiHomeScoped",
 ])
 
 enum HelperFailure: Error {
@@ -2254,6 +2255,7 @@ if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
 }
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
+        && KillSwitchManager.runAIHomeScopeLifecycleSelfTest()
         && KillSwitchManager.runInterruptedSelectiveReleaseSelfTest()
         && KillSwitchManager.runInterruptedExplicitRemovalSelfTest()
         && KillSwitchManager.runFailedSelectiveRemovalRetrySelfTest()
@@ -2276,6 +2278,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
             && runLocalNetworkDevicesFieldSelfTest()
+            && KillSwitchManager.runAIHomeScopeSelfTests()
             && runHelperUpgradeAdmissionSelfTest()
             && runUpgradeSourceSelfTest()
             && runSilentUpgradeStagingSelfTest()

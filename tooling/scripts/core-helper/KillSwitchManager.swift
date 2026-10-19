@@ -84,6 +84,10 @@ struct KillSwitchState {
     let allowLocalNetworkDevices: Bool
     var strictBlocking = false
     var strictProof: StrictRuntimeProof? = nil
+    /// AI Home: no whole-host block. Only the AI prefixes are dropped outside
+    /// the TUN; everything else leaves as without Tono. Persisted, so a heal or
+    /// power transition keeps the session's scope; strict intent overrides it.
+    var aiHomeScoped = false
 }
 
 struct HelperCommandResult {
@@ -241,6 +245,18 @@ final class KillSwitchManager {
         return number.boolValue
     }
 
+    /// The arm request's `aiHomeScoped`. Omission means off (the whole-host
+    /// kill switch); only a real JSON boolean is accepted, as for
+    /// `allowLocalNetworkDevicesField`, because on narrows the block.
+    static func aiHomeScopedField(_ value: Any?) throws -> Bool {
+        guard let value else { return false }
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw HelperFailure.invalid("aiHomeScoped must be a boolean.")
+        }
+        return number.boolValue
+    }
+
     /// Whether the idle loop should release a leftover kill switch. The Core
     /// has already been observed down for `consecutiveCoreDownChecks` periods.
     static func watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: Int) -> Bool {
@@ -264,6 +280,7 @@ final class KillSwitchManager {
             object["bootstrapPins"] = [String: [String]]()
             object["reviewedBundleDirect"] = false
             object["allowLocalNetworkDevices"] = false
+            object["aiHomeScoped"] = false
             let tunnels = try Self.validateTunnels(object["tunnelInterfaces"] ?? [])
             guard tunnels.isEmpty || tunnels == ["utun199"] else {
                 throw HelperFailure.invalid("Strict routing only admits its owned TUN.")
@@ -335,6 +352,7 @@ final class KillSwitchManager {
         let allowLocalNetworkDevices = try Self.allowLocalNetworkDevicesField(
             object["allowLocalNetworkDevices"]
         )
+        let aiHomeScoped = try Self.aiHomeScopedField(object["aiHomeScoped"])
         var availablePins = previous?.pinnedHosts ?? [:]
         for (host, addresses) in bootstrapPins {
             // Bundle pins seed recovery but must not replace addresses learned
@@ -419,6 +437,7 @@ final class KillSwitchManager {
             allowLocalNetworkDevices: allowLocalNetworkDevices
         )
         state.strictBlocking = Self.strictIntentActive
+        state.aiHomeScoped = aiHomeScoped
         if let proof = strictProof, let record = try? ReleaseAuthority().load(),
            record.mode == .secured, record.generation == proof.generation,
            record.strictRuntimeDigest == proof.digest {
@@ -526,6 +545,8 @@ final class KillSwitchManager {
         // Echo what this ruleset enforces. An app reads a reply without it as
         // a helper too old for the setting and refuses to report it applied.
         committed["allowLocalNetworkDevices"] = state.allowLocalNetworkDevices
+        // What was rendered: false under strict intent, whatever was asked.
+        committed["aiHomeScoped"] = state.aiHomeScoped && !Self.strictIntentActive
         return committed
         } catch {
             // A load that pfctl accepted, or that never answered, may already
@@ -950,7 +971,7 @@ final class KillSwitchManager {
             // transition, while retaining inactive recovery pins for wake.
             stateGeneration &+= 1
             lastLoadedPassRules = nil
-            let state = Self.emergencyState(preserving: previous)
+            let state = Self.powerTransitionState(preserving: previous)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
             try Self.ensureAnchorLoaded(flushStates: true, loadOutcome: &load)
@@ -965,6 +986,15 @@ final class KillSwitchManager {
             }
             return false
         }
+    }
+
+    /// The sleep/wake barrier: every exception and the TUN pass are dropped.
+    /// AI Home keeps its scope, so the barrier holds only the AI prefixes and
+    /// ordinary traffic stays open across sleep.
+    static func powerTransitionState(preserving previous: KillSwitchState) -> KillSwitchState {
+        var state = emergencyState(preserving: previous)
+        state.aiHomeScoped = previous.aiHomeScoped
+        return state
     }
 
     /// A sleep or wake barrier that failed after its load may release, as
@@ -1600,7 +1630,8 @@ final class KillSwitchManager {
             proxyTargets: state.proxyTargets,
             sessionDirectEndpoints: state.sessionDirectEndpoints,
             reviewedBundleDirectEnabled: state.reviewedBundleDirectEnabled,
-            allowLocalNetworkDevices: state.allowLocalNetworkDevices
+            allowLocalNetworkDevices: state.allowLocalNetworkDevices,
+            aiHomeScoped: state.aiHomeScoped
         )
     }
 
@@ -1769,6 +1800,8 @@ final class KillSwitchManager {
         }
 
         let proxyTargets = try Self.loadProxyTargets(object["proxyTargets"] ?? [])
+        // Written only when on, so every other state file is unchanged.
+        let aiHomeScoped = try Self.aiHomeScopedField(object["aiHomeScoped"])
 
         return KillSwitchState(
             armed: armed,
@@ -1785,7 +1818,8 @@ final class KillSwitchManager {
             // restart and every boot therefore restore fail-closed with none.
             sessionDirectEndpoints: [],
             reviewedBundleDirectEnabled: false,
-            allowLocalNetworkDevices: false
+            allowLocalNetworkDevices: false,
+            aiHomeScoped: aiHomeScoped
         )
     }
 
@@ -1806,7 +1840,7 @@ final class KillSwitchManager {
         _ state: KillSwitchState,
         allowedUID: uid_t
     ) -> [String: Any] {
-        [
+        var object: [String: Any] = [
             "armed": state.armed,
             "tailscaleBootstrapEnabled": state.tailscaleBootstrapEnabled,
             "apiHosts": state.apiHosts,
@@ -1819,6 +1853,8 @@ final class KillSwitchManager {
             "proxyTargets": state.proxyTargets.map(\.json),
             "allowedUid": Int(allowedUID),
         ]
+        if state.aiHomeScoped { object["aiHomeScoped"] = true }
+        return object
     }
 
     static func stateFileExists() -> Bool {

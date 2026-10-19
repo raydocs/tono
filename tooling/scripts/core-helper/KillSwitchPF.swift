@@ -209,6 +209,9 @@ extension KillSwitchManager {
             rules.append("block drop out quick all label \"tono-block\"")
             return rules.joined(separator: "\n") + "\n"
         }
+        if state.aiHomeScoped {
+            return renderAIHomeRules(state: state)
+        }
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
             // Mihomo's controller is loopback-only. Both directions must pass
@@ -599,6 +602,32 @@ extension KillSwitchManager {
         lines.append("block drop out quick all label \"tono-block\"")
         return lines.joined(separator: "\n") + "\n"
     }
+
+    /// AI Home (decision 130): ordinary traffic is not filtered, so quit,
+    /// failure or a dead Core never takes the host offline. The AI prefixes
+    /// the graph sends Home are dropped on every interface but the TUN, which
+    /// covers a socket bound outside the TUN and the window after the Core
+    /// dies, before the watchdog's AI hold. AI names never reach this layer:
+    /// they resolve to fake IPs through the Core. No `user` clause: the Core
+    /// reaches Home through its cloud exit, never an AI address.
+    static func renderAIHomeRules(state: KillSwitchState) -> String {
+        var lines = [
+            "# Managed by Tono AI Home — do not edit",
+            "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+            "pass out quick on lo0 all no state label \"tono-loopback\"",
+        ]
+        for interface in state.tunnelInterfaces.sorted() {
+            lines.append("pass in quick on \(interface) all keep state (if-bound) label \"tono-tunnel\"")
+            lines.append("pass out quick on \(interface) all keep state (if-bound) label \"tono-tunnel\"")
+        }
+        lines.append(
+            "block drop out quick inet to { \(ThreeTierRoutingContract.aiHomeHeldCIDRs.joined(separator: ", ")) } "
+                + "label \"\(aiHomeBlockLabel)\""
+        )
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    static let aiHomeBlockLabel = "tono-ai-home"
 
     @discardableResult
     static func ensureMainHook() throws -> Bool {
@@ -1155,7 +1184,16 @@ extension KillSwitchManager {
 
     static func childAnchorActive() throws -> Bool {
         guard let text = try pfctlQuery(["-a", killSwitchAnchor, "-sr"]) else { return false }
-        return text.lowercased().contains("block drop out quick all")
+        return anchorTextBlocks(text)
+    }
+
+    /// What `pfctl -sr` shows for a loaded Tono block: the whole-host
+    /// catch-all, or AI Home's prefix block (its own label).
+    static func anchorTextBlocks(_ text: String) -> Bool {
+        text.lowercased().contains("block drop out quick all")
+            || text.split(separator: "\n").contains {
+                $0.hasPrefix("block drop out quick ") && $0.contains("label \"\(aiHomeBlockLabel)\"")
+            }
     }
 
     static func effectiveStatus() throws -> Bool {
