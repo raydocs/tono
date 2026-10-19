@@ -128,18 +128,11 @@ struct StatusWidgetView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(p.accessibilityLabel)
         case .accessoryRectangular:
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    MarkGlyph(size: 16).widgetAccentable()
-                    Text(p.title).font(.headline).lineLimit(1)
-                }
-                if let since = p.since {
-                    Text(since, style: .timer).font(.body.monospacedDigit()).lineLimit(1)
-                } else if let detail = p.detail {
-                    Text(detail).font(.body).lineLimit(1)
-                }
-                // A stale reading has no timer or detail line, so its "Last known: … at …" gets two.
-                Text(p.footnote).font(.caption).foregroundStyle(.secondary).lineLimit(p.stale ? 2 : 1)
+            // As on the Home Screen card: the middle line goes before anything is cut.
+            ViewThatFits(in: .vertical) {
+                rectangularLines(middle: true)
+                rectangularLines(middle: false)
+                rectangularLines(middle: false, whole: false)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
@@ -155,39 +148,82 @@ struct StatusWidgetView: View {
         }
     }
 
+    private func rectangularLines(middle: Bool, whole: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                MarkGlyph(size: 16).widgetAccentable()
+                Text(p.title).font(.headline).lineLimit(whole ? 2 : 1).minimumScaleFactor(whole ? 1 : 0.7)
+                    .fixedSize(horizontal: false, vertical: whole)
+            }
+            if middle, let since = p.since {
+                Text(since, style: .timer).font(.body.monospacedDigit()).lineLimit(1)
+            } else if middle, let detail = p.detail {
+                Text(detail).font(.body).lineLimit(2).fixedSize(horizontal: false, vertical: whole)
+            }
+            // A stale reading has no timer or detail line, so its "Last known: … at …" gets two.
+            Text(p.footnote).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(p.stale ? 2 : 1).minimumScaleFactor(whole ? 1 : 0.7)
+                .fixedSize(horizontal: false, vertical: whole)
+        }
+    }
+
+    /// The card's lines. A widget has a fixed size, so at large text sizes the first layout whose
+    /// lines all fit whole is used: the detail line goes first, then the timer, then the glyph. The
+    /// state and the "as of / last known" line always stay; nothing is cut mid-word ("Connection
+    /// dr…" at xxxLarge in round 11). VoiceOver reads every line from the label either way.
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top) {
-                // Tinted and clear Home Screens (iOS 18 / 26) draw one colour: the mark, accented.
-                if renderingMode == .fullColor {
-                    HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: 40)
-                } else {
-                    MarkGlyph(size: 32).widgetAccentable()
-                }
-                Spacer(minLength: 0)
-            }
-            Spacer(minLength: 2)
-            Text(p.title)
-                .font(.headline)
-                .foregroundStyle(TonoColor.textPrimary)
-                .lineLimit(2).minimumScaleFactor(0.8)
-            if let since = p.since {
-                Text(since, style: .timer)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(TonoColor.textSecondary)
-                    .lineLimit(1)
-            }
-            if let detail = p.detail {
-                Text(detail).font(.footnote).foregroundStyle(TonoColor.textSecondary).lineLimit(2).minimumScaleFactor(0.85)
-            }
-            Text(p.footnote)
-                .font(.caption)
-                .foregroundStyle(p.stale ? TonoColor.warning : TonoColor.textTertiary)
-                .lineLimit(2).minimumScaleFactor(0.8)
+        ViewThatFits(in: .vertical) {
+            summaryLines(glyph: true, timer: true, detail: true)
+            summaryLines(glyph: true, timer: true, detail: false)
+            summaryLines(glyph: true, timer: false, detail: false)
+            summaryLines(glyph: false, timer: false, detail: false)
+            // Last resort, never expected at xxxLarge: shrink rather than drop the state.
+            summaryLines(glyph: false, timer: false, detail: false, whole: false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(p.accessibilityLabel)
+    }
+
+    /// `whole`: each line takes the height it needs (so `ViewThatFits` rejects a layout that would
+    /// truncate) instead of being cut to the space left.
+    private func summaryLines(glyph: Bool, timer: Bool, detail: Bool, whole: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if glyph {
+                HStack(alignment: .top) {
+                    // Tinted and clear Home Screens (iOS 18 / 26) draw one colour: the mark, accented.
+                    if renderingMode == .fullColor {
+                        HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: 40)
+                    } else {
+                        MarkGlyph(size: 32).widgetAccentable()
+                    }
+                    Spacer(minLength: 0)
+                }
+                Spacer(minLength: 2)
+            }
+            Text(p.title)
+                .font(.headline)
+                .foregroundStyle(TonoColor.textPrimary)
+                .lineLimit(whole ? 3 : 2).minimumScaleFactor(whole ? 1 : 0.7)
+                .fixedSize(horizontal: false, vertical: whole)
+            if timer, let since = p.since {
+                Text(since, style: .timer)
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(TonoColor.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: whole)
+            }
+            if detail, let line = p.detail {
+                Text(line).font(.footnote).foregroundStyle(TonoColor.textSecondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: whole)
+            }
+            Text(p.footnote)
+                .font(.caption)
+                .foregroundStyle(p.stale ? TonoColor.warning : TonoColor.textTertiary)
+                .lineLimit(whole ? 3 : 2).minimumScaleFactor(whole ? 1 : 0.7)
+                .fixedSize(horizontal: false, vertical: whole)
+        }
     }
 
     @ViewBuilder private var actionButton: some View {
