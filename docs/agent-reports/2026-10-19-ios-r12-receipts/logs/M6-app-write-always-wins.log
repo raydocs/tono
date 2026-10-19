@@ -1,0 +1,49 @@
+$ mutation M6-app-write-always-wins in Sources/TonoKit/StatusFile.swift
+--- /home/user/workspace/repo/apps/ios/TonoKit/Sources/TonoKit/StatusFile.swift	2026-10-19 02:43:36.169879904 +0000
++++ TonoKit/Sources/TonoKit/StatusFile.swift	2026-10-19 02:51:30.628802130 +0000
+@@ -72,6 +72,7 @@
+     /// tunnel ROUTES_STOPPED, or the other way round), is kept: nil means "do not write".
+     public static func admitFromApp(_ app: StatusSnapshot, knownAt: Date?, over current: StatusSnapshot?,
+                                     now: Date) -> StatusSnapshot? {
++        if true { return app }
+         guard let current, current.writer == .tunnel, case .fresh = StatusReading.read(current, now: now),
+               current.updatedAt > (knownAt ?? .distantPast),
+               let tunnelSays = current.claimsRouting, let appSays = app.claimsRouting, tunnelSays != appSays else { return app }
+
+$ swift test --filter StatusFileTests
+Building for debugging...
+[Constructing description]
+[Pre-planning 1 / 153]
+[Planning deferred tasks]
+[37 / 64] TonoKit
+[38 / 64] TonoKit
+[47 / 68] TonoKitTests-product
+[52 / 75] tono-config-product
+[60 / 75] TonoKit
+[64 / 75] TonoKitTests-product
+[68 / 76] TonoKitTests-product
+[72 / 79] TonoKitTests-test-runner
+[76 / 79] TonoKitTests-test-runner
+[80 / 80] TonoKitTests-test-runner
+Build complete! (7.85 secs)
+Test Suite 'Selected tests' started at 2026-10-19 02:51:39.221
+Test Suite 'StatusFileTests' started at 2026-10-19 02:51:39.222
+Test Case 'StatusFileTests.testAppDecidingWhileTheTunnelWritesDoesNotOverwriteIt' started at 2026-10-19 02:51:39.222
+Test Case 'StatusFileTests.testAppDecidingWhileTheTunnelWritesDoesNotOverwriteIt' passed (0.506 seconds)
+Test Case 'StatusFileTests.testAppRoutesStoppedFromOlderKnowledgeDoesNotHideARestoredGraph' started at 2026-10-19 02:51:39.728
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/StatusFileTests.swift:52: error: StatusFileTests.testAppRoutesStoppedFromOlderKnowledgeDoesNotHideARestoredGraph : XCTAssertEqual failed: ("Optional(TonoKit.StatusSnapshot.State.failed)") is not equal to ("Optional(TonoKit.StatusSnapshot.State.on)") - 
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/StatusFileTests.swift:53: error: StatusFileTests.testAppRoutesStoppedFromOlderKnowledgeDoesNotHideARestoredGraph : XCTAssertEqual failed: ("Optional(TonoKit.StatusSnapshot.Writer.app)") is not equal to ("Optional(TonoKit.StatusSnapshot.Writer.tunnel)") - 
+Test Case 'StatusFileTests.testAppRoutesStoppedFromOlderKnowledgeDoesNotHideARestoredGraph' failed (0.004 seconds)
+Test Case 'StatusFileTests.testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped' started at 2026-10-19 02:51:39.732
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/StatusFileTests.swift:37: error: StatusFileTests.testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped : XCTAssertEqual failed: ("nil") is not equal to ("Optional("ROUTES_STOPPED")") - 
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/StatusFileTests.swift:38: error: StatusFileTests.testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped : XCTAssertEqual failed: ("Optional(TonoKit.StatusSnapshot.Writer.app)") is not equal to ("Optional(TonoKit.StatusSnapshot.Writer.tunnel)") - 
+Test Case 'StatusFileTests.testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped' failed (0.004 seconds)
+Test Case 'StatusFileTests.testWriteWaitsWhileAnotherProcessHoldsTheLock' started at 2026-10-19 02:51:39.736
+Test Case 'StatusFileTests.testWriteWaitsWhileAnotherProcessHoldsTheLock' passed (0.864 seconds)
+Test Suite 'StatusFileTests' failed at 2026-10-19 02:51:40.600
+	 Executed 4 tests, with 4 failures (0 unexpected) in 1.378 (1.378) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 02:51:40.600
+	 Executed 4 tests, with 4 failures (0 unexpected) in 1.378 (1.378) seconds
+Note: Some test targets reported failures:
+  - TonoKitTests (XCTest)
+exit: 1

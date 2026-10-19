@@ -1,0 +1,54 @@
+$ mutation M7-putback-obligation-dropped in Sources/TonoKit/RouteApply.swift
+--- /home/user/workspace/repo/apps/ios/TonoKit/Sources/TonoKit/RouteApply.swift	2026-10-19 02:44:40.330275080 +0000
++++ TonoKit/Sources/TonoKit/RouteApply.swift	2026-10-19 02:51:40.768864583 +0000
+@@ -92,7 +92,7 @@
+     /// What the inputs file still has to be put back to after this run, given what was owed before
+     /// it. An earlier failed put-back stays owed until a write of the file succeeds: a run whose
+     /// saves all failed left the file as it was, holding the refused routes.
+-    public func owed(before: RouteSettings?) -> RouteSettings? { wrote ? unsaved : unsaved ?? before }
++    public func owed(before: RouteSettings?) -> RouteSettings? { unsaved }
+ }
+ 
+ /// Changing the mode or line: save the inputs, ask a running tunnel to rebuild, and report only
+
+$ swift test --filter RouteApplyTests
+Building for debugging...
+[Constructing description]
+[Planning deferred tasks]
+[37 / 64] TonoKit
+[38 / 64] TonoKit
+[49 / 74] TonoKitTests-product
+[54 / 75] TonoKitTests-product
+[60 / 75] tono-config-product
+[64 / 75] TonoKitTests-product
+[68 / 76] TonoKitTests-product
+[72 / 79] TonoKitTests-test-runner
+[76 / 79] TonoKitTests-test-runner
+[80 / 80] TonoKitTests-test-runner
+Build complete! (8.03 secs)
+Test Suite 'Selected tests' started at 2026-10-19 02:51:49.477
+Test Suite 'RouteApplyTests' started at 2026-10-19 02:51:49.478
+Test Case 'RouteApplyTests.testAFailedPutBackOfTheFileIsReportedNotSwallowed' started at 2026-10-19 02:51:49.478
+Test Case 'RouteApplyTests.testAFailedPutBackOfTheFileIsReportedNotSwallowed' passed (0.001 seconds)
+Test Case 'RouteApplyTests.testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither' started at 2026-10-19 02:51:49.479
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/RouteApplyTests.swift:64: error: RouteApplyTests.testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither : XCTAssertEqual failed: ("nil") is not equal to ("Optional(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1")))") - the unfinished put-back was dropped
+Test Case 'RouteApplyTests.testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither' failed (0.001 seconds)
+Test Case 'RouteApplyTests.testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode' started at 2026-10-19 02:51:49.480
+Test Case 'RouteApplyTests.testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect' started at 2026-10-19 02:51:49.480
+Test Case 'RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testNoReplyIsSettledByWhatTheTunnelSaysItRuns' started at 2026-10-19 02:51:49.480
+Test Case 'RouteApplyTests.testNoReplyIsSettledByWhatTheTunnelSaysItRuns' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testRefusedReloadReportsTheGraphTheExtensionStillRuns' started at 2026-10-19 02:51:49.481
+Test Case 'RouteApplyTests.testRefusedReloadReportsTheGraphTheExtensionStillRuns' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp' started at 2026-10-19 02:51:49.481
+Test Case 'RouteApplyTests.testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads' started at 2026-10-19 02:51:49.481
+Test Case 'RouteApplyTests.testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads' passed (0.0 seconds)
+Test Suite 'RouteApplyTests' failed at 2026-10-19 02:51:49.481
+	 Executed 8 tests, with 1 failure (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 02:51:49.481
+	 Executed 8 tests, with 1 failure (0 unexpected) in 0.003 (0.003) seconds
+Note: Some test targets reported failures:
+  - TonoKitTests (XCTest)
+exit: 1

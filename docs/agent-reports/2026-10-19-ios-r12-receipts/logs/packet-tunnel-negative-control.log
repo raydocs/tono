@@ -1,0 +1,13 @@
+commit: abc03885ad4118b6a7b3dbf01dda31bfdc1d031f  ios tree changed files: 0
+swift: Swift version 6.4.1 (swift-6.4.1-RELEASE)
+$ swiftc -emit-module TonoKit
+exit: 0
+$ swiftc -typecheck -D DEBUG /tmp/tmp.IJjz1qdjix/neg/PacketTunnel/PacketTunnelProvider.swift PacketTunnel/TunnelPlatform.swift PacketTunnel/UnderlyingNetwork.swift Shared/NodeLatency.swift Shared/SharedFiles.swift Status/StatusReload.swift Status/StatusStore.swift
+PacketTunnel_PacketTunnelProvider.swift:86:45: error: value of type 'TunnelGraph' has no member 'heartbeatRemoved'
+ 84 |         let failure = running ? nil : SharedFiles.loadFailure()?.code
+ 85 |         let wrote = StatusStore.update { previous in
+ 86 |             if let current { return current.heartbeatRemoved(since: since, previous: previous, now: Date()) }
+    |                                             `- error: value of type 'TunnelGraph' has no member 'heartbeatRemoved'
+ 87 |             return StatusSnapshot.fromTunnel(running: false, since: since, failure: failure, previous: previous, now: Date())
+ 88 |         }
+exit: 1

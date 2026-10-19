@@ -1,0 +1,53 @@
+$ mutation M2-noreply-assumes-previous in Sources/TonoKit/RouteApply.swift
+--- /home/user/workspace/repo/apps/ios/TonoKit/Sources/TonoKit/RouteApply.swift	2026-10-19 02:44:40.330275080 +0000
++++ TonoKit/Sources/TonoKit/RouteApply.swift	2026-10-19 02:50:52.932569957 +0000
+@@ -137,7 +137,7 @@
+                 putBack(previous)
+                 outcome = .notApplied(code: "NO_REPLY", inEffect: nil)
+             case nil:
+-                outcome = .unconfirmed(requested)
++                outcome = .notApplied(code: "NO_REPLY", inEffect: previous)
+             }
+         }
+         return RouteApplyReport(outcome, unsaved: unsaved)
+
+$ swift test --filter RouteApplyTests
+Building for debugging...
+[Constructing description]
+[Planning deferred tasks]
+[37 / 64] TonoKit
+[38 / 64] TonoKit
+[49 / 74] TonoKitTests-product
+[57 / 75] tono-config-product
+[64 / 75] TonoKitTests-product
+[68 / 76] TonoKitTests-product
+[72 / 79] TonoKitTests-test-runner
+[76 / 79] TonoKitTests-test-runner
+[80 / 80] TonoKitTests-test-runner
+Build complete! (8.06 secs)
+Test Suite 'Selected tests' started at 2026-10-19 02:51:01.775
+Test Suite 'RouteApplyTests' started at 2026-10-19 02:51:01.776
+Test Case 'RouteApplyTests.testAFailedPutBackOfTheFileIsReportedNotSwallowed' started at 2026-10-19 02:51:01.776
+Test Case 'RouteApplyTests.testAFailedPutBackOfTheFileIsReportedNotSwallowed' passed (0.001 seconds)
+Test Case 'RouteApplyTests.testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither' started at 2026-10-19 02:51:01.778
+Test Case 'RouteApplyTests.testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode' started at 2026-10-19 02:51:01.778
+Test Case 'RouteApplyTests.testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect' started at 2026-10-19 02:51:01.778
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/RouteApplyTests.swift:27: error: RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect : XCTAssertEqual failed: ("notApplied(code: "NO_REPLY", inEffect: Optional(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1"))))") is not equal to ("unconfirmed(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.stable, node: Optional("tokyo-1")))") - 
+Test Case 'RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect' failed (0.001 seconds)
+Test Case 'RouteApplyTests.testNoReplyIsSettledByWhatTheTunnelSaysItRuns' started at 2026-10-19 02:51:01.779
+Test Case 'RouteApplyTests.testNoReplyIsSettledByWhatTheTunnelSaysItRuns' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testRefusedReloadReportsTheGraphTheExtensionStillRuns' started at 2026-10-19 02:51:01.779
+Test Case 'RouteApplyTests.testRefusedReloadReportsTheGraphTheExtensionStillRuns' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp' started at 2026-10-19 02:51:01.779
+Test Case 'RouteApplyTests.testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads' started at 2026-10-19 02:51:01.780
+Test Case 'RouteApplyTests.testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads' passed (0.0 seconds)
+Test Suite 'RouteApplyTests' failed at 2026-10-19 02:51:01.780
+	 Executed 8 tests, with 1 failure (0 unexpected) in 0.004 (0.004) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 02:51:01.780
+	 Executed 8 tests, with 1 failure (0 unexpected) in 0.004 (0.004) seconds
+Note: Some test targets reported failures:
+  - TonoKitTests (XCTest)
+exit: 1

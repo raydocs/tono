@@ -1,0 +1,42 @@
+$ mutation M1-heartbeat-ignores-graph in Sources/TonoKit/TunnelGraph.swift
+--- /home/user/workspace/repo/apps/ios/TonoKit/Sources/TonoKit/TunnelGraph.swift	2026-10-18 21:12:49.436960708 +0000
++++ TonoKit/Sources/TonoKit/TunnelGraph.swift	2026-10-19 02:50:43.812513786 +0000
+@@ -56,6 +56,6 @@
+ 
+     /// The heartbeat's write: a live process without a graph is reported failed, never on.
+     public func heartbeat(since: Date?, previous: StatusSnapshot?, now: Date) -> StatusSnapshot {
+-        StatusSnapshot.fromTunnel(running: true, routing: running, since: since, failure: nil, previous: previous, now: now)
++        StatusSnapshot.fromTunnel(running: true, routing: true, since: since, failure: nil, previous: previous, now: now)
+     }
+ }
+
+$ swift test --filter TunnelGraphTests
+Building for debugging...
+[Computing dependencies]
+[Pre-planning 1 / 153]
+[Starting]
+[37 / 64] TonoKit
+[38 / 64] TonoKit
+[48 / 73] TonoKitTests-product
+[54 / 73] TonoKitTests-product
+[58 / 75] tono-config-product
+[62 / 75]
+[64 / 75] tono-config-product
+[64 / 75] TonoKitTests-product
+[68 / 76] TonoKitTests-product
+[72 / 79] TonoKitTests-test-runner
+[76 / 79] TonoKitTests-test-runner
+[80 / 80] TonoKitTests-test-runner
+Build complete! (7.95 secs)
+Test Suite 'Selected tests' started at 2026-10-19 02:50:52.706
+Test Suite 'TunnelGraphTests' started at 2026-10-19 02:50:52.709
+Test Case 'TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected' started at 2026-10-19 02:50:52.709
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/TunnelGraphTests.swift:35: error: TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected : XCTAssertEqual failed: ("StatusWording(titleKey: "state_connected", switchOn: true, action: TonoKit.StatusWording.Action.disconnect)") is not equal to ("StatusWording(titleKey: "state_routes_stopped", switchOn: false, action: TonoKit.StatusWording.Action.retry)") - 
+Test Case 'TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected' failed (0.005 seconds)
+Test Suite 'TunnelGraphTests' failed at 2026-10-19 02:50:52.714
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.005 (0.005) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 02:50:52.714
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.005 (0.005) seconds
+Note: Some test targets reported failures:
+  - TonoKitTests (XCTest)
+exit: 1
