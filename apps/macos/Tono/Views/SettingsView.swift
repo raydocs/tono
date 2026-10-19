@@ -286,7 +286,8 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let localNetworkFault = appState.localNetworkDevicesFaultMessage {
+            if let localNetworkFault = appState.localNetworkDevicesFaultMessage,
+               !LocalNetworkDevicesSync.faultIsAIHomeProtection {
                 Text(localNetworkFault)
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)

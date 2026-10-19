@@ -21,6 +21,8 @@ nonisolated enum KillSwitchService {
         case protectionUpdateFailed(String)
         /// An AI Home arm whose reply does not confirm the AI scope.
         case aiHomeScopeUnconfirmed
+        /// An AI Home arm failed and the helper holds the protected fault.
+        case aiHomeProtectionFault(String)
 
         var errorDescription: String? {
             switch self {
@@ -42,6 +44,8 @@ nonisolated enum KillSwitchService {
                 String(localized: "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.")
             case .aiHomeScopeUnconfirmed:
                 String(localized: "The network helper did not confirm AI Home protection. Reconnect to update it.")
+            case .aiHomeProtectionFault:
+                String(localized: "Tono couldn't apply AI Home protection, so AI traffic stays blocked. Disconnect or reconnect to continue.")
             }
         }
     }
@@ -172,6 +176,7 @@ nonisolated enum KillSwitchService {
         if !helperPrepared {
             try installIfNeeded()
         }
+        let aiHomeScoped = readAIHomeSession()
         do {
             let bootstrapPins = configuredBootstrapPins(for: apiHosts)
             // D7: the setting (with its generation) this arm sends. Recorded as
@@ -179,7 +184,6 @@ nonisolated enum KillSwitchService {
             // every other outcome records unknown at this generation, which
             // never overwrites a newer result (`LocalNetworkDevicesSync`).
             let localNetwork = LocalNetworkDevicesSync.desired
-            let aiHomeScoped = readAIHomeSession()
             var localNetworkOutcome = LocalNetworkDevicesSync.Applied.unknown(
                 generation: localNetwork.generation
             )
@@ -268,6 +272,12 @@ nonisolated enum KillSwitchService {
             // The helper could not tighten to off and holds the protected
             // fault (block-all, or the Core stopped). It is still armed.
             isArmed = true
+            // An AI Home arm carries no LAN rule: the same fault is its scope
+            // switch failing, not the local network setting.
+            if aiHomeScoped {
+                LocalNetworkDevicesSync.recordFault(.aiHomeProtection(message))
+                throw Error.aiHomeProtectionFault(message)
+            }
             LocalNetworkDevicesSync.recordFault(.helper(message))
             throw Error.localNetworkFault(message)
         } catch HelperIPCError.commandFailed(let message, "KILLSWITCH_LIVE_REARM_FAILED") {

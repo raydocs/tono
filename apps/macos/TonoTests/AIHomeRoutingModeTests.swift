@@ -82,6 +82,34 @@ final class AIHomeRoutingModeTests: XCTestCase {
         XCTAssertNoThrow(try arm(), "other sessions do not depend on the field")
     }
 
+    func testAIHomeProtectedFaultIsNotALocalNetworkFault() throws {
+        KillSwitchService.readAIHomeSession = { true }
+        KillSwitchService.isArmed = false
+        KillSwitchService.armIPC.deliver = { _ in
+            throw HelperIPCError.commandFailed("block-all installed", code: "KILLSWITCH_LOCAL_NETWORK_FAULT")
+        }
+        XCTAssertThrowsError(try arm()) { error in
+            guard case KillSwitchService.Error.aiHomeProtectionFault = error else {
+                return XCTFail("unexpected \(error)")
+            }
+        }
+        XCTAssertTrue(KillSwitchService.isArmed, "the helper still holds protection")
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .aiHomeProtection("block-all installed"))
+        XCTAssertTrue(LocalNetworkDevicesSync.holdsProtectedFault)
+        XCTAssertTrue(LocalNetworkDevicesSync.faultIsAIHomeProtection)
+        XCTAssertFalse(LocalNetworkDevicesSync.faultMessage?.contains("local network") ?? true)
+
+        LocalNetworkDevicesSync.resetForTesting()
+        KillSwitchService.readAIHomeSession = { false }
+        XCTAssertThrowsError(try arm()) { error in
+            guard case KillSwitchService.Error.localNetworkFault = error else {
+                return XCTFail("unexpected \(error)")
+            }
+        }
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .helper("block-all installed"))
+        XCTAssertFalse(LocalNetworkDevicesSync.faultIsAIHomeProtection)
+    }
+
     @MainActor
     func testAIHomeWriterBuildsTheAIHomeGraph() async throws {
         XCTAssertEqual(DesktopRoutingModeAdmission.ownedGraph("ai-home"), .aiHome)
