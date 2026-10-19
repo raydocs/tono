@@ -1009,7 +1009,7 @@ mod tests {
         assert_eq!(value["dns"]["servers"][0]["inet4_range"], "198.18.128.0/20");
         assert_eq!(value["inbounds"][0]["address"][0], "198.18.0.1/30");
         assert_eq!(value["inbounds"][0]["dns_address"][0], "198.18.0.2");
-        // alpha.9 sing-tun (stack omitted) caps send at 2 MiB and receive at
+        // alpha.12 sing-tun (stack omitted) caps send at 2 MiB and receive at
         // 4 MiB. Those limits are compiled into the pinned binary. Emitting
         // `stack` would select the deprecated gVisor path.
         assert!(value["inbounds"][0].get("stack").is_none());
