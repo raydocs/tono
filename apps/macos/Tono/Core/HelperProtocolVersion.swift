@@ -498,7 +498,16 @@ nonisolated enum HelperProtocolVersion {
     ///   rest DIRECT). It binds non-strict: no strict intent is recorded, so
     ///   quit and failure release ordinary traffic, and it cannot replace a
     ///   strict three-tier session. Stable and three-tier are unchanged.
-    static let current = "4.52.59"
+    /// - 4.52.59 → 4.52.60: the arm request gained optional `aiHomeScoped`
+    ///   (JSON boolean only; absent means off). On renders the AI Home anchor
+    ///   (decision 130): lo0 and TUN passes, then one block of the AI Home
+    ///   graph's Home prefixes (`tono-ai-home`) on every other interface, and
+    ///   no whole-host catch-all, so ordinary traffic is not filtered. It is
+    ///   persisted, kept by heal and the sleep/wake barrier, and overridden by
+    ///   strict intent. The reply echoes `aiHomeScoped` as rendered. Quit,
+    ///   Core death and Restore internet release as before (AI hold kept on
+    ///   quit and failure). An older daemon refuses the unknown field.
+    static let current = "4.52.60"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

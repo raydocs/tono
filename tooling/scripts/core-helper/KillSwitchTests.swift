@@ -2508,3 +2508,203 @@ extension KillSwitchManager {
             endpoints.contains(where: { $0.transport == "udp" && $0.port == 3478 })
     }
 }
+
+extension KillSwitchManager {
+    /// A session with every exception the whole-host ruleset can carry, so the
+    /// AI Home rendering is seen to drop all of them.
+    static func aiHomeFixtureState(scoped: Bool) -> KillSwitchState {
+        KillSwitchState(
+            armed: true,
+            tailscaleBootstrapEnabled: true,
+            apiHosts: ["api.example.com"],
+            exitHints: [],
+            tunnelInterfaces: ["utun199"],
+            resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+            pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+            derpEndpoints: [.init(address: "203.0.113.9", transport: "tcp", port: 443)],
+            cachedDERPEndpoints: [],
+            proxyTargets: [],
+            sessionDirectEndpoints: [.init(address: "223.5.5.5", transport: "tcp", port: 443)],
+            reviewedBundleDirectEnabled: true,
+            allowLocalNetworkDevices: true,
+            aiHomeScoped: scoped
+        )
+    }
+
+    /// Decision 130: AI Home holds the AI prefixes only. Strict intent and
+    /// every other mode keep their rulesets.
+    static func runAIHomeScopeSelfTests() -> Bool {
+        var failures: [String] = []
+        func check(_ name: String, _ ok: Bool) { if !ok { failures.append(name) } }
+        let scoped = aiHomeFixtureState(scoped: true)
+        let whole = aiHomeFixtureState(scoped: false)
+        let held = ThreeTierRoutingContract.aiHomeHeldCIDRs
+        check("held-cidrs-anthropic", held.contains("160.79.104.0/21"))
+        if let graph = try? ThreeTierRoutingContract.graph(home: "Tono-Home-Residential",
+                                                          physicalInterface: "en0", fakeRange: "198.18.176.0/20", variant: .aiHome),
+           let rules = (graph["route"] as? [String: Any])?["rules"] as? [[String: Any]] {
+            let homeCIDRs = Set(rules.filter { $0["outbound"] as? String == "Tono-Home-Residential" }
+                .flatMap { $0["ip_cidr"] as? [String] ?? [] })
+            check("held-cidrs-equal-graph-home-cidrs", Set(held) == homeCIDRs && held.count == homeCIDRs.count)
+        } else {
+            check("held-cidrs-graph", false)
+        }
+
+        let expected = [
+            "# Managed by Tono AI Home — do not edit",
+            "pass in quick on lo0 all keep state (if-bound) label \"tono-ai-home-loopback\"",
+            "pass out quick on lo0 all no state label \"tono-ai-home-loopback\"",
+            "pass in quick on utun199 all keep state (if-bound) label \"tono-ai-home-tunnel\"",
+            "pass out quick on utun199 all keep state (if-bound) label \"tono-ai-home-tunnel\"",
+            "block drop out quick inet to { 160.79.104.0/21 } label \"tono-ai-home\"",
+        ].joined(separator: "\n") + "\n"
+        let rendered = renderRules(state: scoped, allowedUID: 501, physicalInterfaces: ["en0"])
+        check("ai-home-rules-exact", rendered == expected)
+        check("ai-home-no-whole-host-block", !rendered.contains("block drop out quick all") && !rendered.contains(" user "))
+        let wholeRules = renderRules(state: whole, allowedUID: 501, physicalInterfaces: ["en0"])
+        check("whole-host-unchanged-by-flag", wholeRules.contains("block drop out quick all label \"tono-block\"")
+            && !wholeRules.contains("tono-ai-home"))
+        var strict = scoped
+        strict.strictBlocking = true
+        let strictRules = renderRules(state: strict, allowedUID: 501, physicalInterfaces: ["en0"])
+        check("strict-overrides-ai-home", strictRules.hasPrefix("# Managed by Tono strict routing")
+            && strictRules.contains("block drop out quick all") && !strictRules.contains("tono-ai-home"))
+
+        check("persisted-only-when-on", persistentObject(scoped, allowedUID: 501)["aiHomeScoped"] as? Bool == true
+            && persistentObject(whole, allowedUID: 501)["aiHomeScoped"] == nil)
+        check("restorable-keeps-scope", restorableState(scoped, interfaceExists: { _ in true }).aiHomeScoped)
+        let asleep = powerTransitionState(preserving: scoped)
+        let asleepRules = renderRules(state: asleep, allowedUID: 501, physicalInterfaces: ["en0"])
+        check("sleep-barrier-keeps-ai-home", asleep.aiHomeScoped && asleep.tunnelInterfaces.isEmpty
+            && !asleepRules.contains("block drop out quick all") && asleepRules.contains("tono-ai-home")
+            && !asleepRules.contains("utun199"))
+        check("sleep-barrier-whole-host-otherwise", !powerTransitionState(preserving: whole).aiHomeScoped
+            && renderRules(state: powerTransitionState(preserving: whole), allowedUID: 501, physicalInterfaces: ["en0"])
+                .contains("block drop out quick all"))
+        check("emergency-is-whole-host", !emergencyState(preserving: scoped).aiHomeScoped)
+
+        // A switch in either direction flushes the states made under the
+        // other scope; a re-arm in the same scope keeps them.
+        let aiPasses = passRules(in: rendered)
+        let wholePasses = passRules(in: wholeRules)
+        check("ai-home-to-whole-host-flushes", stateDisposal(replacing: aiPasses, with: wholePasses) == .full)
+        check("whole-host-to-ai-home-flushes", stateDisposal(replacing: wholePasses, with: aiPasses) == .full)
+        check("ai-home-rearm-keeps", stateDisposal(replacing: aiPasses, with: aiPasses) == .keep)
+        // The saved scope widens only after a committed load.
+        check("first-ai-home-arm-saves-whole-host", !scopeBeforeCommit(next: scoped, previous: whole).aiHomeScoped
+            && !scopeBeforeCommit(next: scoped, previous: nil).aiHomeScoped)
+        check("ai-home-rearm-saves-scope", scopeBeforeCommit(next: scoped, previous: scoped).aiHomeScoped)
+        check("tightening-saves-whole-host", !scopeBeforeCommit(next: whole, previous: scoped).aiHomeScoped)
+        // A failed switch to AI Home whose load may have committed takes the
+        // stricter block; one that never loaded keeps the whole-host rules.
+        check("widening-loaded-is-tightening", aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .acceptedOrUnknown)
+            && aiHomeWideningMayBeLoaded(next: scoped, previous: nil, load: .acceptedOrUnknown))
+        check("widening-unloaded-keeps", !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .rejected)
+            && !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .notIssued))
+        check("same-scope-or-tightening-not-widening", !aiHomeWideningMayBeLoaded(next: scoped, previous: scoped, load: .acceptedOrUnknown)
+            && !aiHomeWideningMayBeLoaded(next: whole, previous: scoped, load: .acceptedOrUnknown))
+        var stricterInstalled = false
+        var fault = false
+        let tightening = failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .acceptedOrUnknown)
+        check("widening-tightening-wiring", tightening.unconfirmed
+            && !failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .rejected).unconfirmed
+            && failedArmTightening(localNetwork: true, next: whole, previous: whole, load: .notIssued)
+                == (true, "Allow local network devices off", false))
+        let widened = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
+                                tighteningUnconfirmed: tightening.unconfirmed, faultSubject: tightening.subject,
+                                faultHeld: &fault, release: {}, installStricterBlock: { stricterInstalled = true }, persist: { nil })
+        check("widening-failure-installs-stricter-block", stricterInstalled && fault
+            && (widened.error as? HelperFailure)?.code == localNetworkFaultCode
+            && (widened.error as? HelperFailure)?.message.hasPrefix("Could not apply AI Home protection:") == true)
+        // A retry with the LAN baseline unknown is both a LAN tightening and
+        // a widening: the widening's subject, and so the AI hold, wins.
+        check("widening-wins-over-lan-tightening",
+              failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown)
+                == (true, aiHomeFaultSubject, true))
+        let retry = failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown)
+        var retryHeld = 0
+        var retryFault = false
+        let retried = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
+                                tighteningUnconfirmed: retry.unconfirmed, faultSubject: retry.subject, faultHeld: &retryFault,
+                                release: {}, installStricterBlock: {
+                                    try installTighteningBarrier(holdingAI: retry.holdsAI,
+                                                                 install: { throw HelperFailure.system("pf") },
+                                                                 applyAIHold: { retryHeld += 1 })
+                                }, persist: { nil })
+        check("lan-and-widening-stop-core-holds-ai", retryHeld == 1 && retryFault
+            && ((retried.error as? HelperFailure)?.message ?? "").contains("other traffic may not be blocked"))
+        // When the stricter block cannot be installed either, the AI hold is
+        // applied and the message does not claim the block.
+        struct InstallFailed: Error {}
+        var aiHeld = 0
+        var stopFault = false
+        let stopped = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
+                                tighteningUnconfirmed: true, faultSubject: tightening.subject, faultHeld: &stopFault,
+                                release: {}, installStricterBlock: {
+                                    try installTighteningBarrier(holdingAI: true, install: { throw InstallFailed() },
+                                                             applyAIHold: { aiHeld += 1 })
+                                }, persist: { nil })
+        let stoppedMessage = (stopped.error as? HelperFailure)?.message ?? ""
+        check("widening-stop-core-holds-ai", aiHeld == 1 && stopFault
+            && (stopped.error as? HelperFailure)?.code == localNetworkFaultStopCoreCode
+            && stoppedMessage.contains("other traffic may not be blocked")
+            && !stoppedMessage.contains("protection stays armed"))
+        var lanHeld = 0
+        _ = try? installTighteningBarrier(holdingAI: false, install: { throw InstallFailed() }, applyAIHold: { lanHeld += 1 })
+        var okHeld = 0
+        _ = try? installTighteningBarrier(holdingAI: true, install: {}, applyAIHold: { okHeld += 1 })
+        check("stricter-block-ai-hold-only-on-ai-failure", lanHeld == 0 && okHeld == 0)
+        // The update's bootstrap re-arm keeps the session's scope.
+        let retain = UpdateRuntime.retainBootstrapRequest(previous: scoped)
+        check("update-retain-keeps-scope", (try? aiHomeScopedField(retain["aiHomeScoped"])) == true
+            && (try? validateKillSwitchArmFields(retain)) != nil
+            && (try? aiHomeScopedField(UpdateRuntime.retainBootstrapRequest(previous: whole)["aiHomeScoped"])) == false)
+
+        func field(_ json: String) -> Bool? {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return nil }
+            return try? aiHomeScopedField(object["aiHomeScoped"])
+        }
+        check("field-boolean-only", field(#"{"aiHomeScoped":true}"#) == true && field(#"{"aiHomeScoped":false}"#) == false
+            && field("{}") == false && field(#"{"aiHomeScoped":1}"#) == nil
+            && field(#"{"aiHomeScoped":"true"}"#) == nil && field(#"{"aiHomeScoped":null}"#) == nil)
+        check("field-admitted", (try? validateKillSwitchArmFields(["aiHomeScoped": true])) != nil)
+
+        // `pfctl -sr` prints `to` with `from any`; the lifecycle self-test
+        // checks this against the kernel's own text.
+        check("anchor-detects-ai-home", anchorTextBlocks("block drop out quick inet from any to 160.79.104.0/21 label \"tono-ai-home\"\n"))
+        check("anchor-detects-catch-all", anchorTextBlocks("block drop out quick all label \"tono-block\"\n"))
+        check("anchor-ignores-passes", !anchorTextBlocks("pass out quick on lo0 all no state label \"tono-ai-home\"\n")
+            && !anchorTextBlocks(""))
+
+        if failures.isEmpty { return true }
+        FileHandle.standardError.write(Data("AI Home scope self-test failed: \(failures.joined(separator: ", "))\n".utf8))
+        return false
+    }
+
+    /// Root: the kernel takes the AI Home ruleset, and what it then shows is
+    /// recognized as Tono's block without being the whole-host catch-all.
+    static func runAIHomeScopeLifecycleSelfTest() -> Bool {
+        let testAnchor = "tono.ai-home-test"
+        guard geteuid() == 0 else { return false }
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("tono-ai-home-test.conf").path
+        defer {
+            _ = try? run("/sbin/pfctl", ["-a", testAnchor, "-F", "all"])
+            try? FileManager.default.removeItem(atPath: scratch)
+        }
+        let rules = renderRules(state: aiHomeFixtureState(scoped: true), allowedUID: 501, physicalInterfaces: ["en0"])
+        guard (try? Data(rules.utf8).write(to: URL(fileURLWithPath: scratch))) != nil,
+              let applied = try? run("/sbin/pfctl", ["-a", testAnchor, "-f", scratch]), applied.status == 0,
+              let shown = try? run("/sbin/pfctl", ["-a", testAnchor, "-sr"]), shown.status == 0,
+              let kernel = String(data: shown.output, encoding: .utf8) else {
+            FileHandle.standardError.write(Data("AI Home lifecycle: pfctl refused the ruleset\n".utf8))
+            return false
+        }
+        let passed = anchorTextBlocks(kernel) && !kernel.contains("block drop out quick all")
+            && kernel.contains("160.79.104.0/21") && kernel.contains("utun199")
+            && kernel.split(separator: "\n").filter { $0.hasPrefix("block ") }.count == 1
+        if !passed {
+            FileHandle.standardError.write(Data("AI Home lifecycle self-test failed; kernel holds:\n\(kernel)\n".utf8))
+        }
+        return passed
+    }
+}
