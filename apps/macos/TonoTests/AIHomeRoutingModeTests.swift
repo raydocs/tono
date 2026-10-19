@@ -60,6 +60,10 @@ final class AIHomeRoutingModeTests: XCTestCase {
         XCTAssertEqual(DesktopRoutingModeAdmission.effective("ai-home", homeAvailable: true), "ai-home")
         XCTAssertEqual(DesktopRoutingModeAdmission.effective("ai-home", homeAvailable: false), "stable")
         XCTAssertEqual(DesktopRoutingModeAdmission.effective("three-tier", homeAvailable: false), "three-tier")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.admit(held: nil, saved: nil, homeAvailable: false), "stable")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.admit(held: nil, saved: nil, homeAvailable: true), "ai-home")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.admit(held: "ai-home", saved: "stable", homeAvailable: false), "ai-home",
+                       "a held session keeps AI Home before the catalog loads")
         XCTAssertEqual(HelperManager.aiHomeArmFields(true) as NSDictionary, ["aiHomeScoped": true])
         XCTAssertTrue(HelperManager.aiHomeArmFields(false).isEmpty, "other sessions send nothing")
     }

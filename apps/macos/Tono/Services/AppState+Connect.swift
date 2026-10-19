@@ -90,11 +90,11 @@ extension AppState {
                     // Recovery belongs to the admitted session, not the next
                     // preference saved in Settings. A fresh boot without held
                     // strict intent still uses the saved mode as before.
-                    capturedRoutingMode = DesktopRoutingModeAdmission.effective(
-                        try DesktopRoutingModeAdmission.capture(
-                            self.connectionCoordinator.capturedRoutingMode.map { $0 as Any }
-                                ?? AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode)
-                        ),
+                    // The Home-line fallback applies to a new session only: a
+                    // held session keeps its mode even before the catalog loads.
+                    capturedRoutingMode = try DesktopRoutingModeAdmission.admit(
+                        held: self.connectionCoordinator.capturedRoutingMode,
+                        saved: AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode),
                         homeAvailable: self.managedCatalogRouting?.homeSocks5 != nil
                     )
                 } catch {

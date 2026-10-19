@@ -28,6 +28,12 @@ enum DesktopRoutingModeAdmission {
     static func effective(_ mode: String, homeAvailable: Bool) -> String {
         mode == "ai-home" && !homeAvailable ? "stable" : mode
     }
+    /// The mode a connect runs: the held session's, else the saved choice
+    /// with the Home-line fallback.
+    static func admit(held: String?, saved: Any?, homeAvailable: Bool) throws -> String {
+        if let held { return try capture(held) }
+        return effective(try capture(saved), homeAvailable: homeAvailable)
+    }
     /// The owned graph a captured mode compiles; nil for Stable.
     static func ownedGraph(_ mode: String) -> ThreeTierRoutingContract.Variant? {
         switch mode {
