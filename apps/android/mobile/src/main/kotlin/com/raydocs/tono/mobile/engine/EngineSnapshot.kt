@@ -65,8 +65,17 @@ data class EngineSnapshot(
     val catalogRevision: Long = 0,
     /** Debug builds only: the engine talks to a local fixture control plane, not the Tono API ([LocalTestServer]). */
     val localTestServer: Boolean = false,
+    /** The engine instance that wrote this snapshot (random per service instance; not an account identifier). */
+    val session: String = "",
+    /** Write counter within [session]; only ever grows. */
+    val version: Long = 0,
+    /** The tunnel attempt [phase] belongs to ([TunnelLedger]). */
+    val attempt: Long = 0,
+    /** What the engine confirmed for [attempt], or null. Selections ([selectedNode], [mode]) are not confirmations. */
+    val applied: AppliedTunnel? = null,
 ) {
-    val tunnelUp: Boolean get() = phase == Phase.CONNECTED || phase == Phase.DEGRADED
+    /** A tunnel-up phase backed by a confirmation for this attempt ([TunnelAuthority.confirmed]). */
+    val tunnelUp: Boolean get() = TunnelAuthority.confirmed(this)
 
     fun toJson(): String = Json.write(
         linkedMapOf(
@@ -92,6 +101,10 @@ data class EngineSnapshot(
             "core" to coreVersion,
             "revision" to catalogRevision,
             "localTestServer" to localTestServer,
+            "session" to session,
+            "version" to version,
+            "attempt" to attempt,
+            "applied" to applied?.let { linkedMapOf("generation" to it.generation, "node" to it.node, "mode" to it.mode.name) },
         ),
     )
 
@@ -103,10 +116,16 @@ data class EngineSnapshot(
             return ExitProbe(ProbeState.valueOf(m["state"] as String), m["location"] as String?, (m["latencyMs"] as Number?)?.toLong())
         }
 
+        /** Missing or malformed confirmation fields (an older engine) decode as unconfirmed; the result is sealed. */
+        private fun applied(o: Any?): AppliedTunnel? = runCatching {
+            val a = o as? Map<*, *> ?: return null
+            AppliedTunnel((a["generation"] as Number).toLong(), a["node"] as String?, RoutingMode.valueOf(a["mode"] as String))
+        }.getOrNull()
+
         fun fromJson(text: String): EngineSnapshot {
             val m = Json.parse(text).asObject()
             val login = m["login"].asObject()
-            return EngineSnapshot(
+            return TunnelAuthority.seal(EngineSnapshot(
                 phase = Phase.valueOf(m["phase"] as String),
                 reasonCode = m["reasonCode"] as String?,
                 email = m["email"] as String?,
@@ -132,7 +151,11 @@ data class EngineSnapshot(
                 coreVersion = m["core"] as String,
                 catalogRevision = (m["revision"] as Number).toLong(),
                 localTestServer = m["localTestServer"] as? Boolean ?: false,
-            )
+                session = m["session"] as? String ?: "",
+                version = (m["version"] as? Number)?.toLong() ?: 0,
+                attempt = (m["attempt"] as? Number)?.toLong() ?: 0,
+                applied = applied(m["applied"]),
+            ))
         }
     }
 }

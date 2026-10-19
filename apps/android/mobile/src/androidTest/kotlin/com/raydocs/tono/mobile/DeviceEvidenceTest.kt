@@ -276,6 +276,8 @@ class DeviceEvidenceTest {
     private val nodes = listOf(NodeView("Tokyo · Dawn", "Tokyo", "Dawn", 86), NodeView("Los Angeles · Grove", "Los Angeles", "Grove", 162))
     private val idle = EngineSnapshot(phase = Phase.IDLE, email = "tester@example.com", nodes = nodes, selectedNode = "Tokyo · Dawn", homeKind = HomeKind.RESIDENTIAL, mode = RoutingMode.THREE_TIER)
     private fun connected() = idle.copy(
+        session = "device-fixture", attempt = 1,
+        applied = com.raydocs.tono.mobile.engine.AppliedTunnel(1, idle.selectedNode, idle.mode),
         phase = Phase.CONNECTED, connectedSinceMs = System.currentTimeMillis() - 23 * 60_000,
         cloudProbe = ExitProbe(ProbeState.OK, "JP"), homeProbe = ExitProbe(ProbeState.OK, "US"), rxBytesPerSec = 2_340_000, txBytesPerSec = 81_000,
     )

@@ -40,6 +40,7 @@ import com.raydocs.tono.mobile.engine.ExitProbe
 import com.raydocs.tono.mobile.engine.HomeKind
 import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.engine.ProbeState
+import com.raydocs.tono.mobile.engine.TunnelAuthority
 import com.raydocs.tono.routing.RoutingMode
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -107,12 +108,14 @@ fun Lanes(s: EngineSnapshot) {
         HomeKind.CATALOG_NODE -> stringResource(R.string.lane_home_node, s.homeLabel ?: "")
     }
     val cloud = stringResource(R.string.lane_cloud)
+    // The lanes of the mode the confirmed tunnel runs; with none, of the selected mode, and not live.
+    val mode = TunnelAuthority.appliedMode(s) ?: s.mode
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).border(1.dp, TonoColors.Hairline, RoundedCornerShape(18.dp)).padding(vertical = 4.dp)) {
         Lane(Glyph.AI, stringResource(R.string.lane_ai), homeDest, if (s.homeKind == HomeKind.NONE) s.cloudProbe else s.homeProbe, s.tunnelUp)
         LaneDivider()
         Lane(Glyph.VIDEO, stringResource(R.string.lane_video), cloud, s.cloudProbe, s.tunnelUp)
         LaneDivider()
-        if (s.mode == RoutingMode.STABLE) Lane(Glyph.APPS, stringResource(R.string.lane_other), cloud, s.cloudProbe, s.tunnelUp)
+        if (mode == RoutingMode.STABLE) Lane(Glyph.APPS, stringResource(R.string.lane_other), cloud, s.cloudProbe, s.tunnelUp)
         else Lane(Glyph.APPS, stringResource(R.string.lane_other), stringResource(R.string.lane_local), null, s.tunnelUp)
     }
 }

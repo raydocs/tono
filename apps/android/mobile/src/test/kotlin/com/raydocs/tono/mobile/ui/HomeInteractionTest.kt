@@ -19,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.raydocs.tono.mobile.R
@@ -219,6 +220,27 @@ class HomeInteractionTest {
         compose.waitForIdle()
         compose.onNodeWithText(str(R.string.state_idle)).assertExists()
         compose.onAllNodesWithText(unknown).assertCountEquals(0)
+    }
+
+    @Test fun aConnectedSnapshotWithoutTheEnginesConfirmationIsShownAsConnecting() {
+        snapshot = UiFixtures.connected().copy(applied = null)
+        show()
+        compose.onAllNodesWithText(str(R.string.state_connected)).assertCountEquals(0)
+        assertEquals(true, compose.onAllNodesWithText(str(R.string.state_connecting)).fetchSemanticsNodes().isNotEmpty())
+        compose.onAllNodesWithText(str(R.string.status_exit_both, "Japan", "United States")).assertCountEquals(0)
+    }
+
+    @Test fun theSelectedLineIsNotMarkedInUseUntilTheTunnelRunsIt() {
+        // Los Angeles selected while the confirmed tunnel still runs Tokyo, then the reload in flight.
+        var lines by mutableStateOf(UiFixtures.connected().copy(selectedNode = "Los Angeles · Grove"))
+        compose.setContent { TonoTheme { LinesContent(lines, zh = false, onSelect = {}, onTest = {}) } }
+        val inUse = str(R.string.lines_in_use)
+        compose.onAllNodesWithText(inUse).assertCountEquals(1)
+        compose.onNode(hasText("Tokyo").and(hasText(inUse))).assertExists()
+        compose.onNode(hasText("Los Angeles").and(isSelected())).assertExists()
+        lines = lines.copy(phase = Phase.CONNECTING, attempt = 4, applied = null)
+        compose.waitForIdle()
+        compose.onAllNodesWithText(inUse).assertCountEquals(0)
     }
 
     @Test fun unconfirmedPrimaryStopsAfterATunnelPhaseAndConnectsOtherwise() {

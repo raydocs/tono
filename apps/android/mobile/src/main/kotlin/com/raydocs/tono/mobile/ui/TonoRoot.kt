@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.Phase
+import com.raydocs.tono.mobile.engine.TunnelAuthority
 import com.raydocs.tono.routing.RoutingMode
 
 enum class Screen { HOME, SETTINGS, APPS, LICENSES }
@@ -53,7 +54,9 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink =
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     var linesOpen by rememberSaveable { mutableStateOf(false) }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
-    val s = snapshot
+    // One rule for everything below, as for the notification and the shared status: a tunnel-up
+    // phase without the engine's confirmation for its attempt is shown as connecting.
+    val s = snapshot?.let(TunnelAuthority::seal)
     Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
         when {
             s == null -> SeaScene(SkyState.NIGHT, Modifier.fillMaxSize(), horizon = 0.44f)

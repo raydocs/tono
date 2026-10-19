@@ -31,14 +31,16 @@ object SurfaceCopy {
             SurfaceState.CONNECTED -> when {
                 s?.cloud != null && s.home != null -> c.getString(R.string.status_exit_both, Format.country(s.cloud), Format.country(s.home))
                 s?.cloud != null -> c.getString(R.string.status_exit_cloud, Format.country(s.cloud))
-                else -> s?.line ?: ""
+                // The line the confirmed tunnel uses; the selected one is not current.
+                else -> s?.appliedLine ?: ""
             }
-            SurfaceState.DEGRADED, SurfaceState.FAILED -> reason() ?: s?.line ?: ""
+            SurfaceState.DEGRADED -> reason() ?: s?.appliedLine ?: ""
+            SurfaceState.FAILED -> reason() ?: s?.line ?: ""
             SurfaceState.OFF, SurfaceState.BUSY -> s?.line ?: c.getString(R.string.surface_open_to_pick)
             // Says what was last known and when, so a stale record is never mistaken for the present.
             SurfaceState.UNKNOWN -> if (s == null) c.getString(R.string.surface_open_to_check) else c.getString(
                 R.string.surface_last_known,
-                title(c, SurfaceView(SurfaceRules.stateFor(s.phase), s)),
+                title(c, SurfaceView(SurfaceRules.claimed(s), s)),
                 DateFormat.getTimeFormat(c).format(s.updatedAtMs),
             )
         }

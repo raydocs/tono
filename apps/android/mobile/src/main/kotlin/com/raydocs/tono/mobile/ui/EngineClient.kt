@@ -43,21 +43,16 @@ class EngineClient(private val context: Context) {
     val link: StateFlow<EngineLink> = _link.asStateFlow()
 
     @Volatile private var engine: ITonoEngine? = null
+    /** The engine instance the current binding last heard from (main thread); a death is reported for it alone. */
+    private var session: String? = null
+    /** Instances whose death this client heard (main thread): a snapshot of theirs still queued is not current. */
+    private val dead = mutableSetOf<String>()
     @Volatile private var paused = false
     private var bound = false
     private val main = Handler(Looper.getMainLooper())
 
-    private val listener = object : ITonoEngineListener.Stub() {
-        override fun onSnapshot(json: String) {
-            val fresh = runCatching { EngineSnapshot.fromJson(json) }.getOrNull() ?: return
-            // On the main thread, in order with the connection callbacks that set [engine].
-            main.post {
-                if (paused) return@post
-                _snapshot.value = fresh
-                if (engine != null) _link.value = EngineLink.LIVE
-            }
-        }
-    }
+    private var listener: ITonoEngineListener? = null
+    private var callbackEpoch = 0L
 
     /**
      * Android restarts a dead engine on its own, but not always (run 39170392763: not within 90 s).
@@ -87,15 +82,23 @@ class EngineClient(private val context: Context) {
             // The :vpn process died, and the tunnel with it. Android restarts the engine and calls
             // onServiceConnected again while we stay bound; until then nothing on screen is current.
             engine = null
+            callbackEpoch++
+            listener = null
             _link.value = EngineLink.LOST
+            // Named for the instance this binding heard from: delivered late (this process frozen while a
+            // new engine connected), it still touches only the dead one's record and notification.
+            val died = session
+            session = null
+            if (died != null) dead += died
+            runCatching { PublicStatusStore.markDead(context, died) }
             // The widget redraws only when the engine publishes; have it look again now, and once more
             // after Android has had time to drop the dead tunnel's VPN network.
             SystemSurfaces.refresh(context)
             main.postDelayed({ SystemSurfaces.refresh(context) }, 2_000)
             // Android can leave the dead engine's notification up, still saying Connected (the watch
             // process does the same; whichever runs first, both say the same).
-            runCatching { NotificationWatchdog.engineDied(context, PublicStatusStore.vpnPresent(context)) }
-            main.postDelayed({ runCatching { NotificationWatchdog.confirmStopped(context, PublicStatusStore.vpnPresent(context)) } }, 2_000)
+            runCatching { NotificationWatchdog.engineDied(context, died, PublicStatusStore.tonoVpn(context)) }
+            main.postDelayed({ runCatching { NotificationWatchdog.confirmStopped(context, PublicStatusStore.tonoVpn(context)) } }, 2_000)
             main.removeCallbacks(revive)
             main.postDelayed(revive, 3_000)
         }
@@ -103,6 +106,8 @@ class EngineClient(private val context: Context) {
         override fun onBindingDied(name: ComponentName?) {
             // Android will not reconnect this binding: make a new one.
             engine = null
+            callbackEpoch++
+            listener = null
             _link.value = EngineLink.LOST
             runCatching { context.unbindService(this) }
             bound = false
@@ -111,18 +116,42 @@ class EngineClient(private val context: Context) {
 
         override fun onNullBinding(name: ComponentName?) {
             engine = null
+            callbackEpoch++
+            listener = null
             _link.value = EngineLink.LOST
         }
     }
 
+    /** From a dead engine instance, or older than what is on screen from the same one: a callback that arrived late. */
+    private fun stale(fresh: EngineSnapshot): Boolean {
+        val shown = _snapshot.value
+        return fresh.session in dead || (shown != null && fresh.session.isNotEmpty() && shown.session == fresh.session && fresh.version < shown.version)
+    }
+
     /** Registers for snapshots and reads the current one in the same breath, so the next frame is current. */
     private fun refresh(e: ITonoEngine) {
+        val epoch = ++callbackEpoch
+        listener?.let { previous -> runCatching { e.unregister(previous) } }
+        val current = object : ITonoEngineListener.Stub() {
+            override fun onSnapshot(json: String) {
+                val fresh = runCatching { EngineSnapshot.fromJson(json) }.getOrNull() ?: return
+                main.post {
+                    // A callback queued before pause/unbind is not a fresh reply on the new binding,
+                    // even when no death was observed and its session is not in the death log.
+                    if (paused || epoch != callbackEpoch || engine !== e || stale(fresh)) return@post
+                    _snapshot.value = fresh
+                    session = fresh.session.ifEmpty { null }
+                    _link.value = EngineLink.LIVE
+                }
+            }
+        }
+        listener = current
         runCatching {
-            e.register(listener)
+            e.register(current)
             e.snapshot()?.let { EngineSnapshot.fromJson(it) }
         }.onSuccess { fresh ->
             // Null while the engine is still starting: its first snapshot follows through the listener.
-            if (fresh != null) { _snapshot.value = fresh; _link.value = EngineLink.LIVE }
+            if (fresh != null && !stale(fresh)) { _snapshot.value = fresh; session = fresh.session.ifEmpty { null }; _link.value = EngineLink.LIVE }
         }.onFailure {
             // Dead already; onServiceDisconnected follows.
             _link.value = EngineLink.LOST
@@ -141,8 +170,10 @@ class EngineClient(private val context: Context) {
 
     fun unbind() {
         main.removeCallbacks(revive)
+        callbackEpoch++
         if (!bound) return
-        runCatching { engine?.unregister(listener) }
+        listener?.let { previous -> runCatching { engine?.unregister(previous) } }
+        listener = null
         context.unbindService(connection)
         bound = false
         engine = null
@@ -155,7 +186,9 @@ class EngineClient(private val context: Context) {
      */
     fun pause() {
         paused = true
-        runCatching { engine?.unregister(listener) }
+        callbackEpoch++
+        listener?.let { previous -> runCatching { engine?.unregister(previous) } }
+        listener = null
         if (_link.value == EngineLink.LIVE) _link.value = EngineLink.WAITING
     }
 

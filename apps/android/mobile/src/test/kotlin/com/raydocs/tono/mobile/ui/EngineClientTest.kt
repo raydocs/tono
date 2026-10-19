@@ -12,6 +12,7 @@ import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.engine.TonoVpnService
 import com.raydocs.tono.mobile.ipc.ITonoEngine
 import com.raydocs.tono.mobile.ipc.ITonoEngineListener
+import com.raydocs.tono.mobile.surface.PublicStatusStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -113,6 +114,60 @@ class EngineClientTest {
         client.resume()
         assertEquals(EngineLink.LIVE, client.link.value)
         assertEquals(Phase.IDLE, client.snapshot.value?.phase)
+    }
+
+    /** The app process frozen while the engine was replaced: the old binding's death arrives after the new engine connected. */
+    @Test fun aLateDeathOfTheOldEngineLeavesTheNewEnginesNotificationAndRecord() {
+        val client = bound(StandInEngine(UiFixtures.connected()))
+        assertEquals(UiFixtures.ENGINE, client.snapshot.value?.session)
+        val nm = app.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(TonoNotifications.CHANNEL, "t", NotificationManager.IMPORTANCE_LOW))
+        val pi = android.app.PendingIntent.getActivity(app, 0, android.content.Intent(), android.app.PendingIntent.FLAG_IMMUTABLE)
+        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.ongoing(app, UiFixtures.connected().copy(session = "fixture-engine-2"), pi, pi))
+
+        connection().onServiceDisconnected(name)
+        val title = nm.activeNotifications.single { it.id == TonoNotifications.ONGOING_ID }.notification.extras.getCharSequence(Notification.EXTRA_TITLE)
+        assertEquals(app.getString(R.string.state_connected), title.toString())
+        // The death is recorded for the instance this binding heard from, and for no other.
+        assertEquals(setOf(UiFixtures.ENGINE), PublicStatusStore.dead(app))
+    }
+
+    @Test fun aSnapshotStillQueuedFromTheDeadEngineIsNotShownAsCurrent() {
+        val old = StandInEngine(UiFixtures.connected())
+        val client = bound(old)
+        connection().onServiceDisconnected(name)
+        // The restarted engine speaks first; then a callback the dead one sent before dying is delivered.
+        val restarted = StandInEngine(UiFixtures.idle.copy(session = "fixture-engine-2"))
+        connection().onServiceConnected(name, restarted)
+        idleLooper()
+        assertEquals(Phase.IDLE, client.snapshot.value?.phase)
+        old.listener?.onSnapshot(UiFixtures.connected().toJson())
+        idleLooper()
+        assertEquals(Phase.IDLE, client.snapshot.value?.phase)
+        assertEquals("fixture-engine-2", client.snapshot.value?.session)
+    }
+
+    @Test fun anOlderSnapshotOfTheSameEngineArrivingLateDoesNotReplaceANewerOne() {
+        val engine = StandInEngine(UiFixtures.connected().copy(version = 41))
+        val client = bound(engine)
+        engine.listener?.onSnapshot(UiFixtures.connected().copy(version = 39, phase = Phase.CONNECTING, applied = null).toJson())
+        idleLooper()
+        assertEquals(Phase.CONNECTED, client.snapshot.value?.phase)
+        assertEquals(41L, client.snapshot.value?.version)
+    }
+
+    @Test fun aCallbackRetainedAcrossPauseCannotReplaceTheFreshResumeSnapshot() {
+        val engine = StandInEngine(UiFixtures.connected())
+        val client = bound(engine)
+        val previous = engine.listener!!
+        client.pause()
+        engine.current = UiFixtures.idle.copy(session = "fixture-engine-2")
+        client.resume()
+        previous.onSnapshot(UiFixtures.connected().toJson())
+        idleLooper()
+        assertEquals(EngineLink.LIVE, client.link.value)
+        assertEquals(Phase.IDLE, client.snapshot.value?.phase)
+        assertEquals("fixture-engine-2", client.snapshot.value?.session)
     }
 
     @Test fun anEngineThatCannotBeBoundIsLostNotWaiting() {

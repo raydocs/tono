@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.os.Bundle
 import com.raydocs.tono.mobile.R
+import com.raydocs.tono.mobile.surface.Claim
 import com.raydocs.tono.mobile.ui.Format
 import com.raydocs.tono.mobile.ui.shortReasonRes
 import com.raydocs.tono.routing.RoutingMode
@@ -17,12 +18,19 @@ object TonoNotifications {
     const val NOTICE_ID = 8
     /** The engine's phase when it posted its ongoing notification; replacements carry none. */
     private const val EXTRA_PHASE = "com.raydocs.tono.mobile.PHASE"
+    /** The engine instance that posted it ([EngineSnapshot.session]): invalidations name the instance they are about. */
+    private const val EXTRA_SESSION = "com.raydocs.tono.mobile.SESSION"
 
     fun claimedPhase(n: Notification): Phase? =
         n.extras.getString(EXTRA_PHASE)?.let { name -> runCatching { Phase.valueOf(name) }.getOrNull() }
 
+    /** What an engine's ongoing notification claims, or null for a replacement (which claims nothing). */
+    fun claim(n: Notification): Claim? = claimedPhase(n)?.let { Claim(it, n.extras.getString(EXTRA_SESSION) ?: "") }
+
     /** Ongoing while the tunnel runs: state, verified exits (or the line), and Disconnect. */
-    fun ongoing(c: Context, s: EngineSnapshot, open: PendingIntent, disconnect: PendingIntent): Notification {
+    fun ongoing(c: Context, snapshot: EngineSnapshot, open: PendingIntent, disconnect: PendingIntent): Notification {
+        // The same rule as the app and the shared status: no tunnel-up title without a confirmation.
+        val s = TunnelAuthority.seal(snapshot)
         val title = c.getString(
             when (s.phase) {
                 Phase.CONNECTED -> R.string.state_connected
@@ -31,14 +39,16 @@ object TonoNotifications {
                 else -> R.string.state_connecting
             },
         )
-        val node = s.nodes.firstOrNull { it.name == s.selectedNode }
+        // Up: the line and mode the confirmed tunnel uses. Connecting: the ones it is being started with.
+        val node = TunnelAuthority.appliedNode(s) ?: s.nodes.firstOrNull { it.name == s.selectedNode }?.name
+        val mode = TunnelAuthority.appliedMode(s) ?: s.mode
         val cloud = s.cloudProbe.location?.takeIf { s.tunnelUp }
         val home = s.homeProbe.location?.takeIf { s.tunnelUp && s.homeKind != HomeKind.NONE }
         val text = when {
             s.phase == Phase.DEGRADED && s.reasonCode != null -> shortReasonRes(s.reasonCode)?.let(c::getString) ?: s.reasonCode
             cloud != null && home != null -> c.getString(R.string.status_exit_both, Format.country(cloud), Format.country(home))
             cloud != null -> c.getString(R.string.status_exit_cloud, Format.country(cloud))
-            else -> listOfNotNull(node?.name, c.getString(if (s.mode == RoutingMode.THREE_TIER) R.string.mode_three_tier_short else R.string.mode_stable_short)).joinToString(" · ")
+            else -> listOfNotNull(node, c.getString(if (mode == RoutingMode.THREE_TIER) R.string.mode_three_tier_short else R.string.mode_stable_short)).joinToString(" · ")
         }
         // Same glyph family as the desktop menu bar/tray: only a verified connection gets the filled sun.
         val icon = when (s.phase) {
@@ -50,7 +60,7 @@ object TonoNotifications {
         return Notification.Builder(c, CHANNEL)
             .setSmallIcon(icon)
             .setColor(0xFFFFAD74.toInt())
-            .addExtras(Bundle().apply { putString(EXTRA_PHASE, s.phase.name) })
+            .addExtras(Bundle().apply { putString(EXTRA_PHASE, s.phase.name); putString(EXTRA_SESSION, s.session) })
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(true)

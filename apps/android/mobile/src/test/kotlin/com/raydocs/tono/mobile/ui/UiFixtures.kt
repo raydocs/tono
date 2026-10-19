@@ -2,6 +2,7 @@ package com.raydocs.tono.mobile.ui
 
 import android.content.ComponentName
 import androidx.activity.ComponentActivity
+import com.raydocs.tono.mobile.engine.AppliedTunnel
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.ExitProbe
 import com.raydocs.tono.mobile.engine.HomeKind
@@ -25,10 +26,15 @@ object UiFixtures {
         phase = Phase.IDLE, email = "tester@example.com", nodes = nodes, selectedNode = "Tokyo · Dawn",
         homeKind = HomeKind.RESIDENTIAL, mode = RoutingMode.THREE_TIER, coreVersion = "1.15.0-alpha.12", catalogRevision = 12,
     )
+    /** The fixture engine instance behind [connected]; [idle] names none. */
+    const val ENGINE = "fixture-engine-1"
+
+    /** A tunnel the fixture engine confirmed: attempt 3 started on the selected line and mode. */
     fun connected(sinceMs: Long = System.currentTimeMillis() - 23 * 60_000) = idle.copy(
         phase = Phase.CONNECTED, connectedSinceMs = sinceMs,
         cloudProbe = ExitProbe(ProbeState.OK, "JP"), homeProbe = ExitProbe(ProbeState.OK, "US"),
         rxBytesPerSec = 2_340_000, txBytesPerSec = 81_000,
+        session = ENGINE, version = 40, attempt = 3, applied = AppliedTunnel(3, "Tokyo · Dawn", RoutingMode.THREE_TIER),
     )
     fun degraded() = connected().copy(phase = Phase.DEGRADED, reasonCode = "HOME_UNREACHABLE", homeProbe = ExitProbe(ProbeState.FAILED))
 }

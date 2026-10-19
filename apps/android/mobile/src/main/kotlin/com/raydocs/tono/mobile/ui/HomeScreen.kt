@@ -85,6 +85,7 @@ import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.HomeKind
 import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.engine.ProbeState
+import com.raydocs.tono.mobile.engine.TunnelAuthority
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -375,7 +376,7 @@ private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit, live: Boolean) 
     val node = s.nodes.firstOrNull { it.name == s.selectedNode } ?: s.nodes.firstOrNull()
     // Until "Test" measures it, the connected line's dot follows the cloud exit check: it answered.
     // No number: that check is a whole HTTPS request, not the round trip "Test" reports.
-    val answered = live && s.tunnelUp && s.cloudProbe.state == ProbeState.OK && node?.name == s.selectedNode
+    val answered = live && s.tunnelUp && s.cloudProbe.state == ProbeState.OK && node != null && node.name == TunnelAuthority.appliedNode(s)
     // The line's own name only when another line shares the city; otherwise the city says it all.
     val shared = node != null && s.nodes.count { it.city.equals(node.city, ignoreCase = true) } > 1
     val name = node?.let { Format.city(it.city, zh) + (if (shared && it.label.isNotBlank()) " · ${it.label}" else "") } ?: stringResource(R.string.line_pick)

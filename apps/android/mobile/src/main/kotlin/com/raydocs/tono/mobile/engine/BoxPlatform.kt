@@ -43,6 +43,10 @@ class BoxPlatform(
     private val monitor: NetworkMonitor,
 ) : PlatformInterface {
     @Volatile private var tun: ParcelFileDescriptor? = null
+    /** TUNs Android has established for this engine; the engine compares it around a start to confirm that start's TUN. */
+    @Volatile var tunsEstablished = 0L
+        private set
+    val tunOpen: Boolean get() = tun != null
     private val dnsExecutor = Executors.newCachedThreadPool()
     private val interfaceListeners = HashMap<InterfaceUpdateListener, (NetworkMonitor.Underlying?) -> Unit>()
 
@@ -87,6 +91,7 @@ class BoxPlatform(
         val pfd = builder.establish() ?: throw IllegalStateException("VPN_PERMISSION_REVOKED")
         tun?.let { runCatching { it.close() } }
         tun = pfd
+        tunsEstablished++
         return pfd.fd
     }
 

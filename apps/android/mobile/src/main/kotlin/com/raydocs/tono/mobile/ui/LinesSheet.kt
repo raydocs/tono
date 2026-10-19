@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
+import com.raydocs.tono.mobile.engine.TunnelAuthority
 
 /** Cloud line picker. Lines come only from the admitted exit catalog; nothing is invented here. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,6 +59,8 @@ fun LinesContent(s: EngineSnapshot, zh: Boolean, onSelect: (String) -> Unit, onT
             QuietButton(stringResource(R.string.lines_test), onTest)
         }
         if (s.usingCachedCatalog) Text(stringResource(R.string.lines_cached), style = MaterialTheme.typography.bodySmall, color = TonoColors.Warning)
+        // The radio is the selection (a preference); "In use" only on the line the confirmed tunnel runs.
+        val inUse = TunnelAuthority.appliedNode(s)
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp).selectableGroup(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(s.nodes, key = { it.name }) { n ->
                 val selected = n.name == s.selectedNode
@@ -82,7 +85,7 @@ fun LinesContent(s: EngineSnapshot, zh: Boolean, onSelect: (String) -> Unit, onT
                         style = MaterialTheme.typography.labelLarge,
                         color = TonoColors.TextSecondary,
                     )
-                    if (selected) Text(stringResource(R.string.lines_in_use), style = MaterialTheme.typography.labelMedium, color = TonoColors.Accent)
+                    if (n.name == inUse) Text(stringResource(R.string.lines_in_use), style = MaterialTheme.typography.labelMedium, color = TonoColors.Accent)
                 }
             }
         }

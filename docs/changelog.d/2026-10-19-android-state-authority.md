@@ -1,0 +1,10 @@
+## 2026-10-19 · Android 隧道确认状态与本地故障矩阵（WIP 云验证）
+- 归属：owner 指定 Android #1673 试验端整改；遵守 docs/SHIP_PLAN.md §1「Android 不进这一发」，不改变 G1–G4 客户发布证据或门。
+- 来源：基线 f769fc43b；feat/android-singbox-horizon / [#1673](https://github.com/raydocs/tono/pull/1673)；本批先提交/推送 wip/android-state-authority 供 Devin Cloud 验证；未合 main，未更新 PR 分支。
+- 缺陷修复：尝试身份与 applied 状态分离；未知 VPN 不能确认连接；失联/旧代际事件不宣告当前线路；暂停前旧回调以 callback epoch 隔离；目录 IO 结果回到引擎串行提交，目录变更先清确认再重载。实现待完整 Android 验证，不宣称历史否决已消除。
+- 新增/优化：故障矩阵及共享确认投影、单调时钟 freshness、带锁/检查 rename 的状态文件；暂停视觉打磨。
+- 工程与测试：设备夹具补确认字段和单调时钟，新增不自动下载的纯 JUnit 子集入口；无 CI 修改。
+- 验证：主线程本机实际运行 46 个真实 JUnit 测试通过；未知 VPN 回归在旧源码编译成功后断言失败。证据 docs/agent-reports/2026-10-19-android-state-jvm/README.md。git diff --check 通过。
+- 未运行：正式 Gradle/Android/Robolectric/AndroidTest 编译与设备测试、真机/真实服务；历史 CI 仅覆盖原基线，没有本批冻结评分。
+- 候选/发布：WIP 源码验证，无客户候选或 release；云验证未通过前不更新 PR 分支。
+- 剩余限制：owner 已取消本机组件安装要求；正式编译/测试改到已准备的 Devin Linux KVM 快照，按精确 SHA 留证。通知/widget 调度时延、重载 openTun、API29/OEM owner UID、通知替换竞争仍待验证。

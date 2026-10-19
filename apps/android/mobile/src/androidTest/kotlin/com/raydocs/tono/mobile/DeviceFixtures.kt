@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.activity.enableEdgeToEdge
 import com.raydocs.tono.mobile.engine.EngineSnapshot
+import com.raydocs.tono.mobile.engine.AppliedTunnel
 import com.raydocs.tono.mobile.engine.ExitProbe
 import com.raydocs.tono.mobile.engine.HomeKind
 import com.raydocs.tono.mobile.engine.NodeView
@@ -19,6 +20,7 @@ object DeviceFixtures {
         homeKind = HomeKind.RESIDENTIAL, mode = RoutingMode.THREE_TIER, coreVersion = "1.15.0-alpha.12", catalogRevision = 12,
     )
     fun connected() = idle.copy(
+        session = "device-fixture", attempt = 1, applied = AppliedTunnel(1, idle.selectedNode, idle.mode),
         phase = Phase.CONNECTED, connectedSinceMs = System.currentTimeMillis() - 23 * 60_000,
         cloudProbe = ExitProbe(ProbeState.OK, "JP"), homeProbe = ExitProbe(ProbeState.OK, "US"), rxBytesPerSec = 2_340_000, txBytesPerSec = 81_000,
     )

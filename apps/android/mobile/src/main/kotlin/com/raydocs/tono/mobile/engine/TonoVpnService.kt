@@ -76,7 +76,12 @@ class TonoVpnService : VpnService() {
     private var accessToken: String? = null
     private var trafficTask: ScheduledFuture<*>? = null
     @Volatile private var foreground = false
-    private var generation = 0L
+    /** Attempts and their confirmation (engine thread only); the single writer of [EngineSnapshot.applied]. */
+    private val ledger = TunnelLedger()
+    /** This service instance; stamps every snapshot, the shared status and the ongoing notification. */
+    private val session = EngineStore.randomHex(8)
+    /** Set once [onDestroy] has drained the engine thread: a late task of this instance writes nothing. */
+    @Volatile private var retired = false
     /** The phone's own network the exits were last checked over (engine thread only). */
     private var lastUnderlying: Network? = null
     private lateinit var apiBase: String
@@ -84,15 +89,15 @@ class TonoVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
-        // First: a fresh process has no tunnel, whatever notification Android re-posted for it.
-        runCatching { NotificationWatchdog.engineStarting(this) }
+        // First: a fresh engine has no tunnel, whatever notification Android re-posted for it.
+        runCatching { NotificationWatchdog.engineStarting(this, session) }
         store = EngineStore(this)
         val local = LocalTestServer.apiBase(this)
         localTestServer = local != null
         apiBase = local ?: BuildConfig.API_BASE
         api = ControlPlane(apiBase, BuildConfig.VERSION_NAME.substringBefore('-'))
         // Before restore() runs, so every snapshot built from here on carries the mark.
-        snapshot.set(snapshot.get().copy(localTestServer = localTestServer))
+        snapshot.set(snapshot.get().copy(localTestServer = localTestServer, session = session))
         val connectivity = getSystemService(ConnectivityManager::class.java)
         monitor = NetworkMonitor(connectivity)
         monitor.start()
@@ -128,7 +133,7 @@ class TonoVpnService : VpnService() {
         engine.execute {
             stopCore()
             store.update { it.copy(wantConnected = false) }
-            update { it.copy(phase = Phase.NEEDS_PERMISSION, reasonCode = "REVOKED", connectedSinceMs = 0) }
+            update { ledger.end(it, Phase.NEEDS_PERMISSION, "REVOKED") }
             leaveForeground()
         }
     }
@@ -137,6 +142,7 @@ class TonoVpnService : VpnService() {
         engine.execute { stopCore() }
         engine.shutdown()
         engine.awaitTermination(3, TimeUnit.SECONDS)
+        retired = true
         monitor.stop()
         listeners.kill()
         super.onDestroy()
@@ -145,8 +151,10 @@ class TonoVpnService : VpnService() {
     // ---- state -------------------------------------------------------------------------------
 
     private fun update(block: (EngineSnapshot) -> EngineSnapshot) {
+        if (retired) return
         val before = snapshot.get()
-        val next = block(before)
+        // Sealed: no tunnel-up phase leaves the engine without a confirmation for its attempt.
+        val next = TunnelAuthority.seal(block(before)).copy(session = session, version = before.version + 1)
         snapshot.set(next)
         broadcast(next.toJson())
         if (foreground) notify(next)
@@ -270,7 +278,7 @@ class TonoVpnService : VpnService() {
         store.clearAccount()
         accessToken = null
         catalog = null
-        update { signedOut(mode = it.mode, excluded = it.excludedPackages) }
+        update { ledger.end(signedOut(mode = it.mode, excluded = it.excludedPackages), Phase.SIGNED_OUT, null) }
     }
 
     private fun bearer(forceRefresh: Boolean = false): String {
@@ -295,7 +303,10 @@ class TonoVpnService : VpnService() {
     // ---- catalog -----------------------------------------------------------------------------
 
     /** Fetches and admits the catalog. Falls back to the last admitted copy only for network failures. */
-    private fun loadCatalog(): ExitCatalog {
+    private data class LoadedCatalog(val catalog: ExitCatalog, val cached: Boolean)
+
+    /** IO result only: the caller commits snapshot changes on the engine executor. */
+    private fun loadCatalog(): LoadedCatalog {
         val settings = store.settings()
         return try {
             val body = authorized { token -> api.get("exit-catalog", token) }
@@ -303,23 +314,33 @@ class TonoVpnService : VpnService() {
             if (admitted.revision < settings.catalogRevision) throw CatalogRejected("CATALOG_ROLLBACK", "catalog revision went backwards")
             store.saveCatalogBody(Json.write(body))
             store.update { it.copy(catalogKey = admitted.key, catalogRevision = admitted.revision, catalogFetchedAtMs = System.currentTimeMillis()) }
-            update { it.copy(usingCachedCatalog = false) }
-            admitted
+            LoadedCatalog(admitted, cached = false)
         } catch (e: ApiException) {
             val cachedBody = store.cachedCatalogBody()
             val fresh = System.currentTimeMillis() - settings.catalogFetchedAtMs < CACHE_MAX_AGE_MS
             if (e.code == "NETWORK" && cachedBody != null && fresh) {
-                update { it.copy(usingCachedCatalog = true) }
-                CatalogAdmission.admit(Json.parse(cachedBody).asObject())
+                LoadedCatalog(CatalogAdmission.admit(Json.parse(cachedBody).asObject()), cached = true)
             } else throw e
         }
     }
 
     private fun refreshCatalogQuietly() {
+        val gen = ledger.attempt
         io.execute {
             val result = runCatching { loadCatalog() }
             engine.execute {
-                result.onSuccess { c -> catalog = c; update { it.withCatalog(c) } }
+                if (!ledger.isCurrent(gen)) return@execute
+                result.onSuccess { loaded ->
+                    val c = loaded.catalog
+                    val restart = c != catalog && snapshot.get().let { it.tunnelUp || it.phase == Phase.CONNECTING }
+                    catalog = c
+                    update {
+                        val refreshed = it.withCatalog(c).copy(usingCachedCatalog = loaded.cached)
+                        // New catalog metadata must not describe the old tunnel as its applied routes.
+                        if (restart) ledger.begin(refreshed, Phase.CONNECTING) else refreshed
+                    }
+                    if (restart) startCore(ledger.attempt)
+                }
                     .onFailure { e -> if (isSessionEnded(e)) endSession() }
             }
         }
@@ -342,20 +363,16 @@ class TonoVpnService : VpnService() {
         }
         enterForeground()
         store.update { it.copy(wantConnected = true) }
-        val gen = ++generation
-        update {
-            it.copy(
-                phase = Phase.PREPARING, reasonCode = null,
-                cloudProbe = ExitProbe(), homeProbe = ExitProbe(),
-            )
-        }
+        update { ledger.begin(it, Phase.PREPARING) }
+        val gen = ledger.attempt
         io.execute {
             val loaded = runCatching { loadCatalog() }
             engine.execute {
-                if (gen != generation) return@execute
-                loaded.onSuccess { c ->
+                if (!ledger.isCurrent(gen)) return@execute
+                loaded.onSuccess { loaded ->
+                    val c = loaded.catalog
                     catalog = c
-                    update { it.withCatalog(c) }
+                    update { it.withCatalog(c).copy(usingCachedCatalog = loaded.cached) }
                     startCore(gen)
                 }.onFailure { e -> fail(e, userInitiated) }
             }
@@ -363,39 +380,48 @@ class TonoVpnService : VpnService() {
     }
 
     private fun startCore(gen: Long) {
+        if (!ledger.isCurrent(gen)) return
         val c = catalog ?: return
         val s = store.settings()
         update { it.copy(phase = Phase.CONNECTING) }
+        val input = ConfigInput(
+            catalog = c,
+            selectedCloudNode = s.selectedNode,
+            mode = s.mode,
+            underlyingIpv6 = monitor.current?.globalIpv6 == true,
+            cacheFilePath = File(boxDir(), "cache.db").absolutePath,
+            logLevel = if (BuildConfig.DEBUG) "info" else "warn",
+        )
+        val tunsBefore = platform.tunsEstablished
         try {
             ensureLibbox()
-            val config = SingBoxConfig.buildJson(
-                ConfigInput(
-                    catalog = c,
-                    selectedCloudNode = s.selectedNode,
-                    mode = s.mode,
-                    underlyingIpv6 = monitor.current?.globalIpv6 == true,
-                    cacheFilePath = File(boxDir(), "cache.db").absolutePath,
-                    logLevel = if (BuildConfig.DEBUG) "info" else "warn",
-                ),
-            )
+            val config = SingBoxConfig.buildJson(input)
             commandServer!!.startOrReloadService(config, OverrideOptions().apply { excludePackage = StringArray(s.excludedPackages) })
             File(boxDir(), "configuration.json").delete()
         } catch (e: Exception) {
-            Log.w(TAG, "core start failed: ${e.message}")
+            Log.w(TAG, "core start failed")
             stopCore()
             val revoked = e.message?.contains("VPN_PERMISSION_REVOKED") == true
-            update { it.copy(phase = if (revoked) Phase.NEEDS_PERMISSION else Phase.FAILED, reasonCode = if (revoked) "REVOKED" else "CORE_START") }
+            // No rollback: the core closed the previous tunnel before trying this one, so nothing is
+            // confirmed and the line the user asked for is not shown as current.
+            update { ledger.end(it, if (revoked) Phase.NEEDS_PERMISSION else Phase.FAILED, if (revoked) "REVOKED" else "CORE_START") }
             leaveForeground()
             return
         }
-        val since = System.currentTimeMillis()
+        // Confirmed only if Android established a TUN during this start: sing-box returning is not enough.
+        val established = platform.tunsEstablished > tunsBefore && platform.tunOpen
+        val node = SingBoxConfig.selectedNode(input).name
         update {
-            it.copy(
-                phase = Phase.CONNECTING, connectedSinceMs = since,
+            (ledger.started(it, gen, established, node, s.mode, System.currentTimeMillis()) ?: it).copy(
                 alwaysOn = isAlwaysOn, lockdown = isLockdownEnabled,
                 underlyingIpv6 = monitor.current?.globalIpv6 == true,
-                cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING),
             )
+        }
+        if (!established) {
+            Log.w(TAG, "core start returned without a TUN")
+            stopCore()
+            leaveForeground()
+            return
         }
         startTraffic()
         runProbes(gen)
@@ -408,40 +434,27 @@ class TonoVpnService : VpnService() {
             val cloud = Probes.trace(Probes.CLOUD_URL)
             val home = Probes.trace(Probes.HOME_URL)
             engine.execute {
-                if (gen != generation || !snapshot.get().let { it.phase == Phase.CONNECTING || it.tunnelUp }) return@execute
-                val reason = when {
-                    cloud.state != ProbeState.OK -> "CLOUD_UNREACHABLE"
-                    home.state != ProbeState.OK -> "HOME_UNREACHABLE"
-                    else -> null
-                }
-                update {
-                    it.copy(
-                        phase = if (reason == null) Phase.CONNECTED else Phase.DEGRADED,
-                        reasonCode = reason, cloudProbe = cloud, homeProbe = home,
-                    )
-                }
+                // Only for the attempt they were asked for, and only once that attempt is confirmed.
+                if (ledger.probed(snapshot.get(), gen, cloud, home) == null) return@execute
+                update { ledger.probed(it, gen, cloud, home) ?: it }
             }
         }
     }
 
     private fun reloadIfRunning() {
         if (!snapshot.get().tunnelUp && snapshot.get().phase != Phase.CONNECTING) return
-        startCore(++generation)
+        // A new attempt first: the running line stops counting as confirmed before the core restarts.
+        update { ledger.begin(it, Phase.CONNECTING) }
+        startCore(ledger.attempt)
     }
 
     private fun disconnect(reason: String?) {
-        generation++
         store.update { it.copy(wantConnected = false) }
-        if (snapshot.get().phase != Phase.SIGNED_OUT) update { it.copy(phase = Phase.DISCONNECTING) }
+        if (snapshot.get().phase != Phase.SIGNED_OUT) update { ledger.begin(it, Phase.DISCONNECTING) }
         stopCore()
         leaveForeground()
         val signedIn = store.refreshToken() != null
-        update {
-            it.copy(
-                phase = if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reasonCode = reason, connectedSinceMs = 0,
-                cloudProbe = ExitProbe(), homeProbe = ExitProbe(), rxBytesPerSec = 0, txBytesPerSec = 0,
-            )
-        }
+        update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
     }
 
     private fun fail(e: Throwable, userInitiated: Boolean) {
@@ -450,7 +463,7 @@ class TonoVpnService : VpnService() {
         if (isSessionEnded(e)) { endSession(); return }
         val code = errorCode(e)
         Log.w(TAG, "connect failed: $code")
-        update { it.copy(phase = Phase.FAILED, reasonCode = code, connectedSinceMs = 0) }
+        update { ledger.end(it, Phase.FAILED, code) }
         // An automatic (always-on/restart) attempt keeps the user's intent; a tapped one asks again.
         if (userInitiated) store.update { it.copy(wantConnected = false) }
         // Nobody may be looking at the app after an automatic attempt: say so, with a Retry.
@@ -463,7 +476,7 @@ class TonoVpnService : VpnService() {
         store.clearAccount()
         accessToken = null
         catalog = null
-        update { signedOut(reasonCode = "SESSION_ENDED", mode = it.mode) }
+        update { ledger.end(signedOut(reasonCode = "SESSION_ENDED", mode = it.mode), Phase.SIGNED_OUT, "SESSION_ENDED") }
     }
 
     private fun stopCore() {
@@ -488,8 +501,8 @@ class TonoVpnService : VpnService() {
         // Wi-Fi ↔ mobile: the exits' last answers came over the old network, so ask them again
         // instead of keeping a verdict the new network has not earned.
         if (switched && before.tunnelUp) {
-            update { it.copy(cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING)) }
-            runProbes(generation)
+            update { ledger.rechecking(it) ?: it }
+            runProbes(ledger.attempt)
         }
     }
 
@@ -686,8 +699,8 @@ class TonoVpnService : VpnService() {
             "refreshCatalog" -> refreshCatalogQuietly()
             "measureLatency" -> measureLatency()
             "recheck" -> if (snapshot.get().tunnelUp) {
-                update { it.copy(cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING)) }
-                runProbes(generation)
+                update { ledger.rechecking(it) ?: it }
+                runProbes(ledger.attempt)
             }
             "permissionDenied" -> update { it.copy(phase = Phase.NEEDS_PERMISSION, reasonCode = "DENIED") }
         }

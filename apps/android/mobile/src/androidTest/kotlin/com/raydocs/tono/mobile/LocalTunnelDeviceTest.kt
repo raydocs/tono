@@ -34,7 +34,6 @@ import androidx.test.uiautomator.Until
 import com.raydocs.tono.mobile.engine.LocalTestServer
 import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.surface.PublicStatusStore
-import com.raydocs.tono.mobile.surface.SurfaceRules
 import com.raydocs.tono.mobile.surface.SurfaceState
 import com.raydocs.tono.mobile.ui.MainActivity
 import org.junit.Assert.assertFalse
@@ -147,7 +146,7 @@ class LocalTunnelDeviceTest {
             // One query per sample: each UiAutomator lookup can wait for an idle UI, and the sea never idles.
             val seen = device.findObjects(By.text(watched)).mapNotNull { runCatching { it.text }.getOrNull() }.toSet()
             val shown = connected in seen
-            val surface = SurfaceRules.view(PublicStatusStore.read(context), System.currentTimeMillis(), PublicStatusStore.boot(context), vpn).state
+            val surface = PublicStatusStore.current(context).state
             val notice = noticeTitles()
             if (!vpn && vpnWentDown < 0) vpnWentDown = t
             if (!shown && connectedGone < 0) connectedGone = t

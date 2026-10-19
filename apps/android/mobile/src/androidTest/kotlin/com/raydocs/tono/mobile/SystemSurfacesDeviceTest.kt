@@ -177,16 +177,24 @@ class SystemSurfacesDeviceTest {
 
     @Test fun s3_fixtureWidgetAndNotificationStates() {
         val now = System.currentTimeMillis()
+        val elapsed = android.os.SystemClock.elapsedRealtime()
         val boot = PublicStatusStore.boot(context)
         fun st(p: Phase, reason: String? = null, cloud: String? = null, home: String? = null, age: Long = 0) =
-            PublicStatus(p, reason, "Tokyo · Dawn", cloud, home, now - age, boot)
+            PublicStatus(
+                p, reason, "Tokyo · Dawn", cloud, home, now - age, boot,
+                session = "device-fixture", attempt = 1,
+                confirmed = p == Phase.CONNECTED || p == Phase.DEGRADED,
+                appliedLine = "Tokyo · Dawn", elapsedMs = elapsed - age,
+            )
         val cases = listOf(
-            "connected" to SurfaceRules.view(st(Phase.CONNECTED, cloud = "JP", home = "US"), now, boot, true),
-            "degraded" to SurfaceRules.view(st(Phase.DEGRADED, "HOME_UNREACHABLE", cloud = "JP"), now, boot, true),
-            "off" to SurfaceRules.view(st(Phase.IDLE), now, boot, false),
-            "failed" to SurfaceRules.view(st(Phase.FAILED, "CATALOG_UNAVAILABLE"), now, boot, false),
-            "connected 10 min ago, no heartbeat since" to SurfaceRules.view(st(Phase.CONNECTED, cloud = "JP", age = 10 * 60_000), now, boot, true),
+            "connected" to SurfaceRules.view(st(Phase.CONNECTED, cloud = "JP", home = "US"), elapsed, boot, true),
+            "degraded" to SurfaceRules.view(st(Phase.DEGRADED, "HOME_UNREACHABLE", cloud = "JP"), elapsed, boot, true),
+            "off" to SurfaceRules.view(st(Phase.IDLE), elapsed, boot, false),
+            "failed" to SurfaceRules.view(st(Phase.FAILED, "CATALOG_UNAVAILABLE"), elapsed, boot, false),
+            "connected 10 min ago, no heartbeat since" to SurfaceRules.view(st(Phase.CONNECTED, cloud = "JP", age = 10 * 60_000), elapsed, boot, true),
         )
+        assertEquals(SurfaceState.CONNECTED, cases[0].second.state)
+        assertEquals(SurfaceState.DEGRADED, cases[1].second.state)
         assertEquals(SurfaceState.UNKNOWN, cases.last().second.state)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { a ->

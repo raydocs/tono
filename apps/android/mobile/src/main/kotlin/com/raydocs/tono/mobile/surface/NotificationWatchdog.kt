@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
+import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.engine.TonoNotifications
@@ -25,6 +26,10 @@ import com.raydocs.tono.mobile.engine.TonoNotifications
  * notification claims with what Android and the status record say, and replaces a claim nobody can
  * vouch for. The alarm is inexact and non-waking: with the phone awake it fires about 10–35 s after
  * the engine's death; asleep, once the phone wakes (Doze and standby buckets can defer it further).
+ *
+ * Every replacement is fenced by the engine instance it is about ([ClaimRules]): a late or repeated
+ * one leaves a newer engine's notification alone. Replacements only ever say less (Status unknown,
+ * Tono stopped), never that a tunnel is up.
  */
 object NotificationWatchdog {
     const val ARM_MS = SurfaceRules.HEARTBEAT_MS + 10_000
@@ -42,89 +47,93 @@ object NotificationWatchdog {
         else alarms.cancel(intent(context))
     }
 
+    private fun ongoing(nm: NotificationManager): StatusBarNotification? =
+        nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID }
+
+    private fun replace(context: Context, nm: NotificationManager, tonoVpn: Boolean?) =
+        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = tonoVpn == false))
+
     /**
-     * Replaces the ongoing notification if it claims more than [view] supports. Returns what it
-     * replaced, or null. Pure apart from the notification manager, so the JVM can drive it.
+     * Replaces the ongoing notification if it claims more than [view] supports for the engine
+     * instance that posted it. Returns what it replaced, or null. Pure apart from the notification
+     * manager, so the JVM can drive it.
      */
-    fun check(context: Context, view: SurfaceView, vpnPresent: Boolean?): Phase? {
+    fun check(context: Context, view: SurfaceView, tonoVpn: Boolean?): Phase? {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return null
-        val n = nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID } ?: return null
+        val n = ongoing(nm) ?: return null
         // Only the engine's own notification carries its phase; a replacement is already honest.
-        val claimed = TonoNotifications.claimedPhase(n.notification) ?: return null
-        val supported = when (claimed) {
-            Phase.CONNECTED, Phase.DEGRADED -> view.state == SurfaceState.CONNECTED || view.state == SurfaceState.DEGRADED
-            else -> view.state == SurfaceState.BUSY || view.state == SurfaceState.CONNECTED || view.state == SurfaceState.DEGRADED
-        }
-        if (supported) {
+        val claim = TonoNotifications.claim(n.notification) ?: return null
+        if (ClaimRules.supported(claim, view)) {
             // The engine is alive and will keep pushing the alarm back; keep watching meanwhile.
             arm(context, live = true)
             return null
         }
-        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = vpnPresent == false))
-        Log.i(TAG, "replaced a stale ${claimed.name} notification (surface ${view.state}, VPN network ${vpnPresent})")
+        replace(context, nm, tonoVpn)
+        Log.i(TAG, "replaced a stale ${claim.phase.name} notification (surface ${view.state}, Tono VPN $tonoVpn)")
         SystemSurfaces.refresh(context)
-        return claimed
+        return claim.phase
     }
 
     /**
-     * The engine's process is known to have died ([EngineWatchService] heard its binder die, or the
-     * open app lost its binding): whatever the engine's notification claims died with it. Returns
-     * what it replaced, or null when no engine claim is up (a normal stop already removed it).
+     * The engine instance [deadSession] is known to have died ([EngineWatchService] heard its binder
+     * die, or the open app lost its binding): its claim died with it. Returns what it replaced, or
+     * null when no claim of that instance is up (a normal stop removed it, or a newer engine's is).
      */
-    fun engineDied(context: Context, vpnPresent: Boolean?): Phase? {
+    fun engineDied(context: Context, deadSession: String?, tonoVpn: Boolean?): Phase? {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return null
-        val n = nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID } ?: return null
-        val claimed = TonoNotifications.claimedPhase(n.notification) ?: return null
-        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = vpnPresent == false))
-        Log.i(TAG, "engine died: replaced its ${claimed.name} notification (VPN network $vpnPresent)")
+        val n = ongoing(nm) ?: return null
+        val claim = TonoNotifications.claim(n.notification) ?: return null
+        if (!ClaimRules.diedWith(claim, deadSession)) return null
+        replace(context, nm, tonoVpn)
+        Log.i(TAG, "engine died: replaced its ${claim.phase.name} notification (Tono VPN $tonoVpn)")
         SystemSurfaces.refresh(context)
-        return claimed
+        return claim.phase
     }
 
     /**
-     * A new engine process starting: it cannot have a tunnel yet, but when Android restarts a crashed
-     * engine it re-posts the dead one's last notification first (run 39193223160: "Connected" with no
-     * VPN network until the new engine said Connecting). Replaced before anything else runs.
+     * A new engine instance [session] starting: it cannot have a tunnel yet, but when Android restarts
+     * a crashed engine it re-posts the dead one's last notification first (run 39193223160: "Connected"
+     * with no VPN network until the new engine said Connecting). Replaced before anything else runs.
      */
-    fun engineStarting(context: Context): Phase? {
+    fun engineStarting(context: Context, session: String): Phase? {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return null
-        val n = nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID } ?: return null
-        val claimed = TonoNotifications.claimedPhase(n.notification) ?: return null
-        val vpn = PublicStatusStore.vpnPresent(context)
-        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = vpn == false))
-        Log.i(TAG, "engine starting: replaced a leftover ${claimed.name} notification (VPN network $vpn)")
-        return claimed
+        val n = ongoing(nm) ?: return null
+        val claim = TonoNotifications.claim(n.notification) ?: return null
+        if (!ClaimRules.leftOver(claim, session)) return null
+        val vpn = PublicStatusStore.tonoVpn(context)
+        replace(context, nm, vpn)
+        Log.i(TAG, "engine starting: replaced a leftover ${claim.phase.name} notification (Tono VPN $vpn)")
+        return claim.phase
     }
 
     /**
-     * Between an engine's death and the next engine registering with the watch: Android re-posts a
-     * crashed engine's last notification when it restarts the service, before the new process runs any
-     * code (runs 39197246583: "Connected" for 0.4–0.7 s with no VPN network until [engineStarting]).
-     * Only a tunnel-up claim is replaced, and only until a new engine shows it is alive (the caller
-     * stops at its first shared-status write or registration, both long before it can be connected),
-     * so a Connected or Partly working claim here is the dead engine's.
+     * Between [deadSession]'s death and the next engine registering with the watch: Android re-posts
+     * a crashed engine's last notification when it restarts the service, before the new process runs
+     * any code (runs 39197246583: "Connected" for 0.4–0.7 s with no VPN network until
+     * [engineStarting]). Only the dead instance's tunnel-up claim is replaced; a restarted engine's
+     * own notification carries its own instance and stays, whenever this runs.
      */
-    fun restartRepost(context: Context): Phase? {
+    fun restartRepost(context: Context, deadSession: String?): Phase? {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return null
-        val n = nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID } ?: return null
-        val claimed = TonoNotifications.claimedPhase(n.notification) ?: return null
-        if (claimed != Phase.CONNECTED && claimed != Phase.DEGRADED) return null
-        val vpn = PublicStatusStore.vpnPresent(context)
-        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = vpn == false))
-        Log.i(TAG, "engine restarting: replaced Android's re-posted ${claimed.name} notification (VPN network $vpn)")
-        return claimed
+        val n = ongoing(nm) ?: return null
+        val claim = TonoNotifications.claim(n.notification) ?: return null
+        if (!ClaimRules.repost(claim, deadSession)) return null
+        val vpn = PublicStatusStore.tonoVpn(context)
+        replace(context, nm, vpn)
+        Log.i(TAG, "engine restarting: replaced Android's re-posted ${claim.phase.name} notification (Tono VPN $vpn)")
+        return claim.phase
     }
 
-    /** After a replacement that said "Status unknown": once Android has no VPN network, say Tono stopped. */
-    fun confirmStopped(context: Context, vpnPresent: Boolean?): Boolean {
-        if (vpnPresent != false) return false
+    /** After a replacement that said "Status unknown": once Android lists no Tono VPN network, say Tono stopped. */
+    fun confirmStopped(context: Context, tonoVpn: Boolean?): Boolean {
+        if (tonoVpn != false) return false
         val nm = context.getSystemService(NotificationManager::class.java) ?: return false
-        val n = nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID } ?: return false
+        val n = ongoing(nm) ?: return false
         // A restarted engine's own notification (it carries a phase) or one already saying stopped stays.
         if (TonoNotifications.claimedPhase(n.notification) != null) return false
         if (n.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() != context.getString(com.raydocs.tono.mobile.R.string.surface_unknown)) return false
         nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = true))
-        Log.i(TAG, "engine died: no VPN network now, notification says Tono stopped")
+        Log.i(TAG, "engine died: no Tono VPN network now, notification says Tono stopped")
         SystemSurfaces.refresh(context)
         return true
     }
@@ -132,8 +141,9 @@ object NotificationWatchdog {
     class Receiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != ACTION_CHECK) return
-            val vpn = PublicStatusStore.vpnPresent(context)
-            check(context, SurfaceRules.view(PublicStatusStore.read(context), System.currentTimeMillis(), PublicStatusStore.boot(context), vpn), vpn)
+            val vpn = PublicStatusStore.tonoVpn(context)
+            val view = SurfaceRules.view(PublicStatusStore.read(context), SystemClock.elapsedRealtime(), PublicStatusStore.boot(context), vpn, PublicStatusStore.dead(context))
+            check(context, view, vpn)
         }
     }
 }
