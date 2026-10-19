@@ -297,4 +297,80 @@ mod tests {
         widened["route"]["rules"][0]["invert"] = Value::Bool(true);
         assert!(expected_clash_api_rules(&widened.to_string()).is_err());
     }
+
+    /// Bound home SOCKS5 plus WeChat UDP: the shape customers on 0.0.77 run.
+    fn direct_home_runtime() -> String {
+        let nodes = nodes();
+        let routing = CatalogRouting {
+            home_socks5: Some(crate::catalog::CatalogHomeSocks5 {
+                host: "isp.example.net".into(),
+                port: 10078,
+                username: "fixture-user".into(),
+                password: "fixture-password".into(),
+            }),
+            ..CatalogRouting::default()
+        };
+        let plan = DirectPlan {
+            physical_interface: "以太网 2".into(),
+            hosts: vec![
+                ("qq.com".into(), "101.1.2.3".into()),
+                ("weixin.qq.com".into(), "101.1.2.4".into()),
+            ],
+            tcp_wechat_rules: vec![
+                ("qq.com".into(), "101.1.2.3".parse().unwrap(), 443),
+                ("weixin.qq.com".into(), "101.1.2.4".parse().unwrap(), 80),
+            ],
+            tcp_web_rules: vec![],
+            web_suffix_rules: vec![],
+            udp_wechat_rules: vec![("101.1.2.6".parse().unwrap(), 8000)],
+            wechat_process_path_regexes: vec![
+                crate::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\Weixin\").unwrap(),
+                crate::config::wechat_file_path_regex(r"D:\软件\WeChat\WeChat.exe").unwrap(),
+                crate::config::wechat_prefix_path_regex(r"C:\Program Files (x86)\Tencent\WeChat\").unwrap(),
+                crate::config::wechat_prefix_path_regex(r"E:\WeChat\").unwrap(),
+            ],
+            reviewed_direct_ports: vec![80, 443],
+        };
+        let strings = |names: &[&str]| names.iter().map(|name| (*name).to_string()).collect::<Vec<_>>();
+        let home_names = strings(&crate::config::HOME_PROCESS_NAMES);
+        let direct_names = strings(&crate::config::REVIEWED_DIRECT_PROCESS_NAMES);
+        build_runtime(RuntimeInput {
+            nodes: &nodes,
+            selected: "Fixture Beta",
+            controller_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            direct_plan: Some(&plan),
+            routing: &routing,
+            platform: "windows-amd64-v2",
+            ports: RuntimePorts {
+                mixed_port: 29190,
+                controller_port: 29191,
+            },
+            required_capabilities: &[],
+            home_process_names: &home_names,
+            home_process_path_regexes: &crate::config::home_process_path_regexes(),
+            direct_process_names: &direct_names,
+            fake_ip_slot: 0,
+        })
+        .unwrap()
+        .runtime_json()
+        .to_string()
+    }
+
+    /// #1684: the fixture is `/rules` read back from a real alpha.9 core running this runtime;
+    /// `sing-box-alpha9-check.yml` replays it against the pinned binary.
+    #[test]
+    fn alpha9_rules_match_a_live_core_with_home_and_wechat_udp() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../../tooling/scripts/sing-box/fixtures/alpha9-clash-rules.json"
+        ))
+        .unwrap();
+        let runtime: Value = serde_json::from_str(&direct_home_runtime()).unwrap();
+        assert_eq!(runtime["route"], fixture["runtime"]["route"], "regenerate the fixture");
+        let predicted: Vec<Value> = expected_clash_api_rules(&runtime.to_string())
+            .unwrap()
+            .into_iter()
+            .map(|rule| serde_json::json!({"type": rule.type_name, "payload": rule.payload, "proxy": rule.proxy}))
+            .collect();
+        assert_eq!(Value::Array(predicted), fixture["rules"]);
+    }
 }
