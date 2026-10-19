@@ -8,3 +8,8 @@
 - 验证：本机（诊断用）以 go1.27.2 编出 alpha.9 darwin-arm64，`clash_rules.py check` 20 条一致；`node --test tooling/scripts/tests/ci-gate-changes.test.mjs` 8 passed。`tono-core` 测试与 alpha.9 linux 回放由托管 CI 跑，结果见 PR 验证评论。Windows 实机未跑。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：修复后的 Windows 实机直连（微信真实走 DIRECT）未验证；界面「国内直连未开」文案仍像一个没打开的开关，未改。
+
+## 2026-10-19 · 续记
+- 红灯：只含测试的提交 `944415268` 上，`ci-gate`（run 39201370065）的 Windows `core` 在 `alpha9_rules_match_a_live_core_with_home_and_wechat_udp` 失败：预测的编号 8 是 `process_name=[Claude.exe claude.exe Claude Helper.exe]`，参照文件是全部 19 个进程名。同一轮里，`sing_box / check` 用重建的锁定 linux alpha.9 回放参照文件，结果是「/rules matches the fixture: 20 rules」。
+- 独立审查（Codex gpt-6.1-sol xhigh，覆盖 `f8b511cc2`）结论是 approve-with-fixes，指出一个 P2：回放固定使用 29391 端口和参照文件里的密钥，上一次残留的核心可以替一个没能启动的核心应答，造成误报通过。改为每次回放取新的回环端口和随机密钥，读到规则后还要确认核心仍在运行。新增 `test_clash_rules.py`（一个测试），在 `sing-box alpha.9 check` 里运行；修复前的脚本上失败（`SystemExit not raised`），修复后通过。
+- 复审（Codex，覆盖 `a91cb836b`）结论是 approve-with-fixes：残留监听者误报通过的路径已经堵住，但三个随机端口是分别取的，可能互相撞上，导致 CI 偶尔误报失败（小问题）。改为一次性取若干个互不相同的端口，所有监听者（包括原来固定在 29190 的 mixed 入站）和控制器各用一个。按仓库规定，小问题只给这一轮修复。

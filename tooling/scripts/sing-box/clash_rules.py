@@ -10,6 +10,8 @@ the TUN inbound becomes a loopback mixed inbound and nothing needs privileges.
 import argparse
 import json
 from pathlib import Path
+import secrets
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,43 +20,62 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / "tooling/scripts/sing-box/fixtures/alpha9-clash-rules.json"
-CONTROLLER = "127.0.0.1:29391"
 
 
-def unprivileged(runtime):
+def free_ports(count):
+    """Distinct loopback ports: every probe stays bound until all are chosen."""
+    probes = [socket.socket() for _ in range(count)]
+    try:
+        for probe in probes:
+            probe.bind(("127.0.0.1", 0))
+        return [probe.getsockname()[1] for probe in probes]
+    finally:
+        for probe in probes:
+            probe.close()
+
+
+def unprivileged(runtime, ports, secret):
+    """Every listener moves to its own fresh loopback port; route rules are untouched."""
     runtime = json.loads(json.dumps(runtime))
+    ports = iter(ports)
     for inbound in runtime.get("inbounds", []):
         if inbound["type"] == "tun":
             tag = inbound["tag"]
             inbound.clear()
-            inbound.update({"type": "mixed", "tag": tag, "listen": "127.0.0.1", "listen_port": 29300})
-        elif inbound.get("listen_port") == 53:
-            inbound["listen_port"] = 29353
+            inbound.update({"type": "mixed", "tag": tag, "listen": "127.0.0.1", "listen_port": next(ports)})
+        elif "listen_port" in inbound:
+            inbound["listen_port"] = next(ports)
     for outbound in runtime.get("outbounds", []):
         outbound.pop("bind_interface", None)
     runtime["route"].pop("auto_detect_interface", None)
     runtime["route"].pop("default_interface", None)
-    runtime["experimental"]["clash_api"]["external_controller"] = CONTROLLER
+    runtime["experimental"]["clash_api"]["external_controller"] = f"127.0.0.1:{next(ports)}"
+    runtime["experimental"]["clash_api"]["secret"] = secret
     return runtime
 
 
 def live_rules(binary, runtime):
-    secret = runtime["experimental"]["clash_api"].get("secret", "")
+    # Fresh ports and secret per replay: a leftover core cannot answer for this one.
+    secret = secrets.token_urlsafe(24)
+    started = unprivileged(runtime, free_ports(len(runtime.get("inbounds", [])) + 1), secret)
+    controller = started["experimental"]["clash_api"]["external_controller"]
     with tempfile.TemporaryDirectory() as work:
         config = Path(work) / "runtime.json"
-        config.write_text(json.dumps(unprivileged(runtime)))
+        config.write_text(json.dumps(started))
         core = subprocess.Popen(
             [binary, "run", "-c", str(config)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
         try:
             request = urllib.request.Request(
-                f"http://{CONTROLLER}/rules", headers={"Authorization": f"Bearer {secret}"}
+                f"http://{controller}/rules", headers={"Authorization": f"Bearer {secret}"}
             )
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline and core.poll() is None:
                 try:
                     with urllib.request.urlopen(request, timeout=2) as response:
                         rules = json.loads(response.read())["rules"]
+                    if core.poll() is not None:
+                        break
                     return [{"type": r["type"], "payload": r["payload"], "proxy": r["proxy"]} for r in rules]
                 except OSError:
                     time.sleep(0.2)

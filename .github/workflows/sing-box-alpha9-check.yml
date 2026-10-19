@@ -88,4 +88,5 @@ jobs:
             --output "$work/check"
           cmp "$work/linux/manifest.json" tooling/scripts/sing-box/manifests/alpha12/linux-amd64-v2.json
           # #1684: the Windows App proves a DIRECT reload against these /rules strings.
+          python3 -m unittest discover -s tooling/scripts/sing-box -p 'test_clash_rules.py'
           python3 tooling/scripts/sing-box/clash_rules.py check --binary "$work/linux/sing-box"
