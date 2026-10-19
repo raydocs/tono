@@ -10,3 +10,7 @@
   - linux-amd64-v2（仅离线校验）：二进制 `0106597a0e3a4ae2ecaaf1105b8109bc33ec9d7779a28143304172f40ec5ca19`，清单 `e6783fc0fb635f2d4cb7e413f3754c31fa9589c2bb88a4dc90e2575d5e5f13b2`。
 - 候选/发布：仅源码，无新候选。Windows 安装器、打包门和 workflow 只认新的 Windows 摘要，所以旧候选包不能再通过这些门。
 - 剩余限制：macOS PF 与 Windows WFP 的真机认证没做。hysteria2 的行为变化（去掉分片默认值、零校验和修复、输入校验）需要真机和真实节点测试，不能凭 CI 声称没有回归。
+
+## 2026-10-19 · 续记
+- 所有者决定：alpha.12 与 #1685 的修复放进同一个 0.0.78 客户测试 RC，不再单独验证。实机验证（macOS PF、Windows WFP、hy2）随 0.0.78 一起做，仍未完成。
+- 独立审查（Codex gpt-6.1-sol xhigh，覆盖 `d6dc4806d`，24 个文件）结论是 approve，没有发现问题，见 [PR 评论](https://github.com/raydocs/tono/pull/1686#issuecomment-6260299697)。合入 main 后，本 PR 合并了 `origin/main`（#1685 的 `5e2866edb`），finding `WIN-SINGBOX-RULES-PROOF-TRUNCATION` 改为 `fixed(5e2866edb)`，并注明待实机。
