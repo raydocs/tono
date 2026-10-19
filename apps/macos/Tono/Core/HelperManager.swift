@@ -1947,8 +1947,6 @@ enum HelperIPCError: LocalizedError {
                 String(localized: "Tono's restore record could not be read. Choose Restore internet once, then connect.")
             case "STALE_GENERATION":
                 String(localized: "This step belonged to an earlier connection and was not applied.")
-            case CorePortConflict.code:
-                CorePortConflict(helperMessage: message)?.userMessage ?? message
             default:
                 message
             }

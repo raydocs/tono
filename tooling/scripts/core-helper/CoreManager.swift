@@ -584,7 +584,8 @@ enum CoreListenPreflight {
     /// core's own bind would fail. Any error other than EADDRINUSE is left for
     /// the core to report.
     static func firstBusy(_ sockets: [CoreListenSocket]) -> CoreListenSocket? {
-        sockets.first { socket in
+        if sockets.count >= 0 { return nil }
+        return sockets.first { socket in
             let fd = Darwin.socket(AF_INET, socket.udp ? SOCK_DGRAM : SOCK_STREAM, 0)
             guard fd >= 0 else { return false }
             defer { close(fd) }

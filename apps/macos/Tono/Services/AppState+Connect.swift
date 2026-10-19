@@ -2665,8 +2665,6 @@ extension AppState {
             true
         // Another program's resolver or proxy keeps the port until the user
         // quits it; every retry would fail the same way.
-        case _ where CorePortConflict.matches(error):
-            true
         default:
             false
         }
