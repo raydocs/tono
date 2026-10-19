@@ -224,6 +224,7 @@ class DeviceEvidenceTest {
                 assertTrue("ambient motion at scale 1 ($moving)", moving > 0.0001)
                 assertEquals("no motion with animations removed", 0.0, still, 0.0)
                 assertTrue("motion resumes at scale 1 ($resumed)", resumed > 0.0001)
+                holdStillBeforeClose()
             }
         } finally {
             scale("1")
@@ -293,8 +294,22 @@ class DeviceEvidenceTest {
                     }
                 }
             }
-            block({ s -> instrumentation.runOnMainSync { state.value = s } }, scenario)
+            try {
+                block({ s -> instrumentation.runOnMainSync { state.value = s } }, scenario)
+            } finally {
+                holdStillBeforeClose()
+            }
         }
+    }
+
+    /**
+     * Closing a scenario waits for an idle main thread, which the animated sea on a software-GPU
+     * emulator may never give (runs 39193223160 and 39197246583: b2 done, then stuck in close for
+     * 600 s). Motion is turned off for the close only; the next test sets its own.
+     */
+    private fun holdStillBeforeClose() {
+        instrumentation.uiAutomation.executeShellCommand("settings put global animator_duration_scale 0").close()
+        Thread.sleep(1_000)
     }
 
     @Test fun b1_fixtureStatesRenderedOnDevice() = withFixtureHost { set, _ ->

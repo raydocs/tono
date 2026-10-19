@@ -93,4 +93,14 @@ class NotificationWatchdogTest {
         // Nothing claimed: nothing to do.
         assertNull(NotificationWatchdog.engineStarting(app))
     }
+
+    @Test fun theWatchReplacesARepostedTunnelClaimButNotARestartedEnginesConnecting() {
+        // A restarted engine says Connecting before it registers with the watch: that one stays.
+        postEngineNotification(Phase.CONNECTING)
+        assertNull(NotificationWatchdog.restartRepost(app))
+        assertEquals(app.getString(R.string.state_connecting), title())
+        postEngineNotification(Phase.DEGRADED)
+        assertEquals(Phase.DEGRADED, NotificationWatchdog.restartRepost(app))
+        assertNull(NotificationWatchdog.restartRepost(app))
+    }
 }

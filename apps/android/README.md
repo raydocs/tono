@@ -187,20 +187,33 @@ Round 9 (after the round-8 blind reviews, `docs/agent-reports/2026-10-19-android
   record now counts as stale after 30 s (was 90 s), and the widget looks again 40 s after the last
   live status (was 100 s).
 - **Fault injection.** t5 (no app open) now allows a tunnel claim without a VPN network for at most
-  3 s after the VPN network is seen gone, sampled every 100 ms, and requires the replacement to come
-  from the watch's process (its log line and pid); the status the tile and widget read may never say
-  Connected without a VPN network. t6 repeats the fault in forced deep Doze (`dumpsys deviceidle
+  3 s after the VPN network is seen gone, sampled every 100 ms, and requires the watch to log that it
+  heard the death from its own pid and, unless Android had already removed the notification with the
+  process, to have replaced it; the status the tile and widget read may never say Connected without
+  a VPN network. t6 repeats the fault in forced deep Doze (`dumpsys deviceidle
   force-idle deep`, checked with `get deep` = `IDLE`) with the same 3 s limit, and with the watch
   dead too (frozen, the engine killed, then the watch killed): the backstop alarm must be pending
   before the fault (`dumpsys alarm`), and if Android keeps the notification without restarting the
   engine, the alarm must start a fresh watch process and replace it (window measured, asserted below
   60 s). If Android instead restarts the engine or drops the notification, that is recorded and the
   alarm path is not exercised in that run.
-- **A restarted engine replaces the dead one's notification first thing.** When Android itself
-  restarts a crashed engine it re-posts the dead engine's last notification (run 39193223160:
-  "Connected" with no VPN network for about 0.2 s until the new engine said Connecting). The new
-  engine process now replaces any leftover claim in its first step; t5/t6 hold such a claim from a
-  restarted engine to under 1 s (Android's own re-post comes before the new process runs).
+- **A restarted engine's re-posted notification is replaced.** When Android itself restarts a
+  crashed engine it first drops the notification, then re-posts the dead engine's last one when the
+  new process starts, before any of Tono's code runs (run 39193223160: "Connected" with no VPN
+  network for about 0.2 s; run 39197246583, in Doze: 0.4–0.7 s, until the new engine's first step
+  replaced it). Now the watch, having heard the death, also replaces a re-posted Connected or Partly
+  working claim (checking every 100 ms for 10 s, or until a new engine registers with it; a
+  restarted engine says Connecting first and registers before it can be connected), and the new
+  engine process still replaces any leftover claim in its first step. t5/t6 hold a re-posted claim
+  without a VPN network to under 1 s (measured up to the first sample without it). The watch now
+  logs every death it hears, also when there is nothing left to replace (run 39197246583 failed t6
+  on that: Android had removed the notification itself, so the watch had nothing to replace and
+  logged nothing).
+- **Motion tests and an idle main thread.** b2 and t3 finished their steps, then hung for 600 s in
+  closing the activity (runs 39193223160, 39197246583): closing waits for an idle main thread, and
+  the round's heavier reflection left the emulator's main thread none. The reflection is back to
+  about the earlier stroke count (28 rows of two glints instead of 46 rows of two or three, no round
+  caps, the glow without a blend mode), and the motion tests turn motion off just before closing.
 - **Failed no longer looks like connecting.** On a failed connect the sun sets below the horizon and
   only its ember afterglow stays; connecting keeps a rising half sun. The sea's reflection is a soft
   column of light (under the sun only, kept narrow: the first, wider version coincided with slower
@@ -325,9 +338,9 @@ internal test builds.
 - `./gradlew :android:routing:test` — catalog admission and routing policy (16 tests).
 - `./gradlew :android:mobile:testDebugUnitTest` — HTTP framing, token refresh, error mapping,
   cross-process snapshot, the engine link (death, restart, return from the background), the
-  notification watchdog and engine-death replacement, Home and accessibility contracts: 51 tests
+  notification watchdog and engine-death replacement, Home and accessibility contracts: 53 tests
   discovered, 17 of them (screenshot and motion renders, opt-in with `-Ptono.screenshots`) skipped
-  by default, so 34 run.
+  by default, so 36 run.
 - `scripts/routing/check-singbox-configs.sh android/routing/build/singbox-configs` — real
   `sing-box check` (pinned linux CLI, same commit) on generated configs.
 - `scripts/routing/engine-route-harness.py` — real engine, stub cloud/Home, fail-closed checks.

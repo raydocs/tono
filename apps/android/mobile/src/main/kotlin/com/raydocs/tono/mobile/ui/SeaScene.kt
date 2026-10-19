@@ -22,7 +22,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import kotlin.math.PI
@@ -148,15 +147,16 @@ private fun DrawScope.reflection(x: Float, horizonY: Float, alpha: Float, color:
     if (alpha <= 0f) return
     val depth = size.height - horizonY
     // A soft column of light under the sun first, so the glints read as light on water, not a ladder.
-    // Sun only, and kept narrow: a large gradient fill every frame is costly on a software renderer
-    // (the emulators' frame times rose with the first, wider version).
+    // Sun only, kept narrow and drawn without a blend mode: on a software renderer every frame's cost
+    // counts (with the first, heavier version the emulators' main thread never went idle).
     if (glow) scale(scaleX = 0.3f, scaleY = 1f, pivot = Offset(x, horizonY)) {
         drawCircle(
             Brush.radialGradient(listOf(color.copy(alpha = 0.20f * alpha), Color.Transparent), Offset(x, horizonY), depth * 0.42f),
-            radius = depth * 0.42f, center = Offset(x, horizonY), blendMode = BlendMode.Screen,
+            radius = depth * 0.42f, center = Offset(x, horizonY),
         )
     }
-    val rows = 46
+    // About as many strokes as the earlier one-per-row column (46), in fewer rows of two.
+    val rows = 28
     val tau = 2 * PI.toFloat()
     for (i in 0 until rows) {
         val p = i / rows.toFloat()
@@ -164,7 +164,7 @@ private fun DrawScope.reflection(x: Float, horizonY: Float, alpha: Float, color:
         val span = sunR * (0.45f + p * 2.8f)
         val sway = sin(i * 2.3f + drift * tau * 5) * sunR * 0.22f * p
         // Each row breaks into a few glints of uneven length (fixed per row, so it does not flicker).
-        val pieces = 2 + (i * 7) % 2
+        val pieces = 2
         for (k in 0 until pieces) {
             val h = ((i * 131 + k * 71) % 97) / 97f
             if (h < 0.18f && k > 0) continue
@@ -175,7 +175,7 @@ private fun DrawScope.reflection(x: Float, horizonY: Float, alpha: Float, color:
             drawLine(
                 color.copy(alpha = a.coerceIn(0f, 1f)),
                 Offset(cx - len / 2, y), Offset(cx + len / 2, y),
-                strokeWidth = (1.2f + p * 2.4f) * (0.7f + 0.6f * h), cap = StrokeCap.Round, blendMode = BlendMode.Screen,
+                strokeWidth = (1.4f + p * 2.6f) * (0.7f + 0.6f * h), blendMode = BlendMode.Screen,
             )
         }
     }

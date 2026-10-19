@@ -29,7 +29,7 @@ import com.raydocs.tono.mobile.engine.TonoNotifications
 object NotificationWatchdog {
     const val ARM_MS = SurfaceRules.HEARTBEAT_MS + 10_000
     private const val ACTION_CHECK = "com.raydocs.tono.mobile.NOTIFICATION_CHECK"
-    private const val TAG = "TonoWatchdog"
+    internal const val TAG = "TonoWatchdog"
 
     private fun intent(context: Context) = PendingIntent.getBroadcast(
         context, 14, Intent(context, Receiver::class.java).setAction(ACTION_CHECK), PendingIntent.FLAG_IMMUTABLE,
@@ -93,6 +93,24 @@ object NotificationWatchdog {
         val vpn = PublicStatusStore.vpnPresent(context)
         nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = vpn == false))
         Log.i(TAG, "engine starting: replaced a leftover ${claimed.name} notification (VPN network $vpn)")
+        return claimed
+    }
+
+    /**
+     * Between an engine's death and the next engine registering with the watch: Android re-posts a
+     * crashed engine's last notification when it restarts the service, before the new process runs any
+     * code (runs 39197246583: "Connected" for 0.4–0.7 s with no VPN network until [engineStarting]).
+     * Only a tunnel-up claim is replaced: a restarted engine says Connecting first and registers
+     * before it can be connected, so a Connected or Partly working claim here is the dead engine's.
+     */
+    fun restartRepost(context: Context): Phase? {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return null
+        val n = nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID } ?: return null
+        val claimed = TonoNotifications.claimedPhase(n.notification) ?: return null
+        if (claimed != Phase.CONNECTED && claimed != Phase.DEGRADED) return null
+        val vpn = PublicStatusStore.vpnPresent(context)
+        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = vpn == false))
+        Log.i(TAG, "engine restarting: replaced Android's re-posted ${claimed.name} notification (VPN network $vpn)")
         return claimed
     }
 
