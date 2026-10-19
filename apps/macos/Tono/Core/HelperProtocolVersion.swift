@@ -488,7 +488,12 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.56 → 4.52.57: exact three-tier admission accepts its DIRECT
     ///   final and rechecks protected Home CIDRs after ordinary resolution.
     ///   Stable still requires the cloud final.
-    static let current = "4.52.57"
+    /// - 4.52.57 → 4.52.58: the release check reads an unreaped zombie as
+    ///   gone, and a process whose executable path is unreadable no longer
+    ///   holds every component busy when the kernel shows it is neither root
+    ///   nor platform code, so a user's app updated while it runs cannot
+    ///   block Connect. Root and platform processes stay unidentified.
+    static let current = "4.52.58"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
