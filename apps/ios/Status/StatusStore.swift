@@ -1,8 +1,8 @@
 import Foundation
 import TonoKit
 
-/// The shared connection status in the App Group (`StatusSnapshot`), for the app, the packet
-/// tunnel and the widget extension. Unlike `SharedFiles` this never traps: a process without the
+/// The shared connection status in the App Group (`SharedStatus`: the tunnel's report and the
+/// app's note), for the app, the packet tunnel and the widget extension. Unlike `SharedFiles` this never traps: a process without the
 /// App Group (an unsigned simulator build) simply reads "unavailable" and writes nothing.
 enum StatusStore {
     static var appGroup: String {
@@ -22,14 +22,15 @@ enum StatusStore {
         url.map { StatusFile(url: $0, options: .completeFileProtectionUntilFirstUserAuthentication) }
     }
 
-    static func load() -> StatusSnapshot? { file?.load() }
+    static func load() -> SharedStatus? { file?.load() }
 
-    static func reading(now: Date = Date()) -> StatusReading { StatusReading.read(load(), now: now) }
+    /// The one reading every surface states (`SharedStatus.reading`).
+    static func reading(now: Date = Date()) -> StatusReading { load()?.reading(now: now) ?? .unavailable }
 
     /// `next` gets what is on disk and returns what to write (nil: leave it); written only when it
-    /// says something new or the last write is a minute old. Returns whether it wrote.
+    /// differs. Returns whether it wrote.
     @discardableResult
-    static func update(_ next: (StatusSnapshot?) -> StatusSnapshot?) -> Bool { file?.update(next) ?? false }
+    static func update(_ next: (SharedStatus?) -> SharedStatus?) -> Bool { file?.update(next) ?? false }
 
     static func clear() { file?.clear() }
 }

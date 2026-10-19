@@ -66,6 +66,16 @@ public enum TunnelMessage: Equatable, Sendable {
         return Data(JSON.obj(("op", .string(op))).serialized().utf8)
     }
 
+    /// How long the app waits for the reply before it counts as no answer. A rebuild starts
+    /// sing-box again; a measure dials every node (3 s each, in parallel).
+    public var replyTimeout: TimeInterval {
+        switch self {
+        case .status: return 5
+        case .measure: return 10
+        case .reload: return 20
+        }
+    }
+
     public static func decode(_ data: Data) -> TunnelMessage? {
         switch (try? JSON.parse(data))?["op"]?.string {
         case "reload": return .reload

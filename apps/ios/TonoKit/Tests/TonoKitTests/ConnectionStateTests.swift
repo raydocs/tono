@@ -2,13 +2,18 @@ import XCTest
 @testable import TonoKit
 
 final class ConnectionStateTests: XCTestCase {
+    /// What the tunnel confirmed it runs; the probe tests below start from a confirmed graph.
+    private let confirmed = RoutingConfirmation.graph(RouteSettings(mode: .threeTier, node: "tokyo-1"))
+
     func testTunnelUpWithChecksPendingStillReadsConnecting() {
-        let f = ConnectionFacts(signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .checking), homeProbe: ExitProbe(state: .checking))
+        let f = ConnectionFacts(signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .checking), homeProbe: ExitProbe(state: .checking),
+                                routing: confirmed)
         XCTAssertEqual(ConnectionState.derive(f).phase, .connecting)
     }
 
     func testCloudCheckFailureIsDegradedWithTheOtherLineAction() {
-        let f = ConnectionFacts(signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .failed), homeProbe: ExitProbe(state: .ok))
+        let f = ConnectionFacts(signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .failed), homeProbe: ExitProbe(state: .ok),
+                                routing: confirmed)
         let (phase, reason) = ConnectionState.derive(f)
         XCTAssertEqual(phase, .degraded)
         XCTAssertEqual(reason, "CLOUD_UNREACHABLE")
@@ -16,7 +21,8 @@ final class ConnectionStateTests: XCTestCase {
     }
 
     func testHomeCheckFailureIsDegradedNotDisconnected() {
-        let f = ConnectionFacts(signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .ok, location: "JP"), homeProbe: ExitProbe(state: .failed))
+        let f = ConnectionFacts(signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .ok, location: "JP"), homeProbe: ExitProbe(state: .failed),
+                                routing: confirmed)
         XCTAssertEqual(ConnectionState.derive(f).phase, .degraded)
         XCTAssertEqual(ConnectionState.derive(f).reason, "HOME_UNREACHABLE")
         XCTAssertEqual(SkyState(.degraded), .duskWarning)

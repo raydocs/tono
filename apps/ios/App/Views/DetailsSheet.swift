@@ -142,7 +142,7 @@ struct DetailsSheet: View {
         // claims to be in use until a status read settles it.
         let unsettled = model.unsettled(\.mode)
         let pending = unsettled?.pending == true ? unsettled?.value : nil
-        let unsure = unsettled?.pending == false
+        let unsure = unsettled?.pending == false || model.routesUnconfirmed
         return VStack(alignment: .leading, spacing: 8) {
             // Accessibility sizes stack the two, so "Three-tier" never breaks inside the word.
             let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 4))
@@ -157,6 +157,8 @@ struct DetailsSheet: View {
                     Text(L.t("route_switching", ModeText.name(pending))).foregroundStyle(TonoColor.textSecondary)
                 } else if let note = model.routeNote(full: true), model.routeChange?.requested.mode != model.mode {
                     Text(note).foregroundStyle(TonoColor.warning).accessibilityIdentifier("modeNotApplied")
+                } else if model.routesUnconfirmed {
+                    Text(L.t("mode_unconfirmed_line")).foregroundStyle(TonoColor.warning).accessibilityIdentifier("modeUnconfirmed")
                 } else {
                     Text(ModeText.line(model.mode)).foregroundStyle(TonoColor.textSecondary).accessibilityIdentifier("modeLine")
                 }

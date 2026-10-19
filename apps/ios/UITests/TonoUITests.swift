@@ -474,6 +474,48 @@ final class TonoUITests: XCTestCase {
         save(XCUIScreen.main.screenshot(), "details-mode-unconfirmed")
     }
 
+    /// Network Extension says up but the tunnel has not confirmed what it runs (launched into a
+    /// running tunnel, an unanswered or expired answer): Home claims no connection and names no line.
+    @MainActor func testUnconfirmedTunnelClaimsNoConnectionOrLineOnHome() {
+        let app = launch("CONNECTING", ["-TonoPreviewReason", "UNCONFIRMED"])
+        let status = app.staticTexts["statusLine"]
+        XCTAssertTrue(status.waitForExistence(timeout: 6))
+        XCTAssertEqual(title(app), "Not confirmed")
+        XCTAssertEqual(status.label, "Asking the tunnel what it runs…")
+        let exit = app.buttons["exitCapsule"]
+        XCTAssertTrue(exit.waitForExistence(timeout: 4))
+        XCTAssertTrue(exit.label.hasPrefix("Lines: Unconfirmed"), exit.label)
+        for city in ["Tokyo", "Los Angeles"] {
+            XCTAssertFalse(exit.label.contains(city), "a line is named as in use: \(exit.label)")
+        }
+        XCTAssertFalse(app.staticTexts["Connected"].exists)
+        save(XCUIScreen.main.screenshot(), "home-unconfirmed")
+    }
+
+    /// The same unconfirmed tunnel in Details: no mode segment is selected, no lane states a
+    /// destination, and the route check gives no rule-based answer.
+    @MainActor func testUnconfirmedTunnelClaimsNoModeLaneOrRouteInDetails() {
+        let app = launch("CONNECTING", ["-TonoPreviewReason", "UNCONFIRMED", "-TonoPreviewSheet", "details"])
+        let stable = app.buttons["mode_STABLE"]
+        XCTAssertTrue(stable.waitForExistence(timeout: 6))
+        XCTAssertFalse(stable.isSelected, "Stable is claimed without the tunnel's answer")
+        XCTAssertFalse(app.buttons["mode_THREE_TIER"].isSelected, "Three-tier is claimed without the tunnel's answer")
+        let note = app.descendants(matching: .any)["modeUnconfirmed"]
+        XCTAssertTrue(note.waitForExistence(timeout: 4), "Details does not say the mode is unconfirmed")
+        XCTAssertEqual(note.label, "The tunnel hasn't confirmed which mode it runs.")
+        for id in ["lane_ai", "lane_video", "lane_other"] {
+            let lane = app.descendants(matching: .any)[id]
+            XCTAssertTrue(lane.waitForExistence(timeout: 4), id)
+            XCTAssertTrue(lane.label.contains("Not confirmed"), "\(id) still states a route: \(lane.label)")
+        }
+        checkSite(app, "example.com")
+        let message = app.descendants(matching: .any)["routeCheckMessage"]
+        XCTAssertTrue(message.waitForExistence(timeout: 4))
+        XCTAssertTrue(message.label.hasPrefix("Tono couldn't confirm which routes are in use"), message.label)
+        XCTAssertFalse(app.descendants(matching: .any)["routeAnswer"].exists)
+        save(XCUIScreen.main.screenshot(), "details-unconfirmed")
+    }
+
     /// A refusal whose put-back of the inputs file also fails is said, not swallowed.
     @MainActor func testFailedPutBackOfTheFileIsSaid() {
         let app = launch("CONNECTED", ["-TonoPreviewSheet", "details", "-TonoPreviewApplyFails", "putback"])

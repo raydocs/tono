@@ -73,14 +73,23 @@ final class RouteApplyTests: XCTestCase {
         XCTAssertEqual(file, threeTier)
     }
 
+    /// The refusal reaches the phase through the tunnel's stamped answer, not through the outcome:
+    /// the reply as the extension sends it, the report, the app's tracker, the phase.
     func testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp() async {
-        let outcome = await RouteApply.run(stable, previous: threeTier, tunnelUp: true, save: { _ in },
-                                           reload: { ReloadReply.refused(code: "CORE_START", running: nil).encoded },
-                                           status: { nil }).outcome
-        XCTAssertEqual(outcome, .notApplied(code: "CORE_START", inEffect: nil))
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let stamp = TunnelAnswer(session: "s1", generation: 3, routing: nil, since: t0, at: t0)
+        var tracker = ConfirmationTracker()
+        let ticket = tracker.ask()
+        let report = await RouteApply.run(stable, previous: threeTier, tunnelUp: true, save: { _ in },
+                                          reload: { ReloadReply.refused(code: "CORE_START", running: nil).encoded(answer: stamp) },
+                                          status: { nil })
+        XCTAssertEqual(report.outcome, .notApplied(code: "CORE_START", inEffect: nil))
+        XCTAssertTrue(tracker.received(report.answer, ticket: ticket))
         let facts = ConnectionFacts(signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .ok), homeProbe: ExitProbe(state: .ok),
-                                    routesStopped: true)
-        XCTAssertEqual(ConnectionState.derive(facts).phase, .failed)
+                                    routing: tracker.confirmation(now: t0.addingTimeInterval(1)))
+        let derived = ConnectionState.derive(facts)
+        XCTAssertEqual(derived.phase, .failed)
+        XCTAssertEqual(derived.reason, "ROUTES_STOPPED")
     }
 
     func testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode() async {
@@ -89,4 +98,21 @@ final class RouteApplyTests: XCTestCase {
                                            status: { nil }).outcome
         XCTAssertEqual(outcome, .applied(stable))
     }
+    func testAReplyAfterTheSessionEndedCannotPutOldInputsBack() async {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        var tracker = ConfirmationTracker()
+        let ticket = tracker.ask(at: t0)
+        var writes: [RouteSettings] = []
+        let oldAnswer = TunnelAnswer(session: "old-session", generation: 2, routing: threeTier, since: t0, at: t0)
+        let report = await RouteApply.run(stable, previous: threeTier, tunnelUp: true,
+            save: { writes.append($0) },
+            reload: {
+                tracker.sessionEnded()
+                return ReloadReply.refused(code: "CORE_START", running: self.threeTier).encoded(answer: oldAnswer)
+            }, status: { XCTFail("stale reload must not query the new session"); return nil },
+            acceptReply: { tracker.permits(RouteApplyReport(.unconfirmed(self.stable), answer: $0), ticket: ticket) })
+        XCTAssertEqual(writes, [stable], "an obsolete response must not roll the new session's inputs back")
+        XCTAssertFalse(tracker.settle(report, ticket: ticket))
+    }
+
 }

@@ -1,10 +1,10 @@
 import Foundation
 
 /// The connection status other processes (widgets, the Control Center control, the Live Activity)
-/// may show. Written to the App Group by the app (from NEVPNStatus and its exit checks) and by the
-/// packet tunnel (start, stop, and a heartbeat while it runs); read with `StatusReading.read`,
-/// which decides whether it is still fresh enough to state as current. A snapshot is never
-/// invented: no file means "unavailable", an old one is shown as "last known".
+/// may show, as `SharedStatus.reading` resolves it from the tunnel's report and the app's note in
+/// the App Group; `StatusReading.read` decides whether it is still fresh enough to state as
+/// current. A snapshot is never invented: no file means "unavailable", an old one is shown as
+/// "last known".
 public struct StatusSnapshot: Equatable, Sendable {
     public enum State: String, Sendable, CaseIterable {
         /// Signed in, tunnel down by choice.
@@ -22,11 +22,13 @@ public struct StatusSnapshot: Equatable, Sendable {
         public var tunnelUp: Bool { self == .on || self == .degraded }
         /// The switch reads on (Control Center, widget button).
         public var switchOn: Bool { self == .on || self == .degraded || self == .connecting }
+
+        /// The phase as the shared state names it.
+        public init(_ phase: Phase) { self.init(AppNote.State(phase)) }
     }
 
     public enum Writer: String, Sendable { case app, tunnel }
 
-    public static let version = 1
     /// The tunnel refreshes its snapshot this often while it runs.
     public static let heartbeat: TimeInterval = 5 * 60
     /// Older than this, a snapshot is "last known", not "now" (three missed heartbeats).
@@ -39,6 +41,8 @@ public struct StatusSnapshot: Equatable, Sendable {
     public var since: Date?
     /// Short reason code for failed / degraded / connecting ("NETWORK_CHANGED", "CORE_STOPPED", …).
     public var reason: String?
+    /// When the claim's owner last made it: the tunnel's own write for anything about a running
+    /// tunnel, which the app cannot move.
     public var updatedAt: Date
     public var writer: Writer
 
@@ -49,70 +53,6 @@ public struct StatusSnapshot: Equatable, Sendable {
         self.reason = reason
         self.updatedAt = updatedAt
         self.writer = writer
-    }
-
-    /// The app's view of a phase, as the shared state other processes read.
-    public static func fromApp(_ phase: Phase, reason: String?, exit: String?, since: Date?, now: Date) -> StatusSnapshot {
-        let state: State
-        switch phase {
-        case .signedOut: state = .signedOut
-        case .idle, .needsPermission, .disconnecting: state = .off
-        case .preparing, .connecting: state = .connecting
-        case .connected: state = .on
-        case .degraded: state = .degraded
-        case .failed: state = .failed
-        }
-        return StatusSnapshot(state: state, exit: exit, since: state.tunnelUp ? since : nil,
-                              reason: state == .off || state == .on ? nil : reason, updatedAt: now, writer: .app)
-    }
-
-    /// The tunnel's own write. While it runs it keeps the app's finer state (degraded, the exit
-    /// name) for the same session and only refreshes the time; a stop always wins. `routing` is
-    /// whether sing-box runs a graph: a live process without one is not a connection, so its
-    /// heartbeat says failed (ROUTES_STOPPED), never on.
-    public static func fromTunnel(running: Bool, routing: Bool = true, since: Date?, failure: String?,
-                                  previous: StatusSnapshot?, now: Date) -> StatusSnapshot {
-        guard running else {
-            return StatusSnapshot(state: failure == nil ? .off : .failed, exit: previous?.exit, since: nil,
-                                  reason: failure, updatedAt: now, writer: .tunnel)
-        }
-        guard routing else {
-            return StatusSnapshot(state: .failed, exit: previous?.exit, since: nil, reason: "ROUTES_STOPPED",
-                                  updatedAt: now, writer: .tunnel)
-        }
-        // Same session: the app's start time (iOS connectedDate) and the tunnel's own differ by the
-        // time the start took, so they are compared within a minute.
-        if let previous, previous.state.tunnelUp, let a = previous.since, let b = since, abs(a.timeIntervalSince(b)) < 60 {
-            var kept = previous
-            kept.updatedAt = now
-            kept.writer = .tunnel
-            return kept
-        }
-        return StatusSnapshot(state: .on, exit: previous?.exit, since: since, reason: nil, updatedAt: now, writer: .tunnel)
-    }
-
-    public func encoded() -> Data {
-        var o = JSONObject()
-        o["version"] = .int(Self.version)
-        o["state"] = .string(state.rawValue)
-        o["exit"] = exit.map(JSON.string) ?? .null
-        o["since"] = since.map { JSON.number($0.timeIntervalSince1970) } ?? .null
-        o["reason"] = reason.map(JSON.string) ?? .null
-        o["updatedAt"] = .number(updatedAt.timeIntervalSince1970)
-        o["writer"] = .string(writer.rawValue)
-        return Data(JSON.object(o).serialized().utf8)
-    }
-
-    /// nil for anything unreadable or from another version: unreadable is "unavailable", not "off".
-    public static func decode(_ data: Data) -> StatusSnapshot? {
-        guard let json = try? JSON.parse(data), json["version"]?.int == version,
-              let state = json["state"]?.string.flatMap(State.init(rawValue:)),
-              case .number(let updated)? = json["updatedAt"],
-              let writer = json["writer"]?.string.flatMap(Writer.init(rawValue:)) else { return nil }
-        var since: Date?
-        if case .number(let s)? = json["since"] { since = Date(timeIntervalSince1970: s) }
-        return StatusSnapshot(state: state, exit: json["exit"]?.string, since: since, reason: json["reason"]?.string,
-                              updatedAt: Date(timeIntervalSince1970: updated), writer: writer)
     }
 }
 
@@ -145,9 +85,10 @@ public enum StatusReading: Equatable, Sendable {
         }
     }
 
-    /// The switch value a control may show: only a fresh reading says on.
+    /// The switch value a control may show: only a fresh reading says on, and not one the tunnel has
+    /// not confirmed (up by Network Extension, unconfirmed by the tunnel: neither on nor off).
     public var switchOn: Bool {
-        if case .fresh(let s) = self { return s.state.switchOn }
+        if case .fresh(let s) = self { return s.state.switchOn && s.reason != "UNCONFIRMED" }
         return false
     }
 }
@@ -176,10 +117,14 @@ public struct StatusWording: Equatable, Sendable {
             return
         }
         titleKey = Self.titleKey(s.state, reason: s.reason)
-        switchOn = s.state.switchOn
+        // Up by Network Extension but not confirmed by the tunnel: the switch claims neither on nor
+        // off, and the one action is the app, which asks the tunnel.
+        let unconfirmed = s.reason == "UNCONFIRMED"
+        switchOn = reading.switchOn
         switch s.state {
         case .signedOut: action = .openApp
         case .failed: action = .retry
+        case _ where unconfirmed: action = .openApp
         default: action = s.state.switchOn ? .disconnect : .connect
         }
     }
@@ -188,7 +133,9 @@ public struct StatusWording: Equatable, Sendable {
         switch state {
         case .on: return "state_connected"
         case .degraded: return "state_degraded"
-        case .connecting: return reason == "NETWORK_CHANGED" ? "state_reconnecting" : "state_connecting"
+        case .connecting:
+            if reason == "UNCONFIRMED" { return "state_unconfirmed" }
+            return reason == "NETWORK_CHANGED" ? "state_reconnecting" : "state_connecting"
         case .off: return "state_idle"
         case .failed:
             if reason == "CORE_STOPPED" { return "state_dropped" }

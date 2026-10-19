@@ -212,3 +212,7 @@
 "line_unconfirmed" = "未确认";
 "lane_unconfirmed" = "未确认";
 "settings_mode_unconfirmed" = "无法确认当前是哪个模式，详见「详情」。";
+"state_unconfirmed" = "未确认";
+"status_unconfirmed" = "正在向隧道确认当前路由…";
+"short_UNCONFIRMED" = "隧道尚未确认当前路由";
+"mode_unconfirmed_line" = "隧道尚未确认正在使用哪个模式。";

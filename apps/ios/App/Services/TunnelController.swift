@@ -111,13 +111,11 @@ final class TunnelController {
 
     func send(_ message: TunnelMessage) async -> Data? {
         guard let session = manager?.connection as? NETunnelProviderSession, session.status == .connected else { return nil }
-        return await withCheckedContinuation { continuation in
-            do {
-                try session.sendProviderMessage(message.encoded) { continuation.resume(returning: $0) }
-            } catch {
-                continuation.resume(returning: nil)
-            }
-        }
+        // Network Extension may never call the handler (a hung or killed tunnel): the question ends
+        // at the message's timeout with no answer, and a reply after that is dropped.
+        return await ProviderReply.ask(timeout: message.replyTimeout,
+                                       schedule: { delay, work in DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: work) },
+                                       send: { reply in try session.sendProviderMessage(message.encoded) { reply($0) } })
     }
 
     func lastDisconnectError() async -> Error? {

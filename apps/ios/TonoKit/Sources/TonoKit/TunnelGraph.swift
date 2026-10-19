@@ -5,11 +5,19 @@ import Foundation
 /// bookkeeping here lets the refused-rebuild path, and what the heartbeat then tells widgets, run in
 /// tests without libbox.
 public struct TunnelGraph: Sendable {
+    /// One packet-tunnel start; a new graph record is made for each.
+    public let session: String
+    public let opened: Date
+    /// Bumped by every start attempt and close: an answer names the graph it is about.
+    public private(set) var generation = 0
     /// The inputs of the last graph that started. Kept after a refusal closed it.
     public private(set) var inputs: TunnelInputs?
     public private(set) var running = false
 
-    public init() {}
+    public init(session: String = UUID().uuidString, opened: Date = Date()) {
+        self.session = session
+        self.opened = opened
+    }
 
     /// What runs now; nil when no graph does.
     public var runningSettings: RouteSettings? { running ? inputs?.settings : nil }
@@ -21,13 +29,17 @@ public struct TunnelGraph: Sendable {
                              start: (String) throws -> Void) throws {
         let config = try build(next)
         running = false
+        generation += 1
         try start(config)
         inputs = next
         running = true
     }
 
     /// The service was closed (tunnel stop).
-    public mutating func closed() { running = false }
+    public mutating func closed() {
+        running = false
+        generation += 1
+    }
 
     /// The app asked for a rebuild from the inputs file. On a refusal the previous graph is brought
     /// back if libbox closed it, and the file is put back to the last inputs that ran, so an On
@@ -54,8 +66,19 @@ public struct TunnelGraph: Sendable {
         return .refused(code: code, running: runningSettings)
     }
 
-    /// The heartbeat's write: a live process without a graph is reported failed, never on.
-    public func heartbeat(since: Date?, previous: StatusSnapshot?, now: Date) -> StatusSnapshot {
-        StatusSnapshot.fromTunnel(running: true, routing: running, since: since, failure: nil, previous: previous, now: now)
+    /// What the tunnel tells the app it runs (status and rebuild replies). After sing-box stopped
+    /// its own service (`coreStopped`, the code) no graph runs, whatever the bookkeeping still holds.
+    public func answer(since: Date?, now: Date, coreStopped: String? = nil) -> TunnelAnswer {
+        TunnelAnswer(session: session, generation: generation, routing: coreStopped == nil ? runningSettings : nil, since: since, at: now)
+    }
+
+    /// The tunnel's record in the shared status. `process` is whether the tunnel itself is up; a
+    /// live process without a graph is reported as such and reads as Routes stopped, never on. Once
+    /// sing-box stopped its service (`coreStopped`) the record says the tunnel stopped with that
+    /// code, from the stop until the process ends, so no beat in between says it runs.
+    public func report(process running: Bool, since: Date?, failure: String?, now: Date, coreStopped: String? = nil) -> TunnelReport {
+        let up = running && coreStopped == nil
+        return TunnelReport(session: session, opened: opened, generation: generation, running: up,
+                            routing: up ? runningSettings : nil, since: since, failure: up ? nil : coreStopped ?? failure, beatAt: now)
     }
 }

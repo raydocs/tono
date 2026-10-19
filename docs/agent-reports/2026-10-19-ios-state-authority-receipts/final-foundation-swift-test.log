@@ -1,0 +1,276 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.15s)
+Test Suite 'All tests' started at 2026-10-19 10:13:21.083.
+Test Suite 'TonoKitPackageTests.xctest' started at 2026-10-19 10:13:21.084.
+Test Suite 'AccountTests' started at 2026-10-19 10:13:21.084.
+Test Case '-[TonoKitTests.AccountTests testAPIErrorIsFinalAndNotRetriedOnARelay]' started.
+Test Case '-[TonoKitTests.AccountTests testAPIErrorIsFinalAndNotRetriedOnARelay]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.AccountTests testEdgeFiveHundredWithoutAnAPIBodyTriesTheNextPath]' started.
+Test Case '-[TonoKitTests.AccountTests testEdgeFiveHundredWithoutAnAPIBodyTriesTheNextPath]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AccountTests testEmailShapeCheck]' started.
+Test Case '-[TonoKitTests.AccountTests testEmailShapeCheck]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AccountTests testExpiredAccessTokenIsRefreshedAndRotatedBeforeTheCatalogCall]' started.
+Test Case '-[TonoKitTests.AccountTests testExpiredAccessTokenIsRefreshedAndRotatedBeforeTheCatalogCall]' passed (0.003 seconds).
+Test Case '-[TonoKitTests.AccountTests testNetworkOutageReusesARecentCatalogButHomeUnavailableNeverDoes]' started.
+Test Case '-[TonoKitTests.AccountTests testNetworkOutageReusesARecentCatalogButHomeUnavailableNeverDoes]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.AccountTests testOlderCatalogRevisionIsRefusedAsRollback]' started.
+Test Case '-[TonoKitTests.AccountTests testOlderCatalogRevisionIsRefusedAsRollback]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.AccountTests testRelayRequestCarriesTheAPIHostAndBasePath]' started.
+Test Case '-[TonoKitTests.AccountTests testRelayRequestCarriesTheAPIHostAndBasePath]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AccountTests testRelayResponseParserReadsChunkedAndSizedBodies]' started.
+Test Case '-[TonoKitTests.AccountTests testRelayResponseParserReadsChunkedAndSizedBodies]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AccountTests testSignOutClearsLocallyEvenWhenTheServerIsUnreachable]' started.
+Test Case '-[TonoKitTests.AccountTests testSignOutClearsLocallyEvenWhenTheServerIsUnreachable]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AccountTests testUnreachableSystemPathFallsBackToARelayAndReportsTheFailedPath]' started.
+Test Case '-[TonoKitTests.AccountTests testUnreachableSystemPathFallsBackToARelayAndReportsTheFailedPath]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AccountTests testWeekOldCacheIsNotUsed]' started.
+Test Case '-[TonoKitTests.AccountTests testWeekOldCacheIsNotUsed]' passed (0.000 seconds).
+Test Suite 'AccountTests' passed at 2026-10-19 10:13:21.092.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+Test Suite 'AppStatusTests' started at 2026-10-19 10:13:21.092.
+Test Case '-[TonoKitTests.AppStatusTests testAfterAReconnectNeitherHomeNorWidgetsUseTheEarlierStartsReport]' started.
+Test Case '-[TonoKitTests.AppStatusTests testAfterAReconnectNeitherHomeNorWidgetsUseTheEarlierStartsReport]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AppStatusTests testANewerBeatAfterAnUnansweredQuestionReadsConnectedOnHomeAndWidgets]' started.
+Test Case '-[TonoKitTests.AppStatusTests testANewerBeatAfterAnUnansweredQuestionReadsConnectedOnHomeAndWidgets]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AppStatusTests testANewerRoutesStoppedReportReadsTheSameOnHomeAndWidgets]' started.
+Test Case '-[TonoKitTests.AppStatusTests testANewerRoutesStoppedReportReadsTheSameOnHomeAndWidgets]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.AppStatusTests testAnUnansweredQuestionReadsUnconfirmedOnHomeAndWidgets]' started.
+Test Case '-[TonoKitTests.AppStatusTests testAnUnansweredQuestionReadsUnconfirmedOnHomeAndWidgets]' passed (0.000 seconds).
+Test Suite 'AppStatusTests' passed at 2026-10-19 10:13:21.093.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'CatalogTests' started at 2026-10-19 10:13:21.093.
+Test Case '-[TonoKitTests.CatalogTests testAdmitsFixtureWithSocksHomeAndKeepsBothCloudNodes]' started.
+Test Case '-[TonoKitTests.CatalogTests testAdmitsFixtureWithSocksHomeAndKeepsBothCloudNodes]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.CatalogTests testAssignedHomeMissingFromCatalogRefusesInsteadOfFallingBackToCloud]' started.
+Test Case '-[TonoKitTests.CatalogTests testAssignedHomeMissingFromCatalogRefusesInsteadOfFallingBackToCloud]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.CatalogTests testCatalogNodeHomeIsRemovedFromTheCloudList]' started.
+Test Case '-[TonoKitTests.CatalogTests testCatalogNodeHomeIsRemovedFromTheCloudList]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.CatalogTests testEmptyRoutingDigestMatchesTheWorkerRecipe]' started.
+Test Case '-[TonoKitTests.CatalogTests testEmptyRoutingDigestMatchesTheWorkerRecipe]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.CatalogTests testHy2BlockIsStrippedNotAdmittedAsASecondIdentity]' started.
+Test Case '-[TonoKitTests.CatalogTests testHy2BlockIsStrippedNotAdmittedAsASecondIdentity]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testJSONRoundTripKeepsOrderAndEscapes]' started.
+Test Case '-[TonoKitTests.CatalogTests testJSONRoundTripKeepsOrderAndEscapes]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testLineLabelShowsOnlyWhenACityHasTwoLines]' started.
+Test Case '-[TonoKitTests.CatalogTests testLineLabelShowsOnlyWhenACityHasTwoLines]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testPrivateOrBenchmarkServerAddressIsRefused]' started.
+Test Case '-[TonoKitTests.CatalogTests testPrivateOrBenchmarkServerAddressIsRefused]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testReservedNodeNameIsRefused]' started.
+Test Case '-[TonoKitTests.CatalogTests testReservedNodeNameIsRefused]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testRoutingDocumentWithoutItsDigestIsRefused]' started.
+Test Case '-[TonoKitTests.CatalogTests testRoutingDocumentWithoutItsDigestIsRefused]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.CatalogTests testSHA256MatchesKnownVector]' started.
+Test Case '-[TonoKitTests.CatalogTests testSHA256MatchesKnownVector]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testSkipCertVerifyIsRefused]' started.
+Test Case '-[TonoKitTests.CatalogTests testSkipCertVerifyIsRefused]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testTamperedYamlFailsTheDigest]' started.
+Test Case '-[TonoKitTests.CatalogTests testTamperedYamlFailsTheDigest]' passed (0.005 seconds).
+Test Case '-[TonoKitTests.CatalogTests testYamlKeepsHashInsideQuotesAndStripsComments]' started.
+Test Case '-[TonoKitTests.CatalogTests testYamlKeepsHashInsideQuotesAndStripsComments]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testYamlRejectsAnchorsAndDuplicateKeys]' started.
+Test Case '-[TonoKitTests.CatalogTests testYamlRejectsAnchorsAndDuplicateKeys]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.CatalogTests testYamlRejectsTabIndentation]' started.
+Test Case '-[TonoKitTests.CatalogTests testYamlRejectsTabIndentation]' passed (0.000 seconds).
+Test Suite 'CatalogTests' passed at 2026-10-19 10:13:21.106.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.012 (0.012) seconds
+Test Suite 'ConfirmationTrackerTests' started at 2026-10-19 10:13:21.106.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testALateReplyAboutAnOlderGraphIsDropped]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testALateReplyAboutAnOlderGraphIsDropped]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnUnansweredEarlierQuestionDoesNotClearANewerAnswer]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnUnansweredEarlierQuestionDoesNotClearANewerAnswer]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnUnansweredLatestQuestionClearsTheConfirmation]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnUnansweredLatestQuestionClearsTheConfirmation]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAppLaunchedIntoARunningTunnelClaimsNothingUntilItAnswers]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAppLaunchedIntoARunningTunnelClaimsNothingUntilItAnswers]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAQuestionThatIsNeverAnsweredDoesNotHoldTheConfirmationPastItsExpiry]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAQuestionThatIsNeverAnsweredDoesNotHoldTheConfirmationPastItsExpiry]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testARefusedRebuildThatRestoredTheGraphConfirmsTheOldRoutes]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testARefusedRebuildThatRestoredTheGraphConfirmsTheOldRoutes]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAReplyToAQuestionAskedBeforeAReconnectIsDropped]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAReplyToAQuestionAskedBeforeAReconnectIsDropped]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAReplyWithoutTheTunnelsStampIsNoAnswer]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAReplyWithoutTheTunnelsStampIsNoAnswer]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testASwitchReplyAboutTheGraphTheTunnelsReportAlreadyNamedStillCounts]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testASwitchReplyAboutTheGraphTheTunnelsReportAlreadyNamedStillCounts]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testASwitchReplyFromASessionThatEndedChangesNothing]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testASwitchReplyFromASessionThatEndedChangesNothing]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testExitChecksOfAnEarlierGraphDoNotCertifyTheOneConfirmedNow]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testExitChecksOfAnEarlierGraphDoNotCertifyTheOneConfirmedNow]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testTheConfirmationExpiresByTheTunnelsClock]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testTheConfirmationExpiresByTheTunnelsClock]' passed (0.000 seconds).
+Test Suite 'ConfirmationTrackerTests' passed at 2026-10-19 10:13:21.108.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'ConnectionStateTests' started at 2026-10-19 10:13:21.108.
+Test Case '-[TonoKitTests.ConnectionStateTests testCloudCheckFailureIsDegradedWithTheOtherLineAction]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testCloudCheckFailureIsDegradedWithTheOtherLineAction]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testEndedSessionShowsSignInWithItsReason]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testEndedSessionShowsSignInWithItsReason]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testHomeCheckFailureIsDegradedNotDisconnected]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testHomeCheckFailureIsDegradedNotDisconnected]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testJWTExpiry]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testJWTExpiry]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testNetworkChangeSunSitsBelowAPartlyWorkingTunnel]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testNetworkChangeSunSitsBelowAPartlyWorkingTunnel]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testReassertingReadsAsConnectingNotConnected]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testReassertingReadsAsConnectingNotConnected]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testStoppedTunnelWithAFailureIsFailedWithRetry]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testStoppedTunnelWithAFailureIsFailedWithRetry]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testTraceLocationAndFormatting]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testTraceLocationAndFormatting]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ConnectionStateTests testTunnelUpWithChecksPendingStillReadsConnecting]' started.
+Test Case '-[TonoKitTests.ConnectionStateTests testTunnelUpWithChecksPendingStillReadsConnecting]' passed (0.000 seconds).
+Test Suite 'ConnectionStateTests' passed at 2026-10-19 10:13:21.109.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'PrimaryActionTests' started at 2026-10-19 10:13:21.109.
+Test Case '-[TonoKitTests.PrimaryActionTests testHapticsOnlyForAStartReachingConnectedOrFailing]' started.
+Test Case '-[TonoKitTests.PrimaryActionTests testHapticsOnlyForAStartReachingConnectedOrFailing]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.PrimaryActionTests testInFlightStartOffersCancelAndRunningTunnelOffersDisconnect]' started.
+Test Case '-[TonoKitTests.PrimaryActionTests testInFlightStartOffersCancelAndRunningTunnelOffersDisconnect]' passed (0.000 seconds).
+Test Suite 'PrimaryActionTests' passed at 2026-10-19 10:13:21.109.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'ProviderReplyTests' started at 2026-10-19 10:13:21.109.
+Test Case '-[TonoKitTests.ProviderReplyTests testAReplyBeforeTheTimerIsDeliveredOnceAndTheTimerThenDoesNothing]' started.
+Test Case '-[TonoKitTests.ProviderReplyTests testAReplyBeforeTheTimerIsDeliveredOnceAndTheTimerThenDoesNothing]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.ProviderReplyTests testATunnelThatNeverRepliesIsNoAnswerWhenTheTimerFiresAndALateReplyIsDropped]' started.
+Test Case '-[TonoKitTests.ProviderReplyTests testATunnelThatNeverRepliesIsNoAnswerWhenTheTimerFiresAndALateReplyIsDropped]' passed (0.000 seconds).
+Test Suite 'ProviderReplyTests' passed at 2026-10-19 10:13:21.110.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'RouteApplyTests' started at 2026-10-19 10:13:21.110.
+Test Case '-[TonoKitTests.RouteApplyTests testAFailedPutBackOfTheFileIsReportedNotSwallowed]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testAFailedPutBackOfTheFileIsReportedNotSwallowed]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testAReplyAfterTheSessionEndedCannotPutOldInputsBack]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testAReplyAfterTheSessionEndedCannotPutOldInputsBack]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testNoReplyIsSettledByWhatTheTunnelSaysItRuns]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testNoReplyIsSettledByWhatTheTunnelSaysItRuns]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testRefusedReloadReportsTheGraphTheExtensionStillRuns]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testRefusedReloadReportsTheGraphTheExtensionStillRuns]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RouteApplyTests testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads]' passed (0.000 seconds).
+Test Suite 'RouteApplyTests' passed at 2026-10-19 10:13:21.111.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'RoutingTests' started at 2026-10-19 10:13:21.111.
+Test Case '-[TonoKitTests.RoutingTests testAIWithoutAssignedHomeGoesToCloudNeverDirect]' started.
+Test Case '-[TonoKitTests.RoutingTests testAIWithoutAssignedHomeGoesToCloudNeverDirect]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.RoutingTests testContractCountsMatchTheDesktopLists]' started.
+Test Case '-[TonoKitTests.RoutingTests testContractCountsMatchTheDesktopLists]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.RoutingTests testDirectAAAAIsEmptyOnlyWhenTheNetworkHasNoIPv6]' started.
+Test Case '-[TonoKitTests.RoutingTests testDirectAAAAIsEmptyOnlyWhenTheNetworkHasNoIPv6]' passed (0.003 seconds).
+Test Case '-[TonoKitTests.RoutingTests testGraphCarriesNoPerAppRules]' started.
+Test Case '-[TonoKitTests.RoutingTests testGraphCarriesNoPerAppRules]' passed (0.002 seconds).
+Test Case '-[TonoKitTests.RoutingTests testHomeTrafficOnUDPIsRejectedSoQUICFallsBackToTCP]' started.
+Test Case '-[TonoKitTests.RoutingTests testHomeTrafficOnUDPIsRejectedSoQUICFallsBackToTCP]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.RoutingTests testLANStaysLocalInBothModes]' started.
+Test Case '-[TonoKitTests.RoutingTests testLANStaysLocalInBothModes]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.RoutingTests testRawAnthropicAddressFollowsHome]' started.
+Test Case '-[TonoKitTests.RoutingTests testRawAnthropicAddressFollowsHome]' passed (0.002 seconds).
+Test Case '-[TonoKitTests.RoutingTests testRouteCheckAnswersInUserTerms]' started.
+Test Case '-[TonoKitTests.RoutingTests testRouteCheckAnswersInUserTerms]' passed (0.002 seconds).
+Test Case '-[TonoKitTests.RoutingTests testSelectorFallsBackToTheAccountDefaultWhenTheSavedNodeVanished]' started.
+Test Case '-[TonoKitTests.RoutingTests testSelectorFallsBackToTheAccountDefaultWhenTheSavedNodeVanished]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.RoutingTests testStaleFakeAddressIsRejectedNotSentDirect]' started.
+Test Case '-[TonoKitTests.RoutingTests testStaleFakeAddressIsRejectedNotSentDirect]' passed (0.002 seconds).
+Test Case '-[TonoKitTests.RoutingTests testThreeTierSendsUnlistedTrafficDirectAndStableSendsItToCloud]' started.
+Test Case '-[TonoKitTests.RoutingTests testThreeTierSendsUnlistedTrafficDirectAndStableSendsItToCloud]' passed (0.004 seconds).
+Test Case '-[TonoKitTests.RoutingTests testTunnelInputsRoundTripAndTheExtensionReAdmitsTheBody]' started.
+Test Case '-[TonoKitTests.RoutingTests testTunnelInputsRoundTripAndTheExtensionReAdmitsTheBody]' passed (0.002 seconds).
+Test Case '-[TonoKitTests.RoutingTests testTunUsesNetworkExtensionMTUAndCapturesIPv6]' started.
+Test Case '-[TonoKitTests.RoutingTests testTunUsesNetworkExtensionMTUAndCapturesIPv6]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.RoutingTests testVideoExceptionWinsOverTheBroadHomeParent]' started.
+Test Case '-[TonoKitTests.RoutingTests testVideoExceptionWinsOverTheBroadHomeParent]' passed (0.001 seconds).
+Test Suite 'RoutingTests' passed at 2026-10-19 10:13:21.137.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.025 (0.026) seconds
+Test Suite 'SharedStatusTests' started at 2026-10-19 10:13:21.137.
+Test Case '-[TonoKitTests.SharedStatusTests testALateBeatCannotMoveTheSameGraphConfirmationBackwards]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testALateBeatCannotMoveTheSameGraphConfirmationBackwards]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnAppConnectedNoteCannotReviveAStoppedTunnel]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAnAppConnectedNoteCannotReviveAStoppedTunnel]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnAppNoteAloneNeverReadsConnected]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAnAppNoteAloneNeverReadsConnected]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnOlderGraphOfTheSameStartIsNotWritten]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAnOlderGraphOfTheSameStartIsNotWritten]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnchangedReportIsRewrittenOnlyOnceAMinuteOld]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnchangedReportIsRewrittenOnlyOnceAMinuteOld]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedNoteReadsNotConfirmedWithNoSwitchClaim]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedNoteReadsNotConfirmedWithNoSwitchClaim]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAppPhasesMapToNotesThatMakeNoClaimOfTheirOwn]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAppPhasesMapToNotesThatMakeNoClaimOfTheirOwn]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAppWritesDoNotRenewACrashedTunnelsReport]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAppWritesDoNotRenewACrashedTunnelsReport]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAStoppingProcessCannotOverwriteANewerStart]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAStoppingProcessCannotOverwriteANewerStart]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testATunnelStopWithAFailureIsFailedWithoutATimer]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testATunnelStopWithAFailureIsFailedWithoutATimer]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testDegradedForTheSameGraphOutlivesLaterBeats]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testDegradedForTheSameGraphOutlivesLaterBeats]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testDegradedFromAnEarlierSessionIsNotCarriedIntoAReconnect]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testDegradedFromAnEarlierSessionIsNotCarriedIntoAReconnect]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testRoundTripAndOtherVersionsAreUnreadable]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testRoundTripAndOtherVersionsAreUnreadable]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testRoutesStoppedLearntAboutANewerGraphShowsAtOnce]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testRoutesStoppedLearntAboutANewerGraphShowsAtOnce]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testRoutesStoppedLearntAboutAnOlderGraphDoesNotHideARestoredOne]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testRoutesStoppedLearntAboutAnOlderGraphDoesNotHideARestoredOne]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testTheAppSeeingTheTunnelStopOverridesItsLastBeat]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testTheAppSeeingTheTunnelStopOverridesItsLastBeat]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testTheExitIsNamedOnlyForTheNodeTheTunnelRuns]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testTheExitIsNamedOnlyForTheNodeTheTunnelRuns]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testTheTunnelsNextBeatOutranksAnEarlierUnconfirmedNote]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testTheTunnelsNextBeatOutranksAnEarlierUnconfirmedNote]' passed (0.000 seconds).
+Test Suite 'SharedStatusTests' passed at 2026-10-19 10:13:21.140.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'StatusFileTests' started at 2026-10-19 10:13:21.140.
+Test Case '-[TonoKitTests.StatusFileTests testAppDecidingWhileTheTunnelWritesDoesNotOverwriteIt]' started.
+Test Case '-[TonoKitTests.StatusFileTests testAppDecidingWhileTheTunnelWritesDoesNotOverwriteIt]' passed (0.003 seconds).
+Test Case '-[TonoKitTests.StatusFileTests testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped]' started.
+Test Case '-[TonoKitTests.StatusFileTests testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped]' passed (0.001 seconds).
+Test Case '-[TonoKitTests.StatusFileTests testWriteWaitsWhileAnotherProcessHoldsTheLock]' started.
+Test Case '-[TonoKitTests.StatusFileTests testWriteWaitsWhileAnotherProcessHoldsTheLock]' passed (0.118 seconds).
+Test Suite 'StatusFileTests' passed at 2026-10-19 10:13:21.263.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.123 (0.123) seconds
+Test Suite 'StatusSnapshotTests' started at 2026-10-19 10:13:21.263.
+Test Case '-[TonoKitTests.StatusSnapshotTests testNoSnapshotIsUnavailableNotOff]' started.
+Test Case '-[TonoKitTests.StatusSnapshotTests testNoSnapshotIsUnavailableNotOff]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.StatusSnapshotTests testOutsideCommandsCannotStartWithoutAccountPermissionOrInputs]' started.
+Test Case '-[TonoKitTests.StatusSnapshotTests testOutsideCommandsCannotStartWithoutAccountPermissionOrInputs]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.StatusSnapshotTests testSnapshotFromTheFutureIsNotFresh]' started.
+Test Case '-[TonoKitTests.StatusSnapshotTests testSnapshotFromTheFutureIsNotFresh]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.StatusSnapshotTests testSnapshotTurnsStaleAfterFifteenMinutesAndStaleNeverReadsOn]' started.
+Test Case '-[TonoKitTests.StatusSnapshotTests testSnapshotTurnsStaleAfterFifteenMinutesAndStaleNeverReadsOn]' passed (0.000 seconds).
+Test Suite 'StatusSnapshotTests' passed at 2026-10-19 10:13:21.264.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'TunnelGraphTests' started at 2026-10-19 10:13:21.264.
+Test Case '-[TonoKitTests.TunnelGraphTests testACoreStopIsReportedAtOnceAndNoLaterBeatOrReplySaysItRuns]' started.
+Test Case '-[TonoKitTests.TunnelGraphTests testACoreStopIsReportedAtOnceAndNoLaterBeatOrReplySaysItRuns]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.TunnelGraphTests testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected]' started.
+Test Case '-[TonoKitTests.TunnelGraphTests testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected]' passed (0.003 seconds).
+Test Suite 'TunnelGraphTests' passed at 2026-10-19 10:13:21.267.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'TunnelStopTests' started at 2026-10-19 10:13:21.267.
+Test Case '-[TonoKitTests.TunnelStopTests testUserStartFailureIsNotTreatedLikeASystemStop]' started.
+Test Case '-[TonoKitTests.TunnelStopTests testUserStartFailureIsNotTreatedLikeASystemStop]' passed (0.000 seconds).
+Test Suite 'TunnelStopTests' passed at 2026-10-19 10:13:21.267.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'TonoKitPackageTests.xctest' passed at 2026-10-19 10:13:21.267.
+	 Executed 110 tests, with 0 failures (0 unexpected) in 0.177 (0.183) seconds
+Test Suite 'All tests' passed at 2026-10-19 10:13:21.267.
+	 Executed 110 tests, with 0 failures (0 unexpected) in 0.177 (0.184) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

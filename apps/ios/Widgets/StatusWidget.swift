@@ -20,11 +20,12 @@ struct StatusProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<StatusEntry>) -> Void) {
         let now = Date()
-        let snapshot = StatusStore.load()
-        var entries = [StatusEntry(date: now, reading: StatusReading.read(snapshot, now: now))]
-        if let snapshot, case .fresh = StatusReading.read(snapshot, now: now) {
-            let staleAt = StatusReading.staleAt(snapshot).addingTimeInterval(1)
-            entries.append(StatusEntry(date: staleAt, reading: StatusReading.read(snapshot, now: staleAt)))
+        let shared = StatusStore.load()
+        let reading = shared?.reading(now: now) ?? .unavailable
+        var entries = [StatusEntry(date: now, reading: reading)]
+        if let shared, case .fresh(let s) = reading {
+            let staleAt = StatusReading.staleAt(s).addingTimeInterval(1)
+            entries.append(StatusEntry(date: staleAt, reading: shared.reading(now: staleAt)))
         }
         // The app and the tunnel reload on every change; this is only the fallback refresh.
         completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(StatusSnapshot.freshFor))))

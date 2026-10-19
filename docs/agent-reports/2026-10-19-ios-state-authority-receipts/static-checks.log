@@ -1,0 +1,3 @@
+iOS routing contract matches the desktop lists
+Syntax parse: 69 Swift files passed (NOT typecheck or native build).
+git diff --check: passed

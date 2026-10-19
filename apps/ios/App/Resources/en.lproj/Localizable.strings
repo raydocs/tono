@@ -212,3 +212,7 @@
 "line_unconfirmed" = "Unconfirmed";
 "lane_unconfirmed" = "Not confirmed";
 "settings_mode_unconfirmed" = "Tono couldn't confirm which mode is on. See Details.";
+"state_unconfirmed" = "Not confirmed";
+"status_unconfirmed" = "Asking the tunnel what it runs…";
+"short_UNCONFIRMED" = "The tunnel hasn't confirmed its routes";
+"mode_unconfirmed_line" = "The tunnel hasn't confirmed which mode it runs.";

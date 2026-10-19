@@ -12,7 +12,7 @@ public enum Phase: String, Sendable, CaseIterable {
     case preparing = "PREPARING"
     /// sing-box starting, the tunnel coming up, or the first exit checks running.
     case connecting = "CONNECTING"
-    /// Tunnel up and the exit checks answered.
+    /// The tunnel confirmed the graph it runs and the exit checks answered.
     case connected = "CONNECTED"
     /// Tunnel up; one exit check failed. Matched traffic fails closed, ordinary traffic still works.
     case degraded = "DEGRADED"
@@ -103,6 +103,9 @@ public enum Probes {
 /// What the tunnel itself reports, independent of Network Extension types so it can be tested.
 public enum TunnelStatus: Sendable {
     case invalid, disconnected, connecting, connected, reasserting, disconnecting
+
+    /// Network Extension reports a tunnel session (it may still not have confirmed any graph).
+    public var isUp: Bool { self == .connected || self == .reasserting }
 }
 
 /// Inputs from which the app derives one `Phase` + reason.
@@ -118,12 +121,13 @@ public struct ConnectionFacts: Sendable {
     public var failure: String?
     /// The last explicit permission problem ("DENIED" or "REVOKED"); nil when there is none.
     public var permission: String?
-    /// The tunnel is up but runs no routing graph: a settings change was refused and the previous
-    /// graph could not be brought back.
-    public var routesStopped: Bool
+    /// What the tunnel itself confirmed it runs in this session (`ConfirmationTracker`). Network
+    /// Extension's "connected" and the app's exit checks never stand in for it.
+    public var routing: RoutingConfirmation
 
     public init(signedIn: Bool, preparing: Bool = false, tunnel: TunnelStatus, configured: Bool = true,
-                cloudProbe: ExitProbe = ExitProbe(), homeProbe: ExitProbe = ExitProbe(), failure: String? = nil, permission: String? = nil, routesStopped: Bool = false) {
+                cloudProbe: ExitProbe = ExitProbe(), homeProbe: ExitProbe = ExitProbe(), failure: String? = nil, permission: String? = nil,
+                routing: RoutingConfirmation = .unknown) {
         self.signedIn = signedIn
         self.preparing = preparing
         self.tunnel = tunnel
@@ -132,7 +136,7 @@ public struct ConnectionFacts: Sendable {
         self.homeProbe = homeProbe
         self.failure = failure
         self.permission = permission
-        self.routesStopped = routesStopped
+        self.routing = routing
     }
 }
 
@@ -149,8 +153,14 @@ public enum ConnectionState {
         case .disconnecting:
             return (.disconnecting, nil)
         case .connected:
+            switch f.routing {
             // Up but routing nothing is not protection, whatever the last checks said.
-            if f.routesStopped { return (.failed, "ROUTES_STOPPED") }
+            case .noGraph: return (.failed, "ROUTES_STOPPED")
+            // Up by Network Extension, but the tunnel has not said (or no longer says) which graph
+            // runs: checks that pass may be riding anything, so nothing is claimed.
+            case .unknown: return (.connecting, "UNCONFIRMED")
+            case .graph: break
+            }
             if f.cloudProbe.state == .unknown || f.cloudProbe.state == .checking || f.homeProbe.state == .checking {
                 return (.connecting, nil)
             }

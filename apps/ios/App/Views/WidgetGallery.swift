@@ -26,18 +26,20 @@ struct WidgetGallery: View {
         .fresh(StatusSnapshot(state: .failed, exit: exit, reason: "CORE_STOPPED", updatedAt: now.addingTimeInterval(-120), writer: .tunnel))
     }
     /// Not a fixture: built the way the extension builds it. A rebuild and the restore of the old
-    /// graph are both refused (`TunnelGraph`, as in PacketTunnelProvider), the heartbeat writes over
-    /// the app's Connected snapshot, and the reading comes back through the shared file's encoding.
+    /// graph are both refused (`TunnelGraph`, as in PacketTunnelProvider), the heartbeat's report
+    /// lands beside the app's Connected note, and the reading comes back through the shared file's
+    /// encoding.
     private var routesStopped: StatusReading {
         struct Refused: Error {}
-        var graph = TunnelGraph()
+        var graph = TunnelGraph(opened: now.addingTimeInterval(-21 * 60))
         try? graph.run(TunnelInputs(catalogBody: "", mode: .threeTier, selectedNode: nil), build: { _ in "" }, start: { _ in })
+        let since = now.addingTimeInterval(-20 * 60)
+        let answer = graph.answer(since: since, now: now.addingTimeInterval(-10 * 60))
         _ = graph.reload(load: { TunnelInputs(catalogBody: "", mode: .stable, selectedNode: nil) }, build: { _ in "" },
                          start: { _ in throw Refused() }, persist: { _ in })
-        let since = now.addingTimeInterval(-20 * 60)
-        let app = StatusSnapshot.fromApp(.connected, reason: nil, exit: exit, since: since, now: now.addingTimeInterval(-10 * 60))
-        let beat = graph.heartbeat(since: since, previous: app, now: now.addingTimeInterval(-30))
-        return StatusReading.read(StatusSnapshot.decode(beat.encoded()), now: now)
+        let app = AppNote(.connected, reason: nil, answer: answer, line: nil, now: now.addingTimeInterval(-10 * 60))
+        let shared = SharedStatus(app: app).writingTunnel(graph.report(process: true, since: since, failure: nil, now: now.addingTimeInterval(-30)))
+        return shared.flatMap { SharedStatus.decode($0.encoded()) }?.reading(now: now) ?? .unavailable
     }
     private var off: StatusReading {
         .fresh(StatusSnapshot(state: .off, exit: exit, updatedAt: now.addingTimeInterval(-300), writer: .app))

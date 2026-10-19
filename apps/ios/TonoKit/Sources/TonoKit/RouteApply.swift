@@ -30,13 +30,20 @@ public enum ReloadReply: Equatable, Sendable {
     /// The new graph was refused. `running` is the graph still (or again) in use; nil means none is.
     case refused(code: String, running: RouteSettings?)
 
-    public var encoded: Data {
-        let json: JSON
+    public var encoded: Data { Data(JSON.object(object).serialized().utf8) }
+
+    /// The reply with the tunnel's stamp on what runs afterwards (`TunnelAnswer`).
+    public func encoded(answer: TunnelAnswer) -> Data {
+        var o = object
+        o["tunnel"] = answer.json
+        return Data(JSON.object(o).serialized().utf8)
+    }
+
+    private var object: JSONObject {
         switch self {
-        case .applied(let s): json = JSON.obj(("applied", s.json))
-        case .refused(let code, let running): json = JSON.obj(("refused", .string(code)), ("running", running?.json ?? .null))
+        case .applied(let s): return JSONObject([("applied", s.json)])
+        case .refused(let code, let running): return JSONObject([("refused", .string(code)), ("running", running?.json ?? .null)])
         }
-        return Data(json.serialized().utf8)
     }
 
     public static func decode(_ data: Data?) -> ReloadReply? {
@@ -82,11 +89,15 @@ public struct RouteApplyReport: Equatable, Sendable {
     public var unsaved: RouteSettings?
     /// Whether any write of the inputs file succeeded in this run.
     public var wrote: Bool
+    /// The tunnel's stamped answer in the last reply it gave (rebuild, else status); nil when it
+    /// gave none. The app's confirmation comes from this, not from `outcome`.
+    public var answer: TunnelAnswer?
 
-    public init(_ outcome: RouteApplyOutcome, unsaved: RouteSettings? = nil, wrote: Bool = true) {
+    public init(_ outcome: RouteApplyOutcome, unsaved: RouteSettings? = nil, wrote: Bool = true, answer: TunnelAnswer? = nil) {
         self.outcome = outcome
         self.unsaved = unsaved
         self.wrote = wrote
+        self.answer = answer
     }
 
     /// What the inputs file still has to be put back to after this run, given what was owed before
@@ -101,7 +112,8 @@ public enum RouteApply {
     public static func run(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool,
                            save: (RouteSettings) throws -> Void,
                            reload: () async -> Data?,
-                           status: () async -> Data?) async -> RouteApplyReport {
+                           status: () async -> Data?,
+                           acceptReply: (TunnelAnswer?) -> Bool = { _ in true }) async -> RouteApplyReport {
         do {
             try save(requested)
         } catch {
@@ -115,7 +127,10 @@ public enum RouteApply {
             do { try save(s) } catch { unsaved = s }
         }
         let outcome: RouteApplyOutcome
-        switch ReloadReply.decode(await reload()) {
+        let reply = await reload()
+        var answer = TunnelAnswer.decode(reply)
+        guard acceptReply(answer) else { return RouteApplyReport(.unconfirmed(requested), answer: answer) }
+        switch ReloadReply.decode(reply) {
         case .applied(let running) where running == requested:
             outcome = .applied(requested)
         case .applied(let running):
@@ -127,7 +142,10 @@ public enum RouteApply {
             outcome = .notApplied(code: code, inEffect: running)
         case nil:
             // No answer is not a refusal: the rebuild may have run. Ask what runs instead of assuming.
-            switch TunnelRunning.decode(await status()) {
+            let said = await status()
+            answer = TunnelAnswer.decode(said)
+            guard acceptReply(answer) else { return RouteApplyReport(.unconfirmed(requested), answer: answer) }
+            switch TunnelRunning.decode(said) {
             case .graph(let running) where running == requested:
                 outcome = .applied(requested)
             case .graph(let running):
@@ -140,6 +158,6 @@ public enum RouteApply {
                 outcome = .unconfirmed(requested)
             }
         }
-        return RouteApplyReport(outcome, unsaved: unsaved)
+        return RouteApplyReport(outcome, unsaved: unsaved, answer: answer)
     }
 }

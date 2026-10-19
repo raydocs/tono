@@ -322,8 +322,9 @@ struct HomeView: View {
     }
 
     private var exitCapsule: some View {
-        let line = model.lines.first { $0.name == model.selectedNode } ?? model.lines.first
-        let name = line.map(model.displayName) ?? L.t("line_pick")
+        // Only the line in use (confirmed while the tunnel is up), never another one in its place.
+        let line = model.currentLine
+        let name = line.map(model.displayName) ?? L.t(model.routing == nil ? "line_pick" : "line_unconfirmed")
         let latency = line?.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested")
         let ax = typeSize.isAccessibilitySize
         let nameText = Text(name).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
@@ -700,6 +701,8 @@ enum PhaseText {
         // The tunnel did connect; what stopped is its routing after a refused change.
         if p == .failed, reason == "ROUTES_STOPPED" { return L.t("state_routes_stopped") }
         if p == .connecting, reason == "NETWORK_CHANGED" { return L.t("state_reconnecting") }
+        // Network Extension says up; the tunnel has not confirmed what it runs.
+        if p == .connecting, reason == "UNCONFIRMED" { return L.t("state_unconfirmed") }
         switch p {
         case .signedOut: return L.t("state_signed_out")
         case .idle: return L.t("state_idle")
@@ -728,6 +731,7 @@ enum PhaseText {
         case .preparing: return L.t("sentence_preparing")
         case .connecting:
             // iOS reasserting the tunnel after a network change reads differently from a first start.
+            if m.reason == "UNCONFIRMED" { return L.t("status_unconfirmed") }
             return m.reason == "NETWORK_CHANGED" ? L.t("status_network_changed") : L.t("sentence_connecting")
         case .connected, .degraded:
             // The exit capsule already names the cloud line (a city); this line adds only where

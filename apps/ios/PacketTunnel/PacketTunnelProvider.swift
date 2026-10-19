@@ -28,10 +28,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let serviceLock = NSLock()
     /// Serialises this process's status writes (heartbeat timer, app reloads, start and stop).
     private let statusLock = NSLock()
-    /// Shared status for widgets and the Control Center switch: written at start and stop, and
-    /// refreshed every `StatusSnapshot.heartbeat` so readers can tell a live tunnel from an old file.
+    /// The tunnel's part of the shared status (`TunnelReport`), the only routing fact widgets and the
+    /// Control Center switch state as current: written at start and stop, after every graph change
+    /// and status question, and every `StatusSnapshot.heartbeat` so readers can tell a live tunnel
+    /// from an old file.
     private var startedAt: Date?
     private var heartbeat: DispatchSourceTimer?
+    /// Set when sing-box stopped its own service (`coreStopped`): from then on every record and
+    /// answer says no graph runs. Its own lock, so the core's callback never waits on `serviceLock`.
+    private let stopLock = NSLock()
+    private var coreStopCode: String?
 
     override init() {
         LibboxPrepareCrashSignalHandlers()
@@ -40,6 +46,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func startTunnel(options: [String: NSObject]?) async throws {
+        // A new session: nothing an earlier start said is about this one.
+        serviceLock.lock()
+        graph = TunnelGraph()
+        serviceLock.unlock()
+        stopLock.lock()
+        coreStopCode = nil
+        stopLock.unlock()
         SharedFiles.clearFailure()
         underlying.start()
         do {
@@ -64,7 +77,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         writeStatus(running: true)
         let timer = DispatchSource.makeTimerSource(queue: reloadQueue)
         timer.schedule(deadline: .now() + StatusSnapshot.heartbeat, repeating: StatusSnapshot.heartbeat, leeway: .seconds(30))
-        timer.setEventHandler { [weak self] in self?.writeStatus(running: true) }
+        timer.setEventHandler { [weak self] in _ = self?.writeStatus(running: true) }
         timer.resume()
         heartbeat = timer
         Self.log.info("tunnel started")
@@ -73,22 +86,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Not called with `serviceLock` held. One tunnel write at a time, each with the graph as it is
     /// when it writes: a heartbeat that read the graph before a reload cannot land after the reload's
     /// own write. The file lock is taken only after the graph is read, never while a reload runs.
-    private func writeStatus(running: Bool) {
+    /// Returns the answer for the graph it wrote.
+    @discardableResult
+    private func writeStatus(running: Bool) -> TunnelAnswer {
         statusLock.lock()
         defer { statusLock.unlock() }
-        var current: TunnelGraph?
-        if running {
-            serviceLock.lock()
-            current = graph
-            serviceLock.unlock()
-        }
+        serviceLock.lock()
+        let current = graph
+        serviceLock.unlock()
         let since = startedAt
+        let now = Date()
+        let stopped = coreStop()
         let failure = running ? nil : SharedFiles.loadFailure()?.code
-        let wrote = StatusStore.update { previous in
-            if let current { return current.heartbeat(since: since, previous: previous, now: Date()) }
-            return StatusSnapshot.fromTunnel(running: false, since: since, failure: failure, previous: previous, now: Date())
-        }
-        if wrote { StatusReload.all() }
+        let report = current.report(process: running, since: since, failure: failure, now: now, coreStopped: stopped)
+        if StatusStore.update({ ($0 ?? SharedStatus()).writingTunnel(report) }) { StatusReload.all() }
+        return current.answer(since: since, now: now, coreStopped: stopped)
+    }
+
+    private func coreStop() -> String? {
+        stopLock.lock()
+        defer { stopLock.unlock() }
+        return coreStopCode
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
@@ -122,9 +140,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         switch TunnelMessage.decode(messageData) {
         case .reload:
             // Not `reasserting`: the app asked for this rebuild, the network did not change.
-            let reply = reloadFromApp()
+            let (reply, answer) = reloadFromApp()
             writeStatus(running: true)
-            return reply.encoded
+            return reply.encoded(answer: answer)
         case .measure:
             var nodes: [VlessNode] = []
             if let body = currentInputs()?.catalogBody, let catalog = try? CatalogAdmission.admit(JSON.parse(body)) {
@@ -135,11 +153,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             for (name, ms) in results { reply[name] = ms.map { JSON.int($0) } ?? .null }
             return Data(JSON.object(reply).serialized().utf8)
         case .status:
+            // The tunnel renews its own record when asked; the reply carries the same answer.
+            let answer = writeStatus(running: true)
             return Data(JSON.obj(
                 ("core", .string(LibboxVersion())),
                 ("ipv6", .bool(underlying.hasGlobalIPv6)),
                 ("path", .string(underlying.summary)),
-                ("running", runningSettings()?.json ?? .null)
+                ("running", answer.routing?.json ?? .null),
+                ("tunnel", answer.json)
             ).serialized().utf8)
         case nil:
             return Data("unknown message".utf8)
@@ -213,8 +234,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// The app changed the mode or line. Answers with what actually runs afterwards, so the app
     /// never shows a graph this process did not start; on a refusal the inputs file goes back to
-    /// the graph that last ran (`TunnelGraph.reload`).
-    private func reloadFromApp() -> ReloadReply {
+    /// the graph that last ran (`TunnelGraph.reload`). The answer is taken under the same lock, so
+    /// it names the graph the reply is about.
+    private func reloadFromApp() -> (ReloadReply, TunnelAnswer) {
         serviceLock.lock()
         defer { serviceLock.unlock() }
         let reply = graph.reload(load: { try SharedFiles.loadInputs() }, build: build, start: start, persist: { inputs in
@@ -227,13 +249,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         if case .refused(let code, let running) = reply {
             Self.log.error("reload refused \(code, privacy: .public); graph running: \(running != nil, privacy: .public)")
         }
-        return reply
-    }
-
-    private func runningSettings() -> RouteSettings? {
-        serviceLock.lock()
-        defer { serviceLock.unlock() }
-        return graph.runningSettings
+        return (reply, graph.answer(since: startedAt, now: Date(), coreStopped: coreStop()))
     }
 
     private func currentInputs() -> TunnelInputs? {
@@ -271,10 +287,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// sing-box stopped its own service (fatal error inside the core).
+    /// sing-box stopped its own service (fatal error inside the core). Nothing runs from now on: the
+    /// latch makes every later record and answer say so, and the stop is written to the shared status
+    /// before the tunnel is cancelled (iOS ends the process in its own time). Written from the reload
+    /// queue so this callback never waits on `serviceLock`, which its caller may hold.
     func coreStopped() {
         SharedFiles.recordFailure(TunnelFailure(code: "CORE_STOPPED", message: "sing-box stopped the service", at: Date()))
-        cancelTunnelWithError(NSError(domain: "Tono", code: 2, userInfo: [NSLocalizedDescriptionKey: "sing-box stopped"]))
+        stopLock.lock()
+        coreStopCode = "CORE_STOPPED"
+        stopLock.unlock()
+        reloadQueue.async { [weak self] in
+            guard let self else { return }
+            self.writeStatus(running: false)
+            self.cancelTunnelWithError(NSError(domain: "Tono", code: 2, userInfo: [NSLocalizedDescriptionKey: "sing-box stopped"]))
+        }
     }
 
     private func fail(_ code: String, _ message: String) -> Error {
