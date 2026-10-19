@@ -25,3 +25,13 @@ Xcode build; Views are not typechecked here. Xcode builds, the simulator UI test
 come only from hosted `macos-26` iOS CI. The status-file tests use a real file, two threads with
 their own descriptors and a python3 process holding `flock`; they are not the app and the packet
 tunnel as two iOS processes, and nothing here ran on a device.
+
+## Offline label measurement (`offline-label/`)
+
+`label.py` is the Python twin of `TonoUITests.labelContrast` with eroded glyph cores (a pixel and its
+four neighbours within 12 of one ink). `results.txt` is its raw output on crops of CI captures, with
+each input's run and sha256. The two round-11 inputs are byte-identical to the images both reviewers
+hashed (`en-03a-preparing.png` dba337a4…, `en-03-connecting.png` 9a959e2c…): Cancel reads 2.99:1 and
+3.81:1 there (the reviews: 3.03 and 3.93), 9.79:1 and 9.14:1 on round 12's capsule. The orange
+widget line that read 1.2:1 in run 39192116052 has no eroded cores, so its element metric (9.6:1)
+decides.

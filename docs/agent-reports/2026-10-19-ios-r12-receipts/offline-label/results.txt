@@ -1,0 +1,12 @@
+# eroded glyph cores (pixel + 4 neighbours within 12 of textPrimary F7F3EE or actionInk 2A1406) vs mean of non-core pixels 2-5 px above / below the band in the same column, worse side, median
+# python3 3.11.6; Version: ImageMagick 7.1.2-25 Q16-HDRI x86_64 037e46295:20260604 https://imagemagick.org
+$ python3 label.py en-03a-preparing.png 260x110+105+2030   # round r11, run 39184374749, sha256 dba337a452fd6a8ce203c946c648254fc749c14ec7b71ad8356316d8fe26f9b9
+band 35-69 of 110, cores 1172, measured 1172, median 2.9919187544950496
+$ python3 label.py en-03-connecting.png 260x110+105+2030   # round r11, run 39184374749, sha256 9a959e2cc2a922610bbcda8f72eb7cc7ac31425684ab8348127107f4f0b7ef97
+band 35-69 of 110, cores 1167, measured 1167, median 3.8130092164784375
+$ python3 label.py primary-label-preparing.png 260x110+105+2030   # round r12, run 39192116052, sha256 fc5941410902c197438177e85746587ec0109b7cc5e510af743f58b40e045810
+band 35-69 of 110, cores 1145, measured 1145, median 9.790323907514006
+$ python3 label.py primary-label-connecting.png 260x110+105+2030   # round r12, run 39192116052, sha256 b33d4d652106e8ba6159fe40a67e5b1e1452462a1a3dfe6b2a9cfb9cb7ef2f8a
+band 35-69 of 110, cores 1145, measured 1145, median 9.136829190066623
+$ python3 label.py en-17-widgets.png 409x91+627+1025   # round r12, run 39192116052, sha256 a40bb870439bfc04d530ad16a9ca844eb7b42f2597d7a09af52d6e5e04e9a465
+no glyph cores in either ink (0 isolated); the element metric decides
