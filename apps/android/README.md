@@ -195,7 +195,8 @@ Round 9 (after the round-8 blind reviews, `docs/agent-reports/2026-10-19-android
   replace the notification (window measured, asserted below 60 s).
 - **Failed no longer looks like connecting.** On a failed connect the sun sets below the horizon and
   only its ember afterglow stays; connecting keeps a rising half sun. The sea's reflection is a soft
-  column of light with uneven glints instead of a regular ladder of lines.
+  column of light (under the sun only, kept narrow: the first, wider version coincided with slower
+  emulator frame times in run 39190910753) with uneven glints instead of a regular ladder of lines.
 - **Glass.** The rim is lit from above and fades along the sides instead of one uniform outline on
   every pill, and a faint warm caustic runs along the bottom edge.
 - **Sign-in.** The code field takes focus when it appears, so the keyboard is up without another tap.

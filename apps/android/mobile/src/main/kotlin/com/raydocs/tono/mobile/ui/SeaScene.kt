@@ -131,7 +131,7 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         val reflectAlpha = if (t > 0.02f) t.coerceAtMost(1f) * (0.35f + 0.65f * disc) else moonAlpha * 0.35f
         val reflectX = if (t > 0.02f) sunX else size.width * 0.80f
         val reflectColor = if (t > 0.02f) lerp(TonoColors.SunMid, TonoColors.Ember, warn) else TonoColors.Moon
-        reflection(reflectX, horizonY, reflectAlpha, reflectColor, if (reduce) 0f else drift, sunR)
+        reflection(reflectX, horizonY, reflectAlpha, reflectColor, if (reduce) 0f else drift, sunR, glow = t > 0.02f)
     }
 }
 
@@ -144,17 +144,19 @@ private fun DrawScope.crescent(center: Offset, r: Float, alpha: Float) {
     drawPath(Path.combine(androidx.compose.ui.graphics.PathOperation.Difference, path, cut), TonoColors.Moon.copy(alpha = alpha))
 }
 
-private fun DrawScope.reflection(x: Float, horizonY: Float, alpha: Float, color: Color, drift: Float, sunR: Float) {
+private fun DrawScope.reflection(x: Float, horizonY: Float, alpha: Float, color: Color, drift: Float, sunR: Float, glow: Boolean) {
     if (alpha <= 0f) return
     val depth = size.height - horizonY
     // A soft column of light under the sun first, so the glints read as light on water, not a ladder.
-    scale(scaleX = 0.42f, scaleY = 1f, pivot = Offset(x, horizonY)) {
+    // Sun only, and kept narrow: a large gradient fill every frame is costly on a software renderer
+    // (the emulators' frame times rose with the first, wider version).
+    if (glow) scale(scaleX = 0.3f, scaleY = 1f, pivot = Offset(x, horizonY)) {
         drawCircle(
-            Brush.radialGradient(listOf(color.copy(alpha = 0.20f * alpha), Color.Transparent), Offset(x, horizonY), depth * 0.55f),
-            radius = depth * 0.55f, center = Offset(x, horizonY), blendMode = BlendMode.Screen,
+            Brush.radialGradient(listOf(color.copy(alpha = 0.20f * alpha), Color.Transparent), Offset(x, horizonY), depth * 0.42f),
+            radius = depth * 0.42f, center = Offset(x, horizonY), blendMode = BlendMode.Screen,
         )
     }
-    val rows = 58
+    val rows = 46
     val tau = 2 * PI.toFloat()
     for (i in 0 until rows) {
         val p = i / rows.toFloat()
@@ -162,7 +164,7 @@ private fun DrawScope.reflection(x: Float, horizonY: Float, alpha: Float, color:
         val span = sunR * (0.45f + p * 2.8f)
         val sway = sin(i * 2.3f + drift * tau * 5) * sunR * 0.22f * p
         // Each row breaks into a few glints of uneven length (fixed per row, so it does not flicker).
-        val pieces = 2 + (i * 7) % 3
+        val pieces = 2 + (i * 7) % 2
         for (k in 0 until pieces) {
             val h = ((i * 131 + k * 71) % 97) / 97f
             if (h < 0.18f && k > 0) continue
