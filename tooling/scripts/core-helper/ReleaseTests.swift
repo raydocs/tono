@@ -110,6 +110,8 @@ func runReleaseSelfTests() -> Bool {
 
     // Real kernel: a dead worker's children are found by session and ended.
     check(deadWorkerSessionIsEnded(), "dead worker session is ended before admission")
+    check(unreapedZombieIsGone(), "an unreaped zombie is gone, not unknown")
+    check(deletedForeignExecutableIsIdentified(in: directory), "a deleted non-platform executable is not unidentified")
 
     // Outcome: only clean, settled, finished readback is restored.
     let clean = ReleaseReport.Component(name: "pf", readback: "restored", risk: "settled", detail: nil)
@@ -360,4 +362,67 @@ private func workerWithoutLockReportsBusy() -> Bool {
     }
     guard let report else { return false }
     return report.outcome == "busy" && report.components.isEmpty
+}
+
+/// A child that has exited keeps its pid until it is reaped. It can no longer
+/// change anything, so it reads as gone; `unknown` would hold the release
+/// open until the Mac restarts.
+private func unreapedZombieIsGone() -> Bool {
+    let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/usr/bin/true"), nil]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    guard posix_spawn(&pid, "/usr/bin/true", nil, nil, argv, nil) == 0 else { return false }
+    defer {
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+    }
+    var info = siginfo_t()
+    var waited: Int32
+    repeat { waited = waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) } while waited == -1 && errno == EINTR
+    guard waited == 0, kill(pid, 0) == 0 else { return false }
+    let state = ReleaseProcessTable.state(of: pid)
+    guard state == .gone else {
+        fputs("release zombie \(pid): \(state)\n", stderr)
+        return false
+    }
+    return true
+}
+
+/// An app updated while it runs keeps executing a file that no longer has a
+/// path. Re-signed ad hoc, the copy is not platform code, so it cannot be one
+/// of the commands a release ends and must not be reported as unidentified.
+private func deletedForeignExecutableIsIdentified(in directory: String) -> Bool {
+    let copy = directory + "/updated-app"
+    guard (try? FileManager.default.copyItem(atPath: "/bin/sleep", toPath: copy)) != nil else { return false }
+    let signer = Process()
+    signer.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+    signer.arguments = ["--force", "--sign", "-", copy]
+    signer.standardOutput = FileHandle.nullDevice
+    signer.standardError = FileHandle.nullDevice
+    guard (try? signer.run()) != nil else { return false }
+    signer.waitUntilExit()
+    guard signer.terminationStatus == 0 else { return false }
+    let argv: [UnsafeMutablePointer<CChar>?] = [strdup(copy), strdup("30"), nil]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    guard posix_spawn(&pid, copy, nil, nil, argv, nil) == 0 else { return false }
+    defer {
+        kill(pid, SIGKILL)
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+    }
+    usleep(300_000)
+    guard unlink(copy) == 0, ReleaseProcessTable.path(of: pid) == nil else {
+        fputs("release deleted executable \(pid): path still readable\n", stderr)
+        return false
+    }
+    let observeOnly = ReleaseProcesses(state: { ReleaseProcessTable.state(of: $0) },
+                                       groupMembers: { ReleaseProcessTable.members(session: $0, group: $1) },
+                                       bootSession: { "boot" }, kill: { _ in })
+    let outcome = ReleaseChildren.end(processes: observeOnly)
+    let named = outcome.failures.contains { failure in
+        failure.split(whereSeparator: { !$0.isNumber }).contains(Substring(String(pid)))
+    }
+    if named { fputs("release deleted executable \(pid): \(outcome.failures)\n", stderr) }
+    return !named
 }
