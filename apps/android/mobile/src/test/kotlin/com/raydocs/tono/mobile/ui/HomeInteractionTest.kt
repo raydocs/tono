@@ -280,13 +280,19 @@ class HomeInteractionTest {
         show(reduceMotion = false)
         compose.mainClock.autoAdvance = false
         compose.runOnIdle { snapshot = UiFixtures.connected() }
+        // Drive scheduling and application separately, not the old 120–270ms label fade.
+        // Assert that action metadata actually advanced before checking the visible-text tree.
         compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.state_connected))).assertExists()
         compose.onNodeWithText(str(R.string.state_connected)).assertExists()
         compose.onNodeWithText(str(R.string.action_disconnect)).assertExists()
         compose.onAllNodesWithText(str(R.string.state_idle)).assertCountEquals(0)
         compose.onAllNodesWithText(str(R.string.action_connect)).assertCountEquals(0)
         compose.runOnIdle { snapshot = UiFixtures.idle }
         compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.state_idle))).assertExists()
         compose.onNodeWithText(str(R.string.action_connect)).assertExists()
         compose.onAllNodesWithText(str(R.string.action_disconnect)).assertCountEquals(0)
         compose.mainClock.autoAdvance = true

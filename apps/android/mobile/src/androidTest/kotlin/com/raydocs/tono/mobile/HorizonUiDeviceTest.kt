@@ -76,6 +76,7 @@ class HorizonUiDeviceTest {
 
     private val calls: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private var snapshot by mutableStateOf<EngineSnapshot>(DeviceFixtures.idle)
+    private var motionReduced by mutableStateOf(false)
 
     private fun str(id: Int) = context.getString(id)
 
@@ -84,7 +85,7 @@ class HorizonUiDeviceTest {
         val conf = android.content.res.Configuration(androidx.compose.ui.platform.LocalConfiguration.current).apply { if (locale != null) setLocale(locale) }
         val ctx = if (locale != null) base.createConfigurationContext(conf) else base
         CompositionLocalProvider(
-            LocalReduceMotion provides reduceMotion,
+            LocalReduceMotion provides (reduceMotion || motionReduced),
             androidx.compose.ui.platform.LocalContext provides ctx,
             androidx.compose.ui.platform.LocalConfiguration provides conf,
             androidx.compose.ui.platform.LocalResources provides ctx.resources,
@@ -277,7 +278,6 @@ class HorizonUiDeviceTest {
     @Test fun u8_motionFrameByFrameAt60fps() {
         compose.mainClock.autoAdvance = false
         show(reduceMotion = false)
-        val dir = File(out, "frames").apply { deleteRecursively(); mkdirs() }
         // Each state is held until its sky has settled (sunset 650 ms, arrival spring ~1.5 s), so the
         // frames show every state at rest as well as the transitions between them.
         val steps = listOf(
@@ -289,20 +289,29 @@ class HorizonUiDeviceTest {
             1_000L to DeviceFixtures.idle,
             1_200L to DeviceFixtures.failed,
         )
-        var frame = 0
-        val timeline = StringBuilder()
-        for ((ms, s) in steps) {
-            snapshot = s
-            timeline.append("frame $frame (${frame * 16} ms): ${s.phase}\n")
-            repeat((ms / 16).toInt()) {
-                compose.mainClock.advanceTimeByFrame()
-                val image = captureFrame()
-                val small = android.graphics.Bitmap.createScaledBitmap(image, image.width / 2, image.height / 2, true)
-                File(dir, "frame-%04d.jpg".format(frame++)).outputStream().use { small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }
+        for (reduced in listOf(false, true)) {
+            motionReduced = reduced
+            val suffix = if (reduced) "-reduced" else ""
+            val dir = File(out, "frames$suffix").apply { mkdirs() }
+            val full = File(out, "frames$suffix-full").apply { mkdirs() }
+            var frame = 0
+            val timeline = StringBuilder()
+            for ((ms, s) in steps) {
+                snapshot = s
+                timeline.append("frame $frame (${frame * 16} ms): input=${s.phase}; reduced=$reduced\n")
+                repeat((ms / 16).toInt()) {
+                    compose.mainClock.advanceTimeByFrame()
+                    val image = captureFrame()
+                    // Full original pixels, not a resized/contact-sheet proxy. Keep the existing
+                    // JPEG sequence too, so downstream tools need not rename or substitute frames.
+                    File(full, "frame-%04d.png".format(frame)).outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                    val small = android.graphics.Bitmap.createScaledBitmap(image, image.width / 2, image.height / 2, true)
+                    File(dir, "frame-%04d.jpg".format(frame++)).outputStream().use { small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }
+                }
             }
+            File(out, "motion-frames$suffix.txt").writeText("$frame frames, 16 ms manual Compose clock; input boundaries are not asserted as rendered-state onset\n$timeline")
+            assertTrue("frames rendered ($suffix): $frame", frame > 380)
         }
-        File(out, "motion-frames.txt").writeText("$frame frames, 16 ms each, rendered on this device by the Compose test clock\n$timeline")
-        assertTrue("frames rendered: $frame", frame > 380)
     }
 
     /**
