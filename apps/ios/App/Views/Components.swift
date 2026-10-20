@@ -237,18 +237,21 @@ struct TonoField: View {
 /// Scrolls at accessibility text sizes but keeps short content on the bottom edge (the thumb zone,
 /// over the scrim) instead of floating it to the top over the sky.
 struct BottomScroll<Content: View>: View {
+    var startAtBottom = false
     @ViewBuilder let content: Content
 
     var body: some View {
         GeometryReader { geo in
             if #available(iOS 17.0, *) {
                 scroll(height: geo.size.height)
-                    .defaultScrollAnchor(.bottom)
-            } else {
+                    .defaultScrollAnchor(startAtBottom ? .bottom : nil)
+            } else if startAtBottom {
                 ScrollViewReader { proxy in
                     scroll(height: geo.size.height)
                         .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
+            } else {
+                scroll(height: geo.size.height)
             }
         }
     }

@@ -43,7 +43,7 @@ struct HomeView: View {
                     .accessibilitySortPriority(0)
                 Group {
                     if typeSize.isAccessibilitySize {
-                        BottomScroll { controls.padding(.top, 24) }
+                        BottomScroll(startAtBottom: true) { controls.padding(.top, 24) }
                     } else {
                         Spacer(minLength: 0)
                         // No GlassEffectContainer here: it lifts the primary capsule's background glass
