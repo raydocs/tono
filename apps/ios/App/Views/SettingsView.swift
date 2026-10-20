@@ -18,7 +18,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     #if DEBUG
                     // In the content, under the navigation bar, so it never covers the sheet's edge.
-                    if PreviewBadge.shown { PreviewBadge().padding(.leading, 6).padding(.top, 4) }
+                    if PreviewBadge.shown { PreviewBadge().padding(.top, 4) }
                     #endif
                     // The mode is chosen in one place, Details (one tap from Home, next to where traffic
                     // goes); Settings names it and keeps the full descriptions in the disclosure below.
@@ -106,8 +106,9 @@ struct SettingsView: View {
                     SettingsLabel(text: L.t("settings_account"))
                     // "Signed in as …", not the bare address: VoiceOver gets a sentence (Apple's audit
                     // flagged the bare address as not human-readable once Settings got shorter).
-                    meta(L.t("settings_signed_in_as", model.email ?? ""))
-                        .padding(.top, 4)
+                    title(L.t("settings_signed_in_as", model.email ?? ""))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 12)
                     // A text action, not a capsule: red is the only colour on the row.
                     Button { confirmSignOut = true } label: {
                         Text(L.t("settings_sign_out")).tonoFont(17, .medium, relativeTo: .body)
@@ -129,6 +130,7 @@ struct SettingsView: View {
                             .foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
                         fine(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion))
                     }
+                    .padding(.top, 8)
                 }
                 .padding(.horizontal, 20).padding(.bottom, 32)
             }
@@ -188,7 +190,7 @@ private struct SettingsLabel: View {
             .tonoFont(15, relativeTo: .subheadline)
             .foregroundStyle(TonoColor.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, first ? 12 : 36).padding(.bottom, 8)
+            .padding(.top, first ? 12 : 40)
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -322,6 +324,7 @@ private struct RowToggle: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 // Drawn only; the row's button takes the tap.
                 Toggle("", isOn: configuration.$isOn).labelsHidden().tint(TonoColor.accent).allowsHitTesting(false)
+                    .padding(.trailing, 4)
             }
             .padding(.vertical, 12)
             .frame(minHeight: 56)
