@@ -125,7 +125,7 @@ final class TonoUITests: XCTestCase {
         XCTAssertTrue(reason.waitForExistence(timeout: 6))
         // A session that dropped is not a start that failed ("Didn't connect").
         XCTAssertEqual(title(app), "Connection dropped")
-        XCTAssertEqual(reason.label, "iOS will try to reconnect")
+        XCTAssertEqual(reason.label, "Tap Retry to reconnect")
         XCTAssertEqual(primary(app).label, "Retry")
     }
 
@@ -217,7 +217,7 @@ final class TonoUITests: XCTestCase {
         tap(search, "search")
         search.typeText("Tono")
         sleep(2)
-        tap(springboard.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Tono'")).firstMatch, "result")
+        tap(springboard.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Tono' AND elementType != %d", XCUIElement.ElementType.icon.rawValue)).firstMatch, "result")
         let listed = springboard.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tono status")).firstMatch
         XCTAssertTrue(listed.waitForExistence(timeout: 6), "the system gallery does not list the Tono status widget")
         save(XCUIScreen.main.screenshot(), "real-widget-gallery")
@@ -295,11 +295,11 @@ final class TonoUITests: XCTestCase {
         let app = launch("CONNECTED")
         let button = primary(app)
         let screen = app.windows.firstMatch.frame
-        let paths: [(entry: String, via: String?, marker: XCUIElement)] = [
-            ("exitCapsule", nil, app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch),
-            ("detailsButton", nil, app.buttons["detailsSettings"]),
-            ("settingsButton", nil, app.buttons["settingsClose"]),
-            ("detailsButton", "detailsSettings", app.buttons["settingsClose"]),
+        let paths: [(entry: String, via: String?, marker: XCUIElement, swipeOrigin: XCUIElement)] = [
+            ("exitCapsule", nil, app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch, app.staticTexts["Lines"]),
+            ("detailsButton", nil, app.buttons["detailsSettings"], app.staticTexts["Details"]),
+            ("settingsButton", nil, app.buttons["settingsClose"], app.staticTexts["settingsModeWhere"]),
+            ("detailsButton", "detailsSettings", app.buttons["settingsClose"], app.staticTexts["settingsModeWhere"]),
         ]
         for path in paths {
             let entry = app.buttons[path.entry]
@@ -312,7 +312,7 @@ final class TonoUITests: XCTestCase {
                 row.tap()
             }
             XCTAssertTrue(path.marker.waitForExistence(timeout: 6), "\(path.entry) → \(path.via ?? "-") did not open")
-            app.swipeDown(velocity: .fast)
+            path.swipeOrigin.swipeDown(velocity: .fast)
             waitHittable(button)
             XCTAssertFalse(path.marker.isHittable, "\(path.entry) → \(path.via ?? "-") still open after the swipe")
         }
@@ -333,7 +333,7 @@ final class TonoUITests: XCTestCase {
         sleep(2)
         app.activate()
         XCTAssertTrue(line.waitForExistence(timeout: 6), "the line picker should still be open after returning")
-        app.swipeDown(velocity: .fast)
+        line.swipeDown(velocity: .fast)
         waitHittable(button)
         waitLabel(button, "Disconnect", timeout: 10)
         XCTAssertEqual(title(app), "Connected")
