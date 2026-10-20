@@ -90,7 +90,7 @@
 "check_hint_inline" = "查一个网址，例如 claude.ai";
 "check_go" = "检查";
 "check_result" = "TCP → %1$@ · UDP → %2$@";
-"settings_mode_where" = "%1$@ · 在「详情」中切换";
+"settings_mode_where" = "在「详情」中切换";
 "system_include_all_pending" = "下次连接时生效。";
 "check_answer_HOME" = "%1$@ 走你的家宽。";
 "check_answer_CLOUD" = "%1$@ 走云端出口。";

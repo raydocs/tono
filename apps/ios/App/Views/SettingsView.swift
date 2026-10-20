@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showScope = false
     @State private var showSystemHow = false
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         // A navigation bar, not a hand-made header: on iOS 26 the close button is system glass and
@@ -21,96 +22,115 @@ struct SettingsView: View {
                     #endif
                     // The mode is chosen in one place, Details (one tap from Home, next to where traffic
                     // goes); Settings names it and keeps the full descriptions in the disclosure below.
-                    SectionLabel(text: L.t("settings_routing"))
-                    Text(model.routesUnconfirmed
-                         ? L.t("settings_mode_unconfirmed") : L.t("settings_mode_where", ModeText.name(model.mode)))
-                        .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4).padding(.bottom, 8)
-                        .accessibilityIdentifier("settingsModeWhere")
+                    // Editorial layout: no cards or dividers, groups set apart by space alone.
+                    SettingsLabel(text: L.t("settings_routing"), first: true)
+                    Group {
+                        if model.routesUnconfirmed {
+                            meta(L.t("settings_mode_unconfirmed"))
+                        } else {
+                            VStack(alignment: .leading, spacing: 4) {
+                                title(ModeText.name(model.mode))
+                                meta(L.t("settings_mode_where"))
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("settingsModeWhere")
 
                     // The routing boundaries stay one tap away instead of a wall of text on open.
-                    SmokeCard {
-                        DisclosureGroup(isExpanded: $showScope) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                // The full mode descriptions live here; the picker is in Details.
-                                para(L.t("mode_three_tier") + (L.isChinese ? "：" : ": ") + L.t("mode_three_tier_desc"))
-                                para(L.t("mode_stable") + (L.isChinese ? "：" : ": ") + L.t("mode_stable_desc"))
-                                para(L.t("routing_scope"))
-                                para(L.t("routing_platform"))
-                                Text(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
-                                small(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
-                            }
-                            .padding(.top, 8)
-                        } label: {
-                            Text(L.t("routing_scope_title")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    DisclosureGroup(isExpanded: $showScope) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            // The full mode descriptions live here; the picker is in Details.
+                            meta(L.t("mode_three_tier") + (L.isChinese ? "：" : ": ") + L.t("mode_three_tier_desc"))
+                            meta(L.t("mode_stable") + (L.isChinese ? "：" : ": ") + L.t("mode_stable_desc"))
+                            meta(L.t("routing_scope"))
+                            meta(L.t("routing_platform"))
+                            fine(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off"))
+                            fine(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
                         }
-                        .tint(TonoColor.textSecondary)
-                        .accessibilityIdentifier("scopeDisclosure")
+                        .padding(.top, 8).padding(.bottom, 12)
+                    } label: {
+                        title(L.t("routing_scope_title"))
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                     }
+                    .tint(TonoColor.textTertiary)
+                    .accessibilityIdentifier("scopeDisclosure")
 
                     // "Where does a site go?" lives in Details, next to where traffic goes.
 
-                    SectionLabel(text: L.t("settings_system"))
-                    SmokeCard {
-                        Toggle(isOn: Binding(get: { model.includeAllNetworks }, set: { on in Task { await model.setIncludeAllNetworks(on) } })) {
-                            Text(L.t("system_include_all")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                    SettingsLabel(text: L.t("settings_system"))
+                    Toggle(isOn: Binding(get: { model.includeAllNetworks }, set: { on in Task { await model.setIncludeAllNetworks(on) } })) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            title(L.t("system_include_all"))
+                            meta(L.t("system_include_all_short"))
                         }
-                        .toggleStyle(RowToggleStyle())
-                        if model.includeAllPending {
-                            // The running tunnel keeps the previous setting until it next starts.
-                            Text(L.t("system_include_all_pending")).tonoFont(13, .medium, relativeTo: .footnote)
-                                .foregroundStyle(TonoColor.warning)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("includeAllPending")
-                        }
-                        para(L.t("system_include_all_short"))
-                        // The mechanics (restart hold, Connect On Demand) one tap away, as the routing scope.
-                        DisclosureGroup(isExpanded: $showSystemHow) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                para(L.t("system_include_all_desc"))
-                                para(L.t("system_on_demand"))
-                                Text(L.t("system_limit")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(.top, 8)
-                        } label: {
-                            Text(L.t("system_how_title")).tonoFont(15, .medium, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .tint(TonoColor.textSecondary)
                     }
-
-                    SectionLabel(text: L.t("settings_lock_screen"))
-                    SmokeCard {
-                        Toggle(isOn: Binding(get: { model.liveActivityEnabled }, set: { model.setLiveActivity($0) })) {
-                            Text(L.t("settings_live_activity")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
-                        }
-                        .toggleStyle(RowToggleStyle())
-                        .accessibilityIdentifier("liveActivityToggle")
-                        para(L.t("settings_live_activity_desc"))
-                    }
-
-                    SectionLabel(text: L.t("settings_account"))
-                    SmokeCard {
-                        // "Signed in as …", not the bare address: VoiceOver gets a sentence (Apple's audit
-                        // flagged the bare address as not human-readable once Settings got shorter).
-                        Text(L.t("settings_signed_in_as", model.email ?? "")).tonoFont(16, relativeTo: .callout)
-                            .foregroundStyle(TonoColor.textPrimary)
+                    .toggleStyle(RowToggleStyle())
+                    if model.includeAllPending {
+                        // The running tunnel keeps the previous setting until it next starts.
+                        Text(L.t("system_include_all_pending")).tonoFont(15, relativeTo: .subheadline)
+                            .foregroundStyle(TonoColor.warning)
                             .fixedSize(horizontal: false, vertical: true)
-                        QuietButton(title: L.t("settings_sign_out"), color: TonoColor.error) { confirmSignOut = true }
+                            .padding(.bottom, 8)
+                            .accessibilityIdentifier("includeAllPending")
                     }
+                    // The mechanics (restart hold, Connect On Demand) one tap away, as the routing scope.
+                    DisclosureGroup(isExpanded: $showSystemHow) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            meta(L.t("system_include_all_desc"))
+                            meta(L.t("system_on_demand"))
+                            Text(L.t("system_limit")).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.warning)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 8).padding(.bottom, 12)
+                    } label: {
+                        title(L.t("system_how_title"))
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    }
+                    .tint(TonoColor.textTertiary)
 
-                    SectionLabel(text: L.t("settings_about"))
-                    SmokeCard {
-                        Text(L.t("about_version", AppModel.appVersion)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
-                        small(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion))
+                    SettingsLabel(text: L.t("settings_lock_screen"))
+                    Toggle(isOn: Binding(get: { model.liveActivityEnabled }, set: { model.setLiveActivity($0) })) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            title(L.t("settings_live_activity"))
+                            meta(L.t("settings_live_activity_desc"))
+                        }
+                    }
+                    .toggleStyle(RowToggleStyle())
+                    .accessibilityIdentifier("liveActivityToggle")
+
+                    SettingsLabel(text: L.t("settings_account"))
+                    // "Signed in as …", not the bare address: VoiceOver gets a sentence (Apple's audit
+                    // flagged the bare address as not human-readable once Settings got shorter).
+                    meta(L.t("settings_signed_in_as", model.email ?? ""))
+                        .padding(.top, 4)
+                    // A text action, not a capsule: red is the only colour on the row.
+                    Button { confirmSignOut = true } label: {
+                        Text(L.t("settings_sign_out")).tonoFont(17, .medium, relativeTo: .body)
+                            .foregroundStyle(TonoColor.error)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScale())
+                    .padding(.top, 4)
+
+                    // About as a colophon: the one line on the screen, then small print.
+                    Rectangle().fill(contrast == .increased ? Color.white.opacity(0.4) : TonoColor.hairline)
+                        .frame(height: 1).padding(.top, 40)
+                        .accessibilityHidden(true)
+                    SettingsLabel(text: L.t("settings_about"), first: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L.t("about_version", AppModel.appVersion)).tonoFont(13, relativeTo: .footnote)
+                            .foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
+                        fine(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion))
                     }
                 }
-                .padding(.horizontal, 16).padding(.bottom, 24)
+                .padding(.horizontal, 20).padding(.bottom, 32)
             }
             .modifier(SheetSurface())
             .navigationTitle(L.t("settings_title"))
@@ -144,12 +164,32 @@ struct SettingsView: View {
         .accessibilityIdentifier("settingsClose")
     }
 
-    private func para(_ text: String) -> some View {
+    /// Row title: the larger of the two sizes; hierarchy comes from size and tone, not weight.
+    private func title(_ text: String) -> some View {
+        Text(text).tonoFont(20, relativeTo: .title3).foregroundStyle(TonoColor.textPrimary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func meta(_ text: String) -> some View {
         Text(text).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
     }
 
-    private func small(_ text: String) -> some View {
-        Text(text).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
+    private func fine(_ text: String) -> some View {
+        Text(text).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textTertiary).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A Settings group heading: sentence case at reading size in the quietest tone, set apart by
+/// space above it rather than a card around the group.
+private struct SettingsLabel: View {
+    let text: String
+    var first = false
+    var body: some View {
+        Text(text)
+            .tonoFont(15, relativeTo: .subheadline)
+            .foregroundStyle(TonoColor.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, first ? 12 : 36).padding(.bottom, 8)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -263,15 +303,28 @@ struct RouteCheck: View {
 /// 63 x 28 pt switch; VoiceOver gets one switch with its label.
 struct RowToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
+        RowToggle(configuration: configuration)
+    }
+}
+
+private struct RowToggle: View {
+    let configuration: ToggleStyleConfiguration
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        // Accessibility sizes: the switch goes under the label, which then has the full width.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                                                  : AnyLayout(HStackLayout(spacing: 12))
         Button { configuration.isOn.toggle() } label: {
-            HStack(spacing: 12) {
+            layout {
                 configuration.label
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 // Drawn only; the row's button takes the tap.
                 Toggle("", isOn: configuration.$isOn).labelsHidden().tint(TonoColor.accent).allowsHitTesting(false)
             }
-            .frame(minHeight: 44)
+            .padding(.vertical, 12)
+            .frame(minHeight: 56)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

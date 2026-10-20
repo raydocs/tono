@@ -90,7 +90,7 @@
 "check_hint_inline" = "Check a site, e.g. claude.ai";
 "check_go" = "Check";
 "check_result" = "TCP → %1$@ · UDP → %2$@";
-"settings_mode_where" = "%1$@ · change in Details";
+"settings_mode_where" = "Change in Details";
 "system_include_all_pending" = "Applies the next time Tono connects.";
 "check_answer_HOME" = "%1$@ goes through your Home broadband.";
 "check_answer_CLOUD" = "%1$@ goes through the cloud exit.";
