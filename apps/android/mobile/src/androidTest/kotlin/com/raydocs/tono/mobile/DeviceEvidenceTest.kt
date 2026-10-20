@@ -318,6 +318,56 @@ class DeviceEvidenceTest {
         Thread.sleep(1_000)
     }
 
+    @Test fun b4_settingsSignOutRemainsAccessibleAfterSwiping() {
+        val state = mutableStateOf(DeviceFixtures.idle)
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent {
+                    CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion()) {
+                        TonoTheme {
+                            FixtureFrame {
+                                TonoRoot(state.value, object : TonoActions {
+                                    override fun connect() {}
+                                    override fun command(op: String, vararg args: Pair<String, Any?>) {
+                                        if (op == "signOut") state.value = DeviceFixtures.idle.copy(phase = Phase.SIGNED_OUT)
+                                    }
+                                    override fun explain(host: String): Map<String, Any?>? = null
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+            try {
+                assertNotNull("Home settings control", find(By.desc(text(R.string.settings_title)), 10_000))
+                device.findObject(By.desc(text(R.string.settings_title))).click()
+                assertNotNull("Settings opened", find(By.text(text(R.string.settings_title)), 10_000))
+                Thread.sleep(600)
+                val selector = By.text(text(R.string.settings_sign_out))
+                var signOut = device.findObject(selector)
+                repeat(6) {
+                    if (signOut != null) return@repeat
+                    device.swipe(device.displayWidth / 2, device.displayHeight * 3 / 4, device.displayWidth / 2, device.displayHeight / 4, 30)
+                    signOut = device.wait(Until.findObject(selector), 1_500)
+                }
+                shot("fixture-31-settings-sign-out")
+                device.dumpWindowHierarchy(File(out, "fixture-31-settings-sign-out.xml"))
+                assertNotNull("Sign out in Settings after swiping", signOut)
+                val bounds = signOut!!.visibleBounds
+                val email = device.findObject(By.text(requireNotNull(DeviceFixtures.idle.email)))
+                assertNotNull("account email", email)
+                assertTrue("account text stays within its visible card after scrolling", email!!.parent.visibleBounds.contains(email.visibleBounds))
+                File(out, "settings-sign-out-report.txt").writeText("Sign out text bounds: $bounds; account text bounds: ${email.visibleBounds}; card bounds: ${email.parent.visibleBounds}; display ${device.displayWidth} × ${device.displayHeight}\n")
+                assertTrue("Sign out text has on-screen bounds", bounds.width() > 0 && bounds.height() > 0 && bounds.top >= 0 && bounds.bottom <= device.displayHeight)
+                signOut!!.click()
+                assertNotNull("signed out", find(By.text(text(R.string.signin_title)), 10_000))
+                shot("fixture-32-settings-signed-out")
+            } finally {
+                holdStillBeforeClose()
+            }
+        }
+    }
+
     @Test fun b1_fixtureStatesRenderedOnDevice() = withFixtureHost { set, _ ->
         val states = listOf(
             "fixture-01-idle" to idle,

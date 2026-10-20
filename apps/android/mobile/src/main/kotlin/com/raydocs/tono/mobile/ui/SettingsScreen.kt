@@ -2,6 +2,7 @@ package com.raydocs.tono.mobile.ui
 
 import android.content.Intent
 import android.provider.Settings
+import android.view.accessibility.AccessibilityEvent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -35,16 +36,19 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -62,6 +66,8 @@ import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.routing.DesktopRoutingContract
 import com.raydocs.tono.routing.RoutingMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -76,10 +82,18 @@ fun SettingsScreen(
     onOpenLicenses: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val scroll = rememberScrollState()
+    LaunchedEffect(scroll, view) {
+        snapshotFlow { scroll.value to scroll.isScrollInProgress }.drop(1).filter { !it.second }.collect {
+            // Android can retain pre-scroll bounds for Compose's virtual card children.
+            view.parent?.notifySubtreeAccessibilityStateChanged(view, view, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE)
+        }
+    }
     Column(Modifier.fillMaxSize().background(TonoColors.Night)) {
         ScreenHeader(stringResource(R.string.settings_title), onBack)
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 24.dp),
         ) {
             SectionLabel(stringResource(R.string.settings_routing))
             SmokeCard {
