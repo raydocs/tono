@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -279,7 +280,7 @@ class HomeInteractionTest {
     @Test fun stateAndPrimaryLabelsReplaceImmediatelyWithoutFadingCopies() {
         show(reduceMotion = false)
         compose.mainClock.autoAdvance = false
-        compose.runOnIdle { snapshot = UiFixtures.connected() }
+        compose.runOnIdle { snapshot = UiFixtures.connected(); Snapshot.sendApplyNotifications() }
         // Drive scheduling and application separately, not the old 120–270ms label fade.
         // Assert that action metadata actually advanced before checking the visible-text tree.
         compose.mainClock.advanceTimeByFrame()
@@ -289,7 +290,7 @@ class HomeInteractionTest {
         compose.onNodeWithText(str(R.string.action_disconnect)).assertExists()
         compose.onAllNodesWithText(str(R.string.state_idle)).assertCountEquals(0)
         compose.onAllNodesWithText(str(R.string.action_connect)).assertCountEquals(0)
-        compose.runOnIdle { snapshot = UiFixtures.idle }
+        compose.runOnIdle { snapshot = UiFixtures.idle; Snapshot.sendApplyNotifications() }
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
         compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.state_idle))).assertExists()
