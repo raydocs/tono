@@ -15,3 +15,4 @@
 - 新增 15 项 JVM/Robolectric 回归；t5/t6 公开通知无 VPN 断言去掉 grace/重启例外，原内部 metadata 收敛断言保留。实现待 Devin 验证，暂不更新 PR 分支；真机/真实服务/签名包仍未验证。
 - Fable 第 1 轮独立评分 82/100、无否决但未过总分门槛；未查看 MP4 的限制原样保留。合并减弱动态/文字过渡、200% 双行吞吐量与箭头首行对齐、登录错误就近显示、通知 Cancel 一致性；不重做材质/评分标准。
 - 续修云首轮 1a5bb985e 保留失败：118 mobile 中1条手动时钟回归失败，17 opt-in 另跑全绿；lint/APKs 成功，15+1设备方法通过；通知基线红测实际断言失败。隧道6方法因临时夹具凭证规则未执行；原9方法简报纠正为6 tunnel +3 DeviceEvidence。下一提交补重组同步、保留新旧标签断言、u8 normal/reduced 原尺寸帧，不宣称已验证。详见 2026-10-19-android-state-truth-devin-r1.md。
+- 证据补全：系统通知设备夹具此前重建 EngineSnapshot 丢掉 attempt/applied，导致 connected 文件实为 Connecting；改为保留既有确认字段并断言 PHASE，另采真正 Connecting。加设备 desired≠applied 线路断言/原图与系统提示独立可见截图，避免以文件名或遮挡区冒充证明。待云执行。

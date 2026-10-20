@@ -222,9 +222,14 @@ class SystemSurfacesDeviceTest {
         // Marked in the title itself, so the label survives collapsed and grouped notification views.
         fun fixture(n: Notification) = Notification.Builder.recoverBuilder(context, n)
             .setContentTitle("FIXTURE · " + n.extras.getCharSequence(Notification.EXTRA_TITLE)).setSubText("no tunnel").build()
-        val connected = DeviceFixtures.connected().let { EngineSnapshot(phase = it.phase, nodes = it.nodes, selectedNode = it.selectedNode, homeKind = it.homeKind, cloudProbe = it.cloudProbe, homeProbe = it.homeProbe) }
+        val connected = DeviceFixtures.connected()
+        val connectedNotice = TonoNotifications.ongoing(context, connected, pi, pi)
+        assertEquals(Phase.CONNECTED, TonoNotifications.claimedPhase(connectedNotice))
+        val connectingNotice = TonoNotifications.ongoing(context, DeviceFixtures.idle.copy(phase = Phase.CONNECTING), pi, pi)
+        assertEquals(Phase.CONNECTING, TonoNotifications.claimedPhase(connectingNotice))
         val notifications = listOf(
-            "fixture-18-notification-connected" to TonoNotifications.ongoing(context, connected, pi, pi),
+            "fixture-18-notification-connected" to connectedNotice,
+            "fixture-18b-notification-connecting" to connectingNotice,
             "fixture-19-notification-stopped" to TonoNotifications.stopped(context, "CORE_STOPPED", pi, pi),
         )
         try {

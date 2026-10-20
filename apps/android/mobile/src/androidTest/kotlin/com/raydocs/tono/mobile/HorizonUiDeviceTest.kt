@@ -30,6 +30,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
@@ -122,6 +125,8 @@ class HorizonUiDeviceTest {
         compose.onNodeWithTag("details").performClick(); check("details"); back()
         compose.onNodeWithTag("exit").performClick(); check("lines"); shot("fixture-10-lines-sheet"); back()
         compose.onNodeWithContentDescription(str(R.string.settings_title)).performClick(); check("settings"); shot("fixture-11-settings")
+        compose.onNodeWithText(str(R.string.system_verify_in_android)).performScrollTo()
+        shot("fixture-11b-system-guidance")
         compose.onNodeWithText(str(R.string.settings_apps_none)).performScrollTo().performClick()
         // The list, not its loading spinner: wait for the installed apps to arrive.
         compose.waitUntil(30_000) { compose.onAllNodes(hasTestTag("app-row")).fetchSemanticsNodes().isNotEmpty() }
@@ -162,6 +167,10 @@ class HorizonUiDeviceTest {
         log += "DISCONNECTING → ${calls.joinToString().ifEmpty { "(disabled, nothing)" }}"
         File(out, "interaction-report.txt").writeText(log.joinToString("\n"))
         assertTrue("disconnecting ignores taps", calls.isEmpty())
+        // Real device drawing from an explicitly different desired/applied fixture, not a tunnel.
+        set(DeviceFixtures.connected().copy(selectedNode = "Los Angeles · Grove"))
+        compose.onNodeWithTag("exit").assert(hasAnyDescendant(hasText("Tokyo")))
+        shot("fixture-28-connected-applied-not-selected")
     }
 
     @Test fun u3_swipeUpOnTheDockOpensDetails() {
