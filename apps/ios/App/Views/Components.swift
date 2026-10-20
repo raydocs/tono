@@ -239,9 +239,22 @@ struct BottomScroll<Content: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            ScrollView {
-                content.frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .bottom)
+            if #available(iOS 17.0, *) {
+                scroll(height: geo.size.height)
+                    .defaultScrollAnchor(.bottom)
+            } else {
+                ScrollViewReader { proxy in
+                    scroll(height: geo.size.height)
+                        .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
             }
+        }
+    }
+
+    private func scroll(height: CGFloat) -> some View {
+        ScrollView {
+            content.frame(maxWidth: .infinity, minHeight: height, alignment: .bottom)
+                .id("bottom")
         }
     }
 }

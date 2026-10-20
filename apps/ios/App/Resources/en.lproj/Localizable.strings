@@ -12,7 +12,7 @@
 "state_failed" = "Didn't connect";
 "widget_last_known" = "Last known: %1$@ at %2$@";
 "widget_stale_title" = "Status unknown";
-"status_protected_home" = "Protected · Home exit in %1$@";
+"status_protected_home" = "Protected · AI via Home (%1$@)";
 "status_network_changed" = "Network changed";
 "state_reconnecting" = "Reconnecting";
 "state_dropped" = "Connection dropped";
@@ -84,13 +84,13 @@
 "mode_stable" = "Stable — everything via cloud";
 "mode_stable_short" = "Stable";
 "mode_stable_desc" = "AI → Home as above; every other public destination leaves through the cloud. LAN stays local.";
-"routing_scope_title" = "What Tono can and cannot recognise";
+"routing_scope_title" = "Routing scope";
 "routing_scope" = "Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range) → explicit cloud list → everything else direct. Matched traffic that fails is blocked, never retried directly; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.";
 "routing_platform" = "On iPhone, all apps, all TCP/UDP ports, IPv4 and IPv6 enter the tunnel. LAN, link-local and multicast stay outside, as do Apple push and cellular services (calls, SMS). DNS for direct names uses your network's resolver; matched names never reach it. iOS has no per-app rules: Tono recognises AI only by domain and the Anthropic address range, and cannot exclude or include individual apps.";
 "check_hint_inline" = "Check a site, e.g. claude.ai";
 "check_go" = "Check";
 "check_result" = "TCP → %1$@ · UDP → %2$@";
-"settings_mode_where" = "%1$@ is on. Change it in Details, next to where traffic goes.";
+"settings_mode_where" = "%1$@ · change in Details";
 "system_include_all_pending" = "Applies the next time Tono connects.";
 "check_answer_HOME" = "%1$@ goes through your Home broadband.";
 "check_answer_CLOUD" = "%1$@ goes through the cloud exit.";
@@ -110,6 +110,7 @@
 "settings_about" = "About";
 "about_version" = "Tono %1$@ · test build, not from the App Store";
 "about_core" = "Core: sing-box %1$@ (GPL-3.0-or-later; source: github.com/SagerNet/sing-box)";
+"about_core_no_version" = "Core: sing-box (GPL-3.0-or-later; source: github.com/SagerNet/sing-box)";
 "about_contract" = "Routing lists: desktop contract, digest %1$@";
 "ipv6_on" = "IPv6 on this network: yes";
 "ipv6_off" = "IPv6 on this network: no (direct names answer IPv4 only)";
@@ -141,7 +142,7 @@
 "short_RATE_LIMITED" = "Too many attempts";
 "short_SESSION_ENDED" = "Please sign in again";
 "short_CATALOG_ROLLBACK" = "Line list refused (older than before)";
-"short_CORE_STOPPED" = "iOS will try to reconnect";
+"short_CORE_STOPPED" = "Tap Retry to reconnect";
 "details" = "Details";
 "details_routes" = "Where traffic goes";
 "details_why" = "What happened";

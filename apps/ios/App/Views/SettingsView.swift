@@ -72,6 +72,8 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 para(L.t("system_include_all_desc"))
                                 para(L.t("system_on_demand"))
+                                Text(L.t("system_limit")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .padding(.top, 8)
                         } label: {
@@ -80,7 +82,6 @@ struct SettingsView: View {
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
                         .tint(TonoColor.textSecondary)
-                        Text(L.t("system_limit")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
                     }
 
                     SectionLabel(text: L.t("settings_lock_screen"))
@@ -106,7 +107,7 @@ struct SettingsView: View {
                     SectionLabel(text: L.t("settings_about"))
                     SmokeCard {
                         Text(L.t("about_version", AppModel.appVersion)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
-                        small(L.t("about_core", model.coreVersion.isEmpty ? "—" : model.coreVersion))
+                        small(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion))
                     }
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)

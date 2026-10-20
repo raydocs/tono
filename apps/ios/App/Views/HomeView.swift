@@ -734,9 +734,7 @@ enum PhaseText {
             if m.reason == "UNCONFIRMED" { return L.t("status_unconfirmed") }
             return m.reason == "NETWORK_CHANGED" ? L.t("status_network_changed") : L.t("sentence_connecting")
         case .connected, .degraded:
-            // The exit capsule already names the cloud line (a city); this line adds only where
-            // Home leaves from, so the screen does not show two naming systems (city and country).
-            let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map(region) : nil)
+            let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map { L.isChinese ? region($0) : $0.uppercased() } : nil)
             if let home { return L.t("status_protected_home", home) }
             return L.t("status_protected")
         default: return nil
