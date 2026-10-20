@@ -188,3 +188,11 @@
 - 验证／限制：详见 `docs/agent-reports/2026-10-19-ios-state-authority-plan.md` 与同日 state-authority-receipts 原始输出；本批 App／扩展原生编译与 UI、真实 NE、App Group、真机未执行，等待所有者安装一个 iOS runtime 并确认 Libbox 构建。没有新候选／新盲评分数。
 - 同日续记：重派修正返回后，根线程重跑原三项红测转绿、完整包 108 项通过；集成再补「无答不能清除代次栅栏」「旧会话回复不能先执行 put-back 再被丢弃」，前者实际红→绿，后者移除 gate 的私有副本负控实际失败。最终本机 **110 项单测、0 失败**；69 个 Swift 文件语法解析通过（不是原生编译）。故障矩阵已填确切测试符号与未覆盖边界。全部仍为未提交/未推送工作区，无新 CI／冻结／盲评；真实进程无 stop write 死亡仍可能保留最长 15 分钟确认，系统调度与真实 NE 未验收，不能称已达目标。
 - Owner 2026-10-19 流程更新：撤销本机组件安装／local-first 后推送要求；本批先提交至 `wip/ios-state-authority` 并使用 Devin Cloud macOS 快照进行只读验证，PR 分支在云端验收通过前不更新。清单含完整编译、110 单测、14 个故障矩阵检查和 35 UI/无障碍，结果尚待云端收据；不把既有本机 Foundation 输出当成云端结果。
+
+
+### 2026-10-19 · 独立盲评第1轮归档与状态修正WIP
+- 来源：已验证/冻结的 `a20b3c107` → 当前 `wip/ios-state-authority` 状态修正；#1672，未合 main，无新候选。
+- 独立盲评：GPT-6.1 Sol xhigh 82.5（D7分项门槛未达、catalog身份V1）；director-fable 83（无否决）。原文和合并计划见 `docs/agent-reports/2026-10-19-ios-a20-blind-r1-results.md`，没有自评分或评分表修改。
+- 缺陷修正WIP：登录会话lease/缓存owner与AppModel账户epoch；隧道catalog digest与admitted/running分离；App/外部按钮共用配置生命周期队列，Cancel/登出同步作废旧start，discovery/save/reload等待后重检。关联三个 `IOS-1672-R1-*` finding，均保持open直到具备相应证据。
+- 工程与测试：增加9个账户隔离、5个catalog身份和6个生命周期回归；静态源码共130个XCTest，既有35个UI未删减。根线程只执行 `git diff --check`（exit0）；新代码未构建/未执行测试，旧110单测与CI绿灯不能证明本批。
+- 剩余限制：文案/动效与owner要求的zh Live Activity locale修正尚未做；真实NE、签名App Group、系统权限提示/配置多副本及On Demand顺序仍待批准真机核对。最多还有第2轮评分，不发release/TestFlight。

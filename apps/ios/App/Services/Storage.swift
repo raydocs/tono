@@ -19,11 +19,14 @@ final class KeychainTokenStore: TokenStore, @unchecked Sendable {
         var item: CFTypeRef?
         guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let data = item as? Data,
               let json = try? JSON.parse(data), let a = json["access"]?.string, let r = json["refresh"]?.string else { return nil }
-        return SessionTokens(access: a, refresh: r)
+        // Items saved before bindings existed have none; AccountSession assigns one on first use.
+        return SessionTokens(access: a, refresh: r, binding: json["binding"]?.string)
     }
 
     func saveTokens(_ tokens: SessionTokens) throws {
-        let data = Data(JSON.obj(("access", .string(tokens.access)), ("refresh", .string(tokens.refresh))).serialized().utf8)
+        var fields: [(String, JSON)] = [("access", .string(tokens.access)), ("refresh", .string(tokens.refresh))]
+        if let binding = tokens.binding { fields.append(("binding", .string(binding))) }
+        let data = Data(JSON.object(JSONObject(fields)).serialized().utf8)
         let update: [String: Any] = [kSecValueData as String: data]
         var status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
@@ -42,7 +45,9 @@ final class KeychainTokenStore: TokenStore, @unchecked Sendable {
 }
 
 /// The last admitted catalog, in the app's own Application Support (not the App Group): only the
-/// app falls back to it, and only on a network failure within seven days.
+/// app falls back to it, and only on a network failure within seven days, for the sign-in recorded
+/// as its owner. A file without an owner (written before owners existed) decodes ownerless and is
+/// never reused.
 final class FileCatalogCache: CatalogCache, @unchecked Sendable {
     private var url: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Tono", isDirectory: true)
@@ -53,11 +58,14 @@ final class FileCatalogCache: CatalogCache, @unchecked Sendable {
     func loadCatalog() -> CachedCatalog? {
         guard let data = try? Data(contentsOf: url), let json = try? JSON.parse(data),
               let body = json["body"]?.string, let revision = json["revision"]?.int, let at = json["fetchedAt"]?.int else { return nil }
-        return CachedCatalog(body: body, revision: revision, fetchedAt: Date(timeIntervalSince1970: TimeInterval(at)))
+        return CachedCatalog(body: body, revision: revision, fetchedAt: Date(timeIntervalSince1970: TimeInterval(at)), owner: json["owner"]?.string)
     }
 
     func saveCatalog(_ cached: CachedCatalog) throws {
-        let json = JSON.obj(("body", .string(cached.body)), ("revision", .int(cached.revision)), ("fetchedAt", .int(Int(cached.fetchedAt.timeIntervalSince1970))))
+        var fields: [(String, JSON)] = [("body", .string(cached.body)), ("revision", .int(cached.revision)),
+                                        ("fetchedAt", .int(Int(cached.fetchedAt.timeIntervalSince1970)))]
+        if let owner = cached.owner { fields.append(("owner", .string(owner))) }
+        let json = JSON.object(JSONObject(fields))
         var target = url
         try Data(json.serialized().utf8).write(to: target, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         var values = URLResourceValues()
@@ -66,6 +74,8 @@ final class FileCatalogCache: CatalogCache, @unchecked Sendable {
     }
 
     func clear() { try? FileManager.default.removeItem(at: url) }
+
+    func clearCatalog() { clear() }
 }
 
 /// Small non-secret preferences.

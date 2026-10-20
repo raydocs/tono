@@ -112,3 +112,16 @@
 外部检查清单：`~/.local/state/devin-cloud/briefs/ios-state-authority-r1.md`。首轮含真实 Libbox hash/provenance 验证、unsigned Release/device 编译、Debug simulator 编译、完整 110 项单测、S01–S14 逐项 filter、35 项 UI/无障碍及现有预览截图录屏。所有者要求 Dev​​in verify-only，不得代改产品代码。失败由本线程修复、同一 WIP 提交，优先 send 续接同一云会话。
 
 云端最终结果仍须核对 exact commit、完整检查覆盖、测试数无减少、原始输出和真实附件；模拟器不能证明真实 NE、签名包或设备行为。后续在冻结 SHA 采集评审证据并发起全新双盲评，当前仍无新分数。
+
+
+## 第1轮盲评后的状态修正（第2轮评分前，尚未云验）
+
+本段只记录实现与待执行覆盖，不沿用 a20 的绿灯给新代码背书。PR 分支仍冻结 a20；先在 WIP 验证三个重大问题，之后再做文案/动效/Live Activity locale 收敛，不提前启动第2轮评分。
+
+| ID | 故障／盲评映射 | 确切回归 | 本批结果 |
+|---|---|---|---|
+| S15 | GPT R1 F1：登出/新登录后旧 refresh/catalog/verify 回答，不得写回或借用他人缓存 | `AccountIsolationTests` 的9个受控响应测试，含 `testANewerVerificationDisownsTheEarlierRequestBeforeEitherAnswer`、`testLocalSignOutDoesNotWaitForTheLogoutServer` | 未执行；AppModel account epoch、apply/error/defer及本地登出接线仅静态核对；Keychain持久化还无专用回归 |
+| S16 | GPT R1 F2/V1：C1/C2同mode/node而Home改变，运行图必须按隧道确认的catalog身份解释 | `CatalogConfirmationTests` 的5个测试，含 `testASameModeAndLineCatalogWithHomeExplainsNothingUntilTheTunnelBuildsItAndSaysSo`、`testTwoMissingCatalogIdentitiesNeverConfirmTheSharedExitName` | 未执行；共享记录双方缺digest也不得命名当前出口；旧SharedStatus fixture补显式同catalog身份，未删断言 |
+| S17 | GPT R1 F3：配置discovery/save/reload暂停时Cancel或signOut，旧start不得迟到，也不得由旧cleanup关掉新start | `TunnelStartCoordinatorTests` 的6个测试，含 `testCancelDuringConfigurationDiscoveryCannotStartOrArmOnDemand`、`testSynchronousInvalidationBeforeAnAccountWaitDisownsAPreparingStart` | 未执行；App与外部intent共用串行生命周期，外部On的discovery已纳入；signOut同步作废start后再等待account actor |
+
+新增 API 在旧代码上不能编译，不声称这是有效 red check。原生编译与130项单测、S01–S17、35项UI均须Devin实际输出。新增真机边界并入真机清单；不改变五分钟心跳/十五分钟确认窗口。

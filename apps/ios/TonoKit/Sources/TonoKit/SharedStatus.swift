@@ -21,9 +21,12 @@ public struct TunnelReport: Equatable, Sendable {
     /// Why it stopped, when it stopped on a failure.
     public var failure: String?
     public var beatAt: Date
+    /// The digest of the catalog the graph in use was built from (`TunnelAnswer.catalog`); nil while
+    /// none runs or in a file from before the field.
+    public var catalog: String?
 
     public init(session: String, opened: Date, generation: Int, running: Bool, routing: RouteSettings?,
-                since: Date?, failure: String?, beatAt: Date) {
+                since: Date?, failure: String?, beatAt: Date, catalog: String? = nil) {
         self.session = session
         self.opened = opened
         self.generation = generation
@@ -32,6 +35,7 @@ public struct TunnelReport: Equatable, Sendable {
         self.since = since
         self.failure = failure
         self.beatAt = beatAt
+        self.catalog = routing == nil ? nil : catalog
     }
 }
 
@@ -68,9 +72,12 @@ public struct AppNote: Equatable, Sendable {
     public var node: String?
     public var exit: String?
     public var writtenAt: Date
+    /// The catalog `exit` was named from (the confirmed graph's, `AppStatus.catalog`): the name is
+    /// shown only beside a tunnel report of the same catalog.
+    public var catalog: String?
 
     public init(state: State, reason: String? = nil, session: String? = nil, generation: Int? = nil,
-                node: String? = nil, exit: String? = nil, writtenAt: Date) {
+                node: String? = nil, exit: String? = nil, writtenAt: Date, catalog: String? = nil) {
         self.state = state
         self.reason = reason
         self.session = session
@@ -78,6 +85,7 @@ public struct AppNote: Equatable, Sendable {
         self.node = node
         self.exit = exit
         self.writtenAt = writtenAt
+        self.catalog = catalog
     }
 
     /// The app's phase as a note. `answer` is the tunnel answer the phase was derived from (nil while
@@ -85,7 +93,7 @@ public struct AppNote: Equatable, Sendable {
     public init(_ phase: Phase, reason: String?, answer: TunnelAnswer?, line: (node: String, name: String)?, now: Date) {
         let state = State(phase)
         self.init(state: state, reason: state == .off || state == .up ? nil : reason, session: answer?.session,
-                  generation: answer?.generation, node: line?.node, exit: line?.name, writtenAt: now)
+                  generation: answer?.generation, node: line?.node, exit: line?.name, writtenAt: now, catalog: answer?.catalog)
     }
 }
 
@@ -156,8 +164,10 @@ public struct SharedStatus: Equatable, Sendable {
                 s.state = .degraded
                 s.reason = note.reason
             }
-            // A name the app gave for another node is never shown in place of the one that runs.
-            if let named = app, let node = named.node, node == routing.node { s.exit = named.exit }
+            // A name the app gave for another node, or from another catalog than the one the graph was
+            // built from, is never shown in place of the one that runs.
+            if let named = app, let node = named.node, node == routing.node,
+               let catalog = tunnel.catalog, named.catalog == catalog { s.exit = named.exit }
         } else {
             // A live process without a graph is not a connection.
             s = StatusSnapshot(state: .failed, reason: "ROUTES_STOPPED", updatedAt: tunnel.beatAt, writer: .tunnel)
@@ -190,13 +200,14 @@ public struct SharedStatus: Equatable, Sendable {
             o["tunnel"] = JSON.obj(("session", .string(t.session)), ("opened", .number(t.opened.timeIntervalSince1970)),
                                    ("generation", .int(t.generation)), ("running", .bool(t.running)),
                                    ("routing", t.routing?.json ?? .null), ("since", Self.date(t.since)),
-                                   ("failure", t.failure.map(JSON.string) ?? .null), ("beatAt", .number(t.beatAt.timeIntervalSince1970)))
+                                   ("failure", t.failure.map(JSON.string) ?? .null), ("beatAt", .number(t.beatAt.timeIntervalSince1970)),
+                                   ("catalogDigest", t.catalog.map(JSON.string) ?? .null))
         }
         if let a = app {
             o["app"] = JSON.obj(("state", .string(a.state.rawValue)), ("reason", a.reason.map(JSON.string) ?? .null),
                                 ("session", a.session.map(JSON.string) ?? .null), ("generation", a.generation.map(JSON.int) ?? .null),
                                 ("node", a.node.map(JSON.string) ?? .null), ("exit", a.exit.map(JSON.string) ?? .null),
-                                ("writtenAt", .number(a.writtenAt.timeIntervalSince1970)))
+                                ("writtenAt", .number(a.writtenAt.timeIntervalSince1970)), ("catalogDigest", a.catalog.map(JSON.string) ?? .null))
         }
         return Data(JSON.object(o).serialized().utf8)
     }
@@ -209,16 +220,17 @@ public struct SharedStatus: Equatable, Sendable {
             guard let session = t["session"]?.string, let opened = number(t["opened"]), let generation = t["generation"]?.int,
                   let running = t["running"]?.bool, let beat = number(t["beatAt"]), let routingJSON = t["routing"] else { return nil }
             let routing = RouteSettings(routingJSON)
-            guard routing != nil || routingJSON == .null else { return nil }
+            guard routing != nil || routingJSON == .null, let catalog = TunnelAnswer.digest(t["catalogDigest"]) else { return nil }
             status.tunnel = TunnelReport(session: session, opened: Date(timeIntervalSince1970: opened), generation: generation,
                                          running: running, routing: routing, since: number(t["since"]).map(Date.init(timeIntervalSince1970:)),
-                                         failure: t["failure"]?.string, beatAt: Date(timeIntervalSince1970: beat))
+                                         failure: t["failure"]?.string, beatAt: Date(timeIntervalSince1970: beat), catalog: catalog)
         }
         if let a = json["app"], a != .null {
-            guard let state = a["state"]?.string.flatMap(AppNote.State.init(rawValue:)), let written = number(a["writtenAt"]) else { return nil }
+            guard let state = a["state"]?.string.flatMap(AppNote.State.init(rawValue:)), let written = number(a["writtenAt"]),
+                  let catalog = TunnelAnswer.digest(a["catalogDigest"]) else { return nil }
             status.app = AppNote(state: state, reason: a["reason"]?.string, session: a["session"]?.string,
                                  generation: a["generation"]?.int, node: a["node"]?.string, exit: a["exit"]?.string,
-                                 writtenAt: Date(timeIntervalSince1970: written))
+                                 writtenAt: Date(timeIntervalSince1970: written), catalog: catalog)
         }
         return status
     }

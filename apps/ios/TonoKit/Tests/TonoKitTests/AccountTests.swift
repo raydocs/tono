@@ -42,6 +42,7 @@ final class MemoryCache: CatalogCache, @unchecked Sendable {
     init(_ c: CachedCatalog? = nil) { cached = c }
     func loadCatalog() -> CachedCatalog? { cached }
     func saveCatalog(_ c: CachedCatalog) throws { cached = c }
+    func clearCatalog() { cached = nil }
 }
 
 func json(_ status: Int, _ value: JSON) -> HTTPResponse { HTTPResponse(status: status, body: Data(value.serialized().utf8)) }
@@ -111,10 +112,10 @@ final class AccountTests: XCTestCase {
     }
 
     func testOlderCatalogRevisionIsRefusedAsRollback() async {
-        let cache = MemoryCache(CachedCatalog(body: "{}", revision: 9, fetchedAt: now))
+        let cache = MemoryCache(CachedCatalog(body: "{}", revision: 9, fetchedAt: now, owner: "login-a"))
         let transport = ScriptedTransport { _, _ in json(200, SampleCatalog.body(revision: 7)) }
         let session = AccountSession(api: ControlPlaneClient(clientVersion: "1", transport: transport),
-                                     tokens: MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 9_999), refresh: "r")),
+                                     tokens: MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 9_999), refresh: "r", binding: "login-a")),
                                      cache: cache, now: { [now] in now })
         do {
             _ = try await session.loadCatalog()
@@ -127,10 +128,10 @@ final class AccountTests: XCTestCase {
 
     func testNetworkOutageReusesARecentCatalogButHomeUnavailableNeverDoes() async throws {
         let cachedBody = SampleCatalog.body().serialized()
-        let tokens = MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 9_999), refresh: "r"))
+        let tokens = MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 9_999), refresh: "r", binding: "login-a"))
         let offline = ScriptedTransport { _, _ in throw Unreachable() }
         let session = AccountSession(api: ControlPlaneClient(clientVersion: "1", transport: offline), tokens: tokens,
-                                     cache: MemoryCache(CachedCatalog(body: cachedBody, revision: 7, fetchedAt: now.addingTimeInterval(-3600))),
+                                     cache: MemoryCache(CachedCatalog(body: cachedBody, revision: 7, fetchedAt: now.addingTimeInterval(-3600), owner: "login-a")),
                                      now: { [now] in now })
         let loaded = try await session.loadCatalog()
         XCTAssertTrue(loaded.fromCache)
@@ -139,7 +140,7 @@ final class AccountTests: XCTestCase {
             json(503, .obj(("error", .obj(("code", "CATALOG_UNAVAILABLE"), ("message", "Assigned home exit is unavailable")))))
         }
         let strict = AccountSession(api: ControlPlaneClient(clientVersion: "1", transport: homeDown), tokens: tokens,
-                                    cache: MemoryCache(CachedCatalog(body: cachedBody, revision: 7, fetchedAt: now)), now: { [now] in now })
+                                    cache: MemoryCache(CachedCatalog(body: cachedBody, revision: 7, fetchedAt: now, owner: "login-a")), now: { [now] in now })
         do {
             _ = try await strict.loadCatalog()
             XCTFail("Home unavailability must not fall back to a cached Home")
@@ -151,9 +152,9 @@ final class AccountTests: XCTestCase {
     func testWeekOldCacheIsNotUsed() async {
         let offline = ScriptedTransport { _, _ in throw Unreachable() }
         let session = AccountSession(api: ControlPlaneClient(clientVersion: "1", transport: offline),
-                                     tokens: MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 9_999), refresh: "r")),
+                                     tokens: MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 9_999), refresh: "r", binding: "login-a")),
                                      cache: MemoryCache(CachedCatalog(body: SampleCatalog.body().serialized(), revision: 7,
-                                                                      fetchedAt: now.addingTimeInterval(-8 * 24 * 3600))),
+                                                                      fetchedAt: now.addingTimeInterval(-8 * 24 * 3600), owner: "login-a")),
                                      now: { [now] in now })
         do {
             _ = try await session.loadCatalog()

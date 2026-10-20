@@ -56,7 +56,14 @@ struct LoginState: Equatable {
 final class AppModel: ObservableObject {
     @Published private(set) var phase: Phase = .signedOut
     @Published private(set) var reason: String?
+    /// The admitted catalog's lines: what a request can pick (the next start builds from it).
     @Published private(set) var lines: [LineItem] = []
+    /// The lines of the catalog the routes in use are explained from (`explained`): the confirmed
+    /// node is looked up here, never among a newer download's lines. Empty when that catalog is not
+    /// known here.
+    @Published private(set) var inUseLines: [LineItem] = []
+    /// Home's kind in the catalog the routes in use are explained from; `.none` (no Home claimed)
+    /// while that catalog is not known here.
     @Published private(set) var homeKind: HomeKind = .none
     @Published private(set) var usingCachedCatalog = false
     @Published private(set) var cloudProbe = ExitProbe()
@@ -114,9 +121,19 @@ final class AppModel: ObservableObject {
     private let liveActivity = LiveActivityController()
     /// The primer was answered for the start in progress.
     private var primerConfirmed = false
-    private var catalog: LoadedCatalog?
+    /// The admitted catalog (next start, requests) apart from the earlier ones a running graph may
+    /// still be built from (`CatalogLedger`).
+    private var catalogs = CatalogLedger()
+    private var catalog: LoadedCatalog? { catalogs.admitted }
+    /// The catalog the routes in use are explained from: the one the running tunnel confirmed it
+    /// built (by digest), or the admitted one while the tunnel is down; nil when not known here.
+    private var explained: LoadedCatalog?
+    /// A confirmed catalog the inputs file was read for and did not hold: not read again for it.
+    private var unrecovered: String?
 
     // Facts behind the phase.
+    private var accountEpoch: UInt64 = 0
+    private var signingOut = false
     private var signedIn: Bool
     private var preparing = false
     private var tunnelStatus: TunnelStatus = .invalid
@@ -210,27 +227,40 @@ final class AppModel: ObservableObject {
     // MARK: - Sign-in
 
     func sendCode(_ raw: String) async {
+        guard !signingOut, !login.busy else { return }
+        let epoch = accountEpoch
         let email = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         login.email = email
         guard AccountSession.isPlausibleEmail(email) else { login.errorCode = "INVALID_EMAIL"; return }
         login.busy = true
         login.errorCode = nil
-        defer { login.busy = false }
+        defer { if epoch == accountEpoch { login.busy = false } }
         do {
-            login.challengeID = try await session.startEmail(email, deviceName: Self.deviceName, installationID: Preferences.installationID)
+            let challenge = try await session.startEmail(email, deviceName: Self.deviceName, installationID: Preferences.installationID)
+            guard epoch == accountEpoch else { return }
+            login.challengeID = challenge
         } catch {
+            guard epoch == accountEpoch, !AccountErrors.isSuperseded(error) else { return }
             login.errorCode = AccountErrors.reasonCode(error)
         }
     }
 
     func verify(_ code: String) async {
+        guard !signingOut, !login.busy else { return }
         guard let challenge = login.challengeID else { return }
         guard code.count == 6, code.allSatisfy(\.isNumber) else { login.errorCode = "INVALID_CODE"; return }
+        accountEpoch &+= 1
+        let epoch = accountEpoch
+        catalogs.clear()
+        unrecovered = nil
+        lines = []
+        refreshExplained()
         login.busy = true
         login.errorCode = nil
-        defer { login.busy = false }
+        defer { if epoch == accountEpoch { login.busy = false } }
         do {
             let reported = try await session.verify(challengeID: challenge, code: code)
+            guard epoch == accountEpoch else { return }
             Preferences.email = reported ?? login.email
             email = Preferences.email
             signedIn = true
@@ -239,37 +269,70 @@ final class AppModel: ObservableObject {
             recompute()
             await refreshCatalog(quiet: true)
         } catch {
+            guard epoch == accountEpoch, !AccountErrors.isSuperseded(error) else { return }
             login.errorCode = AccountErrors.reasonCode(error)
         }
     }
 
-    func changeEmail() { login.challengeID = nil; login.errorCode = nil }
+    func changeEmail() {
+        guard !login.busy, !signingOut else { return }
+        login.challengeID = nil
+        login.errorCode = nil
+    }
 
     func signOut() async {
-        if isPreview { return }
+        if isPreview || signingOut { return }
+        signingOut = true
+        TunnelController.lifecycle.cancelPendingStart()
+        accountEpoch &+= 1
+        signedIn = false
+        wantOn = false
+        userStarting = false
+        preparing = false
+        catalogLoading = false
+        login = LoginState()
         probeTask?.cancel()
         traffic.stop()
         userStopping = true
+        tracker.sessionEnded()
+        catalogs.clear()
+        unrecovered = nil
+        lines = []
+        routeChange = nil
+        unsavedRoutes = nil
+        checks = ExitChecks()
+        reconfirmTask?.cancel()
+        expiryTask?.cancel()
+        recompute()
+        // Clear the account actor before any system wait; an unreachable logout server must not
+        // postpone removing the VPN configuration or let old requests write the account back.
+        await session.signOut(waitForServer: false)
         await tunnel.remove()
-        await session.signOut()
         SharedFiles.removeInputs()
         SharedFiles.clearFailure()
-        cache.clear()
         Preferences.email = nil
         email = nil
-        catalog = nil
+        catalogs.clear()
+        unrecovered = nil
         lines = []
+        routeChange = nil
+        unsavedRoutes = nil
+        checks = ExitChecks()
+        refreshExplained()
         signedIn = false
         failure = nil
         permission = nil
         userStopping = false
+        signingOut = false
         recompute()
     }
 
     // MARK: - Connect / disconnect
 
     func connect() async {
-        guard signedIn, !phase.busy else { return }
+        guard signedIn, !signingOut, !phase.busy else { return }
+        let epoch = accountEpoch
+        let intent = TunnelController.lifecycle.generation
         // Retry after a refused rebuild left the running tunnel without routes: rebuild in place.
         if routesStopped, tunnelStatus.isUp {
             await change(routeSettings, retry: true)
@@ -287,17 +350,23 @@ final class AppModel: ObservableObject {
         SharedFiles.clearFailure()
         preparing = true
         recompute()
-        defer { preparing = false; recompute() }
-        guard await refreshCatalog(quiet: false), let loaded = catalog, wantOn else { return }
+        defer { if epoch == accountEpoch { preparing = false; recompute() } }
+        guard await refreshCatalog(quiet: false), epoch == accountEpoch, signedIn,
+              !signingOut, let loaded = catalog, wantOn,
+              intent == TunnelController.lifecycle.generation else { return }
         do {
             try SharedFiles.saveInputs(inputs(for: loaded))
             unsavedRoutes = nil
             userStarting = true
-            try await tunnel.start(includeAllNetworks: includeAllNetworks)
+            let outcome = try await tunnel.start(includeAllNetworks: includeAllNetworks)
+            guard epoch == accountEpoch else { return }
+            if outcome == .superseded { userStarting = false }
         } catch TunnelError.denied {
+            guard epoch == accountEpoch, wantOn else { return }
             userStarting = false
             permission = "DENIED"
         } catch {
+            guard epoch == accountEpoch, wantOn else { return }
             userStarting = false
             failure = "CORE_START"
         }
@@ -378,7 +447,7 @@ final class AppModel: ObservableObject {
         case .graph(let s)?: name = s.node
         case .noGraph?, .unknown?: return nil
         }
-        return lines.first { $0.name == name }
+        return inUseLines.first { $0.name == name }
     }
 
     func select(_ name: String) async {
@@ -407,8 +476,12 @@ final class AppModel: ObservableObject {
     /// A switch the tunnel never answered, or a running tunnel that has not confirmed (or no longer
     /// confirms) its graph, or one that confirmed none runs: no mode or line is in use that a screen
     /// could state, and the saved choice never stands in for one.
+    /// A confirmed graph whose catalog is not known here (the tunnel named none, or one this app
+    /// neither admitted nor found in the inputs file) counts too: its mode and line are known, but
+    /// not what they mean.
     var routesUnconfirmed: Bool {
         if case .unconfirmed = routeChange { return true }
+        if case .graph? = routing, explained == nil { return true }
         return routing == .unknown || routing == .noGraph
     }
 
@@ -416,6 +489,8 @@ final class AppModel: ObservableObject {
     /// routes in effect until the tunnel confirms; a refusal is said where the change was made and
     /// on Home, and the in-effect routes stay as they are.
     private func change(_ requested: RouteSettings, retry: Bool = false) async {
+        guard !signingOut else { return }
+        let epoch = accountEpoch
         let previous = routeSettings
         // After an unconfirmed switch either choice is a real request, including the previous one.
         guard !changingRoutes, retry || routesUnconfirmed || requested != previous else { return }
@@ -435,11 +510,14 @@ final class AppModel: ObservableObject {
         if let loaded = catalog {
             let tunnel = self.tunnel
             report = await RouteApply.run(requested, previous: previous, tunnelUp: ticket != nil,
-                                          save: { try SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: $0.mode, selectedNode: $0.node)) },
+                                          save: { [weak self] settings in
+                                              guard let self, self.accountEpoch == epoch, !self.signingOut else { throw SessionSuperseded() }
+                                              try SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: settings.mode, selectedNode: settings.node))
+                                          },
                                           reload: { await tunnel.send(.reload) },
                                           status: { await tunnel.send(.status) },
                                           acceptReply: { [weak self] answer in
-                                              guard let self else { return false }
+                                              guard let self, self.accountEpoch == epoch, !self.signingOut else { return false }
                                               return self.tracker.permits(RouteApplyReport(.unconfirmed(requested), answer: answer), ticket: ticket)
                                           })
         } else {
@@ -449,6 +527,7 @@ final class AppModel: ObservableObject {
         // Asked of a session that has since ended, or answered about an older graph than one heard
         // since: the reply says nothing about what runs now, so it moves neither the routes, the
         // pending change nor the put-back. What the tunnel says now decides (`recompute`).
+        guard epoch == accountEpoch, !signingOut else { return }
         guard tracker.settle(report, ticket: ticket) else {
             routeChange = nil
             recompute()
@@ -570,6 +649,7 @@ final class AppModel: ObservableObject {
             return
         }
         lines = lines.map { var l = $0; if let v = results[l.name] { l.latencyMS = v }; return l }
+        inUseLines = inUseLines.map { var l = $0; if let v = results[l.name] { l.latencyMS = v }; return l }
     }
 
     /// The route check's result for what was typed: an answer, or why there is none.
@@ -586,7 +666,7 @@ final class AppModel: ObservableObject {
         case nil: settings = routeSettings
         case .graph(let s)?:
             // A confirmed line this catalog does not list: its rules are not here to answer from.
-            guard s.node == nil || lines.contains(where: { $0.name == s.node }) else { return .unconfirmed }
+            guard s.node == nil || inUseLines.contains(where: { $0.name == s.node }) else { return .unconfirmed }
             settings = s
         case .noGraph?, .unknown?: return .unconfirmed
         }
@@ -594,10 +674,11 @@ final class AppModel: ObservableObject {
         return .answer(answer)
     }
 
-    /// "Where does this site go?" against the graph built from the current catalog and the routes in
-    /// use (confirmed by the running tunnel, or the choice for the next start).
+    /// "Where does this site go?" against the graph built from the catalog the routes in use are
+    /// explained from (the one the running tunnel confirmed it built, or the admitted one for the
+    /// next start) and those routes. Never from a newer download the tunnel has not built.
     func explain(_ host: String, _ settings: RouteSettings) -> RouteAnswer? {
-        guard let catalog = catalog?.catalog else { return nil }
+        guard let catalog = explained?.catalog else { return nil }
         let config = SingBoxConfig.build(ConfigInput(catalog: catalog, selectedCloudNode: settings.node, mode: settings.mode,
                                                      underlyingIPv6: underlyingIPv6, cacheFilePath: nil))
         return RouteExplainer.answer(config: config, catalog: catalog, host: host)
@@ -611,15 +692,20 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     private func refreshCatalog(quiet: Bool) async -> Bool {
+        guard signedIn, !signingOut else { return false }
+        let epoch = accountEpoch
         catalogLoading = true
-        defer { catalogLoading = false }
+        defer { if epoch == accountEpoch { catalogLoading = false } }
         do {
             let loaded = try await session.loadCatalog()
+            guard epoch == accountEpoch, signedIn, !signingOut else { return false }
             apply(loaded)
             return true
         } catch {
+            guard epoch == accountEpoch, !AccountErrors.isSuperseded(error) else { return false }
             if AccountErrors.isSessionEnded(error) {
                 await signOut()
+                guard accountEpoch == epoch &+ 1 else { return false }
                 failure = "SESSION_ENDED"
                 recompute()
                 return false
@@ -629,19 +715,71 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A newly admitted catalog is for the next start and requests. It changes what the routes in
+    /// use are explained from only while the tunnel is down; a running graph keeps its own until the
+    /// tunnel builds this one and confirms it.
     private func apply(_ loaded: LoadedCatalog) {
-        catalog = loaded
+        catalogs.admit(loaded)
         usingCachedCatalog = loaded.fromCache
         let previous = Dictionary(uniqueKeysWithValues: lines.map { ($0.name, $0.latencyMS) })
         lines = loaded.catalog.cloudNodes.map { LineItem(name: $0.name, city: $0.city, label: $0.label, latencyMS: previous[$0.name] ?? nil) }
         if selectedNode == nil || !lines.contains(where: { $0.name == selectedNode }) {
             selectedNode = loaded.catalog.defaultCloudNode ?? lines.first?.name
         }
-        switch loaded.catalog.home {
-        case .socks5: homeKind = .residential
-        case .catalogNode(let node): homeKind = .catalogNode(node.city)
-        case nil: homeKind = .none
+        refreshExplained()
+    }
+
+    /// Puts in place the catalog the routes in use are explained from (`CatalogLedger.explaining`)
+    /// and what Home, the lanes and the line read from it. Returns whether that changed.
+    @discardableResult
+    private func refreshExplained() -> Bool {
+        let next: LoadedCatalog?
+        let digest: String?
+        if isPreview || routing == nil {
+            next = catalog
+            digest = catalogs.admittedDigest
+        } else {
+            var confirmed: String?
+            if case .graph? = routing { confirmed = resolved?.catalog }
+            recoverCatalog(confirmed)
+            next = catalogs.explaining(routing: routing, catalog: confirmed)
+            digest = confirmed
         }
+        let knownBefore = explained != nil
+        explained = next
+        let items: [LineItem]
+        if next == nil {
+            items = []
+        } else if digest == catalogs.admittedDigest {
+            items = lines
+        } else {
+            let known = Dictionary(inUseLines.map { ($0.name, $0.latencyMS) }, uniquingKeysWith: { a, _ in a })
+                .merging(lines.map { ($0.name, $0.latencyMS) }, uniquingKeysWith: { a, _ in a })
+            items = next?.catalog.cloudNodes.map { LineItem(name: $0.name, city: $0.city, label: $0.label, latencyMS: known[$0.name] ?? nil) } ?? []
+        }
+        let kind: HomeKind
+        switch next?.catalog.home {
+        case .socks5?: kind = .residential
+        case .catalogNode(let node)?: kind = .catalogNode(node.city)
+        case nil: kind = .none
+        }
+        guard items != inUseLines || kind != homeKind || knownBefore != (next != nil) else { return false }
+        inUseLines = items
+        homeKind = kind
+        return true
+    }
+
+    /// After a relaunch the catalog a running graph was built from is no longer in memory; the
+    /// inputs file still holds it until a request writes over it. Its body is taken (and admitted
+    /// again) only when its digest is the one the tunnel confirmed: a file that moved on to a newer
+    /// catalog explains nothing.
+    private func recoverCatalog(_ digest: String?) {
+        guard signedIn, !signingOut, let digest, !catalogs.holds(digest), digest != unrecovered else { return }
+        unrecovered = digest
+        guard let inputs = try? SharedFiles.loadInputs(), inputs.catalogDigest == digest,
+              let admitted = try? CatalogAdmission.admit(JSON.parse(inputs.catalogBody)) else { return }
+        catalogs.retain(LoadedCatalog(catalog: admitted, body: inputs.catalogBody, fromCache: true))
+        unrecovered = nil
     }
 
     private func tunnelChanged(_ status: TunnelStatus, since: Date?) {
@@ -829,7 +967,8 @@ final class AppModel: ObservableObject {
         }
         let routingChanged = known != routing
         if routingChanged { routing = known }
-        guard derived.phase != phase || derived.reason != reason || routingChanged || bindingChanged else { return }
+        let explainedChanged = refreshExplained()
+        guard derived.phase != phase || derived.reason != reason || routingChanged || bindingChanged || explainedChanged else { return }
         withAnimation(.easeInOut(duration: 0.22)) {
             phase = derived.phase
             reason = derived.reason
@@ -843,7 +982,9 @@ final class AppModel: ObservableObject {
     /// "Tokyo" (localised city); "Tokyo · Dawn" only when another line is also in Tokyo.
     func displayName(_ line: LineItem) -> String {
         let city = Format.city(line.city, chinese: L.isChinese)
-        return LineNaming.showsLabel(line.name, among: lines.map(\.name)) ? "\(city) · \(line.label)" : city
+        // Among the lines of the catalog the line comes from: the one in use, or the admitted one.
+        let among = inUseLines.contains(line) ? inUseLines : lines
+        return LineNaming.showsLabel(line.name, among: among.map(\.name)) ? "\(city) · \(line.label)" : city
     }
 
     /// Shares the phase with widgets, the control and the Live Activity as the app's note: it can

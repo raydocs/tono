@@ -39,6 +39,14 @@ public struct TunnelInputs: Equatable, Sendable {
         return TunnelInputs(catalogBody: body, mode: mode, selectedNode: json["selectedNode"]?.string, logLevel: level)
     }
 
+    /// The identity of the catalog these inputs build from: SHA-256 (base64url) of the exact body,
+    /// so any change of nodes, Home or rules changes it. With the mode and line beside it
+    /// (`TunnelAnswer.routing`) it names the inputs a graph was built from. A digest only: the body
+    /// (node credentials) never leaves the App Group file.
+    public var catalogDigest: String { Self.catalogDigest(catalogBody) }
+
+    public static func catalogDigest(_ body: String) -> String { SHA256.base64URL(body) }
+
     /// Admits the stored body again (the extension trusts nothing it did not check) and builds the config.
     public func makeConfig(underlyingIPv6: Bool, cacheFilePath: String?) throws -> String {
         let catalog = try CatalogAdmission.admit(JSON.parse(catalogBody))

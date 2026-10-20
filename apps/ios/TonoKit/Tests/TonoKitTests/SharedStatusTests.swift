@@ -11,12 +11,12 @@ final class SharedStatusTests: XCTestCase {
     private func report(_ session: String = "s1", opened: Date? = nil, generation: Int = 1, running: Bool = true,
                         routing: RouteSettings?? = nil, failure: String? = nil, at: Date) -> TunnelReport {
         TunnelReport(session: session, opened: opened ?? t0, generation: generation, running: running,
-                     routing: running ? (routing ?? tokyo) : nil, since: t0, failure: failure, beatAt: at)
+                     routing: running ? (routing ?? tokyo) : nil, since: t0, failure: failure, beatAt: at, catalog: "catalog-a")
     }
 
     private func note(_ state: AppNote.State, reason: String? = nil, session: String? = nil, generation: Int? = nil,
                       node: String? = nil, exit: String? = nil, at: Date) -> AppNote {
-        AppNote(state: state, reason: reason, session: session, generation: generation, node: node, exit: exit, writtenAt: at)
+        AppNote(state: state, reason: reason, session: session, generation: generation, node: node, exit: exit, writtenAt: at, catalog: "catalog-a")
     }
 
     func testAnAppNoteAloneNeverReadsConnected() {

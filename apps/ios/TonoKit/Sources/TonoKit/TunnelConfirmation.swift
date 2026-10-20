@@ -1,7 +1,8 @@
 import Foundation
 
 /// The packet tunnel's word on what it runs, stamped by the tunnel itself: which start (`session`),
-/// which graph within it (`generation`), the routes in use (nil: no graph runs) and when it said so.
+/// which graph within it (`generation`), the routes in use (nil: no graph runs), the catalog that
+/// graph was built from (`catalog`) and when it said so.
 /// Sent with every status and rebuild reply; the shared status file carries the same facts
 /// (`TunnelReport`). It is the only routing fact any screen, widget, control or Live Activity may
 /// state as current. The app can ask for one and decorate it; it cannot make one, and nothing the
@@ -14,19 +15,33 @@ public struct TunnelAnswer: Equatable, Sendable {
     public var since: Date?
     /// When the tunnel answered (the phone's clock, read in the tunnel process).
     public var at: Date
+    /// `TunnelInputs.catalogDigest` of the body the running graph was built from; nil when no graph
+    /// runs or the tunnel did not say (a build from before the field). Only the catalog with this
+    /// digest may explain the routes in use: one downloaded since, with the same mode and line,
+    /// is not what runs until the tunnel builds it and says so (`CatalogLedger`).
+    public var catalog: String?
 
-    public init(session: String, generation: Int, routing: RouteSettings?, since: Date?, at: Date) {
+    public init(session: String, generation: Int, routing: RouteSettings?, since: Date?, at: Date, catalog: String? = nil) {
         self.session = session
         self.generation = generation
         self.routing = routing
         self.since = since
         self.at = at
+        self.catalog = routing == nil ? nil : catalog
     }
 
     public var json: JSON {
         JSON.obj(("session", .string(session)), ("generation", .int(generation)), ("routing", routing?.json ?? .null),
                  ("since", since.map { JSON.number($0.timeIntervalSince1970) } ?? .null),
-                 ("at", .number(at.timeIntervalSince1970)))
+                 ("at", .number(at.timeIntervalSince1970)), ("catalogDigest", catalog.map(JSON.string) ?? .null))
+    }
+
+    /// An optional digest field: absent or null is nil (not said); anything else but a non-empty
+    /// string makes the whole record unreadable.
+    static func digest(_ json: JSON?) -> String?? {
+        guard let json, json != .null else { return .some(nil) }
+        guard let text = json.string, !text.isEmpty else { return nil }
+        return .some(text)
     }
 
     /// The `tunnel` field of a status or rebuild reply. nil when there is no reply, no field or an
@@ -40,11 +55,11 @@ public struct TunnelAnswer: Equatable, Sendable {
         guard let json, let session = json["session"]?.string, !session.isEmpty, let generation = json["generation"]?.int,
               case .number(let at)? = json["at"], let routingJSON = json["routing"] else { return nil }
         let routing = RouteSettings(routingJSON)
-        guard routing != nil || routingJSON == .null else { return nil }
+        guard routing != nil || routingJSON == .null, let catalog = digest(json["catalogDigest"]) else { return nil }
         var since: Date?
         if case .number(let s)? = json["since"] { since = Date(timeIntervalSince1970: s) }
         return TunnelAnswer(session: session, generation: generation, routing: routing, since: since,
-                            at: Date(timeIntervalSince1970: at))
+                            at: Date(timeIntervalSince1970: at), catalog: catalog)
     }
 }
 
@@ -142,7 +157,8 @@ public struct ConfirmationTracker: Equatable, Sendable {
         guard let report, report.session == heardSession else { return false }
         if let silentSince, report.beatAt <= silentSince { return false }
         let word = TunnelAnswer(session: report.session, generation: report.generation,
-                                routing: report.running ? report.routing : nil, since: report.since, at: report.beatAt)
+                                routing: report.running ? report.routing : nil, since: report.since, at: report.beatAt,
+                                catalog: report.running ? report.catalog : nil)
         guard isNewer(word) else { return false }
         take(word)
         return true
@@ -208,7 +224,7 @@ public struct ConfirmationTracker: Equatable, Sendable {
     /// The confirmed graph exit checks may run against now; nil while none is confirmed.
     public func stamp(now: Date) -> GraphStamp? {
         guard let answer = current(now: now), answer.routing != nil else { return nil }
-        return GraphStamp(epoch: epoch, session: answer.session, generation: answer.generation)
+        return GraphStamp(epoch: epoch, session: answer.session, generation: answer.generation, catalog: answer.catalog)
     }
 }
 
@@ -218,6 +234,8 @@ public struct GraphStamp: Equatable, Sendable {
     fileprivate let epoch: Int
     public let session: String
     public let generation: Int
+    /// The catalog that graph was built from (`TunnelAnswer.catalog`).
+    public let catalog: String?
 }
 
 /// The exit checks and the confirmed graph they ran against (nil: none was confirmed when they
@@ -253,6 +271,9 @@ public struct AppStatus: Equatable, Sendable {
     /// The tunnel start and graph the app last heard from in this session: the note is tied to them.
     public var session: String?
     public var generation: Int?
+    /// The catalog the confirmed graph was built from; nil while no graph is confirmed or the
+    /// tunnel did not say which. Routes on screen are explained only from that catalog.
+    public var catalog: String?
 
     /// `facts.routing`, `cloudProbe` and `homeProbe` are ignored: they come from `tracker` and `checks`.
     public static func resolve(_ facts: ConnectionFacts, checks: ExitChecks, tracker: ConfirmationTracker, now: Date) -> AppStatus {
@@ -266,15 +287,79 @@ public struct AppStatus: Equatable, Sendable {
         f.homeProbe = applies ? checks.home : ExitProbe()
         let derived = ConnectionState.derive(f)
         let heard = up ? tracker.heard : nil
+        let catalog = up && routing != .unknown ? tracker.current(now: now)?.catalog : nil
         return AppStatus(routing: routing, phase: derived.phase, reason: derived.reason, cloud: f.cloudProbe, home: f.homeProbe,
-                         graph: graph, session: heard?.session, generation: heard?.generation)
+                         graph: graph, session: heard?.session, generation: heard?.generation, catalog: catalog)
     }
 
     /// The app's note for the shared status. `line` is the confirmed node and its display name (or
-    /// the choice while the tunnel is down); nil while no graph is confirmed.
+    /// the choice while the tunnel is down), named from the confirmed catalog; nil while no graph
+    /// (or no catalog it was built from) is confirmed.
     public func note(line: (node: String, name: String)?, now: Date) -> AppNote {
         let state = AppNote.State(phase)
         return AppNote(state: state, reason: state == .off || state == .up ? nil : reason, session: session,
-                       generation: generation, node: line?.node, exit: line?.name, writtenAt: now)
+                       generation: generation, node: line?.node, exit: line?.name, writtenAt: now, catalog: catalog)
+    }
+}
+
+/// The catalogs the app holds, kept apart by role. `admitted` is the latest one admitted: the next
+/// start and every mode or line request build from it. The routes in use are explained (Home's
+/// kind, the line's name, the lanes, the route check) only from the catalog the running tunnel
+/// confirmed it built, found by its digest among the ones this app admitted or recovered from
+/// the inputs file; a newer download with the same mode and line never stands in for it. Not
+/// found here (an app relaunch after the inputs file moved on): nothing is explained.
+public struct CatalogLedger: Sendable {
+    /// How many earlier catalogs are kept for a graph still running on one of them.
+    public static let kept = 4
+
+    public private(set) var admitted: LoadedCatalog?
+    /// `TunnelInputs.catalogDigest` of `admitted`'s body.
+    public private(set) var admittedDigest: String?
+    private var retained: [(digest: String, loaded: LoadedCatalog)] = []
+
+    public init() {}
+
+    /// A newly admitted catalog: for the next start and requests. What runs is unchanged by it.
+    public mutating func admit(_ loaded: LoadedCatalog) {
+        let digest = TunnelInputs.catalogDigest(loaded.body)
+        admitted = loaded
+        admittedDigest = digest
+        retain(loaded, digest: digest)
+    }
+
+    /// A catalog the tunnel may be running on (an inputs file read back), kept for explaining only.
+    public mutating func retain(_ loaded: LoadedCatalog) { retain(loaded, digest: TunnelInputs.catalogDigest(loaded.body)) }
+
+    private mutating func retain(_ loaded: LoadedCatalog, digest: String) {
+        retained.removeAll { $0.digest == digest }
+        retained.append((digest, loaded))
+        if retained.count > Self.kept { retained.removeFirst(retained.count - Self.kept) }
+    }
+
+    public func holds(_ digest: String) -> Bool { retained.contains { $0.digest == digest } }
+
+    /// Signed out: nothing is kept.
+    public mutating func clear() {
+        admitted = nil
+        admittedDigest = nil
+        retained = []
+    }
+
+    /// The catalog the routes `status` states are explained from. Tunnel down (`routing` nil): the
+    /// admitted one, which the next start builds. A confirmed graph: only the catalog with the digest
+    /// it was built from; none when the tunnel did not name one (an older build) or it is not kept
+    /// here. Unconfirmed, or no graph: none.
+    public func explaining(_ status: AppStatus) -> LoadedCatalog? {
+        explaining(routing: status.routing, catalog: status.catalog)
+    }
+
+    public func explaining(routing: RoutingConfirmation?, catalog: String?) -> LoadedCatalog? {
+        switch routing {
+        case nil: return admitted
+        case .graph?:
+            guard let catalog else { return nil }
+            return retained.last { $0.digest == catalog }?.loaded
+        case .noGraph?, .unknown?: return nil
+        }
     }
 }

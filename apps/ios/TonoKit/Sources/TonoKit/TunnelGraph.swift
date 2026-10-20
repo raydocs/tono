@@ -12,6 +12,9 @@ public struct TunnelGraph: Sendable {
     public private(set) var generation = 0
     /// The inputs of the last graph that started. Kept after a refusal closed it.
     public private(set) var inputs: TunnelInputs?
+    /// `inputs.catalogDigest`, taken when that graph started: the catalog identity every answer and
+    /// report of it carries. Kept with `inputs` after a refusal closed it.
+    public private(set) var catalogDigest: String?
     public private(set) var running = false
 
     public init(session: String = UUID().uuidString, opened: Date = Date()) {
@@ -22,16 +25,22 @@ public struct TunnelGraph: Sendable {
     /// What runs now; nil when no graph does.
     public var runningSettings: RouteSettings? { running ? inputs?.settings : nil }
 
+    /// The catalog of what runs now; nil when no graph does.
+    public var runningCatalog: String? { running ? catalogDigest : nil }
+
     /// Builds the config, then starts it. A build failure leaves the running graph as it was;
     /// libbox's StartOrReloadService closes the running graph before it starts the next, so a start
     /// failure leaves none.
     public mutating func run(_ next: TunnelInputs, build: (TunnelInputs) throws -> String,
                              start: (String) throws -> Void) throws {
         let config = try build(next)
+        // An IPv6 or core reload rebuilds the same body: no need to hash it again.
+        let digest = next.catalogBody == inputs?.catalogBody ? catalogDigest ?? next.catalogDigest : next.catalogDigest
         running = false
         generation += 1
         try start(config)
         inputs = next
+        catalogDigest = digest
         running = true
     }
 
@@ -69,7 +78,9 @@ public struct TunnelGraph: Sendable {
     /// What the tunnel tells the app it runs (status and rebuild replies). After sing-box stopped
     /// its own service (`coreStopped`, the code) no graph runs, whatever the bookkeeping still holds.
     public func answer(since: Date?, now: Date, coreStopped: String? = nil) -> TunnelAnswer {
-        TunnelAnswer(session: session, generation: generation, routing: coreStopped == nil ? runningSettings : nil, since: since, at: now)
+        let live = coreStopped == nil
+        return TunnelAnswer(session: session, generation: generation, routing: live ? runningSettings : nil, since: since, at: now,
+                            catalog: live ? runningCatalog : nil)
     }
 
     /// The tunnel's record in the shared status. `process` is whether the tunnel itself is up; a
@@ -79,6 +90,7 @@ public struct TunnelGraph: Sendable {
     public func report(process running: Bool, since: Date?, failure: String?, now: Date, coreStopped: String? = nil) -> TunnelReport {
         let up = running && coreStopped == nil
         return TunnelReport(session: session, opened: opened, generation: generation, running: up,
-                            routing: up ? runningSettings : nil, since: since, failure: up ? nil : coreStopped ?? failure, beatAt: now)
+                            routing: up ? runningSettings : nil, since: since, failure: up ? nil : coreStopped ?? failure, beatAt: now,
+                            catalog: up ? runningCatalog : nil)
     }
 }

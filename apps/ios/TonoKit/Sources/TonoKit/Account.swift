@@ -3,9 +3,14 @@ import Foundation
 public struct SessionTokens: Equatable, Sendable {
     public var access: String
     public var refresh: String
-    public init(access: String, refresh: String) {
+    /// Random, non-secret identifier of this sign-in (never derived from either token). It survives
+    /// token rotation and is stamped on the catalog cache. Nil only for tokens saved before it
+    /// existed; AccountSession assigns one on first use.
+    public var binding: String?
+    public init(access: String, refresh: String, binding: String? = nil) {
         self.access = access
         self.refresh = refresh
+        self.binding = binding
     }
 }
 
@@ -21,16 +26,21 @@ public struct CachedCatalog: Equatable, Sendable {
     public var body: String
     public var revision: Int
     public var fetchedAt: Date
-    public init(body: String, revision: Int, fetchedAt: Date) {
+    /// The sign-in binding that admitted it. A copy with no owner (written before owners existed) or
+    /// another owner is never reused, for fallback or as the rollback floor.
+    public var owner: String?
+    public init(body: String, revision: Int, fetchedAt: Date, owner: String? = nil) {
         self.body = body
         self.revision = revision
         self.fetchedAt = fetchedAt
+        self.owner = owner
     }
 }
 
 public protocol CatalogCache: AnyObject, Sendable {
     func loadCatalog() -> CachedCatalog?
     func saveCatalog(_ cached: CachedCatalog) throws
+    func clearCatalog()
 }
 
 public struct LoadedCatalog: Equatable, Sendable {
@@ -47,6 +57,12 @@ public struct LoadedCatalog: Equatable, Sendable {
     }
 }
 
+/// The sign-in a request started under ended (sign-out or a new sign-in) before the request
+/// finished. Its result was dropped without touching tokens or the cache; callers ignore it.
+public struct SessionSuperseded: Error, Equatable, Sendable {
+    public init() {}
+}
+
 public enum AccountErrors {
     /// Codes that mean this phone's session is over; the account is cleared locally.
     public static let sessionEnded: Set<String> = ["INVALID_REFRESH_TOKEN", "SIGNED_OUT", "UNAUTHORIZED", "ACCOUNT_SUSPENDED"]
@@ -55,6 +71,8 @@ public enum AccountErrors {
         guard let e = error as? APIError else { return false }
         return e.status == 401 && sessionEnded.contains(e.code)
     }
+
+    public static func isSuperseded(_ error: Error) -> Bool { error is SessionSuperseded }
 
     /// The reason code the UI shows; same mapping as Android `TonoVpnService.errorCode`.
     public static func reasonCode(_ error: Error) -> String {
@@ -72,6 +90,10 @@ public enum AccountErrors {
 }
 
 /// Email sign-in, token rotation and catalog fetch with rollback refusal.
+///
+/// The actor re-enters at every network await, so each request holds a lease on the sign-in it
+/// started under. Sign-out and sign-in end the current sign-in before their first await; a request
+/// whose lease ended may not write tokens or the cache or return a result (`SessionSuperseded`).
 public actor AccountSession {
     public static let cacheMaxAge: TimeInterval = 7 * 24 * 3600
 
@@ -80,6 +102,16 @@ public actor AccountSession {
     let cache: CatalogCache
     let now: @Sendable () -> Date
     private var access: String?
+    /// Bumped by every sign-out and sign-in.
+    private var epoch: UInt64 = 0
+    /// The one token refresh in flight for `epoch`; concurrent callers share it.
+    private var refreshing: (id: UInt64, epoch: UInt64, task: Task<String, Error>)?
+    private var refreshes: UInt64 = 0
+
+    struct Lease: Sendable {
+        let epoch: UInt64
+        let binding: String
+    }
 
     public init(api: ControlPlaneClient, tokens: TokenStore, cache: CatalogCache, now: @escaping @Sendable () -> Date = { Date() }) {
         self.api = api
@@ -111,60 +143,149 @@ public actor AccountSession {
 
     /// Verifies the six-digit code and stores the tokens. Returns the account email the server reports.
     public func verify(challengeID: String, code: String) async throws -> String? {
-        let body = try await api.post("auth/email/verify", .obj(("challengeId", .string(challengeID)), ("code", .string(code))))
+        // A newer verification request owns the sign-in even before either server answer arrives.
+        endSignIn()
+        tokens.clearTokens()
+        cache.clearCatalog()
+        let started = epoch
+        let body: JSON
+        do {
+            body = try await api.post("auth/email/verify", .obj(("challengeId", .string(challengeID)), ("code", .string(code))))
+        } catch {
+            guard epoch == started else { throw SessionSuperseded() }
+            throw error
+        }
+        // A sign-out or another sign-in started meanwhile: this answer is for a flow that is over.
+        guard epoch == started else { throw SessionSuperseded() }
         guard let a = body["accessToken"]?.string, let r = body["refreshToken"]?.string else {
             throw APIError(status: 500, code: "SERVER_ERROR", message: "missing tokens")
         }
-        try tokens.saveTokens(SessionTokens(access: a, refresh: r))
+        try tokens.saveTokens(SessionTokens(access: a, refresh: r, binding: UUID().uuidString))
         access = a
         return body["user"]?["email"]?.string
     }
 
-    /// Best-effort server logout, then local removal. Local state is cleared even when the call fails.
-    public func signOut() async {
+    /// Best-effort server logout, then local removal. Local state is cleared, and every request in
+    /// flight disowned, before the server call, so it holds even when that call fails or hangs.
+    public func signOut(waitForServer: Bool = true) async {
+        endSignIn()
         let saved = tokens.loadTokens()
         tokens.clearTokens()
-        access = nil
+        cache.clearCatalog()
         guard let saved else { return }
-        _ = try? await api.post("auth/logout", .obj(("refreshToken", .string(saved.refresh))), bearer: saved.access)
+        let api = self.api
+        let logout = Task {
+            _ = try? await api.post("auth/logout", .obj(("refreshToken", .string(saved.refresh))), bearer: saved.access)
+        }
+        if waitForServer { await logout.value }
     }
 
-    func bearer(forceRefresh: Bool) async throws -> String {
+    /// Ends the current sign-in for every request holding a lease on it.
+    private func endSignIn() {
+        epoch &+= 1
+        refreshing?.task.cancel()
+        refreshing = nil
+        access = nil
+    }
+
+    /// A lease on the current sign-in. Tokens saved before bindings existed get one now; catalogs
+    /// cached back then carry no owner and stay unused.
+    func currentLease() throws -> Lease {
+        guard let saved = tokens.loadTokens() else { throw APIError(status: 401, code: "SIGNED_OUT", message: "not signed in") }
+        if let binding = saved.binding { return Lease(epoch: epoch, binding: binding) }
+        let binding = UUID().uuidString
+        try tokens.saveTokens(SessionTokens(access: saved.access, refresh: saved.refresh, binding: binding))
+        return Lease(epoch: epoch, binding: binding)
+    }
+
+    /// Throws `SessionSuperseded` unless the lease's sign-in is still the current one.
+    func check(_ lease: Lease) throws {
+        guard lease.epoch == epoch, tokens.loadTokens()?.binding == lease.binding else { throw SessionSuperseded() }
+    }
+
+    func bearer(forceRefresh: Bool, lease: Lease) async throws -> String {
+        try check(lease)
         guard let saved = tokens.loadTokens() else { throw APIError(status: 401, code: "SIGNED_OUT", message: "not signed in") }
         let cached = access ?? saved.access
         if !forceRefresh && !JWT.expiringSoon(cached, now: now()) { return cached }
+        let flight: (id: UInt64, epoch: UInt64, task: Task<String, Error>)
+        if let current = refreshing, current.epoch == lease.epoch {
+            flight = current
+        } else {
+            refreshes &+= 1
+            flight = (refreshes, lease.epoch, Task { try await self.rotate(saved, lease: lease) })
+            refreshing = flight
+        }
+        let result = await flight.task.result
+        if refreshing?.id == flight.id { refreshing = nil }
+        try check(lease)
+        return try result.get()
+    }
+
+    private func rotate(_ saved: SessionTokens, lease: Lease) async throws -> String {
         let body = try await api.post("auth/refresh", .obj(("refreshToken", .string(saved.refresh))))
+        try check(lease)
         guard let a = body["accessToken"]?.string else { throw APIError(status: 500, code: "SERVER_ERROR", message: "no access token") }
         let rotated = body["refreshToken"]?.string ?? saved.refresh
-        try tokens.saveTokens(SessionTokens(access: a, refresh: rotated))
+        try tokens.saveTokens(SessionTokens(access: a, refresh: rotated, binding: lease.binding))
         access = a
         return a
     }
 
     public func authorized<T: Sendable>(_ op: @Sendable (String) async throws -> T) async throws -> T {
+        try await authorized(lease: try currentLease(), op)
+    }
+
+    func authorized<T: Sendable>(lease: Lease, _ op: @Sendable (String) async throws -> T) async throws -> T {
         do {
-            return try await op(try await bearer(forceRefresh: false))
-        } catch let e as APIError where e.status == 401 && e.code != "INVALID_REFRESH_TOKEN" && e.code != "SIGNED_OUT" {
-            return try await op(try await bearer(forceRefresh: true))
+            do {
+                let token = try await bearer(forceRefresh: false, lease: lease)
+                try check(lease)
+                let result = try await op(token)
+                try check(lease)
+                return result
+            } catch let e as APIError where e.status == 401 && e.code != "INVALID_REFRESH_TOKEN" && e.code != "SIGNED_OUT" {
+                try check(lease)
+                let token = try await bearer(forceRefresh: true, lease: lease)
+                try check(lease)
+                let result = try await op(token)
+                try check(lease)
+                return result
+            }
+        } catch {
+            // A failure that lands after its sign-in ended belongs to no one: not a session end, not
+            // a reason to fall back to a cache.
+            try check(lease)
+            throw error
         }
     }
 
+    /// This sign-in's own cached catalog; any other copy is ignored and replaced on the next admit.
+    private func ownCache(_ lease: Lease) -> CachedCatalog? {
+        guard let cached = cache.loadCatalog(), cached.owner == lease.binding else { return nil }
+        return cached
+    }
+
     /// Fetches and admits the catalog. Falls back to the last admitted copy only when the network
-    /// failed and that copy is under seven days old; Home unavailability and rollbacks never fall back.
+    /// failed and that copy is this sign-in's and under seven days old; Home unavailability and
+    /// rollbacks never fall back.
     public func loadCatalog() async throws -> LoadedCatalog {
-        let cached = cache.loadCatalog()
+        let lease = try currentLease()
         do {
             let api = self.api
-            let body = try await authorized { token in try await api.get("exit-catalog", bearer: token) }
+            // Returns only while the lease holds; nothing below awaits, so the writes are this sign-in's.
+            let body = try await authorized(lease: lease) { token in try await api.get("exit-catalog", bearer: token) }
+            try check(lease)
             let admitted = try CatalogAdmission.admit(body)
-            if let cached, admitted.revision < cached.revision {
+            if let cached = ownCache(lease), admitted.revision < cached.revision {
                 throw CatalogRejected("CATALOG_ROLLBACK", "catalog revision went backwards")
             }
             let text = body.serialized()
-            try cache.saveCatalog(CachedCatalog(body: text, revision: admitted.revision, fetchedAt: now()))
+            try cache.saveCatalog(CachedCatalog(body: text, revision: admitted.revision, fetchedAt: now(), owner: lease.binding))
             return LoadedCatalog(catalog: admitted, body: text, fromCache: false)
         } catch let e as APIError where e.code == "NETWORK" {
-            guard let cached, now().timeIntervalSince(cached.fetchedAt) < Self.cacheMaxAge,
+            try check(lease)
+            guard let cached = ownCache(lease), now().timeIntervalSince(cached.fetchedAt) < Self.cacheMaxAge,
                   let catalog = try? CatalogAdmission.admit(JSON.parse(cached.body)) else { throw e }
             return LoadedCatalog(catalog: catalog, body: cached.body, fromCache: true)
         }
