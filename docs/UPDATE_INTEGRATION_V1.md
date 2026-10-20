@@ -4,7 +4,7 @@ This is the implementation contract for #26, following the shared value model
 in [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md). It is not acceptance evidence.
 The owner requested real macOS/Windows integration and permits manually replacing
 legacy clients. Source work does not authorize signing, deployment, feed changes
-or device installation. The current customer-test source version is 0.0.78;
+or device installation. The current customer-test source version is 0.0.79;
 candidate production is separately authorized, not G3 acceptance.
 
 ## Settled implementation choices
