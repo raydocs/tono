@@ -32,18 +32,21 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.78 (build 79)** and **Windows
-0.0.78**, prepared as a new **customer-test candidate** by the owner's
-2026-10-19 request: the Windows China-direct fix (#1684/#1685), the sing-box
-v1.15.0-alpha.12 core (#1686) and the fixes merged since 0.0.77. This is not stable acceptance or customer-feed promotion.
-See `apps/macos/release-notes/build79.md`, `apps/windows/release-notes/0.0.78.md`
-and [the delivery record](changelog.d/2026-10-19-desktop-0078-customer-test.md).
+Source versions in this tree are **macOS 0.0.79 (build 80)** and **Windows
+0.0.79**, prepared as a new **test candidate** by the owner's 2026-10-19
+request ("先把新的全部做完 然后再出签名再测"): macOS AI Home as the default
+routing mode (#1692–#1695, decision 131), the Restore internet zombie fix
+(#1691), the core port preflight (#1698), China Mobile Cloud DIRECT (#1696) and
+failure-report spacing (#1699). It exists for installed-device qualification of
+AI Home. This is not stable acceptance or customer-feed promotion.
+See `apps/macos/release-notes/build80.md`, `apps/windows/release-notes/0.0.79.md`
+and [the delivery record](changelog.d/2026-10-19-desktop-0079-test.md).
 Both packages must bind the same source and release sequence; share verified
 bytes in a new, explicitly labelled prerelease, never by overwriting old assets.
 Installed-device results are collected after candidate creation, not invented
-as a prerequisite receipt. The 0.0.77 and 0.0.76 RCs and their assets remain immutable.
+as a prerequisite receipt. The 0.0.78, 0.0.77 and 0.0.76 RCs and their assets remain immutable.
 G1–G3 still govern stable promotion; the 0.0.75 G3 deferral is not a
-qualification of 0.0.78 upgrades. Three-tier is an explicit opt-in: ordinary
+qualification of 0.0.79 upgrades. Three-tier is an explicit opt-in: ordinary
 DIRECT is public IPv4 TCP80/443 only, not UDP/QUIC, IPv6 or LAN support.
 
 0.0.75 and 0.0.74 were built but not customer-published. Their draft releases,
