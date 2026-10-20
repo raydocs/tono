@@ -164,6 +164,87 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
         && !maySignalOwnedCore(path: mihomoPath, uid: 501, expectedPath: mihomoPath)
 }
 
+/// A port another program holds is refused by name before the core starts.
+/// Holds a UDP socket and a TCP listener on ephemeral loopback ports, so the
+/// holder it must name is this process.
+func runCorePortPreflightSelfTest() -> Bool {
+    var failures: [String] = []
+    let config = Data(#"{"inbounds":[{"type":"tun","interface_name":"utun199"},{"type":"direct","tag":"Tono-DNS","listen":"127.0.0.1","listen_port":53},{"type":"mixed","tag":"Tono-Mixed","listen":"127.0.0.1","listen_port":28990}],"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}}"#.utf8)
+    if CoreListenPreflight.sockets(inConfig: config) != [
+        .init(port: 53, udp: false), .init(port: 53, udp: true),
+        .init(port: 28990, udp: false), .init(port: 9090, udp: false),
+    ] {
+        failures.append("config sockets")
+    }
+    func boundLoopback(udp: Bool) -> (fd: Int32, port: UInt16)? {
+        let fd = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let ready = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, length) == 0 && (udp || listen(fd, 1) == 0)
+                    && getsockname(fd, $0, &length) == 0
+            }
+        }
+        guard ready else { close(fd); return nil }
+        return (fd, UInt16(bigEndian: address.sin_port))
+    }
+    for udp in [true, false] {
+        let label = udp ? "udp" : "tcp"
+        guard let held = boundLoopback(udp: udp) else {
+            failures.append("\(label) bind")
+            continue
+        }
+        let socket = CoreListenSocket(port: held.port, udp: udp)
+        if CoreListenPreflight.firstBusy([socket]) != socket { failures.append("\(label) busy") }
+        let holder = CoreListenPreflight.holder(of: socket)
+        if holder?.pid != getpid() { failures.append("\(label) holder") }
+        let failure = CoreListenPreflight.failure(for: socket, holder: holder)
+        if failure.code != CoreListenPreflight.portInUseCode
+            || !failure.message.hasPrefix("Port \(held.port) (\(udp ? "UDP" : "TCP")) on 127.0.0.1 is already in use by ")
+            || !failure.message.hasSuffix("(PID \(getpid())).") {
+            failures.append("\(label) message")
+        }
+        close(held.fd)
+        if CoreListenPreflight.firstBusy([socket]) != nil { failures.append("\(label) released") }
+    }
+    // A holder on ::1 does not conflict with 127.0.0.1 and is never named.
+    let v6 = socket(AF_INET6, SOCK_DGRAM, 0)
+    if v6 >= 0 {
+        var one: Int32 = 1
+        _ = setsockopt(v6, IPPROTO_IPV6, IPV6_V6ONLY, &one, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in6()
+        address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        address.sin6_family = sa_family_t(AF_INET6)
+        address.sin6_addr = in6addr_loopback
+        var length = socklen_t(MemoryLayout<sockaddr_in6>.size)
+        let bound = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(v6, $0, length) == 0 && getsockname(v6, $0, &length) == 0
+            }
+        }
+        if bound, CoreListenPreflight.holder(of: .init(port: UInt16(bigEndian: address.sin6_port), udp: true)) != nil {
+            failures.append("ipv6 loopback holder")
+        }
+        close(v6)
+    }
+    let scrubbed = CoreListenPreflight.failure(
+        for: .init(port: 53, udp: true),
+        holder: ("a\u{85}b\u{2028}c\u{202E}(d)\u{7}", 5)
+    ).message
+    if scrubbed != "Port 53 (UDP) on 127.0.0.1 is already in use by abcd (PID 5)." {
+        failures.append("holder name scrub")
+    }
+    if !failures.isEmpty {
+        FileHandle.standardError.write(Data("core port preflight self-test failed: \(failures.joined(separator: ", "))\n".utf8))
+    }
+    return failures.isEmpty
+}
+
 /// Folds an object key the way Go's JSON decoder matches it to a struct field
 /// (`bytes.EqualFold`). Every option name the core knows is ASCII, and the only
 /// non-ASCII letters whose simple fold reaches ASCII are U+017F (s) and U+212A (k).
@@ -2289,6 +2370,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runReadRequestBoundSelfTest()
             && ProtectionCheckSchedule.runClockStepSelfTest()
             && runCoreLifecyclePolicySelfTests()
+            && runCorePortPreflightSelfTest()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()

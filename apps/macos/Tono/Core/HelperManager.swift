@@ -1947,10 +1947,73 @@ enum HelperIPCError: LocalizedError {
                 String(localized: "Tono's restore record could not be read. Choose Restore internet once, then connect.")
             case "STALE_GENERATION":
                 String(localized: "This step belonged to an earlier connection and was not applied.")
+            case CorePortConflict.code:
+                CorePortConflict(helperMessage: message)?.userMessage ?? message
             default:
                 message
             }
         }
+    }
+}
+
+/// The helper's `CORE_PORT_IN_USE` refusal: another program holds a loopback
+/// port the core binds (Docker's or dnsmasq's resolver on 53, most often). The
+/// helper keeps one message shape so the port and the program can be named
+/// here in the user's language.
+nonisolated struct CorePortConflict: Equatable, Sendable {
+    static let code = "CORE_PORT_IN_USE"
+
+    let port: Int
+    /// "TCP" or "UDP".
+    let transport: String
+    let program: String?
+    let pid: Int?
+
+    init(port: Int, transport: String, program: String?, pid: Int?) {
+        self.port = port
+        self.transport = transport
+        self.program = program
+        self.pid = pid
+    }
+
+    /// Reads `Port 53 (UDP) on 127.0.0.1 is already in use by <name> (PID 812).`,
+    /// with `another program` for an unknown name and no PID when none was found.
+    init?(helperMessage message: String) {
+        let head = "Port "
+        let marker = " is already in use by "
+        guard message.hasPrefix(head), message.hasSuffix("."),
+              let markerRange = message.range(of: marker) else { return nil }
+        let subject = message[message.index(message.startIndex, offsetBy: head.count)..<markerRange.lowerBound]
+        let parts = subject.split(separator: " ")
+        guard parts.count >= 2, let port = Int(parts[0]),
+              ["(TCP)", "(UDP)"].contains(String(parts[1])) else { return nil }
+        let transport = String(parts[1].dropFirst().dropLast())
+        let tail = message[markerRange.upperBound..<message.index(before: message.endIndex)]
+        var name = String(tail)
+        var pid: Int?
+        if tail.hasSuffix(")"), let open = tail.range(of: " (PID ", options: .backwards) {
+            guard let parsed = Int(tail[open.upperBound..<tail.index(before: tail.endIndex)]) else { return nil }
+            pid = parsed
+            name = String(tail[..<open.lowerBound])
+        }
+        let program = name == "another program" || name.isEmpty ? nil : name
+        self.init(port: port, transport: transport, program: program, pid: pid)
+    }
+
+    var userMessage: String {
+        // Numbers as text: an interpolated Int is formatted, and port 28990
+        // would read "28,990".
+        let port = String(port)
+        if let program, let pid = pid.map(String.init) {
+            return String(localized: "Port \(port) (\(transport)) on this Mac is already in use by \(program) (PID \(pid)), so Tono cannot start protection. Quit that program or turn off its DNS or proxy feature, then connect again.")
+        }
+        return String(localized: "Port \(port) (\(transport)) on this Mac is already in use by another program, so Tono cannot start protection. Quit that program or turn off its DNS or proxy feature, then connect again.")
+    }
+
+    /// Whether a failed core start was this refusal.
+    static func matches(_ error: Error) -> Bool {
+        guard case HelperIPCError.commandFailed(_, let code) = error else { return false }
+        return code == Self.code
     }
 }
 

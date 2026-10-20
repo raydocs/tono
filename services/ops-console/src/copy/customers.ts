@@ -205,6 +205,7 @@ export const customerCopy = {
     CORE_EXIT_UNREACHABLE: '当前节点和核心都没通过验证',
     TONO_NODE_OR_CORE_UNREACHABLE: '当前节点和核心都没通过验证',
     UNKNOWN_CLASSIFIED_FAILURE: '受保护连接失败，已记下诊断',
+    LOCAL_PORT_IN_USE: '本机端口被其他程序占用（常见是 Docker 的 DNS）',
     TUN_ROUTE_UNAVAILABLE: '流量没能进入隧道',
     PROTECTED_DNS_NOT_READY: '系统 DNS 还没进入保护路径',
     NETWORK_ENVIRONMENT_OFFLINE: '当前网络不可用',
