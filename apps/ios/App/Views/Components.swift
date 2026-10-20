@@ -153,12 +153,14 @@ struct StatusDot: View {
 /// Smoked card used for settings sections; same surface as the home sheet.
 struct SmokeCard<Content: View>: View {
     @ViewBuilder let content: Content
+    @Environment(\.tonoReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
         VStack(alignment: .leading, spacing: 10) { content }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(TonoColor.smoke.opacity(0.92), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(TonoColor.hairline, lineWidth: 1))
+            .background(TonoColor.smoke.opacity(reduceTransparency || contrast == .increased ? 1 : 0.82), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.white.opacity(contrast == .increased ? 0.4 : 0.08), lineWidth: 1))
     }
 }
 

@@ -213,7 +213,7 @@ private struct GlassSurface<S: Shape>: ViewModifier {
 
     /// Bright where the sky lights the top edge, faint underneath.
     private var rim: some View {
-        shape.stroke(LinearGradient(colors: [Color.white.opacity(0.34), Color.white.opacity(0.05), Color.white.opacity(0.12)],
+        shape.stroke(LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.04), Color.white.opacity(0.09)],
                                     startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
             .allowsHitTesting(false)
     }
@@ -222,11 +222,12 @@ private struct GlassSurface<S: Shape>: ViewModifier {
 /// Content surface inside a sheet: a smoked fill, not glass (the sheet itself is the glass).
 private struct ContentCard<S: Shape>: ViewModifier {
     let shape: S
+    @Environment(\.tonoReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
         content
-            .background(TonoColor.smokeHigh.opacity(contrast == .increased ? 1 : 0.5), in: shape)
+            .background(TonoColor.smokeHigh.opacity(reduceTransparency || contrast == .increased ? 1 : 0.5), in: shape)
             .overlay(shape.stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0.06), lineWidth: 1))
     }
 }

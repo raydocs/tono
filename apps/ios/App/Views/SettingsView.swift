@@ -112,7 +112,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)
             }
-            .background(TonoColor.night.ignoresSafeArea())
+            .modifier(SheetSurface())
             .navigationTitle(L.t("settings_title"))
             .navigationBarTitleDisplayMode(.inline)
         }
