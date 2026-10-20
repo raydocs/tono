@@ -971,6 +971,7 @@ mod tests {
         assert!(is_allowed_direct_suffix("goofish.com"));
         assert!(is_allowed_direct_suffix("10086.cn"));
         assert!(is_allowed_direct_suffix("cmecloud.cn"));
+        assert!(is_allowed_direct_suffix("miit.gov.cn"));
         assert!(!is_allowed_direct_suffix("gov.cn"));
         assert!(!is_allowed_direct_suffix("alibaba.com"));
         assert!(!is_allowed_direct_suffix("snssdk.com"));
