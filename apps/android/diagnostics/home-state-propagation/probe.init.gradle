@@ -1,6 +1,7 @@
 // Opt-in diagnostic sources only; never part of the normal acceptance suite or APK.
 gradle.beforeProject { p ->
     p.plugins.withId('com.android.application') {
-        p.android.sourceSets.getByName('test').java.srcDir(new File(p.rootDir, 'diagnostics/home-state-propagation/src'))
+        p.android.sourceSets.getByName('test').kotlin.srcDir(new File(p.rootDir, 'diagnostics/home-state-propagation/src'))
+        p.logger.lifecycle('PROPAGATION diagnostic Kotlin roots: ' + p.android.sourceSets.getByName('test').kotlin.srcDirs)
     }
 }
