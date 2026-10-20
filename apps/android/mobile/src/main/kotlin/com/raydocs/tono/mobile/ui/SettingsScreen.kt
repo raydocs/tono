@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -216,7 +217,9 @@ private fun NavRow(text: String, onClick: () -> Unit) {
 @Composable
 private fun TextAction(text: String, onClick: () -> Unit, color: Color = TonoColors.TextPrimary, fill: Boolean = true) {
     Box(
-        Modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 8.dp)).heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 10.dp),
+        // Inline (Check): the padding sits inside the target, which never drops under 48 dp wide.
+        Modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier.widthIn(min = 48.dp)).heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = if (fill) 0.dp else 8.dp, vertical = 10.dp),
         contentAlignment = Alignment.CenterStart,
     ) { Text(text, style = TonoType.Action, color = color) }
 }
