@@ -78,7 +78,8 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
 
     Canvas(modifier.clearAndSetSemantics { }) {
         val horizonY = size.height * horizon
-        val t = sunRise
+        // Leaving protection is immediate; an old full sun must not outlive the state word.
+        val t = if (sky == SkyState.NIGHT || sky == SkyState.EMBER) target else sunRise
         // Sky: night ink → plum/amber dusk → warm day glow.
         val top = lerp(lerp(Color(0xFF070816), Color(0xFF1B1030), (t * 1.4f).coerceAtMost(1f)), Color(0xFF2A1426), warn * 0.4f)
         val mid = lerp(lerp(Color(0xFF111433), Color(0xFF5A2238), t), Color(0xFF4A1A1C), warn * 0.5f)

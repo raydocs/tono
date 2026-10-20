@@ -90,7 +90,7 @@ class TunnelLedger {
 
     /** Asks the exits again on a confirmed tunnel; the last verdicts are not kept as current. Null if none is confirmed. */
     fun rechecking(s: EngineSnapshot): EngineSnapshot? =
-        if (!TunnelAuthority.confirmed(s)) null else s.copy(cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING))
+        if (!TunnelAuthority.confirmed(s)) null else s.copy(phase = Phase.CONNECTING, reasonCode = null, cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING))
 
     /** Ends the current attempt in a resting [phase]; no tunnel is confirmed afterwards. */
     fun end(s: EngineSnapshot, phase: Phase, reasonCode: String?): EngineSnapshot {

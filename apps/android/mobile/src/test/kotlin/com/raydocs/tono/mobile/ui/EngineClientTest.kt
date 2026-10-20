@@ -127,7 +127,7 @@ class EngineClientTest {
 
         connection().onServiceDisconnected(name)
         val title = nm.activeNotifications.single { it.id == TonoNotifications.ONGOING_ID }.notification.extras.getCharSequence(Notification.EXTRA_TITLE)
-        assertEquals(app.getString(R.string.state_connected), title.toString())
+        assertEquals(app.getString(R.string.notif_running_title), title.toString())
         // The death is recorded for the instance this binding heard from, and for no other.
         assertEquals(setOf(UiFixtures.ENGINE), PublicStatusStore.dead(app))
     }

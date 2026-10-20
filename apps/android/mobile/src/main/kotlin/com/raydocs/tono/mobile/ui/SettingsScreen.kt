@@ -117,15 +117,10 @@ fun SettingsScreen(
             SectionLabel(stringResource(R.string.settings_system))
             SmokeCard {
                 Text(
-                    stringResource(
-                        when {
-                            s.alwaysOn && s.lockdown -> R.string.system_lockdown
-                            s.alwaysOn -> R.string.system_on_open
-                            else -> R.string.system_off
-                        },
-                    ),
-                    // Only Android's own block keeps apps from going out directly while Tono is down.
-                    style = MaterialTheme.typography.bodyMedium, color = if (s.alwaysOn && s.lockdown) TonoColors.TextSecondary else TonoColors.Warning,
+                    stringResource(R.string.system_verify_in_android),
+                    // Settings can change independently while the VPN remains up. No cached flag
+                    // can promise what Android will do after this tunnel stops.
+                    style = MaterialTheme.typography.bodyMedium, color = TonoColors.Warning,
                 )
                 QuietButton(stringResource(R.string.system_open), { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
             }

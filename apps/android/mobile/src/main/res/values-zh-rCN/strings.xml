@@ -41,6 +41,7 @@
     <string name="lane_checking">检测中</string>
     <string name="lane_down">不通</string>
 
+    <string name="speed_line_large">↓ %1$s\n↑ %2$s</string>
     <string name="speed_line">↓\u00A0%1$s · ↑\u00A0%2$s</string>
 
     <string name="reason_CATALOG_UNAVAILABLE">Tono 暂时无法下发你的线路：服务器或分配给你的家宽出口暂不可用。不会绕开它们直连；请稍后重试。</string>
@@ -108,9 +109,7 @@
     <string name="verdict_BLOCKED">拦截</string>
     <string name="verdict_DNS">DNS</string>
     <string name="settings_system">Android 系统保护</string>
-    <string name="system_lockdown">已开启始终开启的 VPN，并已“屏蔽未使用 VPN 的连接”：Tono 停止时应用会等待，不会直连。</string>
-    <string name="system_on_open">已开启始终开启的 VPN，但未开启“屏蔽未使用 VPN 的连接”：Tono 重启期间应用会直连。可在 Android VPN 设置中开启。</string>
-    <string name="system_off">未设为始终开启：Tono 停止时应用会直连。可在 Android VPN 设置中开启“始终开启的 VPN”和“屏蔽未使用 VPN 的连接”。</string>
+    <string name="system_verify_in_android">Tono 停止后的保护由 Android 控制，当前连接不能保证。请在 Android 设置中检查“始终开启的 VPN”和“屏蔽未使用 VPN 的连接”；此处不确认它们的当前状态。</string>
     <string name="system_open">打开 VPN 设置</string>
     <string name="settings_account">账号</string>
     <string name="settings_sign_out">退出登录</string>
@@ -168,6 +167,8 @@
     <string name="surface_sign_in">登录</string>
     <string name="surface_open">打开</string>
     <string name="widget_description">Tono 状态与一键连接</string>
+    <string name="notif_running_title">Tono 服务</string>
+    <string name="notif_check_live">打开 Tono 查看实时连接状态</string>
     <string name="notif_stopped_title">Tono 已停止</string>
     <string name="notif_stopped_no_vpn">系统无 VPN 网络 · 打开 Tono 重新连接</string>
     <string name="consent_title">系统询问之前</string>

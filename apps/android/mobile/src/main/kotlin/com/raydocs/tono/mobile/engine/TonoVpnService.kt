@@ -74,6 +74,8 @@ class TonoVpnService : VpnService() {
     private var commandServer: CommandServer? = null
     @Volatile private var catalog: ExitCatalog? = null
     private var accessToken: String? = null
+    private val loginRequests = RequestEpoch()
+    private val accountWork = AccountWorkQueue({ io.execute(it) }, { engine.execute(it) })
     private var trafficTask: ScheduledFuture<*>? = null
     @Volatile private var foreground = false
     /** Attempts and their confirmation (engine thread only); the single writer of [EngineSnapshot.applied]. */
@@ -84,6 +86,7 @@ class TonoVpnService : VpnService() {
     @Volatile private var retired = false
     /** The phone's own network the exits were last checked over (engine thread only). */
     private var lastUnderlying: Network? = null
+    private val probeRequests = ProbeEpoch<Network>()
     private lateinit var apiBase: String
     private var localTestServer = false
 
@@ -139,7 +142,7 @@ class TonoVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        engine.execute { stopCore() }
+        engine.execute { accountWork.invalidate(); loginRequests.next(); stopCore() }
         engine.shutdown()
         engine.awaitTermination(3, TimeUnit.SECONDS)
         retired = true
@@ -222,13 +225,15 @@ class TonoVpnService : VpnService() {
             update { it.copy(login = it.login.copy(email = normalized, errorCode = "INVALID_EMAIL")) }
             return
         }
+        val request = loginRequests.next()
+        val s = store.settings()
         update { it.copy(login = LoginView(email = normalized, busy = true)) }
         io.execute {
-            val s = store.settings()
             val result = runCatching {
                 api.post("auth/email/start", linkedMapOf("email" to normalized, "deviceName" to s.deviceName, "installationId" to s.installationId))
             }
             engine.execute {
+                if (!loginRequests.accepts(request)) return@execute
                 result.onSuccess { body ->
                     update { it.copy(login = LoginView(email = normalized, challengeId = body["challengeId"] as? String)) }
                 }.onFailure { e ->
@@ -245,10 +250,12 @@ class TonoVpnService : VpnService() {
             update { it.copy(login = it.login.copy(errorCode = "INVALID_CODE")) }
             return
         }
+        val request = loginRequests.next()
         update { it.copy(login = it.login.copy(busy = true, errorCode = null)) }
         io.execute {
             val result = runCatching { api.post("auth/email/verify", linkedMapOf("challengeId" to challenge, "code" to code)) }
             engine.execute {
+                if (!loginRequests.accepts(request)) return@execute
                 result.onSuccess { body ->
                     val access = body["accessToken"] as? String
                     val refresh = body["refreshToken"] as? String
@@ -256,11 +263,17 @@ class TonoVpnService : VpnService() {
                         update { it.copy(login = it.login.copy(busy = false, errorCode = "SERVER_ERROR")) }
                         return@execute
                     }
+                    accountWork.invalidate()
+                    loginRequests.next()
+                    stopCore()
+                    leaveForeground()
+                    store.clearAccount()
+                    catalog = null
                     store.saveTokens(access, refresh)
                     accessToken = access
                     val email = ((body["user"] as? Map<*, *>)?.get("email") as? String) ?: login.email
                     store.update { it.copy(email = email, accountApi = apiBase) }
-                    update { it.copy(phase = Phase.IDLE, email = email, login = LoginView(), reasonCode = null) }
+                    update { ledger.end(signedOut(phase = Phase.IDLE, mode = it.mode, excluded = it.excludedPackages).copy(email = email), Phase.IDLE, null) }
                     refreshCatalogQuietly()
                 }.onFailure { e ->
                     update { it.copy(login = it.login.copy(busy = false, errorCode = errorCode(e))) }
@@ -270,6 +283,8 @@ class TonoVpnService : VpnService() {
     }
 
     private fun signOut() {
+        accountWork.invalidate()
+        loginRequests.next()
         stopCore()
         leaveForeground()
         val access = accessToken ?: store.accessToken()
@@ -281,68 +296,89 @@ class TonoVpnService : VpnService() {
         update { ledger.end(signedOut(mode = it.mode, excluded = it.excludedPackages), Phase.SIGNED_OUT, null) }
     }
 
-    private fun bearer(forceRefresh: Boolean = false): String {
-        val cached = accessToken ?: store.accessToken()
-        if (!forceRefresh && cached != null && !jwtExpiringSoon(cached)) return cached.also { accessToken = it }
-        val refresh = store.refreshToken() ?: throw ApiException(401, "SIGNED_OUT", "not signed in")
-        val body = api.post("auth/refresh", linkedMapOf("refreshToken" to refresh))
-        val access = body["accessToken"] as? String ?: throw ApiException(500, "SERVER_ERROR", "no access token")
-        val rotated = body["refreshToken"] as? String ?: refresh
-        store.saveTokens(access, rotated)
-        accessToken = access
-        return access
-    }
-
-    private fun <T> authorized(block: (String) -> T): T = try {
-        block(bearer())
-    } catch (e: ApiException) {
-        if (e.status != 401 || e.code == "INVALID_REFRESH_TOKEN") throw e
-        block(bearer(forceRefresh = true))
-    }
-
     // ---- catalog -----------------------------------------------------------------------------
 
-    /** Fetches and admits the catalog. Falls back to the last admitted copy only for network failures. */
-    private data class LoadedCatalog(val catalog: ExitCatalog, val cached: Boolean)
+    /** Captured on the engine thread. Never consult the current account from a delayed IO job. */
+    private class CatalogInput(
+        var access: String?, var refresh: String?, val settings: EngineSettings, val cachedBody: String?,
+    )
+    private class CatalogResponse(val input: CatalogInput, val result: Result<LoadedCatalog>)
+    private class LoadedCatalog(
+        val catalog: ExitCatalog, val cached: Boolean, val body: String?, val fetchedAt: Long,
+    )
 
-    /** IO result only: the caller commits snapshot changes on the engine executor. */
-    private fun loadCatalog(): LoadedCatalog {
-        val settings = store.settings()
+    /** IO-only: no token, catalog, settings or snapshot writes here. */
+    private fun loadCatalog(input: CatalogInput): LoadedCatalog {
+        var access = input.access
+        var refresh = input.refresh
+        fun bearer(force: Boolean = false): String {
+            val previous = access
+            if (!force && previous != null && !jwtExpiringSoon(previous)) return previous
+            val token = refresh ?: throw ApiException(401, "SIGNED_OUT", "not signed in")
+            val response = api.post("auth/refresh", linkedMapOf("refreshToken" to token))
+            access = response["accessToken"] as? String ?: throw ApiException(500, "SERVER_ERROR", "no access token")
+            refresh = response["refreshToken"] as? String ?: token
+            input.access = access
+            input.refresh = refresh
+            return access!!
+        }
         return try {
-            val body = authorized { token -> api.get("exit-catalog", token) }
+            val body = try { api.get("exit-catalog", bearer()) } catch (e: ApiException) {
+                if (e.status != 401 || e.code == "INVALID_REFRESH_TOKEN") throw e
+                api.get("exit-catalog", bearer(force = true))
+            }
             val admitted = CatalogAdmission.admit(body)
-            if (admitted.revision < settings.catalogRevision) throw CatalogRejected("CATALOG_ROLLBACK", "catalog revision went backwards")
-            store.saveCatalogBody(Json.write(body))
-            store.update { it.copy(catalogKey = admitted.key, catalogRevision = admitted.revision, catalogFetchedAtMs = System.currentTimeMillis()) }
-            LoadedCatalog(admitted, cached = false)
+            if (admitted.revision < input.settings.catalogRevision) throw CatalogRejected("CATALOG_ROLLBACK", "catalog revision went backwards")
+            LoadedCatalog(admitted, false, Json.write(body), System.currentTimeMillis())
         } catch (e: ApiException) {
-            val cachedBody = store.cachedCatalogBody()
-            val fresh = System.currentTimeMillis() - settings.catalogFetchedAtMs < CACHE_MAX_AGE_MS
-            if (e.code == "NETWORK" && cachedBody != null && fresh) {
-                LoadedCatalog(CatalogAdmission.admit(Json.parse(cachedBody).asObject()), cached = true)
+            val fresh = System.currentTimeMillis() - input.settings.catalogFetchedAtMs in 0 until CACHE_MAX_AGE_MS
+            if (e.code == "NETWORK" && input.cachedBody != null && fresh) {
+                LoadedCatalog(CatalogAdmission.admit(Json.parse(input.cachedBody).asObject()), true, null, input.settings.catalogFetchedAtMs)
             } else throw e
         }
     }
 
+    private fun requestCatalog(commit: (Result<LoadedCatalog>) -> Unit) {
+        // Serialized within the account, including refresh rotation. Invalidation happens before
+        // clearing/replacing credentials. The queue checks ownership BEFORE any persistent write.
+        accountWork.submit(prepare = {
+            val input = CatalogInput(accessToken ?: store.accessToken(), store.refreshToken(), store.settings(), store.cachedCatalogBody())
+            val work: () -> CatalogResponse = { CatalogResponse(input, runCatching { loadCatalog(input) }) }
+            work
+        }, commit = { response ->
+            val outcome = response.getOrElse { commit(Result.failure(it)); return@submit }
+            val input = outcome.input
+            val access = input.access
+            val refresh = input.refresh
+            if (access != null && refresh != null) {
+                store.saveTokens(access, refresh)
+                accessToken = access
+            }
+            val result = outcome.result
+            result.onSuccess { loaded ->
+                loaded.body?.let { body ->
+                    store.saveCatalogBody(body)
+                    store.update { it.copy(catalogKey = loaded.catalog.key, catalogRevision = loaded.catalog.revision, catalogFetchedAtMs = loaded.fetchedAt) }
+                }
+            }
+            commit(result)
+        })
+    }
+
     private fun refreshCatalogQuietly() {
         val gen = ledger.attempt
-        io.execute {
-            val result = runCatching { loadCatalog() }
-            engine.execute {
-                if (!ledger.isCurrent(gen)) return@execute
-                result.onSuccess { loaded ->
-                    val c = loaded.catalog
-                    val restart = c != catalog && snapshot.get().let { it.tunnelUp || it.phase == Phase.CONNECTING }
-                    catalog = c
-                    update {
-                        val refreshed = it.withCatalog(c).copy(usingCachedCatalog = loaded.cached)
-                        // New catalog metadata must not describe the old tunnel as its applied routes.
-                        if (restart) ledger.begin(refreshed, Phase.CONNECTING) else refreshed
-                    }
-                    if (restart) startCore(ledger.attempt)
+        requestCatalog { result ->
+            if (!ledger.isCurrent(gen)) return@requestCatalog
+            result.onSuccess { loaded ->
+                val c = loaded.catalog
+                val restart = c != catalog && snapshot.get().let { it.tunnelUp || it.phase == Phase.CONNECTING }
+                catalog = c
+                update {
+                    val refreshed = it.withCatalog(c).copy(usingCachedCatalog = loaded.cached)
+                    if (restart) ledger.begin(refreshed, Phase.CONNECTING) else refreshed
                 }
-                    .onFailure { e -> if (isSessionEnded(e)) endSession() }
-            }
+                if (restart) startCore(ledger.attempt)
+            }.onFailure { e -> if (isSessionEnded(e)) endSession() }
         }
     }
 
@@ -365,17 +401,13 @@ class TonoVpnService : VpnService() {
         store.update { it.copy(wantConnected = true) }
         update { ledger.begin(it, Phase.PREPARING) }
         val gen = ledger.attempt
-        io.execute {
-            val loaded = runCatching { loadCatalog() }
-            engine.execute {
-                if (!ledger.isCurrent(gen)) return@execute
-                loaded.onSuccess { loaded ->
-                    val c = loaded.catalog
-                    catalog = c
-                    update { it.withCatalog(c).copy(usingCachedCatalog = loaded.cached) }
-                    startCore(gen)
-                }.onFailure { e -> fail(e, userInitiated) }
-            }
+        requestCatalog { loaded ->
+            if (!ledger.isCurrent(gen)) return@requestCatalog
+            loaded.onSuccess { result ->
+                catalog = result.catalog
+                update { it.withCatalog(result.catalog).copy(usingCachedCatalog = result.cached) }
+                startCore(gen)
+            }.onFailure { e -> fail(e, userInitiated) }
         }
     }
 
@@ -428,12 +460,14 @@ class TonoVpnService : VpnService() {
     }
 
     private fun runProbes(gen: Long) {
+        val request = probeRequests.begin(monitor.current?.network)
         io.execute {
             // Give the TUN a moment to become the default network for this process.
             SystemClock.sleep(600)
             val cloud = Probes.trace(Probes.CLOUD_URL)
             val home = Probes.trace(Probes.HOME_URL)
             engine.execute {
+                if (!probeRequests.accepts(request, monitor.current?.network)) return@execute
                 // Only for the attempt they were asked for, and only once that attempt is confirmed.
                 if (ledger.probed(snapshot.get(), gen, cloud, home) == null) return@execute
                 update { ledger.probed(it, gen, cloud, home) ?: it }
@@ -441,11 +475,12 @@ class TonoVpnService : VpnService() {
         }
     }
 
-    private fun reloadIfRunning() {
-        if (!snapshot.get().tunnelUp && snapshot.get().phase != Phase.CONNECTING) return
-        // A new attempt first: the running line stops counting as confirmed before the core restarts.
-        update { ledger.begin(it, Phase.CONNECTING) }
-        startCore(ledger.attempt)
+    private fun reloadIfRunning(change: (EngineSnapshot) -> EngineSnapshot = { it }) {
+        val s = snapshot.get()
+        val running = s.tunnelUp || s.phase == Phase.CONNECTING
+        // Selection and withdrawal of the old confirmation are ONE externally visible commit.
+        update { val changed = change(it); if (running) ledger.begin(changed, Phase.CONNECTING) else changed }
+        if (running) startCore(ledger.attempt)
     }
 
     private fun disconnect(reason: String?) {
@@ -471,6 +506,8 @@ class TonoVpnService : VpnService() {
     }
 
     private fun endSession() {
+        accountWork.invalidate()
+        loginRequests.next()
         stopCore()
         leaveForeground()
         store.clearAccount()
@@ -480,6 +517,7 @@ class TonoVpnService : VpnService() {
     }
 
     private fun stopCore() {
+        probeRequests.invalidate()
         trafficTask?.cancel(false)
         trafficTask = null
         runCatching { commandServer?.closeService() }
@@ -490,17 +528,22 @@ class TonoVpnService : VpnService() {
     private fun onUnderlyingChanged(u: NetworkMonitor.Underlying?) {
         val v6 = u?.globalIpv6 == true
         val before = snapshot.get()
-        val switched = u != null && lastUnderlying != null && u.network != lastUnderlying
-        if (u != null) lastUnderlying = u.network
-        if (before.underlyingIpv6 != v6) {
-            update { it.copy(underlyingIpv6 = v6) }
-            // DIRECT AAAA answers depend on the phone's IPv6; regenerate only when that changes (the
-            // restart checks both exits again).
-            if (before.tunnelUp) { reloadIfRunning(); return }
+        val changed = u?.network != lastUnderlying
+        lastUnderlying = u?.network
+        if (changed) probeRequests.invalidate()
+        val hasTun = before.applied?.generation == ledger.attempt && platform.tunOpen
+        if (before.underlyingIpv6 != v6) update { it.copy(underlyingIpv6 = v6) }
+        if (u == null && hasTun) {
+            // No underlying network: old successful exit checks cannot stand as current.
+            val failed = ExitProbe(ProbeState.FAILED)
+            update { ledger.probed(it, ledger.attempt, failed, failed) ?: it }
+            return
         }
-        // Wi-Fi ↔ mobile: the exits' last answers came over the old network, so ask them again
-        // instead of keeping a verdict the new network has not earned.
-        if (switched && before.tunnelUp) {
+        if (u != null && hasTun && before.underlyingIpv6 != v6) {
+            reloadIfRunning()
+            return
+        }
+        if (changed && hasTun) {
             update { ledger.rechecking(it) ?: it }
             runProbes(ledger.attempt)
         }
@@ -539,7 +582,10 @@ class TonoVpnService : VpnService() {
                     }.getOrNull()
                 }
             }.map { it.get() }.toMap()
-            engine.execute { update { s -> s.copy(nodes = s.nodes.map { it.copy(latencyMs = results[it.name] ?: it.latencyMs) }) } }
+            engine.execute {
+                if (catalog !== c) return@execute
+                update { s -> s.copy(nodes = s.nodes.map { it.copy(latencyMs = results[it.name] ?: it.latencyMs) }) }
+            }
         }
     }
 
@@ -675,26 +721,23 @@ class TonoVpnService : VpnService() {
             "disconnect" -> disconnect(reason = null)
             "startEmail" -> startEmail(cmd["email"] as? String ?: "")
             "verifyCode" -> verifyCode(cmd["code"] as? String ?: "")
-            "cancelLogin" -> update { it.copy(login = LoginView(email = it.login.email)) }
+            "cancelLogin" -> { loginRequests.next(); update { it.copy(login = LoginView(email = it.login.email)) } }
             "signOut" -> signOut()
             "selectNode" -> {
                 val name = cmd["name"] as? String ?: return
                 if (catalog?.cloudNodes?.any { it.name == name } != true) return
                 store.update { it.copy(selectedNode = name) }
-                update { it.copy(selectedNode = name) }
-                reloadIfRunning()
+                reloadIfRunning { it.copy(selectedNode = name) }
             }
             "setMode" -> {
                 val mode = runCatching { RoutingMode.valueOf(cmd["mode"] as String) }.getOrNull() ?: return
                 store.update { it.copy(mode = mode) }
-                update { it.copy(mode = mode) }
-                reloadIfRunning()
+                reloadIfRunning { it.copy(mode = mode) }
             }
             "setExcluded" -> {
                 val packages = (cmd["packages"] as? List<*>)?.mapNotNull { it as? String }?.filter { it != packageName }?.distinct()?.take(256) ?: return
                 store.update { it.copy(excludedPackages = packages) }
-                update { it.copy(excludedPackages = packages) }
-                reloadIfRunning()
+                reloadIfRunning { it.copy(excludedPackages = packages) }
             }
             "refreshCatalog" -> refreshCatalogQuietly()
             "measureLatency" -> measureLatency()

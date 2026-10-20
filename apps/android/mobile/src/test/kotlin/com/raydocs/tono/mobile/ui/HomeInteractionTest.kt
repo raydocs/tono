@@ -15,6 +15,8 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyDescendant
@@ -51,13 +53,13 @@ class HomeInteractionTest {
 
     private fun str(id: Int, vararg args: Any) = compose.activity.getString(id, *args)
 
-    private fun show(locale: java.util.Locale? = null) {
+    private fun show(locale: java.util.Locale? = null, reduceMotion: Boolean = true) {
         compose.setContent {
             val conf = android.content.res.Configuration(androidx.compose.ui.platform.LocalConfiguration.current).apply { if (locale != null) setLocale(locale) }
             val base = androidx.compose.ui.platform.LocalContext.current
             val ctx = if (locale != null) base.createConfigurationContext(conf) else base
             CompositionLocalProvider(
-                LocalReduceMotion provides true,
+                LocalReduceMotion provides reduceMotion,
                 androidx.compose.ui.platform.LocalContext provides ctx,
                 androidx.compose.ui.platform.LocalResources provides ctx.resources,
             ) {
@@ -255,4 +257,39 @@ class HomeInteractionTest {
             compose.onAllNodesWithText(str(R.string.surface_unknown)).assertCountEquals(1)
         }
     }
+    @Test fun connectedExitPillUsesAppliedLineNotThePendingSelection() {
+        snapshot = UiFixtures.connected().copy(selectedNode = "Los Angeles · Grove")
+        show()
+        compose.onNode(hasTestTag("exit").and(hasAnyDescendant(hasText("Tokyo"))), useUnmergedTree = true).assertExists()
+        snapshot = snapshot.copy(applied = snapshot.applied!!.copy(node = "Los Angeles · Grove"))
+        compose.waitForIdle()
+        compose.onNode(hasTestTag("exit").and(hasAnyDescendant(hasText("Los Angeles"))), useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun externalLockdownChangesNeverLeaveACachedProtectionPromise() {
+        snapshot = UiFixtures.connected().copy(alwaysOn = true, lockdown = true)
+        show()
+        compose.onNodeWithContentDescription(str(R.string.settings_title)).performClick()
+        compose.onNodeWithText(str(R.string.system_verify_in_android)).performScrollTo().assertExists()
+        snapshot = snapshot.copy(lockdown = false)
+        compose.waitForIdle()
+        compose.onNodeWithText(str(R.string.system_verify_in_android)).assertExists()
+    }
+
+    @Test fun stateAndPrimaryLabelsReplaceImmediatelyWithoutFadingCopies() {
+        show(reduceMotion = false)
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle { snapshot = UiFixtures.connected() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText(str(R.string.state_connected)).assertExists()
+        compose.onNodeWithText(str(R.string.action_disconnect)).assertExists()
+        compose.onAllNodesWithText(str(R.string.state_idle)).assertCountEquals(0)
+        compose.onAllNodesWithText(str(R.string.action_connect)).assertCountEquals(0)
+        compose.runOnIdle { snapshot = UiFixtures.idle }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText(str(R.string.action_connect)).assertExists()
+        compose.onAllNodesWithText(str(R.string.action_disconnect)).assertCountEquals(0)
+        compose.mainClock.autoAdvance = true
+    }
+
 }

@@ -149,8 +149,11 @@ private fun Lane(glyph: Glyph, name: String, dest: String, probe: ExitProbe?, li
         // Two lines, so neither the lane nor its destination is cut off at large font sizes.
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(name, style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextPrimary)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 12.dp)
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val firstLine = with(androidx.compose.ui.platform.LocalDensity.current) { MaterialTheme.typography.labelMedium.lineHeight.toDp() }
+                androidx.compose.foundation.layout.Box(Modifier.height(firstLine), contentAlignment = Alignment.Center) {
+                    GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 12.dp)
+                }
                 Text(dest, style = MaterialTheme.typography.labelMedium, color = TonoColors.TextSecondary, modifier = Modifier.weight(1f, fill = false))
                 if (probeColor != null) {
                     StatusDot(probeColor, size = 6)

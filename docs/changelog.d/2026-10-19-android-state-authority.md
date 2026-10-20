@@ -9,3 +9,8 @@
 - 候选/发布：WIP 源码验证，无客户候选或 release；云验证未通过前不更新 PR 分支。
 - 剩余限制：owner 已取消本机组件安装要求；正式编译/测试改到已准备的 Devin Linux KVM 快照，按精确 SHA 留证。通知/widget 调度时延、重载 openTun、API29/OEM owner UID、通知替换竞争仍待验证。
 - 2026-10-19 Devin 首轮续记：WIP 629849a1c 编译/lint 成功、routing 16/16、矩阵类 75/75；全 mobile 103 项中 1 失败、17 opt-in skip。保留失败；修正序列化 fixture 的确认字段，不减测试/不改产品规则。云会话及原件摘要见 docs/agent-reports/2026-10-19-android-devin-state-r1.md。
+
+- 第 1 轮冻结 a140bac84 的 GPT 独立盲评 78/100、有否决；Opus 因图像策略未评分，owner 作废，改由 Fable 原生子代理独立评审。不修改评分表。
+- 续修 WIP：持久通知取消当前保护断言；系统设置取消缓存保护保证；账号 IO 返回结果后按账号 epoch 串行提交；登录请求及同 attempt 探测各自 fenced；首页用 applied 线路，选择与清确认原子提交；关键文字/按钮底色即时切换，断开即夜景。
+- 新增 15 项 JVM/Robolectric 回归；t5/t6 公开通知无 VPN 断言去掉 grace/重启例外，原内部 metadata 收敛断言保留。实现待 Devin 验证，暂不更新 PR 分支；真机/真实服务/签名包仍未验证。
+- Fable 第 1 轮独立评分 82/100、无否决但未过总分门槛；未查看 MP4 的限制原样保留。合并减弱动态/文字过渡、200% 双行吞吐量与箭头首行对齐、登录错误就近显示、通知 Cancel 一致性；不重做材质/评分标准。

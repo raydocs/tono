@@ -194,3 +194,28 @@ Not run:
    snapshot from on that binding; the watch only for a registered session.
 7. Screenshot fixtures (`ScreenshotRender`, opt-in) now show "In use" only on confirmed snapshots;
    `LinesContent(base…)` with the idle fixture no longer marks a line in use.
+
+
+## 2026-10-19 · a140 第 1 轮盲评后补充（WIP，未验证）
+
+本节取代上文“目录 IO 只返回值”“通知可实时显示连接”“首页线路选择”等过早的完整性表述。
+GPT 第 1 轮为 78/100、有否决，原报告另存；Opus 未完成作废，Fable 独立评审 82/100、无否决但未达标（只看接触表，未读 MP4；不能推翻 GPT 的原日志否决）。
+以下是实现/测试映射，**不是运行结果或评分**。所有新测试待 Devin 精确提交验证。
+
+| 独立盲评发现 | 行为与保守规则 | 确切回归 |
+|---|---|---|
+| GPT F1，通知无 VPN 仍显示 Connected（否决） | Android 可无限保留/重贴原通知，因此 ongoing 的公开标题、正文和图标均不作当前隧道断言；PHASE/SESSION 只供内部 fence | `PersistentNotificationTest.androidRepostingTheExactOldNotificationCannotAssertALiveTunnel`；`LocalTunnelDeviceTest` 原 t5/t6 采样增加无 grace/无重启例外的公开标题断言，原 metadata 收敛/死亡隔离断言保留 |
+| GPT F2，外部解除 lockdown 仍承诺不会直连（否决） | 删除依赖缓存 alwaysOn/lockdown 的肯定/否定保证；明确引导 Android 设置核查，Tono 页面不确认当前系统保护 | `HomeInteractionTest.externalLockdownChangesNeverLeaveACachedProtectionPromise`（UI 中缓存 true→false；不冒充真实系统开关） |
+| GPT F3，取消登录后迟到 verify 保存身份 | 登录 start/verify 各有请求代际；取消、退出、成功切换身份使旧回调失效 | `AccountWorkQueueTest.cancelledVerificationCannotRestoreAnIdentity`、`olderEmailStartCannotReplaceNewChallenge` |
+| GPT F3，账号 A IO 写入账号 B 缓存/令牌 | IO 只计算结果；账号队列在 engine 上检查 epoch 后才能持久化；同账号 refresh 串行且下次捕获在上次提交后 | `AccountWorkQueueTest.oldAccountsDelayedCatalogCannotCommitAfterAccountSwitch`、`queuedRefreshReadsCredentialsOnlyAfterPreviousRotationCommits`、`signOutDropsPendingCatalogAndDoesNotEndNewAccountOnOldFailure` |
+| GPT F4，同 attempt 旧 probe 覆盖新结果/断网保留 OK | probe 请求代际 + 底层网络身份；网络丢失撤销旧出口答案；重检先撤销 Connected | `ProbeEpochTest.olderRecheckCannotOverwriteNewerResultOnTheSameAttempt`、`networkLossRejectsOldSuccessEvenBeforeTheListenerRuns`、`returningToTheSameNetworkDoesNotReviveItsRetiredProbe`；`TunnelAuthorityTest.recheckingWithdrawsConnectedUntilTheNewExitResultsArrive`、`lossOfUnderlyingNetworkWithdrawsBothSuccessfulExitClaims` |
+| GPT F5，关键标题/主按钮字形消失 | 安全文字无 AnimatedContent 淡出/淡入；按钮文字与底色同步，不经过低对比中间色；失去连接时夜景立即生效 | `HomeInteractionTest.stateAndPrimaryLabelsReplaceImmediatelyWithoutFadingCopies` 只证明组成/语义替换；`HorizonUiDeviceTest.u8_motionFrameByFrameAt60fps` 的原始逐帧采集及第二轮盲评还须证明可见字形，不以语义树替代像素 |
+| GPT F6，Connected 配 desired 新线路 | 首页连接态用 appliedNode；选择与撤销旧确认一次提交后才重载 | `HomeInteractionTest.connectedExitPillUsesAppliedLineNotThePendingSelection`；保留 `TunnelAuthorityTest.selectingALineWhileConnectedLeavesTheRunningLineAsTheAppliedOne`、`aReloadClearsTheConfirmationBeforeTheCoreRestarts` |
+
+通知改变是公开声明协议改变，不是放宽测试：无 VPN 时不许出现 Connected/Partly working 的新断言无任何宽限；内部 phase 元数据的替换时延仍单独测量。
+旧的“肯定通知已被及时替换，因此无误导”结论不成立；a140 原始首轮失败/重试、旧通知重贴日志保持存档。
+模拟器不能证明真机 OEM/实际 TalkBack、真实 Tono 出口/蜂窝切换、签名发布性能，仍由 owner 真机清单验收。
+
+
+Fable 同批合并：F2 的消字/减弱动态与 GPT F5 合并；F3 的 200% 吞吐量改为明确两行、Details 箭头对齐首行；F5 登录错误移到输入框 supportingText、沿用可读暖色；F7 通知连接中动作改为 Cancel，新增 `PersistentNotificationTest.connectingNotificationOffersCancelInsteadOfDisconnect`。原始评分不改。
+Fable F1（不透明 sheet）、F4（进度色）、F6（sheet 下方残留主标题）、F8（品牌暗色主题）、F10（JVM 录制残影）保留为未解决/待新冻结证据；不为三分扩大玻璃架构或削弱可读性。F11 的测试瞬态采样不靠强制增加假连接时间掩盖，首轮 flaky 继续披露。

@@ -1,0 +1,8 @@
+tool: Agent (Claude Code native), subagent_type=director-fable, model=Fable 5.1 (per agent definition), run_in_background=false
+agentId: a255d2bbfd3e80ca3
+subagent usage: tokens=193163 tool_uses=61 duration_ms=368085
+checkout: /Users/ruirui/.t3/worktrees/tono-android/t3-e893e378 HEAD=a140bac84dd692781e36dbfd5a86f9ea2d1356a0 (clean)
+brief: /Users/ruirui/.local/state/devin-cloud/briefs/android-fable-r1-a140bac84.md (placeholder YOUR_ISOLATED_CHECKOUT_AT_a140bac84 filled with checkout path; plus one bridge note asking for full report as final text)
+report: /Users/ruirui/.local/state/devin-cloud/blind-reviews/a140bac84/fable-r1/REVIEW.md sha256=7a6b51dc54541a388750c25cb5786eb40f94746e98379f72728f054ecaedf5fb
+note: harness 2-space hand-back indentation removed; text otherwise verbatim
+date: 2026-10-20T03:14:58Z

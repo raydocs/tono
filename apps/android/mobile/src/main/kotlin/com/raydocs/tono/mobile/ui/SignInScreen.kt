@@ -89,6 +89,8 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
                                     onValueChange = { email = it.take(254) },
                                     label = { Text(stringResource(R.string.signin_email)) },
                                     singleLine = true,
+                                    isError = login.errorCode != null,
+                                    supportingText = { login.errorCode?.let { SignInError(it) } },
                                     enabled = !login.busy,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Send, autoCorrectEnabled = false),
                                     keyboardActions = KeyboardActions(onSend = { if (!login.busy) onSend(email) }),
@@ -106,6 +108,8 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
                                     onValueChange = { v -> code = v.filter(Char::isDigit).take(6); if (code.length == 6 && !login.busy) onVerify(code) },
                                     label = { Text(stringResource(R.string.signin_code)) },
                                     singleLine = true,
+                                    isError = login.errorCode != null,
+                                    supportingText = { login.errorCode?.let { SignInError(it) } },
                                     enabled = !login.busy,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
                                     keyboardActions = KeyboardActions(onDone = { if (!login.busy) onVerify(code) }),
@@ -119,9 +123,6 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
                                 }
                             }
                         }
-                    }
-                    login.errorCode?.let {
-                        Text(signInError(it), style = MaterialTheme.typography.bodyMedium, color = TonoColors.Error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
                     }
                     Text(stringResource(R.string.signin_privacy), style = MaterialTheme.typography.labelSmall, color = TonoColors.TextTertiary)
                 }
@@ -154,6 +155,11 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
 }
 
 @Composable
+private fun SignInError(code: String) {
+    Text(signInError(code), style = MaterialTheme.typography.bodyMedium, color = TonoColors.SunEdge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
+}
+
+@Composable
 private fun SignInHeader(modifier: Modifier) {
     Column(modifier) {
         Image(painterResource(R.drawable.tono_tile), contentDescription = null, modifier = Modifier.size(48.dp))
@@ -170,6 +176,9 @@ fun fieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedBorderColor = TonoColors.Hairline,
     focusedLabelColor = TonoColors.Accent,
     cursorColor = TonoColors.Accent,
+    errorBorderColor = TonoColors.SunEdge,
+    errorLabelColor = TonoColors.SunEdge,
+    errorCursorColor = TonoColors.SunEdge,
     focusedContainerColor = TonoColors.NightDeep.copy(alpha = 0.4f),
     unfocusedContainerColor = TonoColors.NightDeep.copy(alpha = 0.4f),
 )

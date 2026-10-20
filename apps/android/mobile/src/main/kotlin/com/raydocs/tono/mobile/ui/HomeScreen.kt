@@ -2,8 +2,6 @@ package com.raydocs.tono.mobile.ui
 
 import android.os.Build
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -12,9 +10,6 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -191,11 +186,13 @@ private fun StateHeader(s: EngineSnapshot, link: EngineLink) {
         else -> null
     }
     Column(Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
-        AnimatedContent(title, transitionSpec = { crossRise() }, label = "title") { t ->
-            Text(t, style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light), color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+        run {
+            Text(title, style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light), color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
         }
         Spacer(Modifier.height(4.dp))
-        AnimatedContent(line to tone, transitionSpec = { crossRise() }, label = "line") { (text, c) ->
+        run {
+            val text = line
+            val c = tone
             Row(verticalAlignment = Alignment.Top, modifier = Modifier.heightIn(min = 22.dp)) {
                 // The dot sits on the first line, also when large text wraps the reason to two.
                 if (c != null) {
@@ -209,14 +206,6 @@ private fun StateHeader(s: EngineSnapshot, link: EngineLink) {
         }
     }
 }
-
-private fun <T> androidx.compose.animation.AnimatedContentTransitionScope<T>.crossRise() =
-    // The incoming words start as the outgoing ones are nearly gone, rising from below while those
-    // leave upwards. Frame-by-frame review found two half-transparent labels on top of each other
-    // when the fades fully overlapped, and 64–100 ms with no words at all when they ran back to back.
-    // No clipping while the size changes: a shorter word cut the old one off ("Not connectec").
-    ((fadeIn(tween(200, delayMillis = 70)) + slideInVertically(tween(260)) { it / 3 }) togetherWith
-        (fadeOut(tween(120)) + slideOutVertically(tween(160)) { -it / 4 })) using SizeTransform(clip = false)
 
 /** One short line under the state word: the exit when connected, the short reason otherwise. */
 @Composable
@@ -256,7 +245,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
     val scale by animateFloatAsState(if (pressed) 0.975f else 1f, TonoMotion.press, label = "press")
 
     val warm = action == PrimaryAction.CONNECT || action == PrimaryAction.RETRY || action == PrimaryAction.ALLOW
-    val warmAlpha by animateFloatAsState(if (warm) 1f else 0f, TonoMotion.state, label = "warm")
+    val warmAlpha = if (warm) 1f else 0f
     // The sunrise fill is the connection's progress: it advances with the engine phase, completes on
     // arrival, then fades so the connected capsule is quiet. It moves on the same phases as the sun.
     val fillTarget = when (phase) {
@@ -288,7 +277,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
     }
     val clickLabel = if (action == PrimaryAction.CANCEL) stringResource(R.string.a11y_cancel_connect) else label
     val stateText = if (unconfirmed) stringResource(R.string.surface_unknown) else phaseTitle(s.phase)
-    val labelColor by animateColorAsState(if (warm) Color(0xFF2A1406) else TonoColors.TextPrimary, tween(220), label = "labelColor")
+    val labelColor = if (warm) Color(0xFF2A1406) else TonoColors.TextPrimary
     val shape = RoundedCornerShape(28.dp)
     // While the tunnel is up the primary keeps a warm rim, so it outranks the exit pill without shouting.
     val rimColor by animateColorAsState(if (tunnelUp) TonoColors.SunMid else Color.White, tween(350), label = "rim")
@@ -304,7 +293,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
         tintAlpha = 0.32f,
         rimColor = rimColor,
     ) {
-        // Warm sun capsule (idle/retry/allow) fades over the glass instead of swapping widgets.
+        // Background and safety label switch together; no low-contrast intermediate color.
         // matchParentSize, not fillMaxSize: Home scrolls at large text, so the height is unbounded here.
         Box(Modifier.matchParentSize().graphicsLayer { alpha = warmAlpha }.background(TonoColors.ActionFill))
         // Sunrise progress: a soft band whose leading edge glows like the sun's rim, rounded to the capsule.
@@ -341,10 +330,10 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Label and arrow change together, so "Cancel" never shows the connect arrow mid-transition.
-            AnimatedContent(label to warm, transitionSpec = { crossRise() }, label = "capsuleLabel", modifier = Modifier.weight(1f)) { (t, arrow) ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(t, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = labelColor, modifier = Modifier.weight(1f))
-                    if (arrow) GlyphIcon(Glyph.ARROW, labelColor, size = 20.dp)
+            run {
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = labelColor, modifier = Modifier.weight(1f))
+                    if (warm) GlyphIcon(Glyph.ARROW, labelColor, size = 20.dp)
                 }
             }
             // The timer arrives after the label has become “Disconnect”, never beside “Cancel”.
@@ -373,7 +362,8 @@ private fun ConnectedTimer(since: Long) {
 @Composable
 private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit, live: Boolean) {
     val zh = isChinese()
-    val node = s.nodes.firstOrNull { it.name == s.selectedNode } ?: s.nodes.firstOrNull()
+    val nameToShow = if (live && s.tunnelUp) TunnelAuthority.appliedNode(s) else s.selectedNode
+    val node = s.nodes.firstOrNull { it.name == nameToShow }
     // Until "Test" measures it, the connected line's dot follows the cloud exit check: it answered.
     // No number: that check is a whole HTTPS request, not the round trip "Test" reports.
     val answered = live && s.tunnelUp && s.cloudProbe.state == ProbeState.OK && node != null && node.name == TunnelAuthority.appliedNode(s)
@@ -409,7 +399,7 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings:
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         AnimatedVisibility(tunnelUp, enter = fadeIn(tween(350)), exit = fadeOut(tween(220)), modifier = Modifier.weight(1f)) {
             Text(
-                stringResource(R.string.speed_line, Format.rate(s.rxBytesPerSec), Format.rate(s.txBytesPerSec)),
+                stringResource(if (LocalDensity.current.fontScale > 1.3f) R.string.speed_line_large else R.string.speed_line, Format.rate(s.rxBytesPerSec), Format.rate(s.txBytesPerSec)),
                 style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary, maxLines = 2,
             )
         }

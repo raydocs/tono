@@ -157,7 +157,7 @@ class LocalTunnelDeviceTest {
             if (signIn in seen) lies += "${t}ms sign-in screen shown"
             if (!vpn && surface == SurfaceState.CONNECTED) lies += "${t}ms tile/widget status CONNECTED without a VPN network"
             if (!vpn && t > graceMs && shown) lies += "${t}ms Home says Connected without a VPN network"
-            if (!vpn && t > graceMs && connected in notice) lies += "${t}ms notification says Connected without a VPN network"
+            if (!vpn && connected in notice) lies += "${t}ms notification says Connected without a VPN network"
             // A fresh Connected: after the tunnel was seen gone and Home had stopped claiming it.
             if (shown && vpn && vpnWentDown >= 0 && connectedGone >= 0) { reconnectedAt = t; break }
             Thread.sleep(150)
@@ -771,9 +771,9 @@ class LocalTunnelDeviceTest {
         assertNotNull("Connected", find(connected, 90_000))
         assertTrue("Android shows a VPN network", vpnUp())
         val noticeDeadline = SystemClock.elapsedRealtime() + 15_000
-        while (ongoingNotice().first != connected && SystemClock.elapsedRealtime() < noticeDeadline) Thread.sleep(250)
-        assertEquals("the engine's notification says Connected", connected, ongoingNotice().first)
-        if (shadeName != null) shadeShot(shadeName, connected)
+        while (ongoingNotice().first != text(R.string.notif_running_title) && SystemClock.elapsedRealtime() < noticeDeadline) Thread.sleep(250)
+        assertEquals("persisted notification makes no live connection claim", text(R.string.notif_running_title), ongoingNotice().first)
+        if (shadeName != null) shadeShot(shadeName, text(R.string.notif_running_title))
         app.close()
         var open = 0
         instrumentation.runOnMainSync {
@@ -829,6 +829,9 @@ class LocalTunnelDeviceTest {
             val t = SystemClock.elapsedRealtime() - killed
             val vpn = vpnUp()
             val (title, phase) = ongoingNotice()
+            if (!vpn && title in setOf(text(R.string.state_connected), text(R.string.state_degraded))) {
+                lies += "${t}ms public notification claims a live tunnel without a VPN (no grace/restart exception)"
+            }
             val pids = pidsOf("vpn")
             val alive = (pids - doomed).isNotEmpty()
             val watch = pidsOf("watch")
@@ -868,7 +871,7 @@ class LocalTunnelDeviceTest {
                 Thread.sleep(200)
             }
             if (wrongFrom >= 0) worst = maxOf(worst, SystemClock.elapsedRealtime() - killed - wrongFrom)
-            afterReconnect = if (worst == 0L) "kept saying Connected" else "did not say Connected for up to ${worst}ms (\"$wrongTitle\")"
+            afterReconnect = if (worst == 0L) "retained CONNECTED protocol metadata (public title is neutral)" else "lost CONNECTED protocol metadata for up to ${worst}ms (\"$wrongTitle\")"
             if (worst >= 1_000) lies += "the reconnected engine's notification $afterReconnect"
         }
         val watchdogLog = shell("logcat -d -s TonoWatchdog:I").lines().filter { "TonoWatchdog" in it }

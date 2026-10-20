@@ -7,9 +7,7 @@ import android.content.Context
 import android.os.Bundle
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.surface.Claim
-import com.raydocs.tono.mobile.ui.Format
 import com.raydocs.tono.mobile.ui.shortReasonRes
-import com.raydocs.tono.routing.RoutingMode
 
 /** The tunnel's notifications. Built from a snapshot only, so fixture renders use the same code. */
 object TonoNotifications {
@@ -31,34 +29,12 @@ object TonoNotifications {
     fun ongoing(c: Context, snapshot: EngineSnapshot, open: PendingIntent, disconnect: PendingIntent): Notification {
         // The same rule as the app and the shared status: no tunnel-up title without a confirmation.
         val s = TunnelAuthority.seal(snapshot)
-        val title = c.getString(
-            when (s.phase) {
-                Phase.CONNECTED -> R.string.state_connected
-                Phase.DEGRADED -> R.string.state_degraded
-                Phase.DISCONNECTING -> R.string.state_disconnecting
-                else -> R.string.state_connecting
-            },
-        )
-        // Up: the line and mode the confirmed tunnel uses. Connecting: the ones it is being started with.
-        val node = TunnelAuthority.appliedNode(s) ?: s.nodes.firstOrNull { it.name == s.selectedNode }?.name
-        val mode = TunnelAuthority.appliedMode(s) ?: s.mode
-        val cloud = s.cloudProbe.location?.takeIf { s.tunnelUp }
-        val home = s.homeProbe.location?.takeIf { s.tunnelUp && s.homeKind != HomeKind.NONE }
-        val text = when {
-            s.phase == Phase.DEGRADED && s.reasonCode != null -> shortReasonRes(s.reasonCode)?.let(c::getString) ?: s.reasonCode
-            cloud != null && home != null -> c.getString(R.string.status_exit_both, Format.country(cloud), Format.country(home))
-            cloud != null -> c.getString(R.string.status_exit_cloud, Format.country(cloud))
-            else -> listOfNotNull(node, c.getString(if (mode == RoutingMode.THREE_TIER) R.string.mode_three_tier_short else R.string.mode_stable_short)).joinToString(" · ")
-        }
-        // Same glyph family as the desktop menu bar/tray: only a verified connection gets the filled sun.
-        val icon = when (s.phase) {
-            Phase.CONNECTED -> R.drawable.ic_stat_connected
-            Phase.DEGRADED -> R.drawable.ic_stat_degraded
-            Phase.DISCONNECTING -> R.drawable.ic_stat_standby
-            else -> R.drawable.ic_stat_connecting
-        }
+        // Android persists and can re-post this exact Notification after the TUN and both
+        // processes die. A live claim (including an exit/filled sun) cannot safely live here.
+        val title = c.getString(R.string.notif_running_title)
+        val text = c.getString(R.string.notif_check_live)
         return Notification.Builder(c, CHANNEL)
-            .setSmallIcon(icon)
+            .setSmallIcon(R.drawable.ic_stat_standby)
             .setColor(0xFFFFAD74.toInt())
             .addExtras(Bundle().apply { putString(EXTRA_PHASE, s.phase.name); putString(EXTRA_SESSION, s.session) })
             .setContentTitle(title)
@@ -66,7 +42,7 @@ object TonoNotifications {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .addAction(Notification.Action.Builder(null, c.getString(R.string.action_disconnect), disconnect).build())
+            .addAction(Notification.Action.Builder(null, c.getString(if (s.phase == Phase.PREPARING || s.phase == Phase.CONNECTING) R.string.action_cancel else R.string.action_disconnect), disconnect).build())
             .setCategory(Notification.CATEGORY_SERVICE)
             .build()
     }

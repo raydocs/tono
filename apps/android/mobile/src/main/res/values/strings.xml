@@ -41,6 +41,7 @@
     <string name="lane_checking">checking</string>
     <string name="lane_down">unreachable</string>
 
+    <string name="speed_line_large">↓ %1$s\n↑ %2$s</string>
     <string name="speed_line">↓\u00A0%1$s · ↑\u00A0%2$s</string>
 
     <string name="reason_CATALOG_UNAVAILABLE">Tono can\'t hand out your lines right now: its servers or your assigned Home exit are unavailable. Nothing is sent around them; try again later.</string>
@@ -109,9 +110,7 @@
     <string name="verdict_BLOCKED">Blocked</string>
     <string name="verdict_DNS">DNS</string>
     <string name="settings_system">Android VPN protection</string>
-    <string name="system_lockdown">Always-on VPN is on, with \"block connections without VPN\": if Tono stops, apps wait instead of going out directly.</string>
-    <string name="system_on_open">Always-on VPN is on, but without \"block connections without VPN\" apps go out directly while Tono restarts. Turn it on in Android VPN settings.</string>
-    <string name="system_off">Not always-on: if Tono stops, apps go out directly. In Android VPN settings, turn on Always-on VPN and \"block connections without VPN\".</string>
+    <string name="system_verify_in_android">Protection while Tono is stopped is controlled by Android, not this connection. Check Always-on VPN and \"block connections without VPN\" in Android settings; their current status is not confirmed here.</string>
     <string name="system_open">Open VPN settings</string>
     <string name="settings_account">Account</string>
     <string name="settings_sign_out">Sign out</string>
@@ -169,6 +168,8 @@
     <string name="surface_sign_in">Sign in</string>
     <string name="surface_open">Open</string>
     <string name="widget_description">Tono status and one-tap connect</string>
+    <string name="notif_running_title">Tono service</string>
+    <string name="notif_check_live">Open Tono to check the live connection status</string>
     <string name="notif_stopped_title">Tono stopped</string>
     <string name="notif_stopped_no_vpn">No VPN network · Open Tono to reconnect</string>
     <string name="consent_title">Before Android asks</string>

@@ -52,7 +52,7 @@ class NotificationWatchdogTest {
 
     @Test fun connectedWithoutTonosVpnNetworkIsReplacedWithStopped() {
         postEngineNotification(Phase.CONNECTED)
-        assertEquals(app.getString(R.string.state_connected), title())
+        assertEquals(app.getString(R.string.notif_running_title), title())
         // The record is still fresh (the engine died seconds ago), but Android lists no Tono VPN network.
         assertEquals(Phase.CONNECTED, NotificationWatchdog.check(app, view(Phase.CONNECTED, ageMs = 5_000, vpn = false), tonoVpn = false))
         assertEquals(app.getString(R.string.notif_stopped_title), title())
@@ -63,7 +63,7 @@ class NotificationWatchdogTest {
     @Test fun aLiveConfirmedTunnelIsLeftAlone() {
         postEngineNotification(Phase.CONNECTED)
         assertNull(NotificationWatchdog.check(app, view(Phase.CONNECTED, ageMs = 5_000, vpn = true), tonoVpn = true))
-        assertEquals(app.getString(R.string.state_connected), title())
+        assertEquals(app.getString(R.string.notif_running_title), title())
     }
 
     @Test fun connectingFromAnEngineThatStoppedWritingIsReplacedOnceTheRecordIsStale() {
@@ -97,7 +97,7 @@ class NotificationWatchdogTest {
         assertNull(NotificationWatchdog.engineDied(app, engineA, tonoVpn = true))
         assertNull(NotificationWatchdog.restartRepost(app, engineA))
         assertEquals(false, NotificationWatchdog.confirmStopped(app, tonoVpn = false))
-        assertEquals(app.getString(R.string.state_connected), title())
+        assertEquals(app.getString(R.string.notif_running_title), title())
     }
 
     @Test fun engineDeathLeavesANormalStopAlone() {
@@ -109,7 +109,7 @@ class NotificationWatchdogTest {
     @Test fun aLateStoppedConfirmationLeavesARestartedEnginesConnecting() {
         postEngineNotification(Phase.CONNECTING, session = engineB)
         assertEquals(false, NotificationWatchdog.confirmStopped(app, tonoVpn = false))
-        assertEquals(app.getString(R.string.state_connecting), title())
+        assertEquals(app.getString(R.string.notif_running_title), title())
     }
 
     @Test fun aStartingEngineReplacesTheDeadOnesRepostedClaimButNotItsOwn() {
@@ -127,7 +127,7 @@ class NotificationWatchdogTest {
         // A restarted engine says Connecting before it registers with the watch: that one stays.
         postEngineNotification(Phase.CONNECTING, session = engineB)
         assertNull(NotificationWatchdog.restartRepost(app, engineA))
-        assertEquals(app.getString(R.string.state_connecting), title())
+        assertEquals(app.getString(R.string.notif_running_title), title())
         postEngineNotification(Phase.DEGRADED, session = engineA)
         assertEquals(Phase.DEGRADED, NotificationWatchdog.restartRepost(app, engineA))
         assertNull(NotificationWatchdog.restartRepost(app, engineA))
@@ -136,7 +136,7 @@ class NotificationWatchdogTest {
     @Test fun anUnconfirmedConnectedSnapshotPostsAConnectingClaim() {
         nm.createNotificationChannel(NotificationChannel(TonoNotifications.CHANNEL, "t", NotificationManager.IMPORTANCE_LOW))
         nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.ongoing(app, UiFixtures.connected().copy(applied = null), pi, pi))
-        assertEquals(app.getString(R.string.state_connecting), title())
+        assertEquals(app.getString(R.string.notif_running_title), title())
         assertEquals(Phase.CONNECTING, TonoNotifications.claimedPhase(nm.activeNotifications.single { it.id == TonoNotifications.ONGOING_ID }.notification))
     }
 }
