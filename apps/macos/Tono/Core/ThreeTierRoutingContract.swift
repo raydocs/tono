@@ -2843,8 +2843,20 @@ nonisolated enum ThreeTierRoutingContract {
               }),
               let top = labels.last, top.unicodeScalars.contains(where: { ("a"..."z").contains($0) })
         else { return false }
-        let reserved = ["localhost", "local", "internal", "arpa", "invalid", "onion", "alt"]
-        return !reserved.contains(String(top)) && labels.first != "localhost"
+        // `127.0.0.0x1` and `0x7f.0.0.1` are IPv4 to inet_aton; only the
+        // canonical literal branch above may admit an address.
+        let numeric = labels.allSatisfy { label in
+            let digits = label.hasPrefix("0x") ? label.dropFirst(2) : label[...]
+            return digits.unicodeScalars.allSatisfy {
+                ("0"..."9").contains($0) || (label.hasPrefix("0x") && ("a"..."f").contains($0))
+            }
+        }
+        // RFC 6761 / IANA special-use names, matched as the name or any
+        // subdomain of it, never as an ordinary provider gateway.
+        let reserved = ["localhost", "local", "internal", "arpa", "invalid", "onion", "alt", "test", "example",
+                        "example.com", "example.net", "example.org"]
+        return !numeric && !reserved.contains { value == $0 || value.hasSuffix("." + $0) }
+            && labels.first != "localhost"
     }
 
     private static func publicIPv4(_ value: String) -> Bool {

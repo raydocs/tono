@@ -983,7 +983,8 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         guard ThreeTierRoutingContract.admitsAIHome(homeServer("isp.decodo.com")),
               ownedRuntimeConfigIsSafe(aiText(homeServer("isp.decodo.com"))),
               ["localhost", "printer.local", "nas.home.arpa", "router.internal", "10.0.0.1", "1.2.3",
-               "ISP.decodo.com", "-bad.example.com", "single"].allSatisfy({
+               "ISP.decodo.com", "-bad.example.com", "single", "127.0.0.0x1", "0x7f.0x0.0x0.0x1",
+               "gateway.test", "gateway.example", "gateway.example.com"].allSatisfy({
                   !ThreeTierRoutingContract.admitsAIHome(homeServer($0))
               }) else { return false }
         var aiRoute = aiHome["route"] as! [String: Any]
