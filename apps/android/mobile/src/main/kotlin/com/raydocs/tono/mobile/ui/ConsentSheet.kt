@@ -44,11 +44,13 @@ fun ConsentSheet(onContinue: () -> Unit, onDismiss: () -> Unit) {
         modifier = Modifier.statusBarsPadding(),
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = TonoColors.Smoke,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         scrimColor = TonoColors.NightDeep.copy(alpha = 0.55f),
     ) {
-        SheetGrip()
-        ConsentContent(onContinue, onDismiss)
+        SheetGlass {
+            SheetGrip()
+            ConsentContent(onContinue, onDismiss)
+        }
     }
 }
 

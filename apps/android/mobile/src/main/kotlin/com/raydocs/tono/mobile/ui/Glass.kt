@@ -5,6 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -31,7 +35,7 @@ import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -50,7 +54,7 @@ fun BackdropHost(scene: @Composable () -> Unit, modifier: Modifier = Modifier, c
     var origin by remember { mutableStateOf(Offset.Zero) }
     val recording = rememberGraphicsLayer()
     val canBlur = Build.VERSION.SDK_INT >= 31
-    Box(modifier.onGloballyPositioned { origin = it.positionInRoot() }) {
+    Box(modifier.onGloballyPositioned { origin = it.positionOnScreen() }) {
         Box(
             Modifier.matchParentSize().drawWithContent {
                 if (!canBlur) return@drawWithContent drawContent()
@@ -81,7 +85,8 @@ fun Glass(
 ) {
     val backdrop = LocalBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
-    Box(modifier.onGloballyPositioned { origin = it.positionInRoot() }.clip(shape)) {
+    // Modal sheets have a separate root; screen coordinates keep their slice aligned with Home.
+    Box(modifier.onGloballyPositioned { origin = it.positionOnScreen() }.clip(shape)) {
         if (backdrop != null) {
             // The platform blur (RenderEffect) over this surface's slice of the shared scene recording.
             Box(
@@ -109,6 +114,17 @@ fun Glass(
         )
         content()
     }
+}
+
+@Composable
+fun SheetGlass(content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    Glass(
+        shape,
+        Modifier.fillMaxWidth().clip(shape).background(if (LocalBackdrop.current == null) TonoColors.Smoke else Color.Transparent),
+        blur = 26.dp,
+        tintAlpha = 0.80f,
+    ) { Column(Modifier.fillMaxWidth(), content = content) }
 }
 
 /**

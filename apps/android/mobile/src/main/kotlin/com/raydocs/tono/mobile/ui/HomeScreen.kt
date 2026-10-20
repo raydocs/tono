@@ -131,20 +131,24 @@ fun HomeScreen(
     onOpenDetails: () -> Unit,
     onOpenSettings: () -> Unit,
     link: EngineLink = EngineLink.LIVE,
+    sheetOpen: Boolean = false,
+    sheetContent: @Composable () -> Unit = {},
 ) {
     val unconfirmed = link != EngineLink.LIVE
     val sky = if (unconfirmed) SkyState.NIGHT else skyFor(s.phase)
+    val headlineAlpha by animateFloatAsState(if (sheetOpen) 0f else 1f, if (LocalReduceMotion.current) tween(0) else TonoMotion.state, label = "headline")
     Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
         BackdropHost(scene = { SeaScene(sky, Modifier.fillMaxSize(), horizon = 0.46f) }, modifier = Modifier.fillMaxSize()) {
             // Top bar at the top, dock at the bottom; when large text makes them taller than the
             // screen, Home scrolls instead of squeezing the exit and Details rows to nothing.
             val scroll = rememberScrollState()
+            sheetContent()
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxWidth().verticalScroll(scroll).heightIn(min = maxHeight), verticalArrangement = Arrangement.SpaceBetween) {
                     TopBar()
                     // A thumb-width column: on a landscape phone or a tablet the capsules do not stretch across the sea.
                     Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)).padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
-                        StateHeader(s, link)
+                        StateHeader(s, link, headlineAlpha)
                         Spacer(Modifier.height(18.dp))
                         PrimaryCapsule(s, onConnect, onDisconnect, link)
                         Spacer(Modifier.height(10.dp))
@@ -170,7 +174,7 @@ private fun TopBar() {
 }
 
 @Composable
-private fun StateHeader(s: EngineSnapshot, link: EngineLink) {
+private fun StateHeader(s: EngineSnapshot, link: EngineLink, headlineAlpha: Float) {
     val unconfirmed = link != EngineLink.LIVE
     val title = if (unconfirmed) stringResource(R.string.surface_unknown) else phaseTitle(s.phase)
     val line = when (link) {
@@ -187,7 +191,7 @@ private fun StateHeader(s: EngineSnapshot, link: EngineLink) {
     }
     Column(Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
         run {
-            Text(title, style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light), color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+            Text(title, style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light), color = TonoColors.TextPrimary, modifier = Modifier.graphicsLayer { alpha = headlineAlpha }.semantics { heading() })
         }
         Spacer(Modifier.height(4.dp))
         run {
@@ -457,4 +461,3 @@ private fun PhaseHaptics(phase: Phase) {
         }
     }
 }
-

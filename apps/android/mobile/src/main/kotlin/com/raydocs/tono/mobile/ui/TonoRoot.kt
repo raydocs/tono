@@ -50,13 +50,14 @@ interface TonoActions {
 }
 
 @Composable
-fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink = EngineLink.LIVE) {
+fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink = EngineLink.LIVE, consentSheet: (@Composable () -> Unit)? = null) {
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     var linesOpen by rememberSaveable { mutableStateOf(false) }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     // One rule for everything below, as for the notification and the shared status: a tunnel-up
     // phase without the engine's confirmation for its attempt is shown as connecting.
     val s = snapshot?.let(TunnelAuthority::seal)
+    val current = link == EngineLink.LIVE
     Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
         when {
             s == null -> SeaScene(SkyState.NIGHT, Modifier.fillMaxSize(), horizon = 0.44f)
@@ -92,6 +93,23 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink =
                                 onOpenDetails = { detailsOpen = true },
                                 onOpenSettings = { screen = Screen.SETTINGS },
                                 link = link,
+                                sheetOpen = ((detailsOpen || linesOpen) && current) || consentSheet != null,
+                                sheetContent = {
+                                    if (detailsOpen && current) DetailsSheet(
+                                        s,
+                                        onRecheck = { actions.command("recheck") },
+                                        onOpenLines = { detailsOpen = false; linesOpen = true },
+                                        onOpenSettings = { detailsOpen = false; screen = Screen.SETTINGS },
+                                        onDismiss = { detailsOpen = false },
+                                    )
+                                    if (linesOpen && current) LinesSheet(
+                                        s,
+                                        onSelect = { actions.command("selectNode", "name" to it) },
+                                        onTest = { actions.command("measureLatency") },
+                                        onDismiss = { linesOpen = false },
+                                    )
+                                    consentSheet?.invoke()
+                                },
                             )
                             Screen.SETTINGS -> SettingsScreen(
                                 s,
@@ -111,27 +129,9 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink =
                         }
                     }
                 }
-                // Details and Lines speak about the tunnel; they come back once the engine's word is current.
-                val current = link == EngineLink.LIVE
-                if (detailsOpen && screen == Screen.HOME && current) {
-                    DetailsSheet(
-                        s,
-                        onRecheck = { actions.command("recheck") },
-                        onOpenLines = { detailsOpen = false; linesOpen = true },
-                        onOpenSettings = { detailsOpen = false; screen = Screen.SETTINGS },
-                        onDismiss = { detailsOpen = false },
-                    )
-                }
-                if (linesOpen && screen == Screen.HOME && current) {
-                    LinesSheet(
-                        s,
-                        onSelect = { actions.command("selectNode", "name" to it) },
-                        onTest = { actions.command("measureLatency") },
-                        onDismiss = { linesOpen = false },
-                    )
-                }
             }
         }
+        if (s == null || s.phase == Phase.SIGNED_OUT || screen != Screen.HOME) consentSheet?.invoke()
         // Debug builds pointed at a local fixture server say so on every screen, sign-in included.
         if (s?.localTestServer == true) {
             val mark = stringResource(R.string.local_test_server)

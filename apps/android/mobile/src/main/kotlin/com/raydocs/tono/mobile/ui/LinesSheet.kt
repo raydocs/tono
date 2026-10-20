@@ -43,11 +43,13 @@ fun LinesSheet(s: EngineSnapshot, onSelect: (String) -> Unit, onTest: () -> Unit
         modifier = Modifier.statusBarsPadding(),
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = TonoColors.Smoke,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         scrimColor = TonoColors.NightDeep.copy(alpha = 0.55f),
     ) {
-        SheetGrip()
-        LinesContent(s, zh, onSelect, onTest)
+        SheetGlass {
+            SheetGrip()
+            LinesContent(s, zh, onSelect, onTest)
+        }
     }
 }
 

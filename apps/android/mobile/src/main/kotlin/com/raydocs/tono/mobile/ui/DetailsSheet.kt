@@ -53,11 +53,13 @@ fun DetailsSheet(s: EngineSnapshot, onRecheck: () -> Unit, onOpenLines: () -> Un
         modifier = Modifier.statusBarsPadding(),
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = TonoColors.Smoke, // opaque: device renders showed home text through a 97% sheet
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         scrimColor = TonoColors.NightDeep.copy(alpha = 0.45f),
     ) {
-        SheetGrip()
-        DetailsContent(s, onRecheck, onOpenLines, onOpenSettings)
+        SheetGlass {
+            SheetGrip()
+            DetailsContent(s, onRecheck, onOpenLines, onOpenSettings)
+        }
     }
 }
 

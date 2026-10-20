@@ -43,13 +43,14 @@ class MainActivity : ComponentActivity(), TonoActions {
             val pendingConsent by model.pendingConsent.collectAsStateWithLifecycle()
             CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion()) {
                 TonoTheme {
-                    TonoRoot(snapshot, this, link)
-                    pendingConsent?.let { prepare ->
-                        ConsentSheet(
-                            onContinue = { model.setPendingConsent(null); consent.launch(prepare) },
-                            onDismiss = { model.setPendingConsent(null) },
-                        )
-                    }
+                    TonoRoot(snapshot, this, link, consentSheet = pendingConsent?.let { prepare ->
+                        {
+                            ConsentSheet(
+                                onContinue = { model.setPendingConsent(null); consent.launch(prepare) },
+                                onDismiss = { model.setPendingConsent(null) },
+                            )
+                        }
+                    })
                 }
             }
         }

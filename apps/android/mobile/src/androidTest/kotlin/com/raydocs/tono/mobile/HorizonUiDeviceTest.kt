@@ -17,6 +17,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.captureToImage
@@ -263,6 +265,105 @@ class HorizonUiDeviceTest {
     }
 
     /** The Simplified Chinese copy (values-zh-rCN) on the same screens: contract, no truncation, captures. */
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test fun u10_sheetGlassBlursItsBackdropSlice() {
+        val stripes: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit = {
+            drawRect(Color.Black)
+            val w = 8.dp.toPx()
+            var x = 0f
+            while (x < size.width) { drawRect(Color.White, Offset(x, 0f), Size(w, size.height)); x += 2 * w }
+        }
+        compose.setContent {
+            BackdropHost(scene = { Canvas(Modifier.fillMaxSize(), onDraw = stripes) }, modifier = Modifier.fillMaxSize()) {
+                androidx.compose.material3.ModalBottomSheet(
+                    onDismissRequest = {}, dragHandle = null,
+                    sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = Color.Transparent,
+                    scrimColor = com.raydocs.tono.mobile.ui.TonoColors.NightDeep.copy(alpha = 0.55f),
+                ) {
+                    com.raydocs.tono.mobile.ui.SheetGlass {
+                        Box(Modifier.size(240.dp, 120.dp).testTag("sheet-glass"))
+                    }
+                    Glass(RoundedCornerShape(28.dp), Modifier.size(240.dp, 120.dp).testTag("sheet-tint"), blur = 0.dp, tintAlpha = 0.80f) {}
+                    Canvas(Modifier.size(240.dp, 120.dp).blur(26.dp, BlurredEdgeTreatment.Rectangle).testTag("sheet-control"), onDraw = stripes)
+                }
+            }
+        }
+        compose.waitForIdle()
+        val image = instrumentation.uiAutomation.takeScreenshot()
+        val d = compose.density.density
+        val period = Math.round(16 * d)
+        fun amplitude(tag: String): Double {
+            val r = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInWindow
+            val top = (r.top + 24 * d).toInt(); val bottom = (r.bottom - 24 * d).toInt()
+            val left = (r.left + 24 * d).toInt()
+            val n = ((r.width - 48 * d).toInt() / period) * period
+            check(n >= period)
+            var re = 0.0; var im = 0.0
+            for (i in 0 until n) {
+                val x = left + i
+                var sum = 0.0
+                for (y in top until bottom) { val c = image.getPixel(x, y); sum += 0.299 * ((c shr 16) and 0xFF) + 0.587 * ((c shr 8) and 0xFF) + 0.114 * (c and 0xFF) }
+                val a = 2 * Math.PI * x / period
+                re += sum / (bottom - top) * Math.cos(a); im -= sum / (bottom - top) * Math.sin(a)
+            }
+            return 2 * Math.hypot(re, im) / n
+        }
+        val glass = amplitude("sheet-glass")
+        val tintOnly = amplitude("sheet-tint")
+        val platform = amplitude("sheet-control") / (2 * 255 / Math.PI)
+        val residual = glass / tintOnly
+        File(out, "fixture-29-sheet-glass.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        File(out, "sheet-glass-report.txt").writeText("API ${android.os.Build.VERSION.SDK_INT}: sheet amplitude $glass; tint-only $tintOnly; sheet residual $residual; platform residual $platform\n")
+        assertTrue("the sheet receives a recorded scene, not an opaque fallback: $tintOnly", tintOnly > 10)
+        assertTrue("sheet blur leaves $residual of the stripes, platform blur $platform", residual <= platform + 0.05)
+        if (platform < 0.10) assertTrue("sheet blurs the stripes away: $residual", residual < 0.10)
+    }
+
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test fun u11_sheetBackdropOriginMatchesTheScreenAcrossWindows() {
+        var sceneOrigin = Offset.Zero
+        compose.setContent {
+            BackdropHost(scene = {
+                Canvas(Modifier.fillMaxSize().onGloballyPositioned { sceneOrigin = it.positionOnScreen() }) {
+                    drawRect(Color.Black)
+                    val h = 8.dp.toPx()
+                    var y = 0f
+                    while (y < size.height) { drawRect(Color.White, Offset(0f, y), Size(size.width, h)); y += 2 * h }
+                }
+            }, modifier = Modifier.fillMaxSize()) {
+                androidx.compose.material3.ModalBottomSheet(
+                    onDismissRequest = {}, dragHandle = null,
+                    sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = Color.Transparent,
+                ) {
+                    Glass(RoundedCornerShape(28.dp), Modifier.size(240.dp, 240.dp).testTag("origin-slice"), blur = 0.dp, tintAlpha = 0f, rim = 0f) {}
+                }
+            }
+        }
+        compose.waitForIdle()
+        val image = instrumentation.uiAutomation.takeScreenshot()
+        val r = compose.onNodeWithTag("origin-slice").fetchSemanticsNode().boundsInWindow
+        val d = compose.density.density
+        val h = 8 * d
+        var mismatches = 0
+        var samples = 0
+        for (y in (r.top + 32 * d).toInt() until (r.bottom - 32 * d).toInt()) {
+            val row = (y - sceneOrigin.y) / h
+            val fraction = row - kotlin.math.floor(row)
+            if (fraction < 0.25 || fraction > 0.75) continue
+            val white = row.toInt() % 2 == 0
+            val c = image.getPixel(r.center.x.toInt(), y)
+            val value = (c shr 16) and 0xFF
+            if (if (white) value < 180 else value > 15) mismatches++
+            samples++
+        }
+        File(out, "fixture-30-sheet-origin.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        File(out, "sheet-origin-report.txt").writeText("scene screen origin $sceneOrigin; modal bounds $r; matched ${samples - mismatches}/$samples stripe-centre pixels\n")
+        assertTrue("origin test samples the sheet interior", samples > 100)
+        assertEquals("modal glass must draw the same screen slice as the scene", 0, mismatches)
+    }
+
     @Test fun u7_simplifiedChineseCopyFitsEveryScreen() {
         val zh = java.util.Locale.SIMPLIFIED_CHINESE
         show(zh)
