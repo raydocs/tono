@@ -8,10 +8,7 @@ import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
@@ -36,6 +33,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -90,24 +89,13 @@ fun StatusDot(color: Color, modifier: Modifier = Modifier, size: Int = 8) {
     Box(modifier.size(size.dp).clip(CircleShape).background(color))
 }
 
-/** Smoked card used for settings sections; same surface as the home sheet. */
+/** A group heading: sentence case at reading size in the quietest tone, set apart by space above. */
 @Composable
-fun SmokeCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(TonoColors.Smoke.copy(alpha = 0.92f))
-            .border(1.dp, TonoColors.Hairline, RoundedCornerShape(20.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        content = content,
+fun SectionLabel(text: String, first: Boolean = false) {
+    Text(
+        text, style = TonoType.Label, color = TonoColors.TextTertiary,
+        modifier = Modifier.padding(top = if (first) 8.dp else 36.dp, bottom = 8.dp).semantics { heading() },
     )
-}
-
-@Composable
-fun SectionLabel(text: String) {
-    Text(text.uppercase(), style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary, modifier = Modifier.padding(start = 6.dp, top = 18.dp, bottom = 8.dp))
 }
 
 /**

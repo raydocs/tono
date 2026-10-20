@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -47,6 +46,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
@@ -91,82 +91,89 @@ fun SettingsScreen(
         }
     }
     Column(Modifier.fillMaxSize().background(TonoColors.Night)) {
-        ScreenHeader(stringResource(R.string.settings_title), onBack)
+        ScreenHeader(stringResource(R.string.settings_title), onBack, large = true)
+        // Editorial layout: no cards or dividers; groups are set apart by space, one left edge.
         Column(
-            Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 32.dp),
         ) {
-            SectionLabel(stringResource(R.string.settings_routing))
-            SmokeCard {
-                Column(Modifier.selectableGroup()) {
-                    ModeRow(stringResource(R.string.mode_three_tier), stringResource(R.string.mode_three_tier_desc), s.mode == RoutingMode.THREE_TIER) { onMode(RoutingMode.THREE_TIER) }
-                    Spacer(Modifier.height(6.dp))
-                    ModeRow(stringResource(R.string.mode_stable), stringResource(R.string.mode_stable_desc), s.mode == RoutingMode.STABLE) { onMode(RoutingMode.STABLE) }
-                }
+            SectionLabel(stringResource(R.string.settings_routing), first = true)
+            Column(Modifier.selectableGroup()) {
+                ModeRow(stringResource(R.string.mode_three_tier), stringResource(R.string.mode_three_tier_desc), s.mode == RoutingMode.THREE_TIER) { onMode(RoutingMode.THREE_TIER) }
+                ModeRow(stringResource(R.string.mode_stable), stringResource(R.string.mode_stable_desc), s.mode == RoutingMode.STABLE) { onMode(RoutingMode.STABLE) }
             }
-
-            Spacer(Modifier.height(10.dp))
-            SmokeCard { Expandable(stringResource(R.string.routing_scope_title)) {
-                Text(stringResource(R.string.routing_scope), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
-                Text(stringResource(R.string.routing_platform), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
-                Text(stringResource(if (s.underlyingIpv6) R.string.ipv6_on else R.string.ipv6_off), style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary)
-            } }
+            Expandable(stringResource(R.string.routing_scope_title)) {
+                Text(stringResource(R.string.routing_scope), style = TonoType.Meta, color = TonoColors.TextSecondary)
+                Text(stringResource(R.string.routing_platform), style = TonoType.Meta, color = TonoColors.TextSecondary)
+                Text(stringResource(if (s.underlyingIpv6) R.string.ipv6_on else R.string.ipv6_off), style = TonoType.Fine, color = TonoColors.TextTertiary)
+            }
 
             SectionLabel(stringResource(R.string.settings_check))
-            SmokeCard { RouteCheck(onExplain) }
+            RouteCheck(onExplain)
 
             SectionLabel(stringResource(R.string.settings_apps))
-            SmokeCard {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onOpenApps),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (s.excludedPackages.isEmpty()) stringResource(R.string.settings_apps_none) else pluralStringResource(R.plurals.settings_apps_count, s.excludedPackages.size, s.excludedPackages.size),
-                        style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f),
-                    )
-                    GlyphIcon(Glyph.CHEVRON_RIGHT, TonoColors.TextTertiary, size = 18.dp)
-                }
-            }
+            NavRow(
+                if (s.excludedPackages.isEmpty()) stringResource(R.string.settings_apps_none) else pluralStringResource(R.plurals.settings_apps_count, s.excludedPackages.size, s.excludedPackages.size),
+                onOpenApps,
+            )
 
             SectionLabel(stringResource(R.string.settings_system))
-            SmokeCard {
-                Text(
-                    stringResource(R.string.system_verify_in_android),
-                    // Settings can change independently while the VPN remains up. No cached flag
-                    // can promise what Android will do after this tunnel stops.
-                    style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary,
-                )
-                QuietButton(stringResource(R.string.system_open), { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
-            }
+            Text(
+                stringResource(R.string.system_verify_in_android),
+                // Settings can change independently while the VPN remains up. No cached flag
+                // can promise what Android will do after this tunnel stops.
+                style = TonoType.Meta, color = TonoColors.TextSecondary,
+            )
+            TextAction(stringResource(R.string.system_open), { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
 
             SectionLabel(stringResource(R.string.settings_account))
-            SmokeCard {
-                Text(s.email ?: "", style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextPrimary)
-                QuietButton(stringResource(R.string.settings_sign_out), onSignOut, color = TonoColors.Error)
-            }
+            Text(s.email ?: "", style = TonoType.Title, color = TonoColors.TextPrimary)
+            TextAction(stringResource(R.string.settings_sign_out), onSignOut, color = TonoColors.Error)
 
-            SectionLabel(stringResource(R.string.settings_about))
-            SmokeCard {
-                Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextPrimary)
-                Text(stringResource(R.string.about_core, BuildConfig.SING_BOX_VERSION), style = MaterialTheme.typography.bodySmall, color = TonoColors.TextSecondary)
-                Text(stringResource(R.string.about_contract, DesktopRoutingContract.SOURCE_COMMIT.take(9)), style = MaterialTheme.typography.bodySmall, color = TonoColors.TextSecondary)
-                Text(stringResource(R.string.about_test), style = MaterialTheme.typography.bodySmall, color = TonoColors.TextTertiary)
-                QuietButton(stringResource(R.string.about_licenses), onOpenLicenses)
+            // About as a colophon: the one line on the screen, then small print.
+            Box(Modifier.padding(top = 40.dp).fillMaxWidth().height(1.dp).background(TonoColors.Hairline))
+            SectionLabel(stringResource(R.string.settings_about), first = true)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME), style = TonoType.Fine, color = TonoColors.TextSecondary)
+                Text(stringResource(R.string.about_core, BuildConfig.SING_BOX_VERSION), style = TonoType.Fine, color = TonoColors.TextTertiary)
+                Text(stringResource(R.string.about_contract, DesktopRoutingContract.SOURCE_COMMIT.take(9)), style = TonoType.Fine, color = TonoColors.TextTertiary)
+                Text(stringResource(R.string.about_test), style = TonoType.Fine, color = TonoColors.TextTertiary)
             }
+            NavRow(stringResource(R.string.about_licenses), onOpenLicenses)
         }
     }
 }
 
 @Composable
-fun ScreenHeader(title: String, onBack: () -> Unit) {
+fun ScreenHeader(title: String, onBack: () -> Unit, large: Boolean = false) {
     val back = stringResource(R.string.settings_back)
     Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onBack).semantics { contentDescription = back },
             contentAlignment = Alignment.Center,
         ) { GlyphIcon(Glyph.BACK, TonoColors.TextPrimary) }
-        Text(title, style = MaterialTheme.typography.titleLarge, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+        Text(title, style = if (large) TonoType.Display else MaterialTheme.typography.titleLarge, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
     }
+}
+
+/** A row that opens another screen: the value in title size, a quiet chevron at the end. */
+@Composable
+private fun NavRow(text: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f))
+        GlyphIcon(Glyph.CHEVRON_RIGHT, TonoColors.TextTertiary, size = 18.dp)
+    }
+}
+
+/** A text action on the left edge, not a capsule; the whole row is the target. */
+@Composable
+private fun TextAction(text: String, onClick: () -> Unit, color: Color = TonoColors.TextPrimary) {
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 10.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) { Text(text, style = TonoType.Action, color = color) }
 }
 
 @Composable
@@ -175,28 +182,29 @@ private fun Expandable(title: String, content: @Composable () -> Unit) {
     val turn by animateFloatAsState(if (open) 180f else 0f, TonoMotion.state, label = "chevron")
     val state = stringResource(if (open) R.string.a11y_expanded else R.string.a11y_collapsed)
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.small)
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
             .clickable(role = Role.Button, onClickLabel = title) { open = !open }
-            .semantics { stateDescription = state },
+            .semantics { stateDescription = state }
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f))
+        Text(title, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f))
         GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = 18.dp, modifier = Modifier.rotate(turn))
     }
-    AnimatedVisibility(open) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { content() } }
+    AnimatedVisibility(open) { Column(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
 }
 
 @Composable
 private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         // ≥ 48 dp even when collapsed to its title (the device accessibility check found 38 dp).
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.medium).selectable(selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent), modifier = Modifier.padding(top = 2.dp, end = 10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = TonoColors.TextPrimary)
-            AnimatedVisibility(selected) { Text(desc, style = MaterialTheme.typography.bodySmall, color = TonoColors.TextSecondary) }
+        RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent, unselectedColor = TonoColors.TextTertiary), modifier = Modifier.padding(top = 1.dp, end = 12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = TonoType.Title, color = TonoColors.TextPrimary)
+            AnimatedVisibility(selected) { Text(desc, style = TonoType.Meta, color = TonoColors.TextSecondary) }
         }
     }
 }
@@ -237,6 +245,6 @@ private fun RouteCheck(onExplain: (String) -> Map<String, Any?>?) {
         QuietButton(stringResource(R.string.check_go), { run() })
     }
     result?.let {
-        Text(it, style = MaterialTheme.typography.titleMedium, color = TonoColors.TextPrimary, modifier = Modifier.animateContentSize().semantics { liveRegion = LiveRegionMode.Polite })
+        Text(it, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(top = 12.dp).animateContentSize().semantics { liveRegion = LiveRegionMode.Polite })
     }
 }

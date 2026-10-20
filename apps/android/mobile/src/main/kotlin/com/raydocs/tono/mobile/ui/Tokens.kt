@@ -72,6 +72,16 @@ object TonoMotion {
 
 val LocalReduceMotion = compositionLocalOf { false }
 
+/** Settings' editorial type: two sizes carry the hierarchy, Regular weight, no tracking. */
+object TonoType {
+    val Display = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Normal)
+    val Title = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Normal)
+    val Label = TextStyle(fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal)
+    val Meta = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+    val Fine = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
+    val Action = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+}
+
 @Composable
 fun TonoTheme(content: @Composable () -> Unit) {
     val base = Typography()
