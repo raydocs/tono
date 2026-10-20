@@ -121,18 +121,18 @@ fun SettingsScreen(
                 stringResource(R.string.system_verify_in_android),
                 // Settings can change independently while the VPN remains up. No cached flag
                 // can promise what Android will do after this tunnel stops.
-                style = TonoType.Meta, color = TonoColors.TextSecondary,
+                style = TonoType.Meta, color = TonoColors.TextSecondary, modifier = Modifier.padding(top = 8.dp),
             )
             TextAction(stringResource(R.string.system_open), { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
 
             SectionLabel(stringResource(R.string.settings_account))
-            Text(s.email ?: "", style = TonoType.Title, color = TonoColors.TextPrimary)
+            Text(s.email ?: "", style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(top = 12.dp))
             TextAction(stringResource(R.string.settings_sign_out), onSignOut, color = TonoColors.Error)
 
             // About as a colophon: the one line on the screen, then small print.
             Box(Modifier.padding(top = 40.dp).fillMaxWidth().height(1.dp).background(TonoColors.Hairline))
             SectionLabel(stringResource(R.string.settings_about), first = true)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME), style = TonoType.Fine, color = TonoColors.TextSecondary)
                 Text(stringResource(R.string.about_core, BuildConfig.SING_BOX_VERSION), style = TonoType.Fine, color = TonoColors.TextTertiary)
                 Text(stringResource(R.string.about_contract, DesktopRoutingContract.SOURCE_COMMIT.take(9)), style = TonoType.Fine, color = TonoColors.TextTertiary)
@@ -169,9 +169,9 @@ private fun NavRow(text: String, onClick: () -> Unit) {
 
 /** A text action on the left edge, not a capsule; the whole row is the target. */
 @Composable
-private fun TextAction(text: String, onClick: () -> Unit, color: Color = TonoColors.TextPrimary) {
+private fun TextAction(text: String, onClick: () -> Unit, color: Color = TonoColors.TextPrimary, fill: Boolean = true) {
     Box(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 10.dp),
+        Modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 8.dp)).heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 10.dp),
         contentAlignment = Alignment.CenterStart,
     ) { Text(text, style = TonoType.Action, color = color) }
 }
@@ -201,11 +201,12 @@ private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () 
         Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent, unselectedColor = TonoColors.TextTertiary), modifier = Modifier.padding(top = 1.dp, end = 12.dp))
+        // The title on the shared left edge; the radio sits where other rows put their chevron.
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = TonoType.Title, color = TonoColors.TextPrimary)
             AnimatedVisibility(selected) { Text(desc, style = TonoType.Meta, color = TonoColors.TextSecondary) }
         }
+        RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent, unselectedColor = TonoColors.TextTertiary), modifier = Modifier.padding(start = 12.dp, top = 1.dp))
     }
 }
 
@@ -231,7 +232,7 @@ private fun RouteCheck(onExplain: (String) -> Map<String, Any?>?) {
             }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
             value = host,
             onValueChange = { host = it.take(253) },
@@ -242,7 +243,7 @@ private fun RouteCheck(onExplain: (String) -> Map<String, Any?>?) {
             colors = fieldColors(),
             modifier = Modifier.weight(1f),
         )
-        QuietButton(stringResource(R.string.check_go), { run() })
+        TextAction(stringResource(R.string.check_go), { run() }, fill = false)
     }
     result?.let {
         Text(it, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(top = 12.dp).animateContentSize().semantics { liveRegion = LiveRegionMode.Polite })

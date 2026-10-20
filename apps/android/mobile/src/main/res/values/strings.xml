@@ -84,10 +84,10 @@
     <string name="settings_routing">Routing mode</string>
     <string name="mode_three_tier">Three-tier (default)</string>
     <string name="mode_three_tier_short">Three-tier</string>
-    <string name="mode_three_tier_desc">AI → Home · Video → cloud · the rest direct</string>
+    <string name="mode_three_tier_desc">AI → Home\u00A0·\u00A0Video → cloud\u00A0·\u00A0the rest direct</string>
     <string name="mode_stable">Stable — everything via cloud</string>
     <string name="mode_stable_short">Stable</string>
-    <string name="mode_stable_desc">AI → Home · everything else → cloud</string>
+    <string name="mode_stable_desc">AI → Home\u00A0·\u00A0everything else → cloud</string>
     <string name="mode_applies">Changes apply immediately to the running tunnel.</string>
     <string name="routing_scope_title">What Tono can and cannot recognise</string>
     <string name="routing_scope">Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range and the Claude, ChatGPT and Grok apps) → explicit cloud list → everything else direct. Matched traffic that fails is paused, never sent direct; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.</string>

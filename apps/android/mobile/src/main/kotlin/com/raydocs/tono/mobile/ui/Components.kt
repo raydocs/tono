@@ -94,7 +94,7 @@ fun StatusDot(color: Color, modifier: Modifier = Modifier, size: Int = 8) {
 fun SectionLabel(text: String, first: Boolean = false) {
     Text(
         text, style = TonoType.Label, color = TonoColors.TextTertiary,
-        modifier = Modifier.padding(top = if (first) 8.dp else 36.dp, bottom = 8.dp).semantics { heading() },
+        modifier = Modifier.padding(top = if (first) 8.dp else 40.dp).semantics { heading() },
     )
 }
 

@@ -84,9 +84,9 @@
     <string name="settings_routing">路由模式</string>
     <string name="mode_three_tier">三层路由（默认）</string>
     <string name="mode_three_tier_short">三层路由</string>
-    <string name="mode_three_tier_desc">AI → 家宽 · 视频 → 云 · 其他直连</string>
+    <string name="mode_three_tier_desc">AI → 家宽\u00A0·\u00A0视频 → 云\u00A0·\u00A0其他直连</string>
     <string name="mode_stable">稳定（全部经云）</string>
-    <string name="mode_stable_desc">AI → 家宽 · 其他全部 → 云</string>
+    <string name="mode_stable_desc">AI → 家宽\u00A0·\u00A0其他全部 → 云</string>
     <string name="mode_stable_short">稳定</string>
     <string name="mode_applies">修改会立即应用到正在运行的连接。</string>
     <string name="routing_scope_title">Tono 能识别什么、不能识别什么</string>
