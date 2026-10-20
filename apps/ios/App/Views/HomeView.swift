@@ -265,7 +265,8 @@ struct HomeView: View {
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 6)
-        .animation(TonoMotion.state, value: model.phase)
+        .animation(reduceMotion ? nil : TonoMotion.state, value: model.phase)
+        .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
     }
 
     /// One quiet line under the title: exits when connected, progress while connecting, the short
@@ -453,6 +454,7 @@ struct ActionCapsule: View {
         .buttonStyle(PressScale(glass: !filled))
         .disabled(action.wantsTunnel == nil)
         .modifier(Shake(amount: shake))
+        .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
         .onAppear {
             fill = PrimaryAction.progress(phase)
             fillOpacity = phase.tunnelUp || reconnecting ? 0 : 1
@@ -467,6 +469,11 @@ struct ActionCapsule: View {
             let wasUp = shownPhase?.tunnelUp == true || shownReconnecting
             shownPhase = next
             shownReconnecting = change.reconnecting
+            if reduceMotion {
+                fill = PrimaryAction.progress(next)
+                fillOpacity = next.tunnelUp || change.reconnecting ? 0 : 1
+                return
+            }
             // Connected ⇄ partly working ⇄ reconnecting keeps the warm edge; the sunrise plays only
             // on the way up from off.
             if wasUp && (next.tunnelUp || change.reconnecting) {
@@ -476,8 +483,8 @@ struct ActionCapsule: View {
             let target = PrimaryAction.progress(next)
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.9)) { fill = target; if target > 0 { fillOpacity = 1 } }
             if next.tunnelUp {
-                // Sunrise completes, then hands over to the warm edge.
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.6).delay(0.9)) { fillOpacity = 0 }
+                // Hand over to the warm edge as the connected label arrives.
+                withAnimation(.easeOut(duration: 0.6).delay(0.3)) { fillOpacity = 0 }
             }
             if next == .failed && !reduceMotion {
                 withAnimation(.linear(duration: 0.38)) { shake += 1 }
@@ -561,7 +568,7 @@ struct ActionCapsule: View {
             }
             // The clock arrives after the sunrise fill has handed over, not on top of its bright
             // end (state-cycle @ b36d07d 2.7 s; a fade tied to the fill still showed it faintly).
-            .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.3).delay(reduceMotion ? 0 : 1.4)),
+            .transition(reduceMotion ? .identity : .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.3).delay(1.4)),
                                     removal: .opacity.animation(.easeOut(duration: 0.1))))
         }
     }
@@ -594,9 +601,10 @@ extension AnyTransition {
     /// Text that changes in place: the old words fade out in 100 ms, then the new ones fade in (and
     /// rise `rise` points), so two states are never legible on top of each other.
     static func swap(rise: CGFloat, reduceMotion: Bool) -> AnyTransition {
+        if reduceMotion { return .identity }
         let leave = AnyTransition.opacity.animation(.easeOut(duration: 0.1))
         let arrive = AnyTransition.opacity.animation(TonoMotion.state.delay(0.1))
-        guard rise > 0, !reduceMotion else { return .asymmetric(insertion: arrive, removal: leave) }
+        guard rise > 0 else { return .asymmetric(insertion: arrive, removal: leave) }
         return .asymmetric(insertion: arrive.combined(with: .offset(y: rise)), removal: leave.combined(with: .offset(y: -rise * 0.75)))
     }
 }

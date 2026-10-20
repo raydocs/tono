@@ -65,7 +65,7 @@ struct TonoLiveActivityWidget: Widget {
                 }
             } compactLeading: {
                 MarkGlyph(size: 22, label: p.title)
-                    .foregroundStyle(p.stale ? TonoColor.neutral : p.tint)
+                    .foregroundStyle(TonoColor.sunMid)
             } compactTrailing: {
                 if let since = p.since {
                     Text(since, style: .timer)
@@ -81,7 +81,7 @@ struct TonoLiveActivityWidget: Widget {
                 }
             } minimal: {
                 MarkGlyph(size: 20, label: p.title)
-                    .foregroundStyle(p.stale ? TonoColor.neutral : p.tint)
+                    .foregroundStyle(TonoColor.sunMid)
             }
             .widgetURL(URL(string: "tono://home"))
             .keylineTint(TonoColor.sunMid)
