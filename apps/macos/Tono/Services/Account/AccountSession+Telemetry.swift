@@ -306,6 +306,11 @@ extension AccountSession {
         // the window still carries it, so nothing is lost by not sending now.
         let selected = snapshot.selectedExit == "unknown" ? nil : snapshot.selectedExit
         guard let node = notice.node ?? selected, !node.isEmpty else { return }
+        guard admitConnectFailureReport(Self.connectFailureSignature(notice, node: node)) else {
+            lastConnectFailureAt = Date()
+            scheduleEarlyTelemetryWindow()
+            return
+        }
         let path = pathLatencyConsumer()
         let report = TonoConnectFailureReport(
             ts: notice.ts,
@@ -339,6 +344,22 @@ extension AccountSession {
             }
         }
         scheduleEarlyTelemetryWindow()
+    }
+
+    nonisolated static func connectFailureSignature(_ notice: ConnectFailureNotice, node: String) -> String {
+        [notice.stage, notice.code, notice.error ?? "", node].joined(separator: "|")
+    }
+
+    /// Whether a failure goes out now, recording it when it does. The same
+    /// failure again within the spacing does not; a different one, or the
+    /// same one later, does.
+    func admitConnectFailureReport(_ signature: String, now: Date = Date()) -> Bool {
+        if let last = lastSentConnectFailure, last.signature == signature,
+           now.timeIntervalSince(last.at) < Self.connectFailureRepeatSpacing {
+            return false
+        }
+        lastSentConnectFailure = (signature, now)
+        return true
     }
 
     /// One window five minutes after a failure, so the operator sees whether
@@ -652,6 +673,7 @@ extension AccountSession {
         lastCatalogFailureMessage = nil
         lastTrafficPolicyFailureMessage = nil
         lastConnectFailureAt = nil
+        lastSentConnectFailure = nil
         lastPeriodicTelemetryAt = nil
         // An offline admission described the account just cleared (#582),
         // and so did Tono's acceptance of its session (R612-O5).

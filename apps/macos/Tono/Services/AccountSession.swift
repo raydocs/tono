@@ -172,6 +172,12 @@ final class AccountSession {
     /// it the next window may come at five minutes instead of eighteen, so
     /// whether the retry worked is visible before the regular cadence shows it.
     var lastConnectFailureAt: Date?
+    /// The last connect failure sent on its own, as its repeat signature.
+    var lastSentConnectFailure: (signature: String, at: Date)?
+    /// An identical failure inside this span is not sent again: the server
+    /// budget is twelve an hour, and a retry loop repeating one failure spent
+    /// it in minutes and turned every later report into HTTP 429.
+    nonisolated static let connectFailureRepeatSpacing: TimeInterval = 10 * 60
     var earlyTelemetryTask: Task<Void, Never>?
     static let telemetrySpacingAfterFailure: TimeInterval = 5 * 60
     static let telemetryFailureFollowUpWindow: TimeInterval = 15 * 60
