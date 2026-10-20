@@ -512,7 +512,11 @@ nonisolated enum HelperProtocolVersion {
     ///   would. A port another program holds refuses the start with
     ///   `CORE_PORT_IN_USE` and a fixed message naming the port, transport and
     ///   holding process, instead of the core exiting with a bare status.
-    static let current = "4.52.61"
+    /// - 4.52.61 → 4.52.62: the AI Home and three-tier runtime contract admits
+    ///   a Home SOCKS server given as an ordinary public DNS name (provider
+    ///   gateways such as `isp.decodo.com`), not only a public IPv4 literal.
+    ///   An older daemon refuses such a runtime at bind.
+    static let current = "4.52.62"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

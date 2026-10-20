@@ -968,6 +968,25 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         guard ThreeTierRoutingContract.admitsAIHome(aiHome), !ThreeTierRoutingContract.admits(aiHome),
               ThreeTierRoutingContract.routingMode(of: aiHome) == "ai-home",
               !ThreeTierRoutingContract.isThreeTierRuntime(aiHome), ownedRuntimeConfigIsSafe(aiText(aiHome)) else { return false }
+        // Provider Home lines are gateway names, not addresses. A public DNS
+        // name is admitted; a special-use or numeric-looking name is not.
+        let homeServer = { (server: String) -> [String: Any] in
+            var named = aiHome
+            named["outbounds"] = aiOutbounds.map { outbound -> [String: Any] in
+                guard outbound["type"] as? String == "socks" else { return outbound }
+                var home = outbound
+                home["server"] = server
+                return home
+            }
+            return named
+        }
+        guard ThreeTierRoutingContract.admitsAIHome(homeServer("isp.decodo.com")),
+              ownedRuntimeConfigIsSafe(aiText(homeServer("isp.decodo.com"))),
+              ["localhost", "printer.local", "nas.home.arpa", "router.internal", "10.0.0.1", "1.2.3",
+               "ISP.decodo.com", "-bad.example.com", "single", "127.0.0.0x1", "0x7f.0x0.0x0.0x1",
+               "gateway.test", "gateway.example", "gateway.example.com"].allSatisfy({
+                  !ThreeTierRoutingContract.admitsAIHome(homeServer($0))
+              }) else { return false }
         var aiRoute = aiHome["route"] as! [String: Any]
         var aiRules = aiRoute["rules"] as! [[String: Any]]
         let aiHomeRule = aiRules.firstIndex { $0["outbound"] as? String == "Tono-Home-Residential" }!

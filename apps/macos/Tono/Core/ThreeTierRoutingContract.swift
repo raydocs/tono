@@ -2793,7 +2793,7 @@ nonisolated enum ThreeTierRoutingContract {
               let home = outbounds.first(where: { $0["type"] as? String == "socks" }),
               outbounds.filter({ $0["type"] as? String == "socks" }).count == 1,
               let homeTag = home["tag"] as? String, homeTag == "Tono-Home-Residential",
-              let host = home["server"] as? String, publicIPv4(host),
+              let host = home["server"] as? String, publicIPv4(host) || publicHostname(host),
               home["version"] as? String == "5", home["detour"] as? String == "Tono-Exit",
               let username = home["username"] as? String, !username.isEmpty, username.utf8.count <= 4096,
               let password = home["password"] as? String, !password.isEmpty, password.utf8.count <= 4096,
@@ -2828,6 +2828,35 @@ nonisolated enum ThreeTierRoutingContract {
         return outbounds.allSatisfy {
             ["vless", "hysteria2", "socks", "selector", "direct"].contains($0["type"] as? String ?? "")
         }
+    }
+
+    /// Home lines are usually a provider gateway name (`isp.decodo.com`),
+    /// not an address. The hop is dialled through `Tono-Exit`, so the cloud
+    /// node resolves it; still admit only an ordinary lowercase DNS name, never
+    /// a special-use suffix or an all-numeric form that could stand for an IP.
+    private static func publicHostname(_ value: String) -> Bool {
+        let labels = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard value.utf8.count <= 253, labels.count >= 2,
+              labels.allSatisfy({ label in
+                  !label.isEmpty && label.utf8.count <= 63 && label.first != "-" && label.last != "-"
+                      && label.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }
+              }),
+              let top = labels.last, top.unicodeScalars.contains(where: { ("a"..."z").contains($0) })
+        else { return false }
+        // `127.0.0.0x1` and `0x7f.0.0.1` are IPv4 to inet_aton; only the
+        // canonical literal branch above may admit an address.
+        let numeric = labels.allSatisfy { label in
+            let digits = label.hasPrefix("0x") ? label.dropFirst(2) : label[...]
+            return digits.unicodeScalars.allSatisfy {
+                ("0"..."9").contains($0) || (label.hasPrefix("0x") && ("a"..."f").contains($0))
+            }
+        }
+        // RFC 6761 / IANA special-use names, matched as the name or any
+        // subdomain of it, never as an ordinary provider gateway.
+        let reserved = ["localhost", "local", "internal", "arpa", "invalid", "onion", "alt", "test", "example",
+                        "example.com", "example.net", "example.org"]
+        return !numeric && !reserved.contains { value == $0 || value.hasSuffix("." + $0) }
+            && labels.first != "localhost"
     }
 
     private static func publicIPv4(_ value: String) -> Bool {
