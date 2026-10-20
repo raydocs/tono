@@ -2665,8 +2665,6 @@ extension AppState {
             true
         // Another program's resolver or proxy keeps the port until the user
         // quits it; every retry would fail the same way.
-        case _ where CorePortConflict.matches(error):
-            true
         default:
             false
         }
@@ -2751,10 +2749,6 @@ extension AppState {
             // Strict keeps the barrier either way. A failure that needs the
             // user (a port another program holds) would only repeat, so the
             // loop waits for Retry now instead of dialling by itself.
-            if !resumeWhenReachable {
-                protectedReconnectPausedForUserAction = true
-                protectedReconnectPauseLiftsOnNetworkChange = false
-            }
             scheduleProtectedReconnect()
         }
     }
