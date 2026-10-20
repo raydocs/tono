@@ -21,7 +21,8 @@ struct SettingsView: View {
                     if PreviewBadge.shown { PreviewBadge().padding(.top, 4) }
                     #endif
                     // The mode is chosen in one place, Details (one tap from Home, next to where traffic
-                    // goes); Settings names it and keeps the full descriptions in the disclosure below.
+                    // goes); Settings states it as a row like any other: the name, what it does in one
+                    // sentence, where to change it. The full descriptions stay in the disclosure below.
                     // Editorial layout: no cards or dividers, groups set apart by space alone.
                     SettingsLabel(text: L.t("settings_routing"), first: true)
                     Group {
@@ -30,7 +31,7 @@ struct SettingsView: View {
                         } else {
                             VStack(alignment: .leading, spacing: 4) {
                                 title(ModeText.name(model.mode))
-                                meta(L.t("settings_mode_where"))
+                                meta(ModeText.line(model.mode) + (L.isChinese ? "" : " ") + L.t("settings_mode_where"))
                             }
                         }
                     }
@@ -104,14 +105,15 @@ struct SettingsView: View {
                     .accessibilityIdentifier("liveActivityToggle")
 
                     SettingsLabel(text: L.t("settings_account"))
-                    // "Signed in as …", not the bare address: VoiceOver gets a sentence (Apple's audit
-                    // flagged the bare address as not human-readable once Settings got shorter).
-                    title(L.t("settings_signed_in_as", model.email ?? ""))
+                    // The address is the value under the label, as every other row; VoiceOver still
+                    // gets the sentence (Apple's audit flagged the bare address as not human-readable).
+                    title(model.email ?? "")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 12)
-                    // A text action, not a capsule: red is the only colour on the row.
+                        .accessibilityLabel(L.t("settings_signed_in_as", model.email ?? ""))
+                    // A text action, not a capsule, in the one weight of the screen: red alone marks it.
                     Button { confirmSignOut = true } label: {
-                        Text(L.t("settings_sign_out")).tonoFont(17, .medium, relativeTo: .body)
+                        Text(L.t("settings_sign_out")).tonoFont(17, relativeTo: .body)
                             .foregroundStyle(TonoColor.error)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -180,17 +182,18 @@ struct SettingsView: View {
     }
 }
 
-/// A Settings group heading: sentence case at reading size in the quietest tone, set apart by
-/// space above it rather than a card around the group.
+/// A Settings group heading: sentence case, small and in the quietest tone, set apart by space
+/// above it rather than a card around the group. A clear step under the 20 pt row title (footnote
+/// against title3, 44 against 55 pt at AX5), so label and title never read as one size.
 private struct SettingsLabel: View {
     let text: String
     var first = false
     var body: some View {
         Text(text)
-            .tonoFont(15, relativeTo: .subheadline)
+            .tonoFont(13, relativeTo: .footnote)
             .foregroundStyle(TonoColor.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, first ? 12 : 40)
+            .padding(.top, first ? 16 : 40)
             .accessibilityAddTraits(.isHeader)
     }
 }
