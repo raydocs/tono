@@ -72,14 +72,18 @@ object TonoMotion {
 
 val LocalReduceMotion = compositionLocalOf { false }
 
-/** Settings' editorial type: two sizes carry the hierarchy, Regular weight, no tracking. */
+/**
+ * Settings' editorial type: one weight, no tracking; the hierarchy is size and tone alone. The
+ * group label is a clear step under the row title (13 against 20) so the two never read as one
+ * grey line at large font scales.
+ */
 object TonoType {
-    val Display = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Normal)
+    val Display = TextStyle(fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.Normal)
     val Title = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Normal)
-    val Label = TextStyle(fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal)
+    val Label = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
     val Meta = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
     val Fine = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
-    val Action = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+    val Action = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Normal)
 }
 
 @Composable

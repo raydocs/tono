@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,17 +23,17 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -91,16 +93,25 @@ fun SettingsScreen(
         }
     }
     Column(Modifier.fillMaxSize().background(TonoColors.Night)) {
-        ScreenHeader(stringResource(R.string.settings_title), onBack, large = true)
-        // Editorial layout: no cards or dividers; groups are set apart by space, one left edge.
+        // Only the back circle stays fixed. The title opens the page on the content's own left edge
+        // and scrolls away with it: one axis for every word on the screen, as in a book.
+        Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) { BackCircle(onBack) }
+        // Editorial layout: no cards or dividers; groups are set apart by space, controls on one right edge.
         Column(
             Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 32.dp),
         ) {
-            SectionLabel(stringResource(R.string.settings_routing), first = true)
+            Text(
+                stringResource(R.string.settings_title), style = TonoType.Display, color = TonoColors.TextPrimary,
+                modifier = Modifier.padding(top = 4.dp).semantics { heading() },
+            )
+
+            SectionLabel(stringResource(R.string.settings_routing))
             Column(Modifier.selectableGroup()) {
                 ModeRow(stringResource(R.string.mode_three_tier), stringResource(R.string.mode_three_tier_desc), s.mode == RoutingMode.THREE_TIER) { onMode(RoutingMode.THREE_TIER) }
                 ModeRow(stringResource(R.string.mode_stable), stringResource(R.string.mode_stable_desc), s.mode == RoutingMode.STABLE) { onMode(RoutingMode.STABLE) }
             }
+            // The chosen mode is the white one; this line says the grey one is a tap away.
+            Text(stringResource(R.string.settings_mode_hint), style = TonoType.Fine, color = TonoColors.TextTertiary)
             Expandable(stringResource(R.string.routing_scope_title)) {
                 Text(stringResource(R.string.routing_scope), style = TonoType.Meta, color = TonoColors.TextSecondary)
                 Text(stringResource(R.string.routing_platform), style = TonoType.Meta, color = TonoColors.TextSecondary)
@@ -117,15 +128,20 @@ fun SettingsScreen(
             )
 
             SectionLabel(stringResource(R.string.settings_system))
-            Text(
-                stringResource(R.string.system_verify_in_android),
+            // One row: the way out to Android's own switch as the title, the state under it. An arrow,
+            // not a chevron: this leaves Tono.
+            SettingsRow(
+                stringResource(R.string.system_open),
+                Modifier.clickable(role = Role.Button) { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) },
+                trailing = { GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 18.dp) },
+            ) {
                 // Settings can change independently while the VPN remains up. No cached flag
                 // can promise what Android will do after this tunnel stops.
-                style = TonoType.Meta, color = TonoColors.TextSecondary, modifier = Modifier.padding(top = 8.dp),
-            )
-            TextAction(stringResource(R.string.system_open), { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
+                Text(stringResource(R.string.system_verify_in_android), style = TonoType.Meta, color = TonoColors.TextSecondary, modifier = Modifier.padding(top = 4.dp))
+            }
 
             SectionLabel(stringResource(R.string.settings_account))
+            // The address itself is the value under the label (the device test finds it by exact text).
             Text(s.email ?: "", style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(top = 12.dp))
             TextAction(stringResource(R.string.settings_sign_out), onSignOut, color = TonoColors.Error)
 
@@ -144,30 +160,59 @@ fun SettingsScreen(
 }
 
 @Composable
-fun ScreenHeader(title: String, onBack: () -> Unit, large: Boolean = false) {
-    val back = stringResource(R.string.settings_back)
+fun ScreenHeader(title: String, onBack: () -> Unit) {
     Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onBack).semantics { contentDescription = back },
-            contentAlignment = Alignment.Center,
-        ) { GlyphIcon(Glyph.BACK, TonoColors.TextPrimary) }
-        Text(title, style = if (large) TonoType.Display else MaterialTheme.typography.titleLarge, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+        BackCircle(onBack)
+        Text(title, style = MaterialTheme.typography.titleLarge, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+    }
+}
+
+@Composable
+private fun BackCircle(onBack: () -> Unit) {
+    val back = stringResource(R.string.settings_back)
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onBack).semantics { contentDescription = back },
+        contentAlignment = Alignment.Center,
+    ) { GlyphIcon(Glyph.BACK, TonoColors.TextPrimary) }
+}
+
+/**
+ * Every row in Settings: a title on the left edge, anything under it (a description, a state line)
+ * in the smaller grey tone, and at most one quiet mark on the right edge, centred on the title's
+ * first line so wrapped titles at large text keep it in place. The caller's modifier carries the
+ * tap (`clickable`, `selectable`), so the whole row is the target and the semantics are one node.
+ */
+@Composable
+private fun SettingsRow(
+    title: String,
+    modifier: Modifier = Modifier,
+    titleColor: Color = TonoColors.TextPrimary,
+    trailing: (@Composable () -> Unit)? = null,
+    under: @Composable ColumnScope.() -> Unit = {},
+) {
+    val titleLine = with(LocalDensity.current) { TonoType.Title.lineHeight.toDp() }
+    // ≥ 48 dp even when collapsed to its title (the device accessibility check found 38 dp).
+    Row(modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 12.dp), verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = TonoType.Title, color = titleColor)
+            under()
+        }
+        if (trailing != null) {
+            Box(Modifier.padding(start = 12.dp).width(18.dp).height(titleLine), contentAlignment = Alignment.Center) { trailing() }
+        }
     }
 }
 
 /** A row that opens another screen: the value in title size, a quiet chevron at the end. */
 @Composable
 private fun NavRow(text: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f))
-        GlyphIcon(Glyph.CHEVRON_RIGHT, TonoColors.TextTertiary, size = 18.dp)
-    }
+    SettingsRow(
+        text, Modifier.clickable(role = Role.Button, onClick = onClick),
+        trailing = { GlyphIcon(Glyph.CHEVRON_RIGHT, TonoColors.TextTertiary, size = 18.dp) },
+    )
 }
 
-/** A text action on the left edge, not a capsule; the whole row is the target. */
+/** A text action on the left edge, not a capsule; the whole row is the target and colour marks it as one. */
 @Composable
 private fun TextAction(text: String, onClick: () -> Unit, color: Color = TonoColors.TextPrimary, fill: Boolean = true) {
     Box(
@@ -181,32 +226,29 @@ private fun Expandable(title: String, content: @Composable () -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
     val turn by animateFloatAsState(if (open) 180f else 0f, TonoMotion.state, label = "chevron")
     val state = stringResource(if (open) R.string.a11y_expanded else R.string.a11y_collapsed)
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp)
-            .clickable(role = Role.Button, onClickLabel = title) { open = !open }
-            .semantics { stateDescription = state }
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f))
-        GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = 18.dp, modifier = Modifier.rotate(turn))
-    }
+    SettingsRow(
+        title,
+        Modifier.clickable(role = Role.Button, onClickLabel = title) { open = !open }.semantics { stateDescription = state },
+        trailing = { GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = 18.dp, modifier = Modifier.rotate(turn)) },
+    )
     AnimatedVisibility(open) { Column(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
 }
 
+/**
+ * A mode to choose, set like Kura's filters: the chosen one is white, carries its one-line
+ * description and a sun dot where other rows keep their chevron; the other is grey. The row's
+ * `selectable` semantics (radio role, selected state) tell TalkBack which is on, so the dot is
+ * never the only cue.
+ */
 @Composable
 private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        // ≥ 48 dp even when collapsed to its title (the device accessibility check found 38 dp).
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 12.dp),
-        verticalAlignment = Alignment.Top,
+    SettingsRow(
+        title,
+        Modifier.selectable(selected, role = Role.RadioButton, onClick = onClick),
+        titleColor = if (selected) TonoColors.TextPrimary else TonoColors.TextSecondary,
+        trailing = { if (selected) StatusDot(TonoColors.Accent) },
     ) {
-        // The title on the shared left edge; the radio sits where other rows put their chevron.
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = TonoType.Title, color = TonoColors.TextPrimary)
-            AnimatedVisibility(selected) { Text(desc, style = TonoType.Meta, color = TonoColors.TextSecondary) }
-        }
-        RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent, unselectedColor = TonoColors.TextTertiary), modifier = Modifier.padding(start = 12.dp, top = 1.dp))
+        AnimatedVisibility(selected) { Text(desc, style = TonoType.Meta, color = TonoColors.TextSecondary, modifier = Modifier.padding(top = 4.dp)) }
     }
 }
 
@@ -241,9 +283,11 @@ private fun RouteCheck(onExplain: (String) -> Map<String, Any?>?) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Search, autoCorrectEnabled = false),
             keyboardActions = KeyboardActions(onSearch = { run() }),
             colors = fieldColors(),
+            // The same soft corner as the iOS field; the one outline on the screen is the field's.
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier.weight(1f),
         )
-        TextAction(stringResource(R.string.check_go), { run() }, fill = false)
+        TextAction(stringResource(R.string.check_go), { run() }, color = TonoColors.Accent, fill = false)
     }
     result?.let {
         Text(it, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(top = 12.dp).animateContentSize().semantics { liveRegion = LiveRegionMode.Polite })

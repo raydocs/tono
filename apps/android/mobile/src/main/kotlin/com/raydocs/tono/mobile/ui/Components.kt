@@ -89,7 +89,7 @@ fun StatusDot(color: Color, modifier: Modifier = Modifier, size: Int = 8) {
     Box(modifier.size(size.dp).clip(CircleShape).background(color))
 }
 
-/** A group heading: sentence case at reading size in the quietest tone, set apart by space above. */
+/** A group heading: sentence case, small and in the quietest tone, set apart by space above; the rows under it carry the size. */
 @Composable
 fun SectionLabel(text: String, first: Boolean = false) {
     Text(
