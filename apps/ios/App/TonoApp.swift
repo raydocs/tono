@@ -12,8 +12,7 @@ struct TonoApp: App {
             _model = StateObject(wrappedValue: AppModel.previewCycle())
             return
         }
-        if let i = CommandLine.arguments.firstIndex(of: "-TonoPreview"), i + 1 < CommandLine.arguments.count,
-           let phase = Phase(rawValue: CommandLine.arguments[i + 1]) {
+        if let phase = PreviewLaunch.phase {
             _model = StateObject(wrappedValue: AppModel.preview(phase))
             return
         }
@@ -40,7 +39,7 @@ struct RootView: View {
     var body: some View {
         ZStack {
             #if DEBUG
-            if CommandLine.arguments.contains("-TonoPreviewWidgets") {
+            if PreviewLaunch.widgets {
                 WidgetGallery()
             } else if CommandLine.arguments.contains("-TonoPreviewContrastProbe") {
                 ContrastProbe()
@@ -76,7 +75,7 @@ extension View {
     @ViewBuilder func previewBadge() -> some View {
         #if DEBUG
         // The widget gallery carries the badge in its own top strip, above the cards.
-        if PreviewBadge.shown && !CommandLine.arguments.contains("-TonoPreviewWidgets") {
+        if PreviewBadge.shown && !PreviewLaunch.widgets {
             overlay(alignment: .top) { PreviewBadge().padding(.top, 2) }
         } else {
             self
@@ -88,6 +87,24 @@ extension View {
 }
 
 #if DEBUG
+enum PreviewLaunch {
+    static var widgets: Bool {
+        CommandLine.arguments.contains { ["-TonoPreviewWidgets", "-TonoPreviewWidgetsLight", "-TonoPreviewWidgetsRoutes", "-TonoPreviewWidgetsBottom"].contains($0) }
+    }
+
+    static var phase: Phase? {
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "-TonoPreview"), i + 1 < args.count,
+           let phase = Phase(rawValue: args[i + 1]) { return phase }
+        if args.contains("-TonoPreviewOnboarding") { return .signedOut }
+        if let i = args.firstIndex(of: "-TonoPreviewSheet"), i + 1 < args.count {
+            return args[i + 1] == "primer" ? .needsPermission : .connected
+        }
+        if widgets || args.contains("-TonoPreviewSheetCycle") { return .connected }
+        return nil
+    }
+}
+
 /// The yellow "fixtures" badge on every DEBUG preview surface.
 struct PreviewBadge: View {
     static var shown: Bool { CommandLine.arguments.contains(where: { $0.hasPrefix("-TonoPreview") }) }
