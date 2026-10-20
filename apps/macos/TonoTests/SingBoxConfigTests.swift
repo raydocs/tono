@@ -650,6 +650,46 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(process.terminationStatus, 0, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
     }
 
+    /// Provider Home lines are gateway names (decodo's `isp.decodo.com`), not
+    /// addresses. Both strict modes compile them, and the packaged core accepts
+    /// the result; a special-use name is still refused.
+    func testStrictModesAcceptAHostnameHomeLine() throws {
+        let values = try nodes()
+        var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeSocks5: .init(
+                host: "ISP.Decodo.com", port: 10080, username: "fixture-user", password: "fixture-password"))
+        for variant in [ThreeTierRoutingContract.Variant.threeTier, .aiHome] {
+            let result = try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values,
+                physicalInterface: "en0", fakeIPSlot: 3, variant: variant)
+            let document = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+            XCTAssertTrue(variant == .aiHome ? ThreeTierRoutingContract.admitsAIHome(document)
+                : ThreeTierRoutingContract.admits(document))
+            let outbounds = try XCTUnwrap(document["outbounds"] as? [[String: Any]])
+            let home = try XCTUnwrap(outbounds.first { $0["type"] as? String == "socks" })
+            XCTAssertEqual(home["server"] as? String, "isp.decodo.com")
+            XCTAssertEqual(home["detour"] as? String, "Tono-Exit", "the cloud node resolves and dials the Home gateway")
+            XCTAssertFalse(result.dialEndpoints.contains { $0.host.contains("decodo") }, "no direct permit for the Home gateway")
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-home-hostname-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let config = directory.appendingPathComponent("config.json")
+            try result.runtimeJSON.write(to: config)
+            let process = Process()
+            process.executableURL = try XCTUnwrap(CoreRuntimeManager().findBinary())
+            process.arguments = ["check", "-D", directory.path, "-c", config.path]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+        }
+        overlay.claudeHomeSocks5 = .init(host: "printer.local", port: 10080, username: "fixture-user", password: "fixture-password")
+        XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values,
+            physicalInterface: "en0", variant: .aiHome))
+    }
+
     /// AI Home: the three-tier AI rules, Home DNS and Home outbound, but every
     /// other flow (UDP, LAN, unlisted hosts) goes DIRECT; only AI UDP is refused.
     func testAIHomeSnapshotKeepsAIOnHomeAndSendsTheRestDirect() throws {
