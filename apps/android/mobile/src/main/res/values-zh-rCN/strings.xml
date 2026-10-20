@@ -109,7 +109,7 @@
     <string name="verdict_BLOCKED">拦截</string>
     <string name="verdict_DNS">DNS</string>
     <string name="settings_system">Android 系统保护</string>
-    <string name="system_verify_in_android">Tono 停止后的保护由 Android 控制，当前连接不能保证。请在 Android 设置中检查“始终开启的 VPN”和“屏蔽未使用 VPN 的连接”；此处不确认它们的当前状态。</string>
+    <string name="system_verify_in_android">始终开启状态未确认。Tono 停止后，应用可能直连。</string>
     <string name="system_open">打开 VPN 设置</string>
     <string name="settings_account">账号</string>
     <string name="settings_sign_out">退出登录</string>

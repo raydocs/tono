@@ -120,7 +120,7 @@ fun SettingsScreen(
                     stringResource(R.string.system_verify_in_android),
                     // Settings can change independently while the VPN remains up. No cached flag
                     // can promise what Android will do after this tunnel stops.
-                    style = MaterialTheme.typography.bodyMedium, color = TonoColors.Warning,
+                    style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary,
                 )
                 QuietButton(stringResource(R.string.system_open), { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
             }
