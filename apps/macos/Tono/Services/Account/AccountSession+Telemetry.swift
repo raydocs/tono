@@ -354,10 +354,6 @@ extension AccountSession {
     /// failure again within the spacing does not; a different one, or the
     /// same one later, does.
     func admitConnectFailureReport(_ signature: String, now: Date = Date()) -> Bool {
-        if let last = lastSentConnectFailure, last.signature == signature,
-           now.timeIntervalSince(last.at) < Self.connectFailureRepeatSpacing {
-            return false
-        }
         lastSentConnectFailure = (signature, now)
         return true
     }
