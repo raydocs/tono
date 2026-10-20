@@ -2748,6 +2748,13 @@ extension AppState {
         } else {
             noteProtectionLoss(NetworkLossReport.killSwitchStuck)
             disconnect(releaseKillSwitch: false)
+            // Strict keeps the barrier either way. A failure that needs the
+            // user (a port another program holds) would only repeat, so the
+            // loop waits for Retry now instead of dialling by itself.
+            if !resumeWhenReachable {
+                protectedReconnectPausedForUserAction = true
+                protectedReconnectPauseLiftsOnNetworkChange = false
+            }
             scheduleProtectedReconnect()
         }
     }

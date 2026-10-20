@@ -8,3 +8,7 @@
 - 验证：本机 swiftc 编译助手通过；抽出的预检代码在本机跑：同进程占位、另一进程以 0.0.0.0 占 UDP 都能认出并报出进程名，0.0.0.0 的 TCP 监听不误报（核心的 TCP 绑定此时也会成功）。app 单测与 root 自检由托管 CI 跑，结果见 PR 验证评论。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：Clash 等其他 TUN 的冲突仍是失败后归因（`OtherVPNDetection`），没有做启动前检查；Windows 未改。真实 Docker Desktop 占 53 的端到端情况未在真机验证。
+
+## 2026-10-19 · 续记
+- 独立审查（Codex gpt-6.1-sol xhigh，覆盖 `228bdcab4`）结论 approve-with-fixes，无 major，6 个 minor，按规定修一轮：严格模式（三层分流）遇到端口冲突不再自动重连，保留屏障并等「立即重试」；同步换配置（`/core/sync`）返回同一码时也显示具体原因、不自动重试；占用进程查询加 0.5 秒与单进程 4096 个描述符的上限，超限只说「另一个程序」；只认真正与 127.0.0.1 冲突的套接字（IPv4 的 127.0.0.1 或通配、双栈 IPv6 通配），`::1` 不算；预检移到清空旧诊断之后，旧核心的 HY2 idle 文案不会盖过端口冲突；进程名过滤 Unicode 控制、格式与行/段分隔字符。
+- 红灯：`a58e452d7`（预检恒返回空）上 macOS CI run 39323079739 的 helper 自检失败：`core port preflight self-test failed: udp busy, tcp busy`。app 侧红灯另见 PR 验证评论。

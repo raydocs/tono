@@ -212,6 +212,33 @@ func runCorePortPreflightSelfTest() -> Bool {
         close(held.fd)
         if CoreListenPreflight.firstBusy([socket]) != nil { failures.append("\(label) released") }
     }
+    // A holder on ::1 does not conflict with 127.0.0.1 and is never named.
+    let v6 = socket(AF_INET6, SOCK_DGRAM, 0)
+    if v6 >= 0 {
+        var one: Int32 = 1
+        _ = setsockopt(v6, IPPROTO_IPV6, IPV6_V6ONLY, &one, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in6()
+        address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        address.sin6_family = sa_family_t(AF_INET6)
+        address.sin6_addr = in6addr_loopback
+        var length = socklen_t(MemoryLayout<sockaddr_in6>.size)
+        let bound = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(v6, $0, length) == 0 && getsockname(v6, $0, &length) == 0
+            }
+        }
+        if bound, CoreListenPreflight.holder(of: .init(port: UInt16(bigEndian: address.sin6_port), udp: true)) != nil {
+            failures.append("ipv6 loopback holder")
+        }
+        close(v6)
+    }
+    let scrubbed = CoreListenPreflight.failure(
+        for: .init(port: 53, udp: true),
+        holder: ("a\u{85}b\u{2028}c\u{202E}(d)\u{7}", 5)
+    ).message
+    if scrubbed != "Port 53 (UDP) on 127.0.0.1 is already in use by abcd (PID 5)." {
+        failures.append("holder name scrub")
+    }
     if !failures.isEmpty {
         FileHandle.standardError.write(Data("core port preflight self-test failed: \(failures.joined(separator: ", "))\n".utf8))
     }

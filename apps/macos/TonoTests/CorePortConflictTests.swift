@@ -39,6 +39,53 @@ final class CorePortConflictTests: XCTestCase {
         XCTAssertEqual(failure.userMessage, shown)
     }
 
+    /// Strict keeps the barrier, so the failure cannot be answered by
+    /// releasing. Its reconnect loop must wait for Retry now rather than dial
+    /// a start that fails the same way every time.
+    @MainActor
+    func testStrictModeKeepsTheBarrierAndWaitsForRetryNow() async {
+        let savedArmed = KillSwitchService.isArmed
+        let savedStrict = AppProfile.defaults.object(forKey: "strictRoutingSessionIntent")
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        let app = AppState()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            app.connectionCoordinator.protectedReconnectTask?.cancel()
+            KillSwitchService.isArmed = savedArmed
+            AppProfile.defaults.set(savedStrict, forKey: "strictRoutingSessionIntent")
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        AppProfile.defaults.set(true, forKey: "strictRoutingSessionIntent")
+        KillSwitchService.isArmed = true
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        app.networkProtection = runtime
+        let error = HelperIPCError.commandFailed(dockerMessage, code: "CORE_PORT_IN_USE")
+
+        await app.applyExhaustedArmedFailure(
+            message: error.localizedDescription,
+            resumeWhenReachable: !AppState.failureRequiresUserAction(error)
+        )
+        await app.finishPendingDisconnect()
+
+        XCTAssertTrue(app.protectedReconnectPausedForUserAction)
+        XCTAssertFalse(app.protectedReconnectPauseLiftsOnNetworkChange)
+        XCTAssertFalse(app.isProtectedReconnectScheduled)
+    }
+
     func testAnUncodedCoreFailureStaysRetryable() {
         let error = HelperIPCError.commandFailed("sing-box exited (status 1).", code: nil)
         XCTAssertFalse(CorePortConflict.matches(error))

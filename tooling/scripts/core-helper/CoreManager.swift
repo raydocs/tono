@@ -218,9 +218,6 @@ final class CoreManager {
     private func launchValidatedSnapshotLocked(configPath: String, startAllowed: () -> Bool) throws {
         // Recheck the root-owned binary at launch, including after a sync stop.
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
-        // After a sync stop too: the old core has exited, so anything still on
-        // these ports belongs to another program and the core would only exit.
-        try CoreListenPreflight.check(configPath: configPath)
         let child = Process()
         child.executableURL = URL(fileURLWithPath: mihomoPath)
         child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
@@ -232,6 +229,11 @@ final class CoreManager {
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         ]
         resetDiagnostics()
+        // After a sync stop too: the old core has exited, so anything still on
+        // these ports belongs to another program and the core would only exit.
+        // Checked after the reset, so an older core's last words cannot stand
+        // in for this refusal.
+        try CoreListenPreflight.check(configPath: configPath)
         startDiagnosticCapture(for: child)
         do {
             guard startAllowed() else {
@@ -607,8 +609,15 @@ enum CoreListenPreflight {
     }
 
     /// The process holding a local socket on this port and protocol (a TCP
-    /// listener, or a bound UDP socket), as its short name and PID.
-    static func holder(of socket: CoreListenSocket) -> (name: String, pid: Int32)? {
+    /// listener, or a bound UDP socket) that conflicts with 127.0.0.1, as its
+    /// short name and PID. Best effort within a fixed budget: nil names
+    /// "another program", and the refusal stands either way.
+    static func holder(
+        of socket: CoreListenSocket,
+        budget: TimeInterval = 0.5,
+        maximumDescriptors: Int = 4_096
+    ) -> (name: String, pid: Int32)? {
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(budget * 1_000_000_000)
         let capacity = proc_listallpids(nil, 0)
         guard capacity > 0 else { return nil }
         var pids = [Int32](repeating: 0, count: Int(capacity) + 32)
@@ -616,7 +625,9 @@ enum CoreListenPreflight {
             proc_listallpids($0.baseAddress, Int32($0.count))
         }
         guard count > 0 else { return nil }
-        for pid in pids.prefix(Int(count)) where pid > 0 && holds(pid: pid, socket) {
+        for pid in pids.prefix(Int(count)) where pid > 0 {
+            guard DispatchTime.now().uptimeNanoseconds < deadline else { return nil }
+            guard holds(pid: pid, socket, maximumDescriptors: maximumDescriptors) else { continue }
             var name = [CChar](repeating: 0, count: 256)
             guard proc_name(pid, &name, UInt32(name.count)) > 0 else { return ("", pid) }
             return (String(cString: name), pid)
@@ -624,10 +635,10 @@ enum CoreListenPreflight {
         return nil
     }
 
-    private static func holds(pid: Int32, _ socket: CoreListenSocket) -> Bool {
+    private static func holds(pid: Int32, _ socket: CoreListenSocket, maximumDescriptors: Int) -> Bool {
         let fdSize = MemoryLayout<proc_fdinfo>.stride
         let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard needed > 0 else { return false }
+        guard needed > 0, Int(needed) / fdSize <= maximumDescriptors else { return false }
         var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(needed) / fdSize + 16)
         let filled = fds.withUnsafeMutableBytes {
             proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
@@ -637,21 +648,35 @@ enum CoreListenPreflight {
             var info = socket_fdinfo()
             let size = Int32(MemoryLayout<socket_fdinfo>.size)
             guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { continue }
-            let family = info.psi.soi_family
-            guard family == AF_INET || family == AF_INET6 else { continue }
             let kind = info.psi.soi_kind
-            let localPort: Int32
+            let local: in_sockinfo
             if socket.udp {
                 guard kind == Int32(SOCKINFO_IN), info.psi.soi_type == SOCK_DGRAM else { continue }
-                localPort = info.psi.soi_proto.pri_in.insi_lport
+                local = info.psi.soi_proto.pri_in
             } else {
                 guard kind == Int32(SOCKINFO_TCP),
                       info.psi.soi_proto.pri_tcp.tcpsi_state == TSI_S_LISTEN else { continue }
-                localPort = info.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport
+                local = info.psi.soi_proto.pri_tcp.tcpsi_ini
             }
-            if UInt16(bigEndian: UInt16(truncatingIfNeeded: localPort)) == socket.port { return true }
+            guard UInt16(bigEndian: UInt16(truncatingIfNeeded: local.insi_lport)) == socket.port,
+                  conflictsWithLoopback(family: info.psi.soi_family, local) else { continue }
+            return true
         }
         return false
+    }
+
+    /// Whether a socket bound at `local` keeps a bind to 127.0.0.1 on the same
+    /// port from succeeding: IPv4 on 127.0.0.1 or the wildcard, or the IPv6
+    /// wildcard of a dual-stack socket. `::1` and other addresses do not.
+    private static func conflictsWithLoopback(family: Int32, _ local: in_sockinfo) -> Bool {
+        if family == AF_INET {
+            let address = UInt32(bigEndian: local.insi_laddr.ina_46.i46a_addr4.s_addr)
+            return address == 0 || address == 0x7F00_0001
+        }
+        guard family == AF_INET6, local.insi_vflag & UInt8(INI_IPV4) != 0 else { return false }
+        var any = in6addr_any
+        var address = local.insi_laddr.ina_6
+        return memcmp(&address, &any, MemoryLayout<in6_addr>.size) == 0
     }
 
     /// The coded refusal for a taken port. The message keeps one fixed shape
@@ -661,7 +686,13 @@ enum CoreListenPreflight {
         var message = "Port \(socket.port) (\(proto)) on 127.0.0.1 is already in use"
         if let holder {
             let name = String(holder.name.unicodeScalars.filter {
-                $0.value >= 0x20 && $0.value != 0x7F && $0 != "(" && $0 != ")"
+                switch $0.properties.generalCategory {
+                case .control, .format, .lineSeparator, .paragraphSeparator, .surrogate,
+                     .privateUse, .unassigned:
+                    false
+                default:
+                    $0 != "(" && $0 != ")"
+                }
             }.prefix(64))
             message += " by \(name.isEmpty ? "another program" : name) (PID \(holder.pid))."
         } else {
