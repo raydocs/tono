@@ -7,64 +7,48 @@ struct LinesSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var testing = false
-    @State private var headerHeight: CGFloat = 44
-    @State private var rowsHeight: CGFloat = 180
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let ax = typeSize.isAccessibilitySize
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 12) {
-                // At accessibility sizes title and button stack, and each row stacks, so nothing truncates.
-                (ax ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout())) {
-                    Text(L.t("lines_title")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
-                        .accessibilityAddTraits(.isHeader)
-                    if !ax { Spacer() }
-                    QuietButton(title: L.t("lines_test")) {
-                        guard !testing else { return }
-                        testing = true
-                        Task { await model.measureLatency(); testing = false }
-                    }
-                    .opacity(testing ? 0.5 : 1)
+            // At accessibility sizes title and button stack, and each row stacks, so nothing truncates.
+            (ax ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout())) {
+                Text(L.t("lines_title")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                if !ax { Spacer() }
+                QuietButton(title: L.t("lines_test")) {
+                    guard !testing else { return }
+                    testing = true
+                    Task { await model.measureLatency(); testing = false }
                 }
-                if let note = model.routeNote(full: true), model.routeChange?.requested.node != model.selectedNode {
-                    Text(note).tonoFont(14, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("lineNotApplied")
-                }
-                if model.usingCachedCatalog {
-                    Text(L.t("lines_cached")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
-                }
+                .opacity(testing ? 0.5 : 1)
             }
-            .background(heightProbe($headerHeight))
+            if let note = model.routeNote(full: true), model.routeChange?.requested.node != model.selectedNode {
+                Text(note).tonoFont(14, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("lineNotApplied")
+            }
+            if model.usingCachedCatalog {
+                Text(L.t("lines_cached")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
+            }
             ScrollView {
-                VStack(spacing: 0) {
-                    if model.lines.isEmpty {
-                        // Never an empty list without a word: loading says so, a failed load offers a retry.
-                        if model.catalogLoading { loading } else { empty }
-                    } else {
-                        LazyVStack(spacing: 6) {
-                            ForEach(model.lines) { line in row(line) }
-                        }
+                if model.lines.isEmpty {
+                    // Never an empty list without a word: loading says so, a failed load offers a retry.
+                    if model.catalogLoading { loading } else { empty }
+                } else {
+                    LazyVStack(spacing: 6) {
+                        ForEach(model.lines) { line in row(line) }
                     }
                 }
-                .background(heightProbe($rowsHeight))
             }
         }
         .padding(.horizontal, 20).padding(.top, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .modifier(SheetSurface())
-        .presentationDetents(ax || DebugAccessibility.largeSheets ? [.large] : [.height(min(420, headerHeight + rowsHeight + 50)), .large])
+        .presentationDetents(ax || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
         // One detent (accessibility sizes): nothing to drag between, so no grabber; a swipe still closes it.
         .presentationDragIndicator(ax || DebugAccessibility.largeSheets ? .hidden : .visible)
-    }
-
-    private func heightProbe(_ height: Binding<CGFloat>) -> some View {
-        GeometryReader { geo in
-            Color.clear
-                .onAppear { height.wrappedValue = geo.size.height }
-                .onChange(of: geo.size.height) { height.wrappedValue = $0 }
-        }
     }
 
     private var loading: some View {

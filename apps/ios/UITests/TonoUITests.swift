@@ -295,11 +295,11 @@ final class TonoUITests: XCTestCase {
         let app = launch("CONNECTED")
         let button = primary(app)
         let screen = app.windows.firstMatch.frame
-        let paths: [(entry: String, via: String?, marker: XCUIElement, swipeOrigin: XCUIElement)] = [
-            ("exitCapsule", nil, app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch, app.staticTexts["Lines"]),
-            ("detailsButton", nil, app.buttons["detailsSettings"], app.staticTexts["Details"]),
-            ("settingsButton", nil, app.buttons["settingsClose"], app.staticTexts["settingsModeWhere"]),
-            ("detailsButton", "detailsSettings", app.buttons["settingsClose"], app.staticTexts["settingsModeWhere"]),
+        let paths: [(entry: String, via: String?, marker: XCUIElement)] = [
+            ("exitCapsule", nil, app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch),
+            ("detailsButton", nil, app.buttons["detailsSettings"]),
+            ("settingsButton", nil, app.buttons["settingsClose"]),
+            ("detailsButton", "detailsSettings", app.buttons["settingsClose"]),
         ]
         for path in paths {
             let entry = app.buttons[path.entry]
@@ -312,7 +312,7 @@ final class TonoUITests: XCTestCase {
                 row.tap()
             }
             XCTAssertTrue(path.marker.waitForExistence(timeout: 6), "\(path.entry) → \(path.via ?? "-") did not open")
-            path.swipeOrigin.swipeDown(velocity: .fast)
+            app.swipeDown(velocity: .fast)
             waitHittable(button)
             XCTAssertFalse(path.marker.isHittable, "\(path.entry) → \(path.via ?? "-") still open after the swipe")
         }
@@ -333,7 +333,7 @@ final class TonoUITests: XCTestCase {
         sleep(2)
         app.activate()
         XCTAssertTrue(line.waitForExistence(timeout: 6), "the line picker should still be open after returning")
-        line.swipeDown(velocity: .fast)
+        app.swipeDown(velocity: .fast)
         waitHittable(button)
         waitLabel(button, "Disconnect", timeout: 10)
         XCTAssertEqual(title(app), "Connected")
