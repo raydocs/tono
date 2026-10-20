@@ -81,7 +81,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults)
     private var selectedLanguage = InterfaceLanguagePreference.simplifiedChinese
     @AppStorage(SettingsKey.desktopRoutingMode, store: AppProfile.defaults)
-    private var desktopRoutingMode = "stable"
+    private var desktopRoutingMode = "ai-home"
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
     @AppStorage(SettingsKey.localTrafficAuditEnabled)
     private var localTrafficAuditEnabled = true
@@ -183,7 +183,7 @@ struct SettingsView: View {
 
     private var routingCard: some View {
         SettingsCard(icon: "arrow.triangle.branch", title: "Routing mode") {
-            SettingRow(label: "Next connection", subtitle: "Stable is the default. A change is saved only for your next explicit disconnect and reconnect. It does not change the current session, disconnect you, or release protection.") {
+            SettingRow(label: "Next connection", subtitle: "AI Home is the default. Without a Home line on your account, Tono connects in Stable. A change is saved only for your next explicit disconnect and reconnect. It does not change the current session, disconnect you, or release protection.") {
                 settingsPicker(label: "Routing mode", selection: $desktopRoutingMode,
                                options: SettingsKey.desktopRoutingModeOptions)
                     .accessibilityIdentifier("settings.routingMode")
@@ -217,7 +217,9 @@ struct SettingsView: View {
 
     /// AI Home routes and passes the LAN whatever the setting says.
     private var aiHomeLANAlwaysOn: Bool {
-        desktopRoutingMode == "ai-home" || appState.coreRuntime.routingMode == "ai-home"
+        (desktopRoutingMode == "ai-home" && appState.managedCatalogRouting?.homeSocks5 != nil)
+            || (appState.coreRuntime.routingMode == "ai-home"
+                && appState.connectionCoordinator.capturedRoutingMode == "ai-home")
     }
 
     private var preferencesCard: some View {

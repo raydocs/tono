@@ -18,7 +18,7 @@ final class AIHomeRoutingModeTests: XCTestCase {
         savedArmed = KillSwitchService.isArmed
         savedSession = KillSwitchService.readAIHomeSession
         savedReader = LocalNetworkDevicesSync.readStoredSetting
-        savedKey = AppProfile.defaults.object(forKey: SettingsKey.aiHomeRoutingSession)
+        savedKey = AppProfile.defaults.object(forKey: SettingsKey.routingSession)
         savedStrict = AppProfile.defaults.object(forKey: "strictRoutingSessionIntent")
         AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
         LocalNetworkDevicesSync.readStoredSetting = { false }
@@ -31,8 +31,8 @@ final class AIHomeRoutingModeTests: XCTestCase {
         KillSwitchService.readAIHomeSession = savedSession
         LocalNetworkDevicesSync.readStoredSetting = savedReader
         LocalNetworkDevicesSync.resetForTesting()
-        if let savedKey { AppProfile.defaults.set(savedKey, forKey: SettingsKey.aiHomeRoutingSession) }
-        else { AppProfile.defaults.removeObject(forKey: SettingsKey.aiHomeRoutingSession) }
+        if let savedKey { AppProfile.defaults.set(savedKey, forKey: SettingsKey.routingSession) }
+        else { AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession) }
         if let savedStrict { AppProfile.defaults.set(savedStrict, forKey: "strictRoutingSessionIntent") }
         else { AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent") }
         super.tearDown()
@@ -53,6 +53,17 @@ final class AIHomeRoutingModeTests: XCTestCase {
     func testAIHomeIsAnAdmittedModeAndSendsTheScopeFieldOnlyForItsSession() throws {
         XCTAssertEqual(try DesktopRoutingModeAdmission.capture("ai-home"), "ai-home")
         XCTAssertThrowsError(try DesktopRoutingModeAdmission.capture("AI-Home"))
+        // Decision 131: never chosen means AI Home, and without a Home line
+        // the session runs Stable. Every saved choice is kept.
+        XCTAssertEqual(try DesktopRoutingModeAdmission.capture(nil), "ai-home")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.capture("stable"), "stable")
+        XCTAssertEqual(DesktopRoutingModeAdmission.effective("ai-home", homeAvailable: true), "ai-home")
+        XCTAssertEqual(DesktopRoutingModeAdmission.effective("ai-home", homeAvailable: false), "stable")
+        XCTAssertEqual(DesktopRoutingModeAdmission.effective("three-tier", homeAvailable: false), "three-tier")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.admit(held: nil, saved: nil, homeAvailable: false), "stable")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.admit(held: nil, saved: nil, homeAvailable: true), "ai-home")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.admit(held: "ai-home", saved: "stable", homeAvailable: false), "ai-home",
+                       "a held session keeps AI Home before the catalog loads")
         XCTAssertEqual(HelperManager.aiHomeArmFields(true) as NSDictionary, ["aiHomeScoped": true])
         XCTAssertTrue(HelperManager.aiHomeArmFields(false).isEmpty, "other sessions send nothing")
     }
@@ -61,11 +72,11 @@ final class AIHomeRoutingModeTests: XCTestCase {
     func testCaptureRecordsTheSessionModeForEveryLaterArm() throws {
         let runtime = CoreRuntimeManager()
         try runtime.captureRoutingMode("ai-home", physicalInterface: "en0")
-        XCTAssertTrue(AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession))
+        XCTAssertEqual(AppProfile.defaults.string(forKey: SettingsKey.routingSession), "ai-home")
         XCTAssertTrue(KillSwitchService.readAIHomeSession())
         XCTAssertEqual(CoreRuntimeManager().routingMode, "ai-home", "a relaunch inside the session keeps it")
         try runtime.captureRoutingMode("stable", physicalInterface: nil)
-        XCTAssertFalse(AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession))
+        XCTAssertEqual(AppProfile.defaults.string(forKey: SettingsKey.routingSession), "stable")
         XCTAssertFalse(KillSwitchService.readAIHomeSession())
     }
 
@@ -118,7 +129,8 @@ final class AIHomeRoutingModeTests: XCTestCase {
     @MainActor
     func testRelaunchRestoresOneSessionModeEverywhereAndStrictWins() {
         let production = savedSession
-        AppProfile.defaults.set(true, forKey: SettingsKey.aiHomeRoutingSession)
+        KillSwitchService.isArmed = false
+        AppProfile.defaults.set("ai-home", forKey: SettingsKey.routingSession)
         XCTAssertEqual(DesktopRoutingModeAdmission.persistedSession(), "ai-home")
         XCTAssertEqual(ConnectionCoordinator().capturedRoutingMode, "ai-home",
                        "reconnect admission keeps the AI Home session, not the next preference")
@@ -139,6 +151,55 @@ final class AIHomeRoutingModeTests: XCTestCase {
         XCTAssertNil(coordinator.capturedRoutingMode)
         XCTAssertNil(DesktopRoutingModeAdmission.persistedSession(), "an explicit release ends the AI Home record")
         XCTAssertFalse(production())
+    }
+
+    /// Decision 131 review P1: a Stable session (the no-Home fallback, or one
+    /// armed by a build before the record existed) stays Stable across a
+    /// relaunch even once the account gains a Home line.
+    @MainActor
+    func testRelaunchKeepsAStableSessionAfterTheHomeLineAppears() throws {
+        KillSwitchService.isArmed = false
+        let saved = AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode)
+        defer {
+            if let saved { AppProfile.defaults.set(saved, forKey: SettingsKey.desktopRoutingMode) }
+            else { AppProfile.defaults.removeObject(forKey: SettingsKey.desktopRoutingMode) }
+        }
+        AppProfile.defaults.removeObject(forKey: SettingsKey.desktopRoutingMode)
+        let fallback = try DesktopRoutingModeAdmission.admit(held: nil, saved: nil, homeAvailable: false)
+        try CoreRuntimeManager().captureRoutingMode(fallback, physicalInterface: nil)
+        let relaunched = ConnectionCoordinator()
+        XCTAssertEqual(relaunched.capturedRoutingMode, "stable")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.admit(
+            held: relaunched.capturedRoutingMode, saved: nil, homeAvailable: true
+        ), "stable", "the Home line appearing does not change a held session")
+
+        relaunched.retireCapturedRoutingMode()
+        XCTAssertNil(DesktopRoutingModeAdmission.persistedSession())
+        KillSwitchService.isArmed = true
+        XCTAssertEqual(DesktopRoutingModeAdmission.persistedSession(), "stable",
+                       "an armed session from before the record existed ran Stable")
+        KillSwitchService.isArmed = false
+    }
+
+    /// Review P2: a connect cancelled by an explicit Disconnect can record its
+    /// mode after the request retired it. The queue retires it again once that
+    /// work drained, so a relaunch holds no session.
+    @MainActor
+    func testExplicitReleaseRetiresARecordWrittenByDrainedConnectWork() async {
+        KillSwitchService.isArmed = false
+        AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let staleConnect = Task { @MainActor in
+            for await _ in gate { break }
+            AppProfile.defaults.set("stable", forKey: SettingsKey.routingSession)
+        }
+        let coordinator = ConnectionCoordinator()
+        coordinator.enqueueDisconnect(waitingFor: [staleConnect], releaseIntent: true) { _ in }
+        open.yield()
+        open.finish()
+        await coordinator.finishPendingDisconnect()
+        XCTAssertNil(AppProfile.defaults.object(forKey: SettingsKey.routingSession))
+        XCTAssertNil(ConnectionCoordinator().capturedRoutingMode)
     }
 
     func testHelperReportedFaultKeepsTheAIHomeClassification() {

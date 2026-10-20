@@ -65,18 +65,18 @@ final class ConnectionCoordinator {
     /// is refused by the helper instead of touching the next one.
     private(set) var helperSession = HelperSessionGeneration()
 
+    /// An explicit release ends the session's mode. Its record goes with it:
+    /// a later arm is a new connect's, which captures again. Strict intent
+    /// stays until Restore internet is confirmed.
+    func retireCapturedRoutingMode() {
+        capturedRoutingMode = nil
+        AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession)
+    }
+
     /// Retires every task of the current session for a preemptive Restore
     /// internet. Nothing is awaited: the release service ends the old
     /// writers, and the earlier session's late helper requests carry its
     /// generation. Teardowns still queued cannot publish over the result.
-    /// An explicit release ends the session's mode. The AI Home record goes
-    /// with it: a later arm is a new connect's, which captures again. Strict
-    /// intent stays until Restore internet is confirmed.
-    func retireCapturedRoutingMode() {
-        capturedRoutingMode = nil
-        AppProfile.defaults.removeObject(forKey: SettingsKey.aiHomeRoutingSession)
-    }
-
     func beginPreemptiveRelease() {
         retireCapturedRoutingMode()
         bumpGeneration()
@@ -140,6 +140,12 @@ final class ConnectionCoordinator {
         disconnectSequence = Task {
             await previousDisconnect?.value
             for task in pendingTasks { await task.value }
+            // Cancelled work drained: a connect past its last check may still
+            // have recorded its mode. No new connect captures before this
+            // queue finishes (`connectAfterDisconnect`).
+            if disposition == .explicit {
+                AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession)
+            }
             await HelperSessionGeneration.$current.withValue(session) {
                 await operation(requestID)
             }

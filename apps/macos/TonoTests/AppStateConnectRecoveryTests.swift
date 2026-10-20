@@ -46,18 +46,21 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         let defaults = AppProfile.defaults
         let mode = defaults.object(forKey: SettingsKey.desktopRoutingMode)
         let strictIntent = defaults.object(forKey: "strictRoutingSessionIntent")
+        let session = defaults.object(forKey: SettingsKey.routingSession)
         let selection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
         let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
         defer {
             saved.restore()
             defaults.set(mode, forKey: SettingsKey.desktopRoutingMode)
             defaults.set(strictIntent, forKey: "strictRoutingSessionIntent")
+            defaults.set(session, forKey: SettingsKey.routingSession)
             defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
             RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
         }
         RuntimeCleanup.nativeUpdateBlocksConnect = false
         KillSwitchService.isArmed = false
         defaults.removeObject(forKey: "strictRoutingSessionIntent")
+        defaults.removeObject(forKey: SettingsKey.routingSession)
         defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
         let app = makeApp()
         defer {

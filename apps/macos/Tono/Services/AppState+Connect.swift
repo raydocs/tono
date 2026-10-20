@@ -90,9 +90,12 @@ extension AppState {
                     // Recovery belongs to the admitted session, not the next
                     // preference saved in Settings. A fresh boot without held
                     // strict intent still uses the saved mode as before.
-                    capturedRoutingMode = try DesktopRoutingModeAdmission.capture(
-                        self.connectionCoordinator.capturedRoutingMode.map { $0 as Any }
-                            ?? AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode)
+                    // The Home-line fallback applies to a new session only: a
+                    // held session keeps its mode even before the catalog loads.
+                    capturedRoutingMode = try DesktopRoutingModeAdmission.admit(
+                        held: self.connectionCoordinator.capturedRoutingMode,
+                        saved: AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode),
+                        homeAvailable: self.managedCatalogRouting?.homeSocks5 != nil
                     )
                 } catch {
                     self.errorMessage = error.localizedDescription
@@ -270,6 +273,9 @@ extension AppState {
                     physicalInterface = await PrivilegedRuntimeCoordinator.shared
                         .primaryNetworkInterface()
                 }
+                // A Disconnect during the queries above retired this session's
+                // record; a cancelled attempt must not write it back.
+                try Task.checkCancellation()
                 try coreRuntime.captureRoutingMode(capturedRoutingMode, physicalInterface: physicalInterface)
                 let policyIsEmpty = trafficPolicy.domains.isEmpty
                     && trafficPolicy.webDomains.isEmpty
