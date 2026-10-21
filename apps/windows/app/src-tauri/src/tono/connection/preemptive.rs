@@ -22,35 +22,10 @@ pub(crate) const RESTORE_BUSY_PREFIX: &str = "TONO_RESTORE_BUSY";
 pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use crate::core::service::{PreemptiveRelease, tono_restore_internet_preemptively};
-
         // From here no connect or reconnect task starts the Core until the user clicks Connect.
         // The ticket is this click's, taken before the first wait (Sol R3-F1 on PR #1569).
         let ticket = crate::core::service::raise_release_fence();
-        {
-            let mut inner = state.lock().await;
-            if !begin_restore(&mut inner, &ticket) {
-                logging!(info, Type::Service, "Tono: 恢复网络在开始前已被更新的操作取代，不再改动状态");
-                return Ok(());
-            }
-            commands::emit_status(&app, &commands::status_of(&inner));
-        }
-        match tono_restore_internet_preemptively(ticket).await {
-            PreemptiveRelease::Answered(report) => settle(&state, &app, ticket, report).await,
-            PreemptiveRelease::Superseded => {
-                logging!(info, Type::Service, "Tono: 恢复网络已被更新的操作取代，不再改动状态");
-                Ok(())
-            }
-            PreemptiveRelease::Unavailable(reason) => {
-                logging!(
-                    warn,
-                    Type::Service,
-                    "Tono: 解除服务不可用，改走普通释放: {reason}"
-                );
-                // Still this Restore's: refused once a newer Connect or Restore has begun.
-                super::disconnect_for_restore(state, app, ticket).await
-            }
-        }
+        restore_owned(state, app, ticket).await.map(|_| ())
     }
     #[cfg(not(windows))]
     {
@@ -58,19 +33,71 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
     }
 }
 
-/// The Restore internet a Connect runs when admission found the last one unfinished. The release
-/// service answers at its deadline with whatever is known and keeps working, so an `unknown`
-/// answer waits for that release to end: the Connect after it is the one admission judges.
-pub(super) async fn restore_for_unfinished_release(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
-    let error = match restore_internet(state, app).await {
-        Ok(()) => return Ok(()),
-        Err(error) => error,
-    };
-    #[cfg(windows)]
-    if error.starts_with(RESTORE_UNKNOWN_PREFIX) && crate::core::service::wait_release_worker_finished().await {
-        return Ok(());
+/// Restore internet under `ticket`, already raised. `Ok(false)`: a newer Restore or Connect took
+/// the epoch first, and this one changed nothing it owns.
+#[cfg(windows)]
+async fn restore_owned(
+    state: Arc<TonoState>, app: AppHandle, ticket: crate::core::service::ReleaseTicket,
+) -> Result<bool, String> {
+    use crate::core::service::{PreemptiveRelease, tono_restore_internet_preemptively};
+
+    {
+        let mut inner = state.lock().await;
+        if !begin_restore(&mut inner, &ticket) {
+            logging!(info, Type::Service, "Tono: 恢复网络在开始前已被更新的操作取代，不再改动状态");
+            return Ok(false);
+        }
+        commands::emit_status(&app, &commands::status_of(&inner));
     }
-    Err(error)
+    match tono_restore_internet_preemptively(ticket).await {
+        PreemptiveRelease::Answered(report) => settle(&state, &app, ticket, report).await,
+        PreemptiveRelease::Superseded => {
+            logging!(info, Type::Service, "Tono: 恢复网络已被更新的操作取代，不再改动状态");
+            Ok(false)
+        }
+        PreemptiveRelease::Unavailable(reason) => {
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: 解除服务不可用，改走普通释放: {reason}"
+            );
+            // Still this Restore's: refused once a newer Connect or Restore has begun.
+            super::disconnect_for_restore(state, app, ticket).await.map(|()| true)
+        }
+    }
+}
+
+/// The Restore internet a Connect refused as unfinished runs for itself, under that Connect's
+/// `claim`: it starts only while the claim still owns the epoch. The release service answers at
+/// its deadline with whatever is known and keeps working, so an `unknown` answer waits for that
+/// release to end. `Some(ticket)`: the follow-up Connect may claim after this Restore; `None`: a
+/// Restore or Connect the user began meanwhile owns the epoch, and the sequence stops.
+pub(super) async fn restore_for_unfinished_release(
+    state: Arc<TonoState>, app: AppHandle, claim: crate::core::service::ReleaseTicket,
+) -> Result<Option<crate::core::service::ReleaseTicket>, String> {
+    #[cfg(windows)]
+    {
+        let Some(ticket) = crate::core::service::raise_release_fence_after(&claim) else {
+            return Ok(None);
+        };
+        match restore_owned(state, app, ticket).await {
+            Ok(true) => Ok(Some(ticket)),
+            Ok(false) => Ok(None),
+            Err(error)
+                if error.starts_with(RESTORE_UNKNOWN_PREFIX)
+                    && crate::core::service::release_ticket_current(&ticket)
+                    && crate::core::service::wait_release_worker_finished().await =>
+            {
+                Ok(Some(ticket))
+            }
+            Err(error) => Err(error),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = claim;
+        restore_internet(state, app).await.map(|()| None)
+    }
 }
 
 /// Restore's first change: retire every connection task and begin the disconnect, but only while
@@ -98,7 +125,7 @@ async fn settle(
     app: &AppHandle,
     ticket: crate::core::service::ReleaseTicket,
     report: tono_service_protocol::release_wire::ReleaseReport,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     logging!(
         info,
         Type::Service,
@@ -116,7 +143,7 @@ async fn settle(
     let mut inner = state.lock().await;
     if !crate::core::service::release_ticket_current(&ticket) {
         logging!(info, Type::Service, "Tono: 旧的恢复网络结果已被更新的操作取代，不再改动状态");
-        return Ok(());
+        return Ok(false);
     }
     let result = if report.outcome == "restored" {
         inner.fsm.sign_out_or_quit();
@@ -151,7 +178,7 @@ async fn settle(
     if let Err(failure) = &result {
         state.audit().log(crate::tono::audit::AuditEvent::ReleaseFail { error: failure.clone() });
     }
-    result
+    result.map(|()| true)
 }
 
 /// The sentence behind each outcome that is not `restored`. The components named are the ones
