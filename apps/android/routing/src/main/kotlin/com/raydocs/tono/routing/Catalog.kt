@@ -162,7 +162,7 @@ object CatalogAdmission {
             val port = (s["port"] as? Number)?.toInt()
             val user = s["username"] as? String
             val pass = s["password"] as? String
-            if (host == null || !Net.isPublicIpv4(host) || port == null || port !in 1..65535 ||
+            if (host == null || !(Net.isPublicIpv4(host) || Net.isPublicHostname(host)) || port == null || port !in 1..65535 ||
                 user.isNullOrEmpty() || pass.isNullOrEmpty() || user.length > 255 || pass.length > 255
             ) throw CatalogRejected("HOME_SOCKS", "assigned home exit is malformed")
             HomeSocks5(host, port, user, pass)
@@ -205,6 +205,26 @@ object Net {
             (b[0] == 203 && b[1] == 0 && b[2] == 113) ||
             (b[0] == 192 && b[1] == 31 && b[2] == 196) || (b[0] == 192 && b[1] == 52 && b[2] == 193) ||
             (b[0] == 192 && b[1] == 88 && b[2] == 99) || (b[0] == 192 && b[1] == 175 && b[2] == 48))
+    }
+
+    /**
+     * Desktop `publicHostname`: Home lines are usually a provider gateway name (`isp.decodo.com`), dialled
+     * through `Tono-Exit`, so the cloud node resolves it. Only an ordinary lowercase DNS name, never a
+     * special-use suffix or an all-numeric form that inet_aton reads as an IP (`127.0.0.0x1`).
+     */
+    fun isPublicHostname(text: String): Boolean {
+        val labels = text.split('.')
+        if (text.length > 253 || labels.size < 2 ||
+            !labels.all { l -> l.length in 1..63 && !l.startsWith('-') && !l.endsWith('-') && l.all { c -> c in 'a'..'z' || c in '0'..'9' || c == '-' } } ||
+            labels.last().none { it in 'a'..'z' }
+        ) return false
+        val numeric = labels.all { l ->
+            val hex = l.startsWith("0x")
+            l.removePrefix("0x").all { c -> c in '0'..'9' || (hex && c in 'a'..'f') }
+        }
+        val reserved = listOf("localhost", "local", "internal", "arpa", "invalid", "onion", "alt", "test", "example",
+            "example.com", "example.net", "example.org")
+        return !numeric && reserved.none { text == it || text.endsWith(".$it") } && labels.first() != "localhost"
     }
 
     fun ipv4InCidr(ip: String, cidr: String): Boolean {

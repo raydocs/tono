@@ -75,6 +75,23 @@ class CatalogTest {
     }
 
     @Test
+    fun admitsGatewayHostnameHomeLinesButNotSpecialUseOrNumericNames() {
+        fun admit(host: String) = Fixtures.catalog(CatalogRouting(homeSocks5 = Fixtures.socks.copy(host = host)))
+        val gateway = admit("isp.decodo.com").home as HomeTarget.Socks5
+        assertEquals("isp.decodo.com", gateway.socks.host)
+        @Suppress("UNCHECKED_CAST")
+        val outbounds = Fixtures.config(routing = CatalogRouting(homeSocks5 = gateway.socks))["outbounds"] as List<Map<String, Any?>>
+        val outbound = outbounds.single { it["tag"] == SingBoxConfig.HOME_SOCKS_TAG }
+        assertEquals("isp.decodo.com", outbound["server"])
+        assertEquals(SingBoxConfig.EXIT_TAG, outbound["detour"])
+        for (host in listOf("ISP.decodo.com", "decodo", "isp.decodo.com.", "-isp.decodo.com", "isp_x.decodo.com", "127.0.0.0x1",
+            "0x7f.0.0.1", "1.2.3", "localhost.decodo.com", "gw.localhost", "gw.local", "gw.internal", "gw.test", "example.com",
+            "gw.example.org", "x.onion", "1.1.1.1.in-addr.arpa", "192.168.1.2")) {
+            assertEquals(host, "HOME_SOCKS", assertThrows(CatalogRejected::class.java) { admit(host) }.code)
+        }
+    }
+
+    @Test
     fun unboundAccountHasNoHomeTarget() {
         val catalog = Fixtures.catalog(routing = null)
         assertNull(catalog.home)
