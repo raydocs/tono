@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import type { TonoStatus } from '@/services/tono'
 
@@ -13,6 +13,9 @@ const native = vi.hoisted(() => ({
 vi.mock('@/hooks/use-tono', () => ({
   useTonoStatus: () => ({ status: native.status }),
 }))
+beforeEach(() => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+})
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -26,14 +29,14 @@ it('keeps one scene across a route visit; a connection made away plays its sunri
     removeEventListener: vi.fn(),
   }))
   const { container, rerender } = render(
-    <SeaBackdrop enabled active>
+    <SeaBackdrop enabled active dimmed={false}>
       <span>Home</span>
     </SeaBackdrop>,
   )
   const scene = container.querySelector('.sea-scene')
   expect(scene?.getAttribute('data-phase')).toBe('connecting')
   rerender(
-    <SeaBackdrop enabled active={false}>
+    <SeaBackdrop enabled active={false} dimmed>
       <span>Servers</span>
     </SeaBackdrop>,
   )
@@ -42,7 +45,7 @@ it('keeps one scene across a route visit; a connection made away plays its sunri
     killSwitch: { wanted: true, live: true },
   } as TonoStatus
   rerender(
-    <SeaBackdrop enabled active={false}>
+    <SeaBackdrop enabled active={false} dimmed>
       <span>Servers</span>
     </SeaBackdrop>,
   )
@@ -51,7 +54,7 @@ it('keeps one scene across a route visit; a connection made away plays its sunri
   expect(scene?.getAttribute('data-paused')).toBe('false')
   expect(scene?.getAttribute('data-arrival')).toBe('true')
   rerender(
-    <SeaBackdrop enabled active>
+    <SeaBackdrop enabled active dimmed={false}>
       <span>Home</span>
     </SeaBackdrop>,
   )
@@ -76,16 +79,40 @@ it('drops a home that is gone instead of keeping its sunrise without live protec
     return null
   }
   const { container, rerender } = render(
-    <SeaBackdrop enabled active>
+    <SeaBackdrop enabled active dimmed={false}>
       <Home />
     </SeaBackdrop>,
   )
   rerender(
-    <SeaBackdrop enabled active>
+    <SeaBackdrop enabled active dimmed={false}>
       <span>Error</span>
     </SeaBackdrop>,
   )
   expect(
     container.querySelector('.sea-scene')?.getAttribute('data-phase'),
   ).not.toBe('connected')
+})
+
+it('holds the unseen backdrop on sign-in and the intro, and moves again on Home', () => {
+  vi.stubGlobal('CSS', { supports: () => true })
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  native.status = { uiState: 'notConnected' } as TonoStatus
+  const { container, rerender } = render(
+    <SeaBackdrop enabled active={false} dimmed={false}>
+      <span>Sign in</span>
+    </SeaBackdrop>,
+  )
+  const scene = container.querySelector('.sea-scene')
+  expect(scene?.getAttribute('data-paused')).toBe('true')
+  rerender(
+    <SeaBackdrop enabled active dimmed={false}>
+      <span>Home</span>
+    </SeaBackdrop>,
+  )
+  expect(container.querySelector('.sea-scene')).toBe(scene)
+  expect(scene?.getAttribute('data-paused')).toBe('false')
 })

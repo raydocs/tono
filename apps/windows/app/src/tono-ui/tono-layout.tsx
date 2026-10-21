@@ -295,6 +295,7 @@ const TonoLayout = () => {
         <SeaBackdrop
           enabled={newAppearance && !isTrayRoute}
           active={isDashboardRoute}
+          dimmed={seaBackdropDimmed(location.pathname, newAppearance)}
         >
           {!isTrayRoute && !newAppearance && <MeshBackground dark={isDark} />}
           {!isTrayRoute && newAppearance && !isDashboardRoute && (

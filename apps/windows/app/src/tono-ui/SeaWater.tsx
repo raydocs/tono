@@ -350,7 +350,7 @@ const start = (scene: HTMLElement, canvas: HTMLCanvasElement) => {
   }
 }
 
-/** Mounted only at full quality; `running` false (hidden window) holds the last frame. */
+/** Mounted only at full quality; `running` false (window hidden or in the background) holds the last frame. */
 export const SeaWaterCanvas = ({
   sceneRef,
   running,

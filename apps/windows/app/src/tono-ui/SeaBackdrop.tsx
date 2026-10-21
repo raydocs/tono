@@ -8,14 +8,18 @@ import { BackdropContext, type Presentation } from './use-shared-sea-backdrop'
 
 /** Only scenery survives navigation; hidden pages keep no handlers or subscriptions.
  *  The scene keeps animating behind inner pages, where it shows dimmed; the
- *  motion preference and the quality probe still decide whether it moves at all. */
+ *  motion preference and the quality probe still decide whether it moves at all.
+ *  Sign-in and the intro draw their own scene over a transparent backdrop, so
+ *  the backdrop holds still there instead of rendering a second, unseen sea. */
 export const SeaBackdrop = ({
   enabled,
   active,
+  dimmed,
   children,
 }: {
   enabled: boolean
   active: boolean
+  dimmed: boolean
   children: ReactNode
 }) => {
   const { status } = useTonoStatus()
@@ -36,6 +40,7 @@ export const SeaBackdrop = ({
           progress={
             'progress' in presentation ? presentation.progress : undefined
           }
+          paused={!active && !dimmed}
         />
       </div>
       {children}
