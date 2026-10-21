@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,9 +56,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -109,6 +112,9 @@ fun primaryActionFor(p: Phase): PrimaryAction = when (p) {
 /** The phases in which the engine may hold, or be bringing up or down, a tunnel. */
 private val TUNNEL_PHASES = setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED, Phase.DISCONNECTING)
 
+/** The phases whose reason code Home states in its status line (Details explains it). */
+private val REASON_PHASES = setOf(Phase.FAILED, Phase.DEGRADED, Phase.NEEDS_PERMISSION, Phase.IDLE)
+
 /**
  * What the primary does while the engine's word is not current: stop, if the last word was a
  * tunnel (the stop request reaches the engine without its binder), otherwise connect.
@@ -155,10 +161,9 @@ fun HomeScreen(
                             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
                             .padding(horizontal = 20.dp).padding(bottom = 8.dp),
                     ) {
-                        StateHeader(s, link, headlineAlpha)
-                        Spacer(Modifier.height(6.dp))
+                        StateHeader(s, link, headlineAlpha, onOpenDetails)
                         LineRow(s, onOpenLines, live = !unconfirmed)
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(8.dp))
                         PrimaryCapsule(s, onConnect, onDisconnect, link)
                         Spacer(Modifier.height(12.dp))
                         Footer(s, onOpenDetails, onOpenSettings, link)
@@ -181,8 +186,13 @@ private fun TopBar() {
     }
 }
 
+/**
+ * The state word and its subtitle. A short reason is a 48 dp row that opens Details (the full reason
+ * and its one action), with a chevron so it is seen to be tappable, as on iOS; every other status is
+ * plain text. The same geometry in every state, so the rhythm never shifts between them.
+ */
 @Composable
-private fun StateHeader(s: EngineSnapshot, link: EngineLink, headlineAlpha: Float) {
+private fun StateHeader(s: EngineSnapshot, link: EngineLink, headlineAlpha: Float, onOpenDetails: () -> Unit) {
     val unconfirmed = link != EngineLink.LIVE
     val title = if (unconfirmed) stringResource(R.string.surface_unknown) else phaseTitle(s.phase)
     val line = when (link) {
@@ -201,19 +211,44 @@ private fun StateHeader(s: EngineSnapshot, link: EngineLink, headlineAlpha: Floa
         run {
             Text(title, style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light), color = TonoColors.TextPrimary, modifier = Modifier.graphicsLayer { alpha = headlineAlpha }.semantics { heading() })
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         run {
             val text = line
             val c = tone
-            Row(verticalAlignment = Alignment.Top, modifier = Modifier.heightIn(min = 22.dp)) {
+            val opensDetails = !unconfirmed && s.reasonCode != null && s.phase in REASON_PHASES
+            val details = stringResource(R.string.details)
+            val source = remember { MutableInteractionSource() }
+            val pressed by source.collectIsPressedAsState()
+            val scale by animateFloatAsState(if (pressed && opensDetails) 0.97f else 1f, TonoMotion.press, label = "press")
+            val shape = RoundedCornerShape(14.dp)
+            val firstLine = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() }
+            // 8 dp of breathing room inside the focus ring, offset back so the dot stays on the left edge.
+            Row(
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier
+                    .then(
+                        if (opensDetails) {
+                            Modifier.offset(x = (-8).dp).scale(scale).focusRing(source, shape)
+                                .clickable(source, indication = null, role = Role.Button, onClickLabel = details, onClick = onOpenDetails)
+                                .padding(horizontal = 8.dp)
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .heightIn(min = 48.dp).padding(vertical = 12.dp),
+            ) {
                 // The dot sits on the first line, also when large text wraps the reason to two.
                 if (c != null) {
-                    val line = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() }
-                    Box(Modifier.height(line), contentAlignment = Alignment.Center) { StatusDot(c, size = 7) }
+                    Box(Modifier.height(firstLine), contentAlignment = Alignment.Center) { StatusDot(c, size = 7) }
                     Spacer(Modifier.width(8.dp))
                 }
                 // Up to two lines: at large font sizes the exit or reason wraps instead of being cut off.
-                Text(text ?: "", style = MaterialTheme.typography.bodyLarge, color = if (c != null) TonoColors.TextPrimary else TonoColors.TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // The subtitle's tone throughout: the dot carries the alert, the line stays a subtitle.
+                Text(text ?: "", style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (opensDetails) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.height(firstLine), contentAlignment = Alignment.Center) { GlyphIcon(Glyph.CHEVRON_RIGHT, TonoColors.TextTertiary, size = 16.dp) }
+                }
             }
         }
     }
@@ -222,7 +257,7 @@ private fun StateHeader(s: EngineSnapshot, link: EngineLink, headlineAlpha: Floa
 /** One short line under the state word: the exit when connected, the short reason otherwise. */
 @Composable
 fun statusLine(s: EngineSnapshot): String? {
-    s.reasonCode?.let { if (s.phase in setOf(Phase.FAILED, Phase.DEGRADED, Phase.NEEDS_PERMISSION, Phase.IDLE)) return shortReason(it) }
+    s.reasonCode?.let { if (s.phase in REASON_PHASES) return shortReason(it) }
     return when (s.phase) {
         Phase.IDLE -> stringResource(R.string.sentence_idle)
         Phase.NEEDS_PERMISSION -> stringResource(R.string.sentence_permission_short)
@@ -289,10 +324,14 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
     }
     val clickLabel = if (action == PrimaryAction.CANCEL) stringResource(R.string.a11y_cancel_connect) else label
     val stateText = if (unconfirmed) stringResource(R.string.surface_unknown) else phaseTitle(s.phase)
-    val labelColor = if (warm) Color(0xFF2A1406) else TonoColors.TextPrimary
+    val ink = Color(0xFF2A1406)
+    val labelColor = if (warm) ink else TonoColors.TextPrimary
     val shape = RoundedCornerShape(28.dp)
-    // While the tunnel is up the primary keeps a warm rim, so it outranks the exit pill without shouting.
+    // While the tunnel is up the glass takes the rose of the sky, a warm wash and a warm hairline all
+    // round (iOS: rose tint, sunMid edge), so the capsule outranks the dock without shouting.
     val rimColor by animateColorAsState(if (tunnelUp) TonoColors.SunMid else Color.White, tween(350), label = "rim")
+    val tint by animateColorAsState(if (tunnelUp) Color(0xFF5A2E52) else TonoColors.Smoke, tween(350), label = "tint")
+    val warmth by animateFloatAsState(if (tunnelUp) 1f else 0f, if (reduce) tween(0) else tween(350), label = "warmth")
 
     Glass(
         shape,
@@ -302,26 +341,21 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
             .offset(x = nudge.value.dp)
             .scale(scale)
             .testTag("primary"),
+        tint = tint,
         tintAlpha = 0.32f,
         rimColor = rimColor,
     ) {
         // Background and safety label switch together; no low-contrast intermediate color.
         // matchParentSize, not fillMaxSize: Home scrolls at large text, so the height is unbounded here.
         Box(Modifier.matchParentSize().graphicsLayer { alpha = warmAlpha }.background(TonoColors.ActionFill))
-        // Sunrise progress: a soft band whose leading edge glows like the sun's rim, rounded to the capsule.
+        Box(Modifier.matchParentSize().graphicsLayer { alpha = warmth }.background(TonoColors.SunMid.copy(alpha = 0.10f)).border(1.dp, TonoColors.SunMid.copy(alpha = 0.30f), shape))
+        // Sunrise progress: the Connect capsule's own peach, opaque, ending in the capsule's own round
+        // end (as iOS). A translucent warm wash over the dark glass read as a muddy brown bar on device.
         Box(Modifier.matchParentSize()) {
             Box(
                 Modifier.fillMaxHeight().fillMaxWidth(fill.coerceIn(0.001f, 1f)).graphicsLayer { alpha = fillAlpha }
                     .clip(shape)
-                    // A thin wash with a narrow bright edge: wide warm stops read as a muddy brown bar on device.
-                    .background(
-                        Brush.horizontalGradient(
-                            0f to Color.Transparent,
-                            0.55f to TonoColors.SunMid.copy(alpha = 0.16f),
-                            0.9f to TonoColors.SunMid.copy(alpha = 0.42f),
-                            1f to TonoColors.SunCore.copy(alpha = 0.85f),
-                        ),
-                    ),
+                    .background(Brush.horizontalGradient(listOf(Color(0xFFFF9E6B), Color(0xFFFFD6A3)))),
             )
         }
         Row(
@@ -355,6 +389,19 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
             if (s.connectedSinceMs > 0) since[0] = s.connectedSinceMs
             AnimatedVisibility(tunnelUp && s.connectedSinceMs > 0, enter = fadeIn(tween(220, delayMillis = 240)), exit = fadeOut(tween(120))) {
                 ConnectedTimer(since[0])
+            }
+        }
+        // The label again in ink, only over the filled part: white on the peach read 3-4:1 (iOS round
+        // 11), ink on it 8.6:1 or more. Decorative, outside semantics and touch; the white label and
+        // the clickable row above carry both.
+        if (!warm) {
+            Box(
+                Modifier.matchParentSize().clearAndSetSemantics { }.graphicsLayer { alpha = fillAlpha }
+                    .drawWithContent { clipRect(right = size.width * fill.coerceIn(0f, 1f)) { this@drawWithContent.drawContent() } },
+            ) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = ink, modifier = Modifier.weight(1f))
+                }
             }
         }
     }
@@ -415,8 +462,6 @@ private fun LineRow(s: EngineSnapshot, onOpenLines: () -> Unit, live: Boolean) {
 @Composable
 private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings: () -> Unit, link: EngineLink) {
     val tunnelUp = link == EngineLink.LIVE && s.tunnelUp
-    val attention = link == EngineLink.LIVE && (s.usingCachedCatalog || s.phase == Phase.DEGRADED ||
-        (tunnelUp && (s.homeProbe.state == ProbeState.FAILED || s.cloudProbe.state == ProbeState.FAILED)))
     val settings = stringResource(R.string.settings_title)
     val gearSource = remember { MutableInteractionSource() }
     val detailsSource = remember { MutableInteractionSource() }
@@ -442,7 +487,8 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings:
                     Modifier.focusRing(detailsSource, RoundedCornerShape(24.dp)).clickable(detailsSource, LocalIndication.current, role = Role.Button, onClick = onOpenDetails).heightIn(min = 48.dp).padding(start = 14.dp, end = 14.dp).testTag("details"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (attention) { StatusDot(TonoColors.Warning, size = 6); Spacer(Modifier.width(7.dp)) }
+                    // No attention dot here: the status row above already carries the one tinted dot
+                    // and opens Details itself.
                     Text(stringResource(R.string.details), style = MaterialTheme.typography.labelLarge, color = TonoColors.TextPrimary)
                     Spacer(Modifier.width(6.dp))
                     GlyphIcon(Glyph.CHEVRON_UP, TonoColors.TextSecondary, size = 14.dp)
