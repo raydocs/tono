@@ -6,7 +6,12 @@ import Foundation
 enum SettingsKey {
     /// Next explicit connection only; the runtime owns its captured session mode.
     nonisolated static let desktopRoutingMode = "desktopRoutingMode"
-    nonisolated static let desktopRoutingModeOptions = ["stable", "three-tier"]
+    nonisolated static let desktopRoutingModeOptions = ["stable", "three-tier", "ai-home"]
+    /// The mode the runtime last captured, as one of the options (decisions
+    /// 130, 131). Written when a connect captures its mode, so every arm of
+    /// that session, and a relaunch inside it, keeps it; removed by an
+    /// explicit release.
+    nonisolated static let routingSession = "routingSession"
     static let launchAtStartup = "launchAtStartup"
     static let interfaceLanguage = "interfaceLanguage"
     static let subscriptionURL = "subscriptionURL"

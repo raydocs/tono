@@ -31,7 +31,7 @@ concurrency:
 jobs:
   pinned-core:
     uses: ./.github/workflows/windows-core.yml
-  # sing-box.exe is not in git (#1159). Rebuild the reviewed alpha.9 input from the
+  # sing-box.exe is not in git (#1159). Rebuild the reviewed alpha.12 input from the
   # pinned source; the script refuses any bytes but the pinned digest.
   sing-box-input:
     runs-on: ubuntu-24.04
@@ -87,7 +87,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           pnpm install --frozen-lockfile
-          python ../../../tooling/scripts/verify-desktop-version.py --expected 0.0.77
+          python ../../../tooling/scripts/verify-desktop-version.py --expected 0.0.80
       - name: Prepare the exact stable Mihomo and Windows resources
         shell: pwsh
         run: |
@@ -115,9 +115,9 @@ jobs:
           Set-Content -LiteralPath ../app/src-tauri/resources/core-sha256.txt -Value "$coreSha256" -Encoding ascii
           $singBox = (Resolve-Path '../app/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe').Path
           $singBoxSha256 = (Get-FileHash -LiteralPath $singBox -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expectedSingBox = 'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
+          $expectedSingBox = '4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7'
           if ($singBoxSha256 -ne $expectedSingBox) {
-            throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.9 digest $expectedSingBox"
+            throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.12 digest $expectedSingBox"
           }
           $env:TONO_SING_BOX_SHA256 = $singBoxSha256
           "TONO_SING_BOX_SHA256=$singBoxSha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -210,7 +210,7 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: tono-windows-0.0.77-candidate-${{ github.sha }}
+          name: tono-windows-0.0.80-candidate-${{ github.sha }}
           path: |
             apps/windows/app/target/release/bundle/nsis/*-setup.exe
             apps/windows/app/target/release/bundle/nsis/candidate-manifest.json
@@ -233,7 +233,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: tono-windows-0.0.77-candidate-${{ github.sha }}
+          name: tono-windows-0.0.80-candidate-${{ github.sha }}
           path: ${{ runner.temp }}/attest
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

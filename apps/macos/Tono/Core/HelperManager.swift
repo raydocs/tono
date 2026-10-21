@@ -42,6 +42,9 @@ nonisolated struct HelperManager {
         /// What the committed ruleset enforces for "Allow local network
         /// devices" (D7). Absent from a helper older than the setting.
         let allowLocalNetworkDevices: Bool?
+        /// Whether the committed ruleset is the AI Home scope. Absent from a
+        /// helper older than 4.52.60.
+        let aiHomeScoped: Bool?
         /// The helper holds the A29 protected fault (also after it restarted
         /// in the same boot). Absent from older helpers.
         let protectedFault: Bool?
@@ -470,7 +473,7 @@ nonisolated struct HelperManager {
             return nil
         }
         if envelope.protectedFault == true {
-            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+            LocalNetworkDevicesSync.recordHelperReportedFault()
             return true
         }
         return false
@@ -999,6 +1002,12 @@ nonisolated struct HelperManager {
         enabled ? ["allowLocalNetworkDevices": true] : [:]
     }
 
+    /// The arm request's AI Home scope, present only for an AI Home session
+    /// (helper 4.52.60). Absent means the whole-host kill switch.
+    static func aiHomeArmFields(_ scoped: Bool) -> [String: Any] {
+        scoped ? ["aiHomeScoped": true] : [:]
+    }
+
     static func armKillSwitch(
         apiHosts: [String]? = nil,
         exitNodeHints: [String]? = nil,
@@ -1013,11 +1022,13 @@ nonisolated struct HelperManager {
         reviewedBundleDirect: Bool,
         // No default either: the caller records which value the helper
         // committed (`LocalNetworkDevicesSync`).
-        allowLocalNetworkDevices: Bool
+        allowLocalNetworkDevices: Bool,
+        aiHomeScoped: Bool
     ) throws -> KillSwitchService.ArmReply {
         var object: [String: Any] = [:]
         if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
         object.merge(localNetworkDevicesArmFields(allowLocalNetworkDevices)) { _, setting in setting }
+        object.merge(aiHomeArmFields(aiHomeScoped)) { _, setting in setting }
         if let apiHosts { object["apiHosts"] = apiHosts }
         if let exitNodeHints { object["exitHints"] = exitNodeHints }
         if let tunnelInterfaces { object["tunnelInterfaces"] = tunnelInterfaces }
@@ -1052,11 +1063,11 @@ nonisolated struct HelperManager {
             object: object
         )
         let reply = try requireKillSwitchSuccess(result, operation: "arm")
-        let enforced = (try? JSONDecoder().decode(Envelope.self, from: result.body))?
-            .allowLocalNetworkDevices
+        let envelope = try? JSONDecoder().decode(Envelope.self, from: result.body)
         return (
             reply.armed, reply.wanted, reply.live, reply.healed,
-            reply.flushedStates, reply.killedHosts, enforced
+            reply.flushedStates, reply.killedHosts, envelope?.allowLocalNetworkDevices,
+            envelope?.aiHomeScoped
         )
     }
 
@@ -1093,7 +1104,7 @@ nonisolated struct HelperManager {
         let result = try sendRequest(method: "GET", path: "/killswitch/status")
         let reply = try requireKillSwitchSuccess(result, operation: "status")
         if (try? JSONDecoder().decode(Envelope.self, from: result.body))?.protectedFault == true {
-            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+            LocalNetworkDevicesSync.recordHelperReportedFault()
         }
         // A status query loads nothing, so it can never have flushed anything;
         // dropping the field here keeps callers from reading a stale "no" as a
@@ -1936,10 +1947,73 @@ enum HelperIPCError: LocalizedError {
                 String(localized: "Tono's restore record could not be read. Choose Restore internet once, then connect.")
             case "STALE_GENERATION":
                 String(localized: "This step belonged to an earlier connection and was not applied.")
+            case CorePortConflict.code:
+                CorePortConflict(helperMessage: message)?.userMessage ?? message
             default:
                 message
             }
         }
+    }
+}
+
+/// The helper's `CORE_PORT_IN_USE` refusal: another program holds a loopback
+/// port the core binds (Docker's or dnsmasq's resolver on 53, most often). The
+/// helper keeps one message shape so the port and the program can be named
+/// here in the user's language.
+nonisolated struct CorePortConflict: Equatable, Sendable {
+    static let code = "CORE_PORT_IN_USE"
+
+    let port: Int
+    /// "TCP" or "UDP".
+    let transport: String
+    let program: String?
+    let pid: Int?
+
+    init(port: Int, transport: String, program: String?, pid: Int?) {
+        self.port = port
+        self.transport = transport
+        self.program = program
+        self.pid = pid
+    }
+
+    /// Reads `Port 53 (UDP) on 127.0.0.1 is already in use by <name> (PID 812).`,
+    /// with `another program` for an unknown name and no PID when none was found.
+    init?(helperMessage message: String) {
+        let head = "Port "
+        let marker = " is already in use by "
+        guard message.hasPrefix(head), message.hasSuffix("."),
+              let markerRange = message.range(of: marker) else { return nil }
+        let subject = message[message.index(message.startIndex, offsetBy: head.count)..<markerRange.lowerBound]
+        let parts = subject.split(separator: " ")
+        guard parts.count >= 2, let port = Int(parts[0]),
+              ["(TCP)", "(UDP)"].contains(String(parts[1])) else { return nil }
+        let transport = String(parts[1].dropFirst().dropLast())
+        let tail = message[markerRange.upperBound..<message.index(before: message.endIndex)]
+        var name = String(tail)
+        var pid: Int?
+        if tail.hasSuffix(")"), let open = tail.range(of: " (PID ", options: .backwards) {
+            guard let parsed = Int(tail[open.upperBound..<tail.index(before: tail.endIndex)]) else { return nil }
+            pid = parsed
+            name = String(tail[..<open.lowerBound])
+        }
+        let program = name == "another program" || name.isEmpty ? nil : name
+        self.init(port: port, transport: transport, program: program, pid: pid)
+    }
+
+    var userMessage: String {
+        // Numbers as text: an interpolated Int is formatted, and port 28990
+        // would read "28,990".
+        let port = String(port)
+        if let program, let pid = pid.map(String.init) {
+            return String(localized: "Port \(port) (\(transport)) on this Mac is already in use by \(program) (PID \(pid)), so Tono cannot start protection. Quit that program or turn off its DNS or proxy feature, then connect again.")
+        }
+        return String(localized: "Port \(port) (\(transport)) on this Mac is already in use by another program, so Tono cannot start protection. Quit that program or turn off its DNS or proxy feature, then connect again.")
+    }
+
+    /// Whether a failed core start was this refusal.
+    static func matches(_ error: Error) -> Bool {
+        guard case HelperIPCError.commandFailed(_, let code) = error else { return false }
+        return code == Self.code
     }
 }
 

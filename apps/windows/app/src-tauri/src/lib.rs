@@ -157,6 +157,7 @@ mod app_init {
             tono::commands::account::tono_revoke_device,
             tono::commands::catalog::tono_servers,
             tono::commands::catalog::tono_catalog_status,
+            tono::commands::catalog::tono_disable_stale_system_proxy,
             tono::commands::catalog::tono_refresh_catalog,
             tono::commands::catalog::tono_select_server,
             tono::route_preferences::tono_route_preferences,
@@ -241,6 +242,7 @@ async fn recover_tono_state(app_handle: AppHandle, first_error: String) {
                         "Tono state recovered after {} attempt(s)",
                         attempt + 1
                     );
+                    crate::core::stale_proxy::inspect(&state).await;
                     tono::commands::restore_session_guarded(app_handle.clone(), state).await;
                 }
                 return;
@@ -501,6 +503,7 @@ pub fn run() {
                         app.manage(state.clone());
                         let app_handle = app.app_handle().clone();
                         AsyncHandler::spawn(move || async move {
+                            crate::core::stale_proxy::inspect(&state).await;
                             tono::commands::restore_session_guarded(app_handle, state).await;
                         });
                     }

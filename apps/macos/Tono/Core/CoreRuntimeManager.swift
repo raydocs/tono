@@ -4,15 +4,48 @@ import Observation
 
 /// Capture the opt-in once. Runtime writers never read mutable preferences.
 enum DesktopRoutingModeAdmission {
+    /// Never chosen in Settings: AI Home (decision 131).
     static func capture(_ persisted: Any?) throws -> String {
-        guard let persisted else { return "stable" }
-        guard let mode = persisted as? String, ["stable", "three-tier"].contains(mode) else {
+        guard let persisted else { return "ai-home" }
+        guard let mode = persisted as? String, SettingsKey.desktopRoutingModeOptions.contains(mode) else {
             throw CoreRuntimeError.startFailed("Invalid desktopRoutingMode; connection refused.")
         }
         return mode
     }
     static func requireAvailable(_ persisted: Any?) throws {
         _ = try capture(persisted)
+    }
+    /// The session mode saved for relaunch and recovery; nil when none is
+    /// held. Strict intent wins over a leftover record, as it does in the
+    /// helper, so the runtime, the coordinator and the arm agree. A session
+    /// armed by a build before the record existed ran Stable, then the only
+    /// default, and keeps it.
+    nonisolated static func persistedSession() -> String? {
+        if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") { return "three-tier" }
+        if let mode = AppProfile.defaults.string(forKey: SettingsKey.routingSession),
+           SettingsKey.desktopRoutingModeOptions.contains(mode) {
+            return mode
+        }
+        return KillSwitchService.isArmed ? "stable" : nil
+    }
+    /// AI Home needs the account's Home line. Without one the session runs
+    /// Stable, which is what such an account had before AI Home existed.
+    static func effective(_ mode: String, homeAvailable: Bool) -> String {
+        mode == "ai-home" && !homeAvailable ? "stable" : mode
+    }
+    /// The mode a connect runs: the held session's, else the saved choice
+    /// with the Home-line fallback.
+    static func admit(held: String?, saved: Any?, homeAvailable: Bool) throws -> String {
+        if let held { return try capture(held) }
+        return effective(try capture(saved), homeAvailable: homeAvailable)
+    }
+    /// The owned graph a captured mode compiles; nil for Stable.
+    static func ownedGraph(_ mode: String) -> ThreeTierRoutingContract.Variant? {
+        switch mode {
+        case "three-tier": .threeTier
+        case "ai-home": .aiHome
+        default: nil
+        }
     }
 }
 
@@ -32,11 +65,11 @@ private actor RuntimeConfigWriter {
         routingMode: String, physicalInterface: String?
     ) throws -> String {
         let document = try fakeIPRotation.document(installed: installedDigest, keeping: keepsInstalled) { slot in
-            if routingMode == "three-tier" {
+            if let variant = DesktopRoutingModeAdmission.ownedGraph(routingMode) {
                 guard let physicalInterface else { throw CoreRuntimeError.startFailed("No physical interface for strict routing.") }
                 return try ConfigPipeline.buildThreeTierSingBoxRuntime(
                     overlay: overlay, nodes: customNodes, physicalInterface: physicalInterface,
-                    fakeIPSlot: slot
+                    fakeIPSlot: slot, variant: variant
                 ).runtimeJSON
             }
             return try ConfigPipeline.buildSingBoxRuntime(
@@ -177,7 +210,7 @@ final class CoreRuntimeManager {
     private(set) var runtimeConfigSHA256: String?
     private let configWriter = RuntimeConfigWriter()
     private let fakeIPRotation = SingBoxFakeIPRotation()
-    private(set) var routingMode = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") ? "three-tier" : "stable"
+    private(set) var routingMode = DesktopRoutingModeAdmission.persistedSession() ?? "stable"
     private var routingInterface: String?
 
     func captureRoutingMode(_ mode: String, physicalInterface: String?) throws {
@@ -187,6 +220,7 @@ final class CoreRuntimeManager {
         }
         routingMode = mode
         routingInterface = physicalInterface
+        AppProfile.defaults.set(mode, forKey: SettingsKey.routingSession)
     }
 
     /// Config directory for the owned sing-box runtime.

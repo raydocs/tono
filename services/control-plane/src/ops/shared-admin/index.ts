@@ -19,6 +19,7 @@ import {
 } from './exit-nodes';
 import { diagnosticsLogsResource } from './diagnostics-logs';
 import { homeExitsResource } from './home-exits';
+import { homeEgressResource } from './home-egress';
 import { catalogResource } from './catalog';
 import { trafficPolicyResource } from './traffic-policy';
 import { productAccountsResource } from './product-accounts';
@@ -83,6 +84,8 @@ export async function sharedAdministrativeResource(
   if (exits) return exits;
   const homes = await homeExitsResource(req, e, resource, m, actorEmail);
   if (homes) return homes;
+  const egress = await homeEgressResource(req, e, resource, m, actorEmail);
+  if (egress) return egress;
   const catalog = await catalogResource(req, e, resource, m, actorEmail, deps);
   if (catalog) return catalog;
   const traffic = await trafficPolicyResource(req, e, resource, m, actorEmail);

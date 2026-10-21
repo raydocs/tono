@@ -84,6 +84,10 @@ struct KillSwitchState {
     let allowLocalNetworkDevices: Bool
     var strictBlocking = false
     var strictProof: StrictRuntimeProof? = nil
+    /// AI Home: no whole-host block. Only the AI prefixes are dropped outside
+    /// the TUN; everything else leaves as without Tono. Persisted, so a heal or
+    /// power transition keeps the session's scope; strict intent overrides it.
+    var aiHomeScoped = false
 }
 
 struct HelperCommandResult {
@@ -241,6 +245,18 @@ final class KillSwitchManager {
         return number.boolValue
     }
 
+    /// The arm request's `aiHomeScoped`. Omission means off (the whole-host
+    /// kill switch); only a real JSON boolean is accepted, as for
+    /// `allowLocalNetworkDevicesField`, because on narrows the block.
+    static func aiHomeScopedField(_ value: Any?) throws -> Bool {
+        guard let value else { return false }
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw HelperFailure.invalid("aiHomeScoped must be a boolean.")
+        }
+        return number.boolValue
+    }
+
     /// Whether the idle loop should release a leftover kill switch. The Core
     /// has already been observed down for `consecutiveCoreDownChecks` periods.
     static func watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: Int) -> Bool {
@@ -264,6 +280,7 @@ final class KillSwitchManager {
             object["bootstrapPins"] = [String: [String]]()
             object["reviewedBundleDirect"] = false
             object["allowLocalNetworkDevices"] = false
+            object["aiHomeScoped"] = false
             let tunnels = try Self.validateTunnels(object["tunnelInterfaces"] ?? [])
             guard tunnels.isEmpty || tunnels == ["utun199"] else {
                 throw HelperFailure.invalid("Strict routing only admits its owned TUN.")
@@ -335,6 +352,7 @@ final class KillSwitchManager {
         let allowLocalNetworkDevices = try Self.allowLocalNetworkDevicesField(
             object["allowLocalNetworkDevices"]
         )
+        let aiHomeScoped = try Self.aiHomeScopedField(object["aiHomeScoped"])
         var availablePins = previous?.pinnedHosts ?? [:]
         for (host, addresses) in bootstrapPins {
             // Bundle pins seed recovery but must not replace addresses learned
@@ -419,6 +437,7 @@ final class KillSwitchManager {
             allowLocalNetworkDevices: allowLocalNetworkDevices
         )
         state.strictBlocking = Self.strictIntentActive
+        state.aiHomeScoped = aiHomeScoped
         if let proof = strictProof, let record = try? ReleaseAuthority().load(),
            record.mode == .secured, record.generation == proof.generation,
            record.strictRuntimeDigest == proof.digest {
@@ -472,8 +491,11 @@ final class KillSwitchManager {
         // If this arm is interrupted, its fallback remains selective.
         try Self.saveSelectiveRecoveryDisposition(true)
         let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
-        // Persist fail-closed intent before activating the new rules.
-        try saveState(state)
+        // Persist fail-closed intent before activating the new rules. A newly
+        // requested AI Home scope is saved only after its load commits, so a
+        // failed switch leaves heal and sleep rendering the whole-host block.
+        let persistedBeforeCommit = Self.scopeBeforeCommit(next: state, previous: previous)
+        try saveState(persistedBeforeCommit)
         Self.pinHostsIfUsable(state: state)
         // A machine-wide state flush is a security requirement only when the
         // new rule set revokes a previously granted permission. Node switches
@@ -499,6 +521,11 @@ final class KillSwitchManager {
         lastLoadedPassRules = nil
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
         lastLoadedPassRules = passRules
+        if persistedBeforeCommit.aiHomeScoped != state.aiHomeScoped {
+            // Best effort: a failure leaves the saved scope whole-host, which
+            // a later heal or sleep barrier renders as the stricter block.
+            try? saveState(state)
+        }
         lastCommittedLocalNetwork = !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices
         if Self.commitEndsProtectedFault(state) {
             localNetworkFaultLocked = false
@@ -526,6 +553,8 @@ final class KillSwitchManager {
         // Echo what this ruleset enforces. An app reads a reply without it as
         // a helper too old for the setting and refuses to report it applied.
         committed["allowLocalNetworkDevices"] = state.allowLocalNetworkDevices
+        // What was rendered: false under strict intent, whatever was asked.
+        committed["aiHomeScoped"] = state.aiHomeScoped && !Self.strictIntentActive
         return committed
         } catch {
             // A load that pfctl accepted, or that never answered, may already
@@ -539,13 +568,22 @@ final class KillSwitchManager {
             lastCommittedLocalNetwork = nil
             let uid = self.allowedUID
             var faultHeld = localNetworkFaultLocked
+            let tightening = Self.failedArmTightening(
+                localNetwork: tighteningUnconfirmed, next: state, previous: previous, load: load
+            )
             let failure = Self.failedArm(
                 error: error,
                 load: load,
                 liveSessionReArm: liveSessionReArm || Self.strictIntentActive,
-                tighteningUnconfirmed: tighteningUnconfirmed,
+                tighteningUnconfirmed: tightening.unconfirmed,
+                faultSubject: tightening.subject,
                 faultHeld: &faultHeld,
-                installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
+                installStricterBlock: {
+                    try Self.installTighteningBarrier(
+                        holdingAI: tightening.holdsAI,
+                        install: { try Self.installEmergencyBlock(allowedUID: uid) }
+                    )
+                }
             )
             localNetworkFaultLocked = faultHeld
             if failure.bumpsGeneration { stateGeneration &+= 1 }
@@ -600,6 +638,7 @@ final class KillSwitchManager {
         load: KernelLoadOutcome,
         liveSessionReArm: Bool,
         tighteningUnconfirmed: Bool,
+        faultSubject: String = "Allow local network devices off",
         faultHeld: inout Bool,
         release: () -> Void = { KillSwitchManager.releaseInstalledBlock() },
         installStricterBlock: () throws -> Void,
@@ -625,13 +664,22 @@ final class KillSwitchManager {
         case .faultStricterBlock:
             return (HelperFailure.coded(
                 code: localNetworkFaultCode,
-                message: "Could not apply Allow local network devices off: \(detail). "
+                message: "Could not apply \(faultSubject): \(detail). "
                     + "Every connection is blocked until protection is applied again." + unpersisted
+            ), true)
+        case .faultStopCore where faultSubject == aiHomeFaultSubject:
+            // The kernel may hold the AI-only rules: only AI traffic is
+            // known to be held, so the message does not claim the block.
+            return (HelperFailure.coded(
+                code: localNetworkFaultStopCoreCode,
+                message: "Could not apply \(faultSubject), and the stricter block could not be installed; "
+                    + "the Core is stopped and AI traffic is held, but other traffic may not be blocked."
+                    + unpersisted
             ), true)
         case .faultStopCore:
             return (HelperFailure.coded(
                 code: localNetworkFaultStopCoreCode,
-                message: "Could not apply Allow local network devices off, and the stricter "
+                message: "Could not apply \(faultSubject), and the stricter "
                     + "block could not be installed; the Core is stopped and protection stays armed."
                     + unpersisted
             ), true)
@@ -950,7 +998,7 @@ final class KillSwitchManager {
             // transition, while retaining inactive recovery pins for wake.
             stateGeneration &+= 1
             lastLoadedPassRules = nil
-            let state = Self.emergencyState(preserving: previous)
+            let state = Self.powerTransitionState(preserving: previous)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
             try Self.ensureAnchorLoaded(flushStates: true, loadOutcome: &load)
@@ -965,6 +1013,73 @@ final class KillSwitchManager {
             }
             return false
         }
+    }
+
+    /// A switch from the whole-host block to AI Home whose load may have
+    /// committed before the arm failed: the kernel may now hold the narrower
+    /// AI-only set, so the failure is settled like a failed tightening (the
+    /// stricter block). A load that never ran or was rejected left the
+    /// whole-host rules in place.
+    static func aiHomeWideningMayBeLoaded(
+        next: KillSwitchState,
+        previous: KillSwitchState?,
+        load: KernelLoadOutcome
+    ) -> Bool {
+        next.aiHomeScoped && previous?.aiHomeScoped != true && !strictIntentActive && load == .acceptedOrUnknown
+    }
+
+    /// The tightening `arm` hands `failedArm`: a failed LAN tightening, or a
+    /// switch to AI Home whose load may have committed, and what the fault
+    /// message names. A widening wins when both hold (a retry after a failed
+    /// widening leaves the LAN baseline unknown): its residue is the AI-only
+    /// ruleset, which needs the AI hold and the honest message.
+    static func failedArmTightening(
+        localNetwork: Bool,
+        next: KillSwitchState,
+        previous: KillSwitchState?,
+        load: KernelLoadOutcome
+    ) -> (unconfirmed: Bool, subject: String, holdsAI: Bool) {
+        if aiHomeWideningMayBeLoaded(next: next, previous: previous, load: load) {
+            return (true, aiHomeFaultSubject, true)
+        }
+        return (localNetwork, "Allow local network devices off", false)
+    }
+
+    static let aiHomeFaultSubject = "AI Home protection"
+
+    /// The stricter block for a failed tightening. When a failed switch to
+    /// AI Home cannot install it either, PF is not taking rules and the
+    /// kernel may hold the AI-only set: the AI hold that does not depend on
+    /// PF (resolver sinkholes and blackhole routes) is applied before the
+    /// failure goes on to stop the Core. The next committed arm removes it.
+    static func installTighteningBarrier(
+        holdingAI: Bool,
+        install: () throws -> Void,
+        applyAIHold: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+    ) throws {
+        do {
+            try install()
+        } catch {
+            if holdingAI { applyAIHold() }
+            throw error
+        }
+    }
+
+    /// What `arm` saves before its load: the requested state, except that AI
+    /// Home is recorded only if the saved state already had it.
+    static func scopeBeforeCommit(next: KillSwitchState, previous: KillSwitchState?) -> KillSwitchState {
+        var state = next
+        state.aiHomeScoped = next.aiHomeScoped && previous?.aiHomeScoped == true
+        return state
+    }
+
+    /// The sleep/wake barrier: every exception and the TUN pass are dropped.
+    /// AI Home keeps its scope, so the barrier holds only the AI prefixes and
+    /// ordinary traffic stays open across sleep.
+    static func powerTransitionState(preserving previous: KillSwitchState) -> KillSwitchState {
+        var state = emergencyState(preserving: previous)
+        state.aiHomeScoped = previous.aiHomeScoped
+        return state
     }
 
     /// A sleep or wake barrier that failed after its load may release, as
@@ -1600,7 +1715,8 @@ final class KillSwitchManager {
             proxyTargets: state.proxyTargets,
             sessionDirectEndpoints: state.sessionDirectEndpoints,
             reviewedBundleDirectEnabled: state.reviewedBundleDirectEnabled,
-            allowLocalNetworkDevices: state.allowLocalNetworkDevices
+            allowLocalNetworkDevices: state.allowLocalNetworkDevices,
+            aiHomeScoped: state.aiHomeScoped
         )
     }
 
@@ -1769,6 +1885,8 @@ final class KillSwitchManager {
         }
 
         let proxyTargets = try Self.loadProxyTargets(object["proxyTargets"] ?? [])
+        // Written only when on, so every other state file is unchanged.
+        let aiHomeScoped = try Self.aiHomeScopedField(object["aiHomeScoped"])
 
         return KillSwitchState(
             armed: armed,
@@ -1785,7 +1903,8 @@ final class KillSwitchManager {
             // restart and every boot therefore restore fail-closed with none.
             sessionDirectEndpoints: [],
             reviewedBundleDirectEnabled: false,
-            allowLocalNetworkDevices: false
+            allowLocalNetworkDevices: false,
+            aiHomeScoped: aiHomeScoped
         )
     }
 
@@ -1806,7 +1925,7 @@ final class KillSwitchManager {
         _ state: KillSwitchState,
         allowedUID: uid_t
     ) -> [String: Any] {
-        [
+        var object: [String: Any] = [
             "armed": state.armed,
             "tailscaleBootstrapEnabled": state.tailscaleBootstrapEnabled,
             "apiHosts": state.apiHosts,
@@ -1819,6 +1938,8 @@ final class KillSwitchManager {
             "proxyTargets": state.proxyTargets.map(\.json),
             "allowedUid": Int(allowedUID),
         ]
+        if state.aiHomeScoped { object["aiHomeScoped"] = true }
+        return object
     }
 
     static func stateFileExists() -> Bool {

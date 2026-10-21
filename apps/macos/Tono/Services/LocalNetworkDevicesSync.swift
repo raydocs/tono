@@ -44,6 +44,11 @@ nonisolated enum LocalNetworkDevicesSync {
         /// installed block (`KILLSWITCH_LIVE_REARM_FAILED`), or a reload that
         /// was applying a pending generation failed. Its message.
         case reArmFailed(String)
+        /// An AI Home arm failed after its load may have applied: the helper
+        /// holds the protected fault (block-all, or the Core stopped with AI
+        /// held). Not a local network fault: AI Home has no LAN rule. Its
+        /// message.
+        case aiHomeProtection(String)
         /// The automatic attempts for this generation all failed.
         case attemptsExhausted
     }
@@ -141,13 +146,30 @@ nonisolated enum LocalNetworkDevicesSync {
 
     static var fault: Fault? { lock.withLock { faultValue } }
 
+    /// The helper's status reports a held protected fault. An AI Home
+    /// session's fault is the AI Home one; a fault already classified as
+    /// that is kept.
+    static func recordHelperReportedFault(aiHomeSession: Bool = KillSwitchService.readAIHomeSession()) {
+        lock.withLock {
+            if case .aiHomeProtection = faultValue { return }
+            faultValue = aiHomeSession
+                ? .aiHomeProtection("reported by the helper") : .helper("reported by the helper")
+        }
+    }
+
+    /// The held fault belongs to AI Home, not to the local network setting.
+    static var faultIsAIHomeProtection: Bool {
+        if case .aiHomeProtection = fault { return true }
+        return false
+    }
+
     /// A fault the session must hold in: protection armed, the Core as the
     /// helper left it, no automatic release and no automatic reconnect. Only
     /// the user proceeds (toggle, Reconnect, Disconnect). An exhausted budget
     /// stops automatic attempts but is not a held failure.
     static var holdsProtectedFault: Bool {
         switch fault {
-        case .helper, .helperTooOld, .reArmFailed: true
+        case .helper, .helperTooOld, .reArmFailed, .aiHomeProtection: true
         case .attemptsExhausted, nil: false
         }
     }
@@ -205,6 +227,8 @@ nonisolated enum LocalNetworkDevicesSync {
             String(localized: "The network helper is too old to block local network devices. Reconnect to update it.")
         case .reArmFailed:
             String(localized: "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.")
+        case .aiHomeProtection:
+            String(localized: "Tono couldn't apply AI Home protection, so AI traffic stays blocked. Disconnect or reconnect to continue.")
         case .attemptsExhausted:
             String(localized: "Tono couldn't apply the local network devices setting. Reconnect to try again.")
         case nil:

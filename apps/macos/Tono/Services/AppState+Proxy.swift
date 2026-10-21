@@ -785,6 +785,15 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                 } else if ownedRuntime {
                     finishConfigReloadRequest(requestID, startPending: false)
+                    // The helper also checks the ports after a sync stop: the
+                    // same named refusal, and no automatic retry.
+                    let portConflict = CorePortConflict.matches(error)
+                    if portConflict {
+                        lastClassifiedFailure = Self.corePortConflictFailure(
+                            error,
+                            generation: connectionCoordinator.protectionOperationGeneration
+                        )
+                    }
                     // D7: a local network devices fault is the error to show,
                     // not a generic connection failure, and it holds.
                     if appliesLocalNetworkGeneration, LocalNetworkDevicesSync.fault == nil {
@@ -796,7 +805,7 @@ extension AppState {
                             ?? ConnectionFailurePresentation.userFacingMessage(
                                 classified: lastClassifiedFailure
                             ),
-                        resumeWhenReachable: true
+                        resumeWhenReachable: !portConflict
                     )
                 } else {
                     finishConfigReloadRequest(requestID)

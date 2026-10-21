@@ -499,6 +499,15 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
             "goofish.com"
         ))
+        // China Mobile Cloud (ecloud.10086.cn) and the MIIT ICP filing site.
+        for host in ["10086.cn", "cmecloud.cn", "miit.gov.cn"] {
+            XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(host))
+            XCTAssertTrue(
+                ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                    .contains(where: { $0.host == host }), host
+            )
+        }
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("gov.cn"))
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
             "snssdk.com"
         ))

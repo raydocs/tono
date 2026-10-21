@@ -460,6 +460,29 @@ describe('describeTonoActionError', () => {
     ).toBe('translated:tono.dashboard.errors.serviceBusy')
   })
 
+  it('asks for a restart when the unfinished release names one', () => {
+    expect(
+      describeTonoActionError(
+        new Error(
+          'TONO_RELEASE_UNFINISHED: the last network restore has not finished: WMI DNS batch from process 9564 (not seen to finish) may still take effect; restart Windows, then choose Restore internet',
+        ),
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.dashboard.errors.releaseNeedsRestart' })
+  })
+
+  it('says a dead loopback system proxy is the problem', () => {
+    expect(
+      describeTonoActionError(
+        new Error('TONO_STALE_SYSTEM_PROXY: 127.0.0.1:10090'),
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.nodes.staleSystemProxyNotice' })
+    expect(
+      describeTonoActionError(new Error('Failed to connect to proxy'), t),
+    ).toEqual({ message: 'translated:tono.nodes.staleSystemProxyNotice' })
+  })
+
   it('returns a localized fallback and the raw text as detail when nothing matches', () => {
     const raw =
       'sc.exe start TonoService failed: os error 10061; HKLM\\SYSTEM\\CurrentControlSet'
@@ -470,6 +493,21 @@ describe('describeTonoActionError', () => {
     expect(formatTonoActionError(new Error(raw), t)).toBe(
       'translated:tono.errors.unknownAction',
     )
+  })
+
+  it('says an exit identity is still propagating, and that it is stuck after the bound', () => {
+    expect(
+      describeTonoActionError(
+        'your secure exit identity is still being prepared; Tono will retry shortly',
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.nodes.identityPropagating' })
+    expect(
+      describeTonoActionError(
+        'TONO_EXIT_IDENTITY_STUCK: your secure exit identity is still being prepared; Tono will retry shortly',
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.nodes.identityStuck' })
   })
 
   it('returns the raw string when no translator is provided', () => {

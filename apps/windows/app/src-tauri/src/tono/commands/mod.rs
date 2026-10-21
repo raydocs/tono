@@ -44,7 +44,7 @@ pub use account::{
     tono_service_prerequisites, tono_sign_in_dismiss, tono_sign_in_start, tono_sign_in_verify, tono_sign_out,
 };
 pub use catalog::{
-    tono_cancel_server_tests, tono_catalog_status, tono_refresh_catalog, tono_select_server,
+    tono_cancel_server_tests, tono_catalog_status, tono_disable_stale_system_proxy, tono_refresh_catalog, tono_select_server,
     tono_servers, tono_test_available_servers, tono_test_current_server,
 };
 pub use connection_cmd::{
@@ -227,6 +227,9 @@ pub struct TonoCatalogStatus {
     pub node_count: usize,
     pub last_synced_at_ms: Option<i64>,
     pub error: Option<String>,
+    /// Set when a dead loopback system proxy should be shown to the user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stale_system_proxy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -8,28 +8,32 @@ nonisolated extension ConfigPipeline {
         overlay: OverlayConfig,
         nodes: [ProxyNode],
         physicalInterface: String,
-        fakeIPSlot: Int = 0
+        fakeIPSlot: Int = 0,
+        variant: ThreeTierRoutingContract.Variant = .threeTier
     ) throws -> OwnedSingBoxRuntime {
+        // AI Home routes LAN DIRECT itself; strict three-tier never admits it.
         guard overlay.claudeHomeSocks5 != nil, overlay.tonoTransport == nil,
-              !overlay.allowLocalNetworkDevices else { throw SingBoxError.unsupportedPolicy }
+              variant == .aiHome || !overlay.allowLocalNetworkDevices else { throw SingBoxError.unsupportedPolicy }
         let compiled = try buildSingBoxRuntime(overlay: overlay, nodes: nodes, directPlan: nil, fakeIPSlot: fakeIPSlot)
         guard var runtime = try JSONSerialization.jsonObject(with: compiled.runtimeJSON) as? [String: Any],
               var outbounds = runtime["outbounds"] as? [[String: Any]],
               let dns = runtime["dns"] as? [String: Any], let servers = dns["servers"] as? [[String: Any]],
               let fakeRange = servers.first?["inet4_range"] as? String else { throw SingBoxError.unsupportedPolicy }
         let graph = try ThreeTierRoutingContract.graph(home: homeResidentialProxyName,
-            physicalInterface: physicalInterface, fakeRange: fakeRange)
+            physicalInterface: physicalInterface, fakeRange: fakeRange, variant: variant)
+        let directTag = variant == .threeTier ? ThreeTierRoutingContract.direct : ThreeTierRoutingContract.aiHomeDirect
         // Only the selected cloud selector survives. In particular, do not
         // carry stable LAN/direct or a Home alias into a different graph.
         outbounds.removeAll { $0["type"] as? String == "direct"
             || ($0["type"] as? String == "selector" && $0["tag"] as? String != exitGroupName) }
-        guard !outbounds.contains(where: { $0["tag"] as? String == ThreeTierRoutingContract.direct }),
+        guard !outbounds.contains(where: { $0["tag"] as? String == directTag }),
               let direct = graph["direct_outbound"] as? [String: Any] else { throw SingBoxError.unsupportedPolicy }
         outbounds.append(direct)
         runtime["outbounds"] = outbounds
         runtime["route"] = graph["route"]
         runtime["dns"] = graph["dns"]
-        guard ThreeTierRoutingContract.admits(runtime) else { throw SingBoxError.unsupportedPolicy }
+        guard variant == .threeTier ? ThreeTierRoutingContract.admits(runtime)
+                : ThreeTierRoutingContract.admitsAIHome(runtime) else { throw SingBoxError.unsupportedPolicy }
         let data = try JSONSerialization.data(withJSONObject: runtime, options: [.sortedKeys])
         guard data.count <= 8 * 1024 * 1024 else { throw SingBoxError.unsupportedPolicy }
         return OwnedSingBoxRuntime(runtimeJSON: data,

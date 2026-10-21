@@ -420,6 +420,58 @@ export function filterCatalogYamlForUser(
  * those blocks to everyone would fail closed. Keep them only for the gray list.
  * Never YAML-parse: the identity placeholder is legal flow-mapping syntax.
  */
+/** Keep proxy blocks whose base name is in `keepBases`, and drop group members that named a removed block. */
+export function retainCatalogProxies(yaml: string, keepBases: ReadonlySet<string>): string {
+  const { prefix, items, suffix } = splitManagedCatalogProxies(yaml);
+  const dropped = items.filter((item) => !keepBases.has(catalogBaseName(item.name)));
+  if (dropped.length === 0) return yaml;
+  const kept = items.filter((item) => keepBases.has(catalogBaseName(item.name)));
+  if (kept.length === 0) {
+    const empty = 'proxies: []\n';
+    return suffix.trim() ? `${empty}${suffix.startsWith('\n') ? suffix.slice(1) : suffix}` : empty;
+  }
+  const body = kept.map((item) => item.block.replace(/\s+$/, '')).join('\n') + '\n';
+  let next = `${prefix}${body}${suffix}`;
+  if (!next.endsWith('\n')) next += '\n';
+  return stripCatalogMemberReferences(next, dropped.map((item) => item.name), yaml.endsWith('\n'));
+}
+
+function stripCatalogMemberReferences(yaml: string, names: string[], keepTrailingNewline: boolean): string {
+  const memberLine = catalogProxyMemberLine(names);
+  let inLists = false;
+  const keptLines: string[] = [];
+  for (const line of yaml.split('\n')) {
+    if (/^(?:proxy-groups|rules)\s*:/.test(line)) {
+      inLists = true;
+      keptLines.push(line);
+      continue;
+    }
+    if (inLists && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
+      inLists = false;
+    }
+    if (inLists && memberLine.test(line)) continue;
+    if (inLists) {
+      let rewritten = line;
+      let changed = false;
+      for (const name of names) {
+        const without = removeNameFromFlowArrayMemberLine(rewritten, name);
+        if (without !== null) {
+          rewritten = without;
+          changed = true;
+        }
+      }
+      if (changed) {
+        keptLines.push(rewritten);
+        continue;
+      }
+    }
+    keptLines.push(line);
+  }
+  let next = keptLines.join('\n');
+  if (keepTrailingNewline && !next.endsWith('\n')) next += '\n';
+  return next;
+}
+
 export function filterHy2CatalogForViewer(yaml: string, keepHy2: boolean): string {
   if (keepHy2 || !yaml.includes(HY2_NAME_SUFFIX)) return yaml;
   const { prefix, items, suffix } = splitManagedCatalogProxies(yaml);
@@ -433,25 +485,7 @@ export function filterHy2CatalogForViewer(yaml: string, keepHy2: boolean): strin
   const body = kept.map((item) => item.block.replace(/\s+$/, '')).join('\n') + '\n';
   let next = `${prefix}${body}${suffix}`;
   if (!next.endsWith('\n')) next += '\n';
-  const names = dropped.map((item) => item.name);
-  const memberLine = catalogProxyMemberLine(names);
-  let inLists = false;
-  const keptLines: string[] = [];
-  for (const line of next.split('\n')) {
-    if (/^(?:proxy-groups|rules)\s*:/.test(line)) {
-      inLists = true;
-      keptLines.push(line);
-      continue;
-    }
-    if (inLists && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
-      inLists = false;
-    }
-    if (inLists && memberLine.test(line)) continue;
-    keptLines.push(line);
-  }
-  next = keptLines.join('\n');
-  if (yaml.endsWith('\n') && !next.endsWith('\n')) next += '\n';
-  return next;
+  return stripCatalogMemberReferences(next, dropped.map((item) => item.name), yaml.endsWith('\n'));
 }
 
 export function hy2CatalogEmailAllowlist(raw: string | undefined): Set<string> {

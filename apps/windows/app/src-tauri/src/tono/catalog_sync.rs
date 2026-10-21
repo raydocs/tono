@@ -31,6 +31,41 @@ const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// (about a minute), so a full 300 s period would leave a new device with no
 /// catalog long after it could have one.
 pub(crate) const IDENTITY_PROPAGATING_RETRY: Duration = Duration::from_secs(15);
+/// Same bound as the macOS launch wait (20 × 15 s). Past this, a continuous
+/// propagating streak stops the short retry and the stored error is prefixed
+/// `TONO_EXIT_IDENTITY_STUCK` so the UI can offer one manual refresh.
+pub(crate) const IDENTITY_PROPAGATING_BOUND: Duration = Duration::from_secs(20 * 15);
+
+pub(crate) struct IdentityPropagatingNote {
+    pub propagating: bool,
+    pub since_ms: Option<i64>,
+    pub error: String,
+}
+
+/// `since_ms` is the start of the current propagating streak (`None` starts
+/// one at `now_ms`). A streak that has already lasted
+/// [`IDENTITY_PROPAGATING_BOUND`] stops the 15 s retry.
+pub(crate) fn note_identity_propagating(
+    since_ms: Option<i64>,
+    now_ms: i64,
+    api_error: &str,
+) -> IdentityPropagatingNote {
+    let since = since_ms.unwrap_or(now_ms);
+    let elapsed = now_ms.saturating_sub(since);
+    if elapsed >= IDENTITY_PROPAGATING_BOUND.as_millis() as i64 {
+        IdentityPropagatingNote {
+            propagating: false,
+            since_ms: Some(since),
+            error: format!("TONO_EXIT_IDENTITY_STUCK: {api_error}"),
+        }
+    } else {
+        IdentityPropagatingNote {
+            propagating: true,
+            since_ms: Some(since),
+            error: api_error.to_string(),
+        }
+    }
+}
 
 /// Why one catalog or policy sync attempt failed.
 pub(crate) enum SyncFailure {
@@ -395,6 +430,7 @@ pub(crate) async fn sync_with_retries_for_auth_generation(
 }
 
 async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), String> {
+    crate::core::stale_proxy::inspect(state).await;
     let _operation = state.lock_catalog_sync().await;
     if state.lock().await.sign_in_generation != auth_generation {
         return Ok(());
@@ -413,6 +449,7 @@ async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_g
                 inner.catalog_last_synced_at_ms = Some(unix_time_ms());
                 inner.catalog_sync_error = None;
                 inner.catalog_identity_propagating = false;
+                inner.catalog_identity_since_ms = None;
             }
             return Ok(());
         }
@@ -423,16 +460,25 @@ async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_g
     if inner.sign_in_generation != auth_generation {
         return Ok(());
     }
-    inner.catalog_sync_error = Some(last_error.clone());
-    inner.catalog_identity_propagating = matches!(failure, SyncFailure::IdentityPropagating);
+    let stored = if matches!(failure, SyncFailure::IdentityPropagating) {
+        let noted = note_identity_propagating(inner.catalog_identity_since_ms, unix_time_ms(), &last_error);
+        inner.catalog_identity_propagating = noted.propagating;
+        inner.catalog_identity_since_ms = noted.since_ms;
+        noted.error
+    } else {
+        inner.catalog_identity_propagating = false;
+        inner.catalog_identity_since_ms = None;
+        last_error
+    };
+    inner.catalog_sync_error = Some(stored.clone());
     drop(inner);
     state.audit().log(crate::tono::audit::AuditEvent::SyncFail {
-        error: last_error.clone(),
+        error: stored.clone(),
     });
     if matches!(failure, SyncFailure::SessionRejected) {
         note_session_rejected(state, app, auth_generation).await;
     }
-    Err(last_error)
+    Err(stored)
 }
 
 fn unix_time_ms() -> i64 {
@@ -805,10 +851,11 @@ pub fn region_rank(name: &str) -> u8 {
 mod tests {
     use super::{
         SyncFailure, commit_fetched_catalog, default_usable_exit, install_and_persist, is_exit_blocked,
-        is_legacy_wire_name, names_equivalent, next_catalog_exit, periodic_sync_continues, periodic_sync_interval,
-        region_rank, replacement_for_selection, residential_routing_changed, run_with_retries,
-        selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
-        PeriodicSyncWake, wait_for_next_periodic_sync,
+        is_legacy_wire_name, names_equivalent, next_catalog_exit, note_identity_propagating,
+        periodic_sync_continues, periodic_sync_interval, region_rank, replacement_for_selection,
+        residential_routing_changed, run_with_retries, selected_exit_still_present, sort_server_names,
+        suspend_rejected_session, tcp_probe_socket, IDENTITY_PROPAGATING_BOUND, PeriodicSyncWake,
+        wait_for_next_periodic_sync,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
@@ -968,6 +1015,31 @@ mod tests {
         assert_eq!(wait_for_next_periodic_sync(&mut interval, &state, 4, started + super::SYNC_INTERVAL).await,
             PeriodicSyncWake::Catalog);
         assert!(started.elapsed() <= std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn identity_propagating_stops_the_short_retry_after_five_minutes() {
+        let fresh = note_identity_propagating(None, 1_000, "your secure exit identity is still being prepared; Tono will retry shortly");
+        assert!(fresh.propagating);
+        assert_eq!(fresh.since_ms, Some(1_000));
+        assert!(!fresh.error.starts_with("TONO_EXIT_IDENTITY_STUCK"));
+
+        let still_waiting = note_identity_propagating(
+            Some(1_000),
+            1_000 + IDENTITY_PROPAGATING_BOUND.as_millis() as i64 - 1,
+            "your secure exit identity is still being prepared; Tono will retry shortly",
+        );
+        assert!(still_waiting.propagating);
+        assert_eq!(still_waiting.since_ms, Some(1_000));
+
+        let stuck = note_identity_propagating(
+            Some(1_000),
+            1_000 + IDENTITY_PROPAGATING_BOUND.as_millis() as i64,
+            "your secure exit identity is still being prepared; Tono will retry shortly",
+        );
+        assert!(!stuck.propagating);
+        assert_eq!(stuck.since_ms, Some(1_000));
+        assert!(stuck.error.starts_with("TONO_EXIT_IDENTITY_STUCK: "));
     }
 
     #[tokio::test(start_paused = true)]
