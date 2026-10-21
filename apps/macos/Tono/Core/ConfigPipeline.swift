@@ -422,6 +422,7 @@ nonisolated struct ConfigPipeline {
         "poe.com",
         "groq.com",
         "cursor.sh",
+        "ampcode.com",
         "jasper.ai",
         "openart.ai",
         "clipdrop.co",

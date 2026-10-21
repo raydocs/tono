@@ -135,7 +135,7 @@ pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
 /// with no process constraint, so Chrome / Edge / Arc count the same as
 /// the desktop apps. Cloud video exceptions precede Google and process
 /// fallbacks. Shared CDN/ByteDance parents and gstatic remain excluded.
-pub const CLAUDE_HOME_DOMAINS: [&str; 166] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 167] = [
     DEDICATED_MODEL_API_SUFFIXES[0],
     DEDICATED_MODEL_API_SUFFIXES[1],
     DEDICATED_MODEL_API_SUFFIXES[2],
@@ -227,6 +227,7 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 166] = [
     "poe.com",
     "groq.com",
     "cursor.sh",
+    "ampcode.com",
     "jasper.ai",
     "openart.ai",
     "clipdrop.co",

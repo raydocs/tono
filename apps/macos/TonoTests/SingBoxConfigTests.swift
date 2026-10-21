@@ -293,7 +293,7 @@ final class SingBoxConfigTests: XCTestCase {
         // even if both compilers faithfully emit the same incomplete list.
         for host in [
             "clau.de", "cdn.usefathom.com", "g.ai", "dify.ai", "poe.com",
-            "groq.com", "sora.com", "cursor.sh", "jasper.ai", "openart.ai",
+            "groq.com", "sora.com", "cursor.sh", "ampcode.com", "jasper.ai", "openart.ai",
             "clipdrop.co", "chatgpt.site", "deepmind.com", "ai.google.dev",
             "gemini.google", "openrouter.ai", "api.github.com", "deepmind.google",
             "api.jetbrains.ai", "jules.google.com", "notebooklm.google",

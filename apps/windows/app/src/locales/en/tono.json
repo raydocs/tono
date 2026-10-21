@@ -695,7 +695,7 @@
       "routingMode": "Routing mode",
       "routingStable": "Stable (default)",
       "routingThreeTier": "Three-tier",
-      "routingScope": "Priority: 21 cloud-video exceptions → 166 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations. Failed Home/cloud matches never fall back DIRECT. ECH, cached/raw IP or app DoH can hide AI identity and take default DIRECT; unidentified AI is not guaranteed Home routing.",
+      "routingScope": "Priority: 21 cloud-video exceptions → 167 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations. Failed Home/cloud matches never fall back DIRECT. ECH, cached/raw IP or app DoH can hide AI identity and take default DIRECT; unidentified AI is not guaranteed Home routing.",
       "routingLimits": "Ordinary DIRECT supports public IPv4 TCP ports 80/443 only. Application UDP/QUIC, IPv6 and LAN are blocked. If Core stops, protection stays fail-closed.",
       "routingEffect": "Saving applies only after you explicitly disconnect and connect again. It does not silently change the routing or protection of your current connection.",
       "launchAtStartup": "Open at sign-in",
