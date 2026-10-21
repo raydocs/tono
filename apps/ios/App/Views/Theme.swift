@@ -182,6 +182,9 @@ private struct GlassSurface<S: Shape>: ViewModifier {
     let tint: Color?
     /// Tappable glass: iOS 26 answers the touch itself (scale, highlight).
     let interactive: Bool
+    /// Secondary chrome (Home's dock): a thin white wash and a 10 % hairline, no sheen, so it sits
+    /// below the primary capsule instead of being the brightest edge on screen.
+    let quiet: Bool
     @Environment(\.tonoReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -193,29 +196,36 @@ private struct GlassSurface<S: Shape>: ViewModifier {
         } else if #available(iOS 26.0, *) {
             content
                 .background(sheen)
-                .glassEffect(.regular.tint((tint ?? TonoColor.glassTint).opacity(0.3)).interactive(interactive), in: shape)
+                .glassEffect(.regular.tint(quiet ? Color.white.opacity(0.08) : (tint ?? TonoColor.glassTint).opacity(0.3)).interactive(interactive), in: shape)
                 .overlay(rim)
         } else {
             content
                 .background(sheen)
-                .background((tint ?? TonoColor.glassTint).opacity(0.36), in: shape)
+                .background(quiet ? Color.white.opacity(0.08) : (tint ?? TonoColor.glassTint).opacity(0.36), in: shape)
                 .background(.ultraThinMaterial, in: shape)
                 .overlay(rim)
         }
     }
 
     /// Light falling on the upper half, over the glass and under the label.
-    private var sheen: some View {
-        shape.fill(LinearGradient(colors: [Color.white.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
-            .allowsHitTesting(false)
+    @ViewBuilder private var sheen: some View {
+        if !quiet {
+            shape.fill(LinearGradient(colors: [Color.white.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
+                .allowsHitTesting(false)
+        }
     }
 
 
-    /// Bright where the sky lights the top edge, faint underneath.
-    private var rim: some View {
-        shape.stroke(LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.04), Color.white.opacity(0.09)],
-                                    startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
-            .allowsHitTesting(false)
+    /// Bright where the sky lights the top edge, faint underneath; one even 10 % line on quiet glass.
+    @ViewBuilder private var rim: some View {
+        if quiet {
+            shape.stroke(Color.white.opacity(0.10), lineWidth: 0.8)
+                .allowsHitTesting(false)
+        } else {
+            shape.stroke(LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.04), Color.white.opacity(0.09)],
+                                        startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+                .allowsHitTesting(false)
+        }
     }
 }
 
@@ -245,8 +255,8 @@ extension View {
         }
     }
 
-    func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
-        modifier(GlassSurface(shape: shape, tint: tint, interactive: interactive))
+    func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false, quiet: Bool = false) -> some View {
+        modifier(GlassSurface(shape: shape, tint: tint, interactive: interactive, quiet: quiet))
     }
 
     func contentCard<S: Shape>(_ shape: S) -> some View {

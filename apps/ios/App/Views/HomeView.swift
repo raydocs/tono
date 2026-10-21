@@ -20,6 +20,10 @@ struct HomeView: View {
     @Namespace private var zoom
     @ScaledMetric(relativeTo: .body) private var gearScaled: CGFloat = 20
     private var gearGlyph: CGFloat { min(gearScaled, 36) }
+    /// One chevron size for the status and line rows and the dock, growing with the text beside it
+    /// (a fixed 12-14 pt mark next to 60 pt text at AX5 read as a stray dot).
+    @ScaledMetric(relativeTo: .subheadline) private var chevronScaled: CGFloat = 14
+    private var chevronGlyph: CGFloat { min(chevronScaled, 30) }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -212,8 +216,9 @@ struct HomeView: View {
                 .frame(minHeight: 32, alignment: .topLeading)
                 .padding(.top, 4)
             // The line in use is a row of the text block, not a capsule: a fact about the state,
-            // read before it is tapped.
+            // read before it is tapped. Set a step below the subtitle, so the two never read as a list.
             exitCapsule
+                .padding(.top, 8)
             ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince, glassTint: glassTint) { model.toggle($0) }
                 .zoomSource("primary", in: zoom)
                 .accessibilityIdentifier("primaryAction")
@@ -224,7 +229,10 @@ struct HomeView: View {
             let footer = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 12))
             footer {
                 if model.phase.tunnelUp {
-                    Text(L.t("speed_line", Format.rate(model.rx), Format.rate(model.tx)))
+                    // Accessibility sizes: down and up on two lines (Android `speed_line_large`), never
+                    // a truncated run; the separator is the one in the localised string.
+                    let speed = L.t("speed_line", Format.rate(model.rx), Format.rate(model.tx))
+                    Text(typeSize.isAccessibilitySize ? speed.replacingOccurrences(of: " · ", with: "\n") : speed)
                         .tonoFont(12, .medium, relativeTo: .caption).monospacedDigit()
                         .foregroundStyle(TonoColor.textTertiary)
                         // Rates roll between live values; the drop to zero as the tunnel stops is not
@@ -232,7 +240,7 @@ struct HomeView: View {
                         // ("184/4 K", state-cycle @ b36d07d 17.3 s).
                         .contentTransition(model.rx == 0 && model.tx == 0 ? .identity : .numericText())
                         .animation(model.rx == 0 && model.tx == 0 ? nil : TonoMotion.state, value: model.rx)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(minHeight: 44, alignment: .leading)
                         .accessibilityElement(children: .combine)
                         .transition(.opacity)
@@ -249,9 +257,10 @@ struct HomeView: View {
     }
 
     /// One glass dock: Settings as a gear, a hairline, Details with its chevron. One surface, two
-    /// segments, each its own 44 pt target (the hairline keeps them from reading as one button).
+    /// segments, each its own 48 pt target (the hairline keeps them from reading as one button). Quiet
+    /// glass: a thin white wash and a 10 % hairline, so the dock never outshines the capsule.
     private var dock: some View {
-        let side = gearGlyph + 26
+        let side = gearGlyph + 28
         return HStack(spacing: 0) {
             Button { showSettings = true } label: {
                 GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: gearGlyph)
@@ -266,7 +275,7 @@ struct HomeView: View {
             Button { showDetails = true } label: {
                 HStack(spacing: 4) {
                     Text(L.t("details")).tonoFont(15, .medium, relativeTo: .subheadline)
-                    GlyphIcon(glyph: .chevronUp, tint: TonoColor.textPrimary, size: 14)
+                    GlyphIcon(glyph: .chevronUp, tint: TonoColor.textPrimary, size: chevronGlyph)
                 }
                 .foregroundStyle(TonoColor.textPrimary)
                 .padding(.leading, 14).padding(.trailing, 16)
@@ -279,7 +288,7 @@ struct HomeView: View {
             .accessibilityLabel(L.t("details"))
             .accessibilityIdentifier("detailsButton")
         }
-        .glassSurface(Capsule(), tint: glassTint)
+        .glassSurface(Capsule(), tint: glassTint, quiet: true)
     }
 
     /// One quiet line under the title: exits when connected, progress while connecting, the short
@@ -288,11 +297,13 @@ struct HomeView: View {
         let reason = model.reason
         if let reason, BannerAction.showsBanner(model.phase, reason: reason) {
             // The short reason opens Details (full reason + its one action); 44 pt tall for the thumb.
+            // The subtitle's tone (secondary) with one tinted dot: the dot carries the alert, the
+            // line stays a subtitle under the title rather than a second row like the line below.
             Button { showDetails = true } label: {
                 HStack(spacing: 8) {
                     StatusDot(color: model.phase == .failed ? TonoColor.error : TonoColor.warning, size: 7)
-                    Text(PhaseText.short(reason)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
-                    GlyphIcon(glyph: .chevronRight, tint: TonoColor.textSecondary, size: 12)
+                    Text(PhaseText.short(reason)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                    GlyphIcon(glyph: .chevronRight, tint: TonoColor.textTertiary, size: chevronGlyph)
                 }
                 .frame(minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
@@ -312,8 +323,8 @@ struct HomeView: View {
             } label: {
                 HStack(spacing: 8) {
                     StatusDot(color: TonoColor.warning, size: 7)
-                    Text(note).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
-                    GlyphIcon(glyph: .chevronRight, tint: TonoColor.textSecondary, size: 12)
+                    Text(note).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                    GlyphIcon(glyph: .chevronRight, tint: TonoColor.textTertiary, size: chevronGlyph)
                 }
                 .frame(minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
@@ -345,7 +356,7 @@ struct HomeView: View {
         let cached = Text(L.t("lines_cached")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.warning)
         let latencyText = Text(latency).tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
             .foregroundStyle(TonoColor.textSecondary)
-        let chevron = GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 14)
+        let chevron = GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: chevronGlyph)
         // A line switch waiting on the tunnel spins where the latency was; one it never answered
         // says Unconfirmed there, so the name above is not read as confirmed.
         let change = model.unsettled(\.node)
@@ -363,18 +374,15 @@ struct HomeView: View {
             guard let change, let asked else { return latency }
             return change.pending ? L.t("route_switching", asked) : L.t("route_unconfirmed", asked)
         }()
-        // A quiet row of the text block, not a capsule: the dot, the name, the latency and a chevron
-        // on one line; 44 pt tall, the whole row is the target.
+        // A quiet row of the text block, not a capsule: the name, the latency and a chevron on one
+        // line, no bullet (the status above keeps the only dot); 44 pt tall, the whole row is the target.
         return Button { showLines = true } label: {
             Group {
                 if ax {
                     // Accessibility sizes: the name gets the full width on its own lines (a row broke
                     // "Tokyo" mid-word), latency and the chevron sit under it.
                     VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
-                            nameText.fixedSize(horizontal: false, vertical: true)
-                        }
+                        nameText.fixedSize(horizontal: false, vertical: true)
                         if model.usingCachedCatalog { cached.fixedSize(horizontal: false, vertical: true) }
                         HStack(spacing: 8) { trailing; chevron }
                     }
@@ -382,7 +390,6 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     HStack(spacing: 10) {
-                        StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
                         VStack(alignment: .leading, spacing: 2) {
                             nameText.lineLimit(1)
                             if model.usingCachedCatalog { cached.lineLimit(2) }
