@@ -148,6 +148,8 @@
 "details_why" = "发生了什么";
 "details_mode" = "路由模式";
 "settings_close" = "关闭设置";
+"a11y_expanded" = "已展开";
+"a11y_collapsed" = "已收起";
 "a11y_connected_for" = "已连接 %1$@";
 "short_NETWORK_CHANGED" = "网络已切换 · 正在重连";
 "reason_NETWORK_CHANGED" = "网络切换了，Tono 正在重建线路。";

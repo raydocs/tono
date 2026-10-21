@@ -148,6 +148,8 @@
 "details_why" = "What happened";
 "details_mode" = "Routing mode";
 "settings_close" = "Close settings";
+"a11y_expanded" = "Expanded";
+"a11y_collapsed" = "Collapsed";
 "a11y_connected_for" = "Connected for %1$@";
 "short_NETWORK_CHANGED" = "Network changed · reconnecting";
 "reason_NETWORK_CHANGED" = "Your network changed. Tono is rebuilding the route.";

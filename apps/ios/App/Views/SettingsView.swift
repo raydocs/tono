@@ -5,6 +5,9 @@ import UIKit
 /// Sign out's red, muted to the night surfaces (5.8:1 on Smoke, 6.2:1 on Night) instead of the
 /// system alert red, which was the one saturated colour on the screen.
 private let signOutRed = Color(hex: 0xE27068)
+/// The switch's "on": the deeper end of the primary button's sun gradient, one accent with Home,
+/// warm enough to part from the white knob without the coral of the sun's edge.
+private let switchOn = Color(hex: 0xFF9E6B)
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -59,19 +62,16 @@ struct SettingsView: View {
                     } label: {
                         act(L.t("routing_scope_title"))
                     }
-                    .tint(TonoColor.textTertiary)
+                    .disclosureGroupStyle(CaretDisclosure())
                     .accessibilityIdentifier("scopeDisclosure")
 
                     // "Where does a site go?" lives in Details, next to where traffic goes.
 
                     SettingsLabel(text: L.t("settings_system"))
                     Toggle(isOn: Binding(get: { model.includeAllNetworks }, set: { on in Task { await model.setIncludeAllNetworks(on) } })) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            title(L.t("system_include_all"))
-                            meta(L.t("system_include_all_short"))
-                        }
+                        title(L.t("system_include_all"))
                     }
-                    .toggleStyle(RowToggleStyle())
+                    .toggleStyle(RowToggleStyle(meta: L.t("system_include_all_short")))
                     if model.includeAllPending {
                         // The running tunnel keeps the previous setting until it next starts.
                         Text(L.t("system_include_all_pending")).tonoFont(15, relativeTo: .subheadline)
@@ -91,22 +91,19 @@ struct SettingsView: View {
                     } label: {
                         act(L.t("system_how_title"))
                     }
-                    .tint(TonoColor.textTertiary)
+                    .disclosureGroupStyle(CaretDisclosure())
 
                     SettingsLabel(text: L.t("settings_lock_screen"))
                     Toggle(isOn: Binding(get: { model.liveActivityEnabled }, set: { model.setLiveActivity($0) })) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            title(L.t("settings_live_activity"))
-                            meta(L.t("settings_live_activity_desc"))
-                        }
+                        title(L.t("settings_live_activity"))
                     }
-                    .toggleStyle(RowToggleStyle())
+                    .toggleStyle(RowToggleStyle(meta: L.t("settings_live_activity_desc")))
                     .accessibilityIdentifier("liveActivityToggle")
 
                     SettingsLabel(text: L.t("settings_account"))
                     // The address is the value under the label, as every other row; VoiceOver still
                     // gets the sentence (Apple's audit flagged the bare address as not human-readable).
-                    title(model.email ?? "")
+                    title(Self.breakable(model.email ?? ""))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 10)
                         .accessibilityLabel(L.t("settings_signed_in_as", model.email ?? ""))
@@ -121,12 +118,9 @@ struct SettingsView: View {
                     // no rule, the one line the screen had.
                     SettingsLabel(text: L.t("settings_about"))
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(L.t("about_version", AppModel.appVersion)).tonoFont(13, relativeTo: .footnote)
+                        Text(Self.breakable(L.t("about_version", AppModel.appVersion))).tonoFont(13, relativeTo: .footnote)
                             .foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
-                        // Word joiners after each solidus: the source address moves to the next line whole
-                        // instead of breaking after "github.com/".
-                        fine((model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion))
-                            .replacingOccurrences(of: "/", with: "/\u{2060}"))
+                        fine(Self.breakable(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion)))
                     }
                     .padding(.top, 10)
                 }
@@ -187,6 +181,54 @@ struct SettingsView: View {
 
     private func fine(_ text: String) -> some View {
         Text(text).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textTertiary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Identifiers (an address, a source URL) may break only after "@", "/" and a "." that starts
+    /// the next part of a name: a zero-width break opportunity there, so the line breaker never has
+    /// to hyphenate inside a word (AX5 showed "preview@ex-ample.com" and "Sager-Net"). Silent for
+    /// VoiceOver; the string resources are untouched.
+    static func breakable(_ text: String) -> String {
+        let chars = Array(text)
+        var out = ""
+        out.reserveCapacity(chars.count + 8)
+        for (i, c) in chars.enumerated() {
+            out.append(c)
+            let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+            if c == "@" || c == "/" || (c == "." && next?.isLetter == true) { out.append("\u{200B}") }
+        }
+        return out
+    }
+}
+
+/// Both in-place disclosures: the row is the button, a caret on the right edge turns over when the
+/// group opens (never the navigation chevron, which means "another screen"). The caret follows the
+/// text size up to 1.5x. VoiceOver hears the state as a value.
+private struct CaretDisclosure: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CaretDisclosureBody(configuration: configuration)
+    }
+}
+
+private struct CaretDisclosureBody: View {
+    let configuration: DisclosureGroupStyleConfiguration
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(TonoMotion.state) { configuration.isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+                    GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 18 * min(scale, 1.5))
+                        .rotationEffect(.degrees(configuration.isExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(L.t(configuration.isExpanded ? "a11y_expanded" : "a11y_collapsed"))
+            if configuration.isExpanded { configuration.content }
+        }
     }
 }
 
@@ -314,30 +356,40 @@ struct RouteCheck: View {
 }
 
 /// A settings switch whose whole row is the tap target (at least 44 pt tall), not only the
-/// 63 x 28 pt switch; VoiceOver gets one switch with its label.
+/// 63 x 28 pt switch; VoiceOver gets one switch with its label and description.
 struct RowToggleStyle: ToggleStyle {
+    /// The description under the title: drawn full width below the title row, spoken with the label.
+    var meta: String? = nil
+
     func makeBody(configuration: Configuration) -> some View {
-        RowToggle(configuration: configuration)
+        RowToggle(configuration: configuration, meta: meta)
     }
 }
 
 private struct RowToggle: View {
     let configuration: ToggleStyleConfiguration
+    let meta: String?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        // Accessibility sizes: the switch goes under the label, which then has the full width.
+        // The switch sits on the title line, centred on it; the description runs the full width
+        // under both. Accessibility sizes: the switch goes under the title, which then has the full width.
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
                                                   : AnyLayout(HStackLayout(spacing: 12))
         Button { configuration.isOn.toggle() } label: {
-            layout {
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                // Drawn only; the row's button takes the tap.
-                // The deeper sun for "on": the pale accent sat too close to the white knob.
-                Toggle("", isOn: configuration.$isOn).labelsHidden().tint(TonoColor.sunEdge).allowsHitTesting(false)
-                    .padding(.trailing, 4)
+            VStack(alignment: .leading, spacing: 4) {
+                layout {
+                    configuration.label
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Drawn only; the row's button takes the tap.
+                    Toggle("", isOn: configuration.$isOn).labelsHidden().tint(switchOn).allowsHitTesting(false)
+                        .padding(.trailing, 4)
+                }
+                if let meta {
+                    Text(meta).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(.vertical, 10)
             .frame(minHeight: 44)
@@ -345,7 +397,16 @@ private struct RowToggle: View {
         }
         .buttonStyle(.plain)
         .accessibilityRepresentation {
-            Toggle(isOn: configuration.$isOn) { configuration.label }
+            Toggle(isOn: configuration.$isOn) {
+                if let meta {
+                    VStack(alignment: .leading) {
+                        configuration.label
+                        Text(meta)
+                    }
+                } else {
+                    configuration.label
+                }
+            }
         }
     }
 }
