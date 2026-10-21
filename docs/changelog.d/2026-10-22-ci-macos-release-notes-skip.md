@@ -7,3 +7,4 @@
   - 新增「只改 macOS 发布说明不选 macOS」用例（同时改 Swift 仍选中），以及 `classifyMacosDiff` 对发布说明返回 `empty` 的断言。两处都在旧代码上失败。
 - 验证：`node --test tooling/scripts/tests/ci-gate-changes.test.mjs tooling/scripts/tests/macos-ci-skip-duplicate.test.mjs` 13 项通过；`macos-ci.yml` 能被 YAML 解析。
 - 剩余限制：发布说明和 Swift 代码一起改的 PR 照常跑 macOS CI。本 PR 改了 `tooling/scripts/**`，本身仍会触发一次 macOS CI。
+- 审查：独立 Codex（gpt-6.1-sol xhigh）审 `b398782c3`，approve-with-fixes，无 major。两个 minor 已修：`classifyMacosDiff` 的排除规则只跳过 `prefix/` 之内的文件，裸 `apps/macos/release-notes`（目录被换成文件或链接）仍判 `changed`；排除规则带通配符或字符类时返回 `unknown`，不再误判 `empty`。两条新断言在修复前的代码上失败。

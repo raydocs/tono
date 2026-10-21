@@ -107,6 +107,12 @@ test('macOS path classification uses the workflow push list and fails closed', (
     truncated: false,
     patterns,
   }), 'empty')
+  assert.equal(classifyMacosDiff({ files: ['apps/macos/release-notes'], truncated: false, patterns }), 'changed')
+  assert.equal(classifyMacosDiff({
+    files: ['apps/macos/[T]ono/App.swift'],
+    truncated: false,
+    patterns: ['apps/macos/**', '!apps/macos/[T]ono/**'],
+  }), 'unknown')
   assert.equal(classifyMacosDiff({ files: [], truncated: true, patterns }), 'unknown')
   assert.equal(classifyMacosDiff({ files: null, truncated: false, patterns }), 'unknown')
   assert.equal(classifyMacosDiff({
