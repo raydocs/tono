@@ -19,6 +19,24 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(catalog.cloudNodes[0].label, "Dawn")
     }
 
+    func testGatewayHostnameHomeLineIsAdmittedButSpecialUseAndNumericNamesAreNot() throws {
+        func admit(_ host: String) throws -> ExitCatalog {
+            try CatalogAdmission.admit(SampleCatalog.body(routing: CatalogRouting(homeSocks5: HomeSocks5(
+                host: host, port: 1080, username: "home-user", password: "home-pass"))))
+        }
+        let gateway = HomeSocks5(host: "isp.decodo.com", port: 1080, username: "home-user", password: "home-pass")
+        XCTAssertEqual(try admit("isp.decodo.com").home, .socks5(gateway))
+        let outbound = SampleCatalog.config(routing: CatalogRouting(homeSocks5: gateway))["outbounds"]?.array?
+            .first { $0["tag"]?.string == "Tono-Home-Residential" }
+        XCTAssertEqual(outbound?["server"]?.string, "isp.decodo.com")
+        XCTAssertEqual(outbound?["detour"]?.string, "Tono-Exit")
+        for host in ["ISP.decodo.com", "decodo", "isp.decodo.com.", "-isp.decodo.com", "isp_x.decodo.com", "127.0.0.0x1",
+                     "0x7f.0.0.1", "1.2.3", "localhost.decodo.com", "gw.localhost", "gw.local", "gw.internal", "gw.test",
+                     "example.com", "gw.example.org", "x.onion", "1.1.1.1.in-addr.arpa", "192.168.1.2"] {
+            XCTAssertThrowsError(try admit(host), host) { XCTAssertEqual(($0 as? CatalogRejected)?.code, "HOME_SOCKS", host) }
+        }
+    }
+
     func testCatalogNodeHomeIsRemovedFromTheCloudList() throws {
         let catalog = try CatalogAdmission.admit(SampleCatalog.body(routing: CatalogRouting(homeProxy: "Los Angeles · Grove")))
         XCTAssertEqual(catalog.cloudNodes.map(\.name), ["Tokyo · Dawn"])

@@ -213,7 +213,7 @@ public enum CatalogAdmission {
             let port = raw["port"]?.int
             let user = raw["username"]?.string
             let pass = raw["password"]?.string
-            guard let host, Net.isPublicIPv4(host), let port, (1...65535).contains(port),
+            guard let host, Net.isPublicIPv4(host) || Net.isPublicHostname(host), let port, (1...65535).contains(port),
                   let user, !user.isEmpty, user.count <= 255, let pass, !pass.isEmpty, pass.count <= 255 else {
                 throw CatalogRejected("HOME_SOCKS", "assigned home exit is malformed")
             }
@@ -276,6 +276,29 @@ public enum Net {
             (b[0] == 203 && b[1] == 0 && b[2] == 113) ||
             (b[0] == 192 && b[1] == 31 && b[2] == 196) || (b[0] == 192 && b[1] == 52 && b[2] == 193) ||
             (b[0] == 192 && b[1] == 88 && b[2] == 99) || (b[0] == 192 && b[1] == 175 && b[2] == 48))
+    }
+
+    /// Desktop `publicHostname`: Home lines are usually a provider gateway name (`isp.decodo.com`), dialled
+    /// through `Tono-Exit`, so the cloud node resolves it. Only an ordinary lowercase DNS name, never a
+    /// special-use suffix or an all-numeric form that inet_aton reads as an IP (`127.0.0.0x1`).
+    public static func isPublicHostname(_ text: String) -> Bool {
+        let labels = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard text.utf8.count <= 253, labels.count >= 2,
+              labels.allSatisfy({ label in
+                  !label.isEmpty && label.utf8.count <= 63 && label.first != "-" && label.last != "-"
+                      && label.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }
+              }),
+              let top = labels.last, top.unicodeScalars.contains(where: { ("a"..."z").contains($0) })
+        else { return false }
+        let numeric = labels.allSatisfy { label in
+            let hex = label.hasPrefix("0x")
+            return (hex ? label.dropFirst(2) : label[...]).unicodeScalars.allSatisfy {
+                ("0"..."9").contains($0) || (hex && ("a"..."f").contains($0))
+            }
+        }
+        let reserved = ["localhost", "local", "internal", "arpa", "invalid", "onion", "alt", "test", "example",
+                        "example.com", "example.net", "example.org"]
+        return !numeric && !reserved.contains { text == $0 || text.hasSuffix("." + $0) } && labels.first != "localhost"
     }
 
     public static func ipv4InCIDR(_ ip: String, _ cidr: String) -> Bool {
