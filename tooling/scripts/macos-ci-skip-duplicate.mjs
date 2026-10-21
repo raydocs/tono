@@ -83,11 +83,15 @@ export function classifyMacosDiff({ files, truncated, patterns }) {
   }
   for (const file of files) {
     if (typeof file !== 'string' || file === '') return 'unknown'
+    // GitHub's order: the last matching pattern decides, and `!` excludes.
+    let selected = false
     for (const pattern of patterns) {
-      const hit = matchMacosPath(file, pattern)
+      const negated = pattern.startsWith('!')
+      const hit = matchMacosPath(file, negated ? pattern.slice(1) : pattern)
       if (hit === null) return 'unknown'
-      if (hit) return 'changed'
+      if (hit) selected = !negated
     }
+    if (selected) return 'changed'
   }
   return 'empty'
 }
