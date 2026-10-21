@@ -941,6 +941,26 @@ pub(crate) async fn begin_user_connect(claim: ReleaseTicket) -> bool {
     finish_user_connect(&claim, generation)
 }
 
+/// Wait, up to the release's hard cap, for the release service to report that no release is
+/// running. `false` when it cannot be asked or the cap passed.
+#[cfg(windows)]
+pub(crate) async fn wait_release_worker_finished() -> bool {
+    let Ok(credentials) = current_owner_credentials() else {
+        return false;
+    };
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(tono_service_protocol::release_wire::RELEASE_HARD_CAP_SECONDS);
+    while std::time::Instant::now() < deadline {
+        match tono_service_protocol::release_status(&credentials).await.map(|response| response.data) {
+            Ok(Some(status)) if !status.running => return true,
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => return false,
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    false
+}
+
 /// What the release service answered for one Restore internet.
 #[cfg(windows)]
 pub(crate) enum PreemptiveRelease {

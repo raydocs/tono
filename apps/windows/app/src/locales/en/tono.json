@@ -404,7 +404,8 @@
       "encryptedDns": "The connection didn't complete.",
       "sendDiagnostics": "Send to support",
       "releaseInProgress": "Tono is restoring normal internet. Connect once it finishes, in a few seconds.",
-      "releaseUnfinished": "The last internet restore has not fully finished, so Tono cannot connect yet. Choose “Restore normal internet” again, or restart the PC and connect.",
+      "releaseUnfinished": "Tono already restored the internet once by itself, but the last restore has still not fully finished, so it cannot connect yet. Wait a moment and press Connect again; if it keeps failing, contact support.",
+      "releaseNeedsRestart": "Tono could not confirm that its last network change finished, so the PC needs one restart. After restarting, just press Connect.",
       "releaseRecordCorrupt": "Tono cannot read the record of the last internet restore, so it will not connect. Restart the PC; if that does not help, contact support.",
       "staleGeneration": "This connection was started before the internet restore and was cancelled. Connect again."
     },

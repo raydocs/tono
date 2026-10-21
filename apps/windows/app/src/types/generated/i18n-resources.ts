@@ -1069,6 +1069,7 @@ export interface TranslationResources {
           protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
           releaseInProgress: string
+          releaseNeedsRestart: string
           releaseReconciling: string
           releaseRecordCorrupt: string
           releaseUnfinished: string

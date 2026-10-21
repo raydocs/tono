@@ -11,6 +11,43 @@ pub(super) fn seed_autostart_after_connect() {
 /// `tono_connect`: guard, then the full §6 transaction; any failure after
 /// arm keeps blocking and schedules the protected reconnect.
 pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
+    let first = connect_click(state.clone(), app.clone()).await;
+    retry_after_unfinished_release(
+        first,
+        || super::preemptive::restore_for_unfinished_release(state.clone(), app.clone()),
+        || connect_click(state.clone(), app.clone()),
+    )
+    .await
+}
+
+/// A Connect the release authority refused because the last Restore internet did not finish gets
+/// one Restore internet and one more Connect, as if the user had clicked both: users only press
+/// Connect, and the refusal otherwise repeats on every click. A refusal that names a restart of
+/// Windows is returned as is, since no restore can clear it.
+pub(super) async fn retry_after_unfinished_release<R, RF, C, CF>(
+    first: Result<(), String>, restore: R, connect: C,
+) -> Result<(), String>
+where
+    R: FnOnce() -> RF,
+    RF: std::future::Future<Output = Result<(), String>>,
+    C: FnOnce() -> CF,
+    CF: std::future::Future<Output = Result<(), String>>,
+{
+    let error = match first {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    if !error.contains(RELEASE_UNFINISHED_MARKER) || error.contains("restart Windows") {
+        return Err(error);
+    }
+    logging!(warn, Type::Service, "Tono: 上次恢复网络没有完成，自动恢复一次后再连接: {error}");
+    restore().await?;
+    connect().await
+}
+
+const RELEASE_UNFINISHED_MARKER: &str = "TONO_RELEASE_UNFINISHED:";
+
+async fn connect_click(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
     // The user's own Connect is the one thing that may start again after Restore internet. It
     // owns the release epoch from the click: stamped before the first wait, claimed under the
     // state lock that orders it against Restore's first change (Sol R3-F1, R4-F1 on PR #1569).
@@ -153,5 +190,30 @@ async fn connect_owned(
             }
             Err(ConnectFailure { error, retry_generation: current.then_some(generation) })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The customer report of 2026-10-21: after a restart every Connect was refused until the
+    /// user chose Restore internet, which they never did. Connect now runs it and connects.
+    #[tokio::test]
+    async fn an_unfinished_release_is_restored_and_connected_by_the_same_click() {
+        let restored = std::sync::atomic::AtomicBool::new(false);
+        let result = retry_after_unfinished_release(
+            Err("TONO_RELEASE_UNFINISHED: the last network restore has not finished: a DNS change from before the \
+                 restart has not been checked; choose Restore internet again"
+                .to_string()),
+            || async {
+                restored.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+            || async { Ok(()) },
+        )
+        .await;
+        assert!(restored.load(std::sync::atomic::Ordering::SeqCst), "Connect must run Restore internet itself");
+        assert_eq!(result, Ok(()));
     }
 }

@@ -404,7 +404,8 @@
       "encryptedDns": "Windows 还开着「加密 DNS」。点下面打开设置，关掉后再连接。",
       "sendDiagnostics": "发给支持",
       "releaseInProgress": "正在恢复正常网络，完成后才能连接。请稍等几秒再试。",
-      "releaseUnfinished": "上一次恢复正常网络还没有完全结束，暂时不能连接。请再点一次「恢复正常网络」，或重启电脑后再连。",
+      "releaseUnfinished": "Tono 已经自动恢复过一次网络，但上一次恢复仍没有完全结束，暂时不能连接。请稍等片刻再点「连接」；多次仍不行请联系客服。",
+      "releaseNeedsRestart": "Tono 上次修改的网络设置还没能确认完成，需要重启一次电脑。重启后直接点「连接」即可。",
       "releaseRecordCorrupt": "Tono 读不到上一次恢复网络的记录，为安全起见暂时不能连接。请重启电脑；仍不行请联系客服。",
       "staleGeneration": "这次连接是在恢复网络之前发起的，已作废。请重新连接。"
     },

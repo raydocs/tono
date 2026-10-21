@@ -58,6 +58,21 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
     }
 }
 
+/// The Restore internet a Connect runs when admission found the last one unfinished. The release
+/// service answers at its deadline with whatever is known and keeps working, so an `unknown`
+/// answer waits for that release to end: the Connect after it is the one admission judges.
+pub(super) async fn restore_for_unfinished_release(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
+    let error = match restore_internet(state, app).await {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    #[cfg(windows)]
+    if error.starts_with(RESTORE_UNKNOWN_PREFIX) && crate::core::service::wait_release_worker_finished().await {
+        return Ok(());
+    }
+    Err(error)
+}
+
 /// Restore's first change: retire every connection task and begin the disconnect, but only while
 /// `ticket` still owns the release epoch, checked under the state lock that admits attempts and
 /// orders the user's Connect claim (Sol R3-F1). A Restore that waited for the lock while a newer
@@ -132,6 +147,10 @@ async fn settle(
     }
     commands::emit_status(app, &commands::status_of(&inner));
     drop(inner);
+    // Uploaded with the network log: support otherwise sees only the refused Connects.
+    if let Err(failure) = &result {
+        state.audit().log(crate::tono::audit::AuditEvent::ReleaseFail { error: failure.clone() });
+    }
     result
 }
 
