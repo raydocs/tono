@@ -282,7 +282,7 @@ SHA-256 differs from `supply-chain/sing-box/libbox.aar.sha256`
 ## Routing (same contract as desktop `raydocs/tono@59082acf`)
 
 `scripts/routing/sync-desktop-routing.py` generates `DesktopRoutingContract.kt` from the desktop
-`direct_domains.rs` and `three-tier-template.json` (21 cloud-video exceptions, 166 Home entries,
+`direct_domains.rs` and `three-tier-template.json` (21 cloud-video exceptions, 194 Home entries,
 `160.79.104.0/21`, 39 protected entries, domestic/overseas exact lists); `--check` fails on drift.
 
 First match wins:

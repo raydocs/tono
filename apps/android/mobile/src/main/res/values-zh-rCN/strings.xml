@@ -90,7 +90,7 @@
     <string name="mode_stable_short">稳定</string>
     <string name="mode_applies">修改会立即应用到正在运行的连接。</string>
     <string name="routing_scope_title">Tono 能识别什么、不能识别什么</string>
-    <string name="routing_scope">优先级：21 项云端视频例外 → 166 项 AI／指定 Home 条目（另含 Anthropic 地址段，以及 Claude、ChatGPT、Grok 应用）→ 明确的云端列表 → 其他全部直连。命中的流量失败时会暂停，不会退回直连；命中的 UDP/QUIC 会被拒绝，应用会改用 TCP。使用 ECH、自带 DoH 或缓存地址的应用可能隐藏 AI 身份，这部分会走直连；无法保证未识别的 AI 走家宽。</string>
+    <string name="routing_scope">优先级：21 项云端视频例外 → 194 项 AI／指定 Home 条目（另含 Anthropic 地址段，以及 Claude、ChatGPT、Grok 应用）→ 明确的云端列表 → 其他全部直连。命中的流量失败时会暂停，不会退回直连；命中的 UDP/QUIC 会被拒绝，应用会改用 TCP。使用 ECH、自带 DoH 或缓存地址的应用可能隐藏 AI 身份，这部分会走直连；无法保证未识别的 AI 走家宽。</string>
     <string name="routing_platform">在 Android 上，所有应用、所有 TCP/UDP 端口以及 IPv4、IPv6 都进入隧道；局域网、链路本地与组播不进入。直连域名用你当前网络的 DNS 解析，命中名单的域名不会发给它。热点共享设备和你在下方排除的应用完全不经过 Tono。</string>
     <string name="settings_apps">不经过 Tono 的应用</string>
     <string name="settings_apps_none">无：所有应用都按 Tono 规则走</string>
