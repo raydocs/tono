@@ -110,6 +110,9 @@ func runReleaseSelfTests() -> Bool {
 
     // Real kernel: a dead worker's children are found by session and ended.
     check(deadWorkerSessionIsEnded(), "dead worker session is ended before admission")
+    check(unreapedZombieIsGone(), "an unreaped zombie is gone, not unknown")
+    check(deletedExecutableIsUnidentified(asUser: true) == false, "a user's deleted non-platform executable is not unidentified")
+    check(deletedExecutableIsUnidentified(asUser: false) == true, "a root process with a deleted executable stays unidentified")
 
     // Outcome: only clean, settled, finished readback is restored.
     let clean = ReleaseReport.Component(name: "pf", readback: "restored", risk: "settled", detail: nil)
@@ -245,20 +248,20 @@ func runReleaseSelfTests() -> Bool {
     // strict intent; only the explicitly fenced emergency release can.
     do {
         try authority.save(secured)
-        try authority.bindRuntime(generation: 20, digest: "strict-fixture", strict: true, requestedMode: "three-tier")
+        try authority.bindRuntime(generation: 20, digest: "strict-fixture", runtimeMode: "three-tier", requestedMode: "three-tier")
         let restarted = ReleaseAuthority(directory: directory, owner: geteuid())
         let persisted = try restarted.load()
         var mismatchRefused = false
         do {
-            try restarted.bindRuntime(generation: 20, digest: "wrong-mode", strict: true, requestedMode: "stable")
+            try restarted.bindRuntime(generation: 20, digest: "wrong-mode", runtimeMode: "three-tier", requestedMode: "stable")
         } catch { mismatchRefused = true }
         var downgradeRefused = false
         do {
-            try restarted.bindRuntime(generation: 20, digest: "stable-fixture", strict: false, requestedMode: "stable")
+            try restarted.bindRuntime(generation: 20, digest: "stable-fixture", runtimeMode: "stable", requestedMode: "stable")
         } catch { downgradeRefused = true }
         var replacementRefused = false
         do {
-            try restarted.bindRuntime(generation: 20, digest: "different-strict-fixture", strict: true, requestedMode: "three-tier")
+            try restarted.bindRuntime(generation: 20, digest: "different-strict-fixture", runtimeMode: "three-tier", requestedMode: "three-tier")
         } catch { replacementRefused = true }
         var blocked = KillSwitchManager.emergencyState(preserving: nil)
         blocked.strictBlocking = persisted.strictIntent
@@ -272,6 +275,28 @@ func runReleaseSelfTests() -> Bool {
               "strict restart and failed replacement retain block; fenced explicit release retires intent")
     } catch {
         check(false, "strict restart and failed replacement retain block; fenced explicit release retires intent")
+    }
+
+    // AI Home is fail-closed for AI only: its bind records no strict intent,
+    // a stable graph cannot claim it, and it cannot replace a strict session.
+    do {
+        try authority.save(secured)
+        try authority.bindRuntime(generation: 20, digest: "ai-home-fixture", runtimeMode: "ai-home", requestedMode: "ai-home")
+        let aiHome = try authority.load()
+        var claimRefused = false
+        do {
+            try authority.bindRuntime(generation: 20, digest: "stable-fixture", runtimeMode: "stable", requestedMode: "ai-home")
+        } catch { claimRefused = true }
+        try authority.bindRuntime(generation: 20, digest: "strict-fixture", runtimeMode: "three-tier", requestedMode: "three-tier")
+        var downgradeRefused = false
+        do {
+            try authority.bindRuntime(generation: 20, digest: "ai-home-fixture", runtimeMode: "ai-home", requestedMode: "ai-home")
+        } catch { downgradeRefused = true }
+        check(!aiHome.strictIntent && aiHome.strictRuntimeDigest == nil && claimRefused && downgradeRefused,
+              "AI Home binds without strict intent and cannot replace a strict session")
+        try authority.save(secured)
+    } catch {
+        check(false, "AI Home binds without strict intent and cannot replace a strict session")
     }
 
     return passed
@@ -360,4 +385,89 @@ private func workerWithoutLockReportsBusy() -> Bool {
     }
     guard let report else { return false }
     return report.outcome == "busy" && report.components.isEmpty
+}
+
+/// A child that has exited keeps its pid until it is reaped. It can no longer
+/// change anything, so it reads as gone; `unknown` would hold the release
+/// open until the Mac restarts.
+private func unreapedZombieIsGone() -> Bool {
+    let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/usr/bin/true"), nil]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    guard posix_spawn(&pid, "/usr/bin/true", nil, nil, argv, nil) == 0 else { return false }
+    defer {
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+    }
+    var info = siginfo_t()
+    var waited: Int32
+    repeat { waited = waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) } while waited == -1 && errno == EINTR
+    guard waited == 0, kill(pid, 0) == 0 else { return false }
+    let state = ReleaseProcessTable.state(of: pid)
+    guard state == .gone else {
+        fputs("release zombie \(pid): \(state)\n", stderr)
+        return false
+    }
+    return true
+}
+
+/// An app updated while it runs keeps executing a file that no longer has a
+/// path. Copied from `/bin/sleep` and re-signed ad hoc, so it is not platform
+/// code; `asUser` runs it as nobody through sudo, otherwise it runs as root.
+/// Answers whether the release scan named it as unidentified, or nil when the
+/// setup did not hold (the copy must be alive, listed and pathless).
+private func deletedExecutableIsUnidentified(asUser: Bool) -> Bool? {
+    var template = Array("/private/tmp/tono-release-exe.XXXXXX".utf8CString)
+    guard mkdtemp(&template) != nil else { return nil }
+    let directory = String(cString: template)
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    let copy = directory + "/updated-app"
+    guard chmod(directory, 0o755) == 0,
+          (try? FileManager.default.copyItem(atPath: "/bin/sleep", toPath: copy)) != nil,
+          chmod(copy, 0o755) == 0 else { return nil }
+    let signer = Process()
+    signer.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+    signer.arguments = ["--force", "--sign", "-", copy]
+    signer.standardOutput = FileHandle.nullDevice
+    signer.standardError = FileHandle.nullDevice
+    guard (try? signer.run()) != nil else { return nil }
+    signer.waitUntilExit()
+    guard signer.terminationStatus == 0 else { return nil }
+    let launcher = asUser ? "/usr/bin/sudo" : copy
+    let words = asUser ? ["sudo", "-n", "-u", "nobody", "--", copy, "30"] : [copy, "30"]
+    let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
+    defer { argv.forEach { free($0) } }
+    var spawned: pid_t = 0
+    guard posix_spawn(&spawned, launcher, nil, nil, argv, nil) == 0 else { return nil }
+    // sudo runs the command as its child; find the process executing the copy.
+    var target: pid_t = 0
+    for _ in 0..<40 where target == 0 {
+        usleep(50_000)
+        target = (ReleaseProcessTable.listPIDs() ?? []).first { pid in
+            (pid == spawned || ReleaseProcessTable.parent(of: pid) == spawned)
+                && ReleaseProcessTable.path(of: pid) == copy
+        } ?? 0
+    }
+    defer {
+        if target > 0 { kill(target, SIGKILL) }
+        kill(spawned, SIGKILL)
+        var status: Int32 = 0
+        waitpid(spawned, &status, 0)
+    }
+    guard target > 0, unlink(copy) == 0, ReleaseProcessTable.path(of: target) == nil,
+          case .alive(_) = ReleaseProcessTable.state(of: target),
+          ReleaseProcessTable.listPIDs()?.contains(target) == true else {
+        fputs("release deleted executable \(target): setup did not hold\n", stderr)
+        return nil
+    }
+    let observeOnly = ReleaseProcesses(state: { ReleaseProcessTable.state(of: $0) },
+                                       groupMembers: { ReleaseProcessTable.members(session: $0, group: $1) },
+                                       bootSession: { "boot" }, kill: { _ in })
+    let outcome = ReleaseChildren.end(processes: observeOnly)
+    guard !outcome.failures.contains(where: { $0.contains("could not be listed") }) else { return nil }
+    let named = outcome.failures.contains { failure in
+        failure.split(whereSeparator: { !$0.isNumber }).contains(Substring(String(target)))
+    }
+    fputs("release deleted executable \(target) as \(asUser ? "nobody" : "root"): named \(named)\n", stderr)
+    return named
 }

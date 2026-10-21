@@ -7,6 +7,9 @@ mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
+#[cfg(target_os = "windows")]
+pub use windows::{disable_proxy_enable_and_notify, restore_internet_proxy_settings};
+
 // #[cfg(feature = "utils")]
 pub mod utils;
 
@@ -62,6 +65,10 @@ pub enum Error {
     #[cfg(target_os = "linux")]
     #[error(transparent)]
     Xdg(#[from] xdg::BaseDirectoriesError),
+
+    #[cfg(target_os = "windows")]
+    #[error("refusing to enable the system proxy")]
+    RefusingToEnableProxy,
 
     #[cfg(target_os = "windows")]
     #[error("system call failed")]

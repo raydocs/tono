@@ -65,6 +65,7 @@ export interface TonoCatalogStatus {
   nodeCount: number
   lastSyncedAtMs: number | null
   error: string | null
+  staleSystemProxy?: string | null
 }
 
 export interface TonoServerTestResult {
@@ -321,6 +322,10 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   },
   { prefix: 'TONO_DIAG_PREVIEW_EXPIRED', key: 'tono.experience.prepareFailed' },
   { prefix: 'TONO_DIAG_FAILED', key: 'tono.progress.upload.errors.failed' },
+  // Ahead of the English propagating sentence: the stuck prefix contains that
+  // sentence, and the short-retry copy must not win.
+  { prefix: 'TONO_EXIT_IDENTITY_STUCK', key: 'tono.nodes.identityStuck' },
+  { prefix: 'TONO_STALE_SYSTEM_PROXY', key: 'tono.nodes.staleSystemProxyNotice' },
 ]
 
 const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
@@ -357,6 +362,14 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
     match: /server error 5\d\d|INTERNAL_ERROR|internal server error/i,
     key: 'tono.login.errors.serverError',
   },
+  {
+    match: /secure exit identity is still being prepared/i,
+    key: 'tono.nodes.identityPropagating',
+  },
+  {
+    match: /proxy.*127\.0\.0\.1|127\.0\.0\.1:\d+.*proxy|Failed to connect to proxy/i,
+    key: 'tono.nodes.staleSystemProxyNotice',
+  },
 ]
 
 export const isEncryptedDnsFailure = (error: unknown): boolean => {
@@ -391,6 +404,11 @@ const mappedTonoActionErrorKey = (raw: string): string | null => {
   }
   if (raw.includes('CORE_EXIT_UNREACHABLE')) {
     return 'tono.dashboard.errors.nodeUnreachable'
+  }
+  // The one unfinished-release refusal no Restore internet can clear; Connect already ran
+  // Restore internet itself for the others.
+  if (raw.includes('TONO_RELEASE_UNFINISHED:') && raw.includes('restart Windows')) {
+    return 'tono.dashboard.errors.releaseNeedsRestart'
   }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
@@ -562,6 +580,9 @@ export const tonoCatalogStatus = () =>
 
 export const tonoRefreshCatalog = () =>
   call<TonoCatalogStatus>('tono_refresh_catalog')
+
+export const tonoDisableStaleSystemProxy = () =>
+  call<void>('tono_disable_stale_system_proxy')
 
 export const tonoSelectServer = (
   name: string,

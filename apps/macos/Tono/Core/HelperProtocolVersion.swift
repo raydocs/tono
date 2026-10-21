@@ -488,7 +488,39 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.56 → 4.52.57: exact three-tier admission accepts its DIRECT
     ///   final and rechecks protected Home CIDRs after ordinary resolution.
     ///   Stable still requires the cloud final.
-    static let current = "4.52.57"
+    /// - 4.52.57 → 4.52.58: the release check reads an unreaped zombie as
+    ///   gone, and a process whose executable path is unreadable no longer
+    ///   holds every component busy when the kernel shows it is neither root
+    ///   nor platform code, so a user's app updated while it runs cannot
+    ///   block Connect. Root and platform processes stay unidentified.
+    /// - 4.52.58 → 4.52.59: owned-runtime admission and runtime binding accept
+    ///   a third mode, `ai-home` (the exact AI Home graph: AI on Home, the
+    ///   rest DIRECT). It binds non-strict: no strict intent is recorded, so
+    ///   quit and failure release ordinary traffic, and it cannot replace a
+    ///   strict three-tier session. Stable and three-tier are unchanged.
+    /// - 4.52.59 → 4.52.60: the arm request gained optional `aiHomeScoped`
+    ///   (JSON boolean only; absent means off). On renders the AI Home anchor
+    ///   (decision 130): lo0 and TUN passes, then one block of the AI Home
+    ///   graph's Home prefixes (`tono-ai-home`) on every other interface, and
+    ///   no whole-host catch-all, so ordinary traffic is not filtered. It is
+    ///   persisted, kept by heal and the sleep/wake barrier, and overridden by
+    ///   strict intent. The reply echoes `aiHomeScoped` as rendered. Quit,
+    ///   Core death and Restore internet release as before (AI hold kept on
+    ///   quit and failure). An older daemon refuses the unknown field.
+    /// - 4.52.60 → 4.52.61: before the core starts (and after a sync stop),
+    ///   the helper binds each loopback port the config needs the way the core
+    ///   would. A port another program holds refuses the start with
+    ///   `CORE_PORT_IN_USE` and a fixed message naming the port, transport and
+    ///   holding process, instead of the core exiting with a bare status.
+    /// - 4.52.61 → 4.52.62: the AI Home and three-tier runtime contract admits
+    ///   a Home SOCKS server given as an ordinary public DNS name (provider
+    ///   gateways such as `isp.decodo.com`), not only a public IPv4 literal.
+    ///   An older daemon refuses such a runtime at bind.
+    /// - 4.52.62 → 4.52.63: the generated AI Home suffix list gains
+    ///   `ampcode.com` and the sign-in, API and product hosts audited with it
+    ///   (Amp's WorkOS script, Cursor, Copilot, Kiro, Windsurf, JetBrains AI,
+    ///   Hark and others; 194 entries). An older daemon would route them DIRECT.
+    static let current = "4.52.63"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

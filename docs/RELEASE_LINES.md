@@ -32,17 +32,20 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.77 (build 78)** and **Windows
-0.0.77**, prepared as a new **customer-test candidate** by the owner's
-2026-10-17 request after merging #1571. This is not stable acceptance or customer-feed promotion.
-See `apps/macos/release-notes/build78.md`, `apps/windows/release-notes/0.0.77.md`
-and [the delivery record](changelog.d/2026-10-17-desktop-0077-customer-test.md).
+Source versions in this tree are **macOS 0.0.80 (build 81)** and **Windows
+0.0.80** (version only; Windows has no change since 0.0.79 and is not rebuilt
+for this candidate). 0.0.80 exists because the 0.0.79 qualification on a Devin
+macOS VM found that AI Home and Three-tier refused every Home line given as a
+gateway name (#1702, helper 4.52.62). It is a **test candidate** for
+installed-device qualification of AI Home (decision 131), not stable acceptance
+or customer-feed promotion. See `apps/macos/release-notes/build81.md` and
+[the delivery record](changelog.d/2026-10-20-desktop-0080-test.md).
 Both packages must bind the same source and release sequence; share verified
 bytes in a new, explicitly labelled prerelease, never by overwriting old assets.
 Installed-device results are collected after candidate creation, not invented
-as a prerequisite receipt. The 0.0.76 RC and its assets remain immutable.
+as a prerequisite receipt. The 0.0.79, 0.0.78, 0.0.77 and 0.0.76 RCs and their assets remain immutable.
 G1–G3 still govern stable promotion; the 0.0.75 G3 deferral is not a
-qualification of 0.0.77 upgrades. Three-tier is an explicit opt-in: ordinary
+qualification of 0.0.80 upgrades. Three-tier is an explicit opt-in: ordinary
 DIRECT is public IPv4 TCP80/443 only, not UDP/QUIC, IPv6 or LAN support.
 
 0.0.75 and 0.0.74 were built but not customer-published. Their draft releases,

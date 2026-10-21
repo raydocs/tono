@@ -34,6 +34,7 @@ let killSwitchArmFields = Set([
     "bootstrapPins",
     "reviewedBundleDirect",
     "allowLocalNetworkDevices",
+    "aiHomeScoped",
 ])
 
 enum HelperFailure: Error {
@@ -161,6 +162,87 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
         && maySignalOwnedCore(path: mihomoPath, uid: 0, expectedPath: mihomoPath)
         && !maySignalOwnedCore(path: "/usr/libexec/rosetta/runtime", uid: 0, expectedPath: mihomoPath)
         && !maySignalOwnedCore(path: mihomoPath, uid: 501, expectedPath: mihomoPath)
+}
+
+/// A port another program holds is refused by name before the core starts.
+/// Holds a UDP socket and a TCP listener on ephemeral loopback ports, so the
+/// holder it must name is this process.
+func runCorePortPreflightSelfTest() -> Bool {
+    var failures: [String] = []
+    let config = Data(#"{"inbounds":[{"type":"tun","interface_name":"utun199"},{"type":"direct","tag":"Tono-DNS","listen":"127.0.0.1","listen_port":53},{"type":"mixed","tag":"Tono-Mixed","listen":"127.0.0.1","listen_port":28990}],"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}}"#.utf8)
+    if CoreListenPreflight.sockets(inConfig: config) != [
+        .init(port: 53, udp: false), .init(port: 53, udp: true),
+        .init(port: 28990, udp: false), .init(port: 9090, udp: false),
+    ] {
+        failures.append("config sockets")
+    }
+    func boundLoopback(udp: Bool) -> (fd: Int32, port: UInt16)? {
+        let fd = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let ready = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, length) == 0 && (udp || listen(fd, 1) == 0)
+                    && getsockname(fd, $0, &length) == 0
+            }
+        }
+        guard ready else { close(fd); return nil }
+        return (fd, UInt16(bigEndian: address.sin_port))
+    }
+    for udp in [true, false] {
+        let label = udp ? "udp" : "tcp"
+        guard let held = boundLoopback(udp: udp) else {
+            failures.append("\(label) bind")
+            continue
+        }
+        let socket = CoreListenSocket(port: held.port, udp: udp)
+        if CoreListenPreflight.firstBusy([socket]) != socket { failures.append("\(label) busy") }
+        let holder = CoreListenPreflight.holder(of: socket)
+        if holder?.pid != getpid() { failures.append("\(label) holder") }
+        let failure = CoreListenPreflight.failure(for: socket, holder: holder)
+        if failure.code != CoreListenPreflight.portInUseCode
+            || !failure.message.hasPrefix("Port \(held.port) (\(udp ? "UDP" : "TCP")) on 127.0.0.1 is already in use by ")
+            || !failure.message.hasSuffix("(PID \(getpid())).") {
+            failures.append("\(label) message")
+        }
+        close(held.fd)
+        if CoreListenPreflight.firstBusy([socket]) != nil { failures.append("\(label) released") }
+    }
+    // A holder on ::1 does not conflict with 127.0.0.1 and is never named.
+    let v6 = socket(AF_INET6, SOCK_DGRAM, 0)
+    if v6 >= 0 {
+        var one: Int32 = 1
+        _ = setsockopt(v6, IPPROTO_IPV6, IPV6_V6ONLY, &one, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in6()
+        address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        address.sin6_family = sa_family_t(AF_INET6)
+        address.sin6_addr = in6addr_loopback
+        var length = socklen_t(MemoryLayout<sockaddr_in6>.size)
+        let bound = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(v6, $0, length) == 0 && getsockname(v6, $0, &length) == 0
+            }
+        }
+        if bound, CoreListenPreflight.holder(of: .init(port: UInt16(bigEndian: address.sin6_port), udp: true)) != nil {
+            failures.append("ipv6 loopback holder")
+        }
+        close(v6)
+    }
+    let scrubbed = CoreListenPreflight.failure(
+        for: .init(port: 53, udp: true),
+        holder: ("a\u{85}b\u{2028}c\u{202E}(d)\u{7}", 5)
+    ).message
+    if scrubbed != "Port 53 (UDP) on 127.0.0.1 is already in use by abcd (PID 5)." {
+        failures.append("holder name scrub")
+    }
+    if !failures.isEmpty {
+        FileHandle.standardError.write(Data("core port preflight self-test failed: \(failures.joined(separator: ", "))\n".utf8))
+    }
+    return failures.isEmpty
 }
 
 /// Folds an object key the way Go's JSON decoder matches it to a struct field
@@ -362,10 +444,14 @@ func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
         if let array = value as? [Any] { return array.allSatisfy(safe) }
         return true
     }
-    return safe(object)
-        && (ThreeTierRoutingContract.isThreeTierRuntime(object)
-            ? ThreeTierRoutingContract.admits(object)
-            : route["final"] as? String == "Tono-Exit")
+    let admitted: Bool
+    switch ThreeTierRoutingContract.routingMode(of: object) {
+    case "three-tier": admitted = ThreeTierRoutingContract.admits(object)
+    case "ai-home": admitted = ThreeTierRoutingContract.admitsAIHome(object)
+    case "stable": admitted = route["final"] as? String == "Tono-Exit"
+    default: admitted = false
+    }
+    return safe(object) && admitted
 }
 
 /// The refusal matrix that keeps an unprivileged user from getting root to run a
@@ -864,6 +950,62 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         runtime["route"] = route
         guard !ThreeTierRoutingContract.admits(runtime),
               !ownedRuntimeConfigIsSafe(String(decoding: try JSONSerialization.data(withJSONObject: runtime), as: UTF8.self)) else { return false }
+
+        // AI Home: the exact graph is admitted as its own non-strict mode. A
+        // recognized AI match sent DIRECT, or a graph carrying both variants'
+        // tags, is refused.
+        let aiGraph = try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential",
+            physicalInterface: "en0", fakeRange: "198.18.176.0/20", variant: .aiHome)
+        var aiHome = runtime
+        aiHome["route"] = aiGraph["route"]
+        aiHome["dns"] = aiGraph["dns"]
+        var aiOutbounds = (runtime["outbounds"] as! [[String: Any]]).filter { $0["type"] as? String != "direct" }
+        aiOutbounds.append(aiGraph["direct_outbound"] as! [String: Any])
+        aiHome["outbounds"] = aiOutbounds
+        let aiText = { (object: [String: Any]) in
+            String(decoding: (try? JSONSerialization.data(withJSONObject: object)) ?? Data(), as: UTF8.self)
+        }
+        guard ThreeTierRoutingContract.admitsAIHome(aiHome), !ThreeTierRoutingContract.admits(aiHome),
+              ThreeTierRoutingContract.routingMode(of: aiHome) == "ai-home",
+              !ThreeTierRoutingContract.isThreeTierRuntime(aiHome), ownedRuntimeConfigIsSafe(aiText(aiHome)) else { return false }
+        // Provider Home lines are gateway names, not addresses. A public DNS
+        // name is admitted; a special-use or numeric-looking name is not.
+        let homeServer = { (server: String) -> [String: Any] in
+            var named = aiHome
+            named["outbounds"] = aiOutbounds.map { outbound -> [String: Any] in
+                guard outbound["type"] as? String == "socks" else { return outbound }
+                var home = outbound
+                home["server"] = server
+                return home
+            }
+            return named
+        }
+        guard ThreeTierRoutingContract.admitsAIHome(homeServer("isp.decodo.com")),
+              ownedRuntimeConfigIsSafe(aiText(homeServer("isp.decodo.com"))),
+              ["localhost", "printer.local", "nas.home.arpa", "router.internal", "10.0.0.1", "1.2.3",
+               "ISP.decodo.com", "-bad.example.com", "single", "127.0.0.0x1", "0x7f.0x0.0x0.0x1",
+               "gateway.test", "gateway.example", "gateway.example.com"].allSatisfy({
+                  !ThreeTierRoutingContract.admitsAIHome(homeServer($0))
+              }) else { return false }
+        var aiRoute = aiHome["route"] as! [String: Any]
+        var aiRules = aiRoute["rules"] as! [[String: Any]]
+        let aiHomeRule = aiRules.firstIndex { $0["outbound"] as? String == "Tono-Home-Residential" }!
+        aiRules[aiHomeRule]["outbound"] = ThreeTierRoutingContract.aiHomeDirect
+        aiRoute["rules"] = aiRules
+        var leaking = aiHome
+        leaking["route"] = aiRoute
+        var mixed = aiHome
+        mixed["outbounds"] = aiOutbounds + [graph["direct_outbound"] as! [String: Any]]
+        guard !ThreeTierRoutingContract.admitsAIHome(leaking), !ownedRuntimeConfigIsSafe(aiText(leaking)),
+              ThreeTierRoutingContract.routingMode(of: mixed) == nil, !ownedRuntimeConfigIsSafe(aiText(mixed)) else { return false }
+        // Binding classifies the same folded keys admission accepted, so a
+        // case-changed AI Home graph cannot be bound as stable.
+        var cased = aiHome
+        cased["DNS"] = cased.removeValue(forKey: "dns")
+        cased["OUTBOUNDS"] = cased.removeValue(forKey: "outbounds")
+        guard ownedRuntimeConfigIsSafe(aiText(cased)),
+              let bound = CoreManager.foldedRuntime(Data(aiText(cased).utf8)),
+              ThreeTierRoutingContract.routingMode(of: bound) == "ai-home" else { return false }
     } catch { return false }
     return ownedRuntimeConfigIsSafe(valid)
         // DIRECT final is only legal inside the exact protected three-tier
@@ -872,6 +1014,12 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
             valid.replacingOccurrences(
                 of: #""final":"Tono-Exit""#,
                 with: #""final":"Tono-ThreeTier-Direct""#
+            )
+        )
+        && !ownedRuntimeConfigIsSafe(
+            valid.replacingOccurrences(
+                of: #""final":"Tono-Exit""#,
+                with: #""final":"Tono-AIHome-Direct""#
             )
         )
         && !ownedRuntimeConfigIsSafe(
@@ -2207,6 +2355,7 @@ if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
 }
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
+        && KillSwitchManager.runAIHomeScopeLifecycleSelfTest()
         && KillSwitchManager.runInterruptedSelectiveReleaseSelfTest()
         && KillSwitchManager.runInterruptedExplicitRemovalSelfTest()
         && KillSwitchManager.runFailedSelectiveRemovalRetrySelfTest()
@@ -2229,6 +2378,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
             && runLocalNetworkDevicesFieldSelfTest()
+            && KillSwitchManager.runAIHomeScopeSelfTests()
             && runHelperUpgradeAdmissionSelfTest()
             && runUpgradeSourceSelfTest()
             && runSilentUpgradeStagingSelfTest()
@@ -2239,6 +2389,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runReadRequestBoundSelfTest()
             && ProtectionCheckSchedule.runClockStepSelfTest()
             && runCoreLifecyclePolicySelfTests()
+            && runCorePortPreflightSelfTest()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()

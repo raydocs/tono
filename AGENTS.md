@@ -9,7 +9,9 @@ promoted lessons at the end of this file.
 
 ## Invariants (never loosen)
 
-- Fail-closed at PF / WFP. No `skip-cert-verify`. No unprivileged sidecar path.
+- Fail-closed at PF / WFP for the mode's protected scope: the whole host in Stable and Three-tier; AI traffic in
+  macOS AI Home, where ordinary traffic is deliberately unfiltered ([decision 130](docs/decisions/130-2026-10-19-desktop-ai-home-mode.md)).
+  No `skip-cert-verify`. No unprivileged sidecar path.
 - The managed catalog holds Tono-issued exits only; ` · hy2` is a second block on the same node,
   not a second identity (`services/control-plane/src/catalog-yaml.ts`).
 - Leftover Clash Verge names in the privileged path (`StartClash`, the upgrade process sweep) change

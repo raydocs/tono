@@ -317,10 +317,14 @@ struct ReleaseAuthority {
     }
 
     /// Called only after validation of the root snapshot and its bounded graph.
-    func bindRuntime(generation: UInt64, digest: String, strict: Bool, requestedMode: String?) throws {
+    /// `runtimeMode` is the graph's own (`ThreeTierRoutingContract.routingMode`);
+    /// only three-tier is strict.
+    func bindRuntime(generation: UInt64, digest: String, runtimeMode: String, requestedMode: String?) throws {
+        let strict = runtimeMode == "three-tier"
         try withLock(timeout: 1.5) { _ in
             var record = try load()
-            guard requestedMode == nil || requestedMode == (strict ? "three-tier" : "stable"),
+            guard ["stable", "three-tier", "ai-home"].contains(runtimeMode),
+                  requestedMode == nil || requestedMode == runtimeMode,
                   generation == record.generation, record.mode == .secured,
                   record.strictRuntimeDigest == nil || (strict && record.strictRuntimeDigest == digest) else {
                 throw Failure.unsafe("Routing mode/runtime mismatch or strict session downgrade. Explicitly disconnect first.")
@@ -472,8 +476,10 @@ enum ReleaseProcessTable {
     static func state(of pid: pid_t) -> State {
         guard pid > 0 else { return .gone }
         var info = proc_bsdinfo()
+        // A nonzero arg also finds an unreaped zombie; with 0 a zombie is
+        // ESRCH here while kill(pid, 0) still succeeds, which read as unknown.
         let size = withUnsafeMutablePointer(to: &info) { pointer in
-            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 1, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
         }
         if size == MemoryLayout<proc_bsdinfo>.size {
             // A zombie has exited: it can no longer change anything.
@@ -499,6 +505,23 @@ enum ReleaseProcessTable {
         }
         guard size == MemoryLayout<proc_bsdinfo>.size else { return nil }
         return pid_t(info.pbi_ppid)
+    }
+
+    /// True only when the kernel shows `pid` can be neither a command a
+    /// release ends nor a Tono writer: none of its user ids is root (every
+    /// Tono writer runs as root) and its running code is not platform code
+    /// (every command a release ends is). Both are kernel state set at exec,
+    /// not claims the process makes. Any read that fails answers false.
+    static func cannotWrite(_ pid: pid_t) -> Bool {
+        var info = proc_bsdinfo()
+        let size = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        }
+        guard size == MemoryLayout<proc_bsdinfo>.size,
+              info.pbi_uid != 0, info.pbi_ruid != 0, info.pbi_svuid != 0 else { return false }
+        var flags: UInt32 = 0
+        guard csops(pid, csOpsStatus, &flags, MemoryLayout<UInt32>.size) == 0 else { return false }
+        return flags & csPlatformBinary == 0
     }
 
     static func path(of pid: pid_t) -> String? {
@@ -565,3 +588,9 @@ enum ReleaseProcessTable {
         return arguments.count == argc ? arguments : nil
     }
 }
+
+/// `csops(2)`: exported by libsystem_kernel, declared by no SDK module.
+@_silgen_name("csops")
+private func csops(_ pid: pid_t, _ ops: UInt32, _ useraddr: UnsafeMutableRawPointer?, _ usersize: Int) -> Int32
+private let csOpsStatus: UInt32 = 0 // CS_OPS_STATUS
+private let csPlatformBinary: UInt32 = 0x0400_0000 // CS_PLATFORM_BINARY

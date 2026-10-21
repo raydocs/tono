@@ -1069,6 +1069,7 @@ export interface TranslationResources {
           protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
           releaseInProgress: string
+          releaseNeedsRestart: string
           releaseReconciling: string
           releaseRecordCorrupt: string
           releaseUnfinished: string
@@ -1388,10 +1389,13 @@ export interface TranslationResources {
         catalogRevision: string
         catalogSynced: string
         catalogVerified: string
+        clearStaleProxy: string
         cloudServers: string
         empty: string
         exitLatency: string
         exitLatencySlow: string
+        identityPropagating: string
+        identityStuck: string
         lastSynced: string
         noMatches: string
         protocol: {
@@ -1411,7 +1415,10 @@ export interface TranslationResources {
           unavailable: string
           us: string
         }
+        reprovisionIdentity: string
         search: string
+        staleSystemProxy: string
+        staleSystemProxyNotice: string
         subtitle: string
         switchRequested: string
         tcpLatency: string

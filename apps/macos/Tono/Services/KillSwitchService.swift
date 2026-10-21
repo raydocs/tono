@@ -19,6 +19,10 @@ nonisolated enum KillSwitchService {
         case localNetworkHelperTooOld
         /// A re-arm of the live session failed; the helper kept the block.
         case protectionUpdateFailed(String)
+        /// An AI Home arm whose reply does not confirm the AI scope.
+        case aiHomeScopeUnconfirmed
+        /// An AI Home arm failed and the helper holds the protected fault.
+        case aiHomeProtectionFault(String)
 
         var errorDescription: String? {
             switch self {
@@ -38,6 +42,10 @@ nonisolated enum KillSwitchService {
                 String(localized: "The network helper is too old to block local network devices. Reconnect to update it.")
             case .protectionUpdateFailed:
                 String(localized: "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.")
+            case .aiHomeScopeUnconfirmed:
+                String(localized: "The network helper did not confirm AI Home protection. Reconnect to update it.")
+            case .aiHomeProtectionFault:
+                String(localized: "Tono couldn't apply AI Home protection, so AI traffic stays blocked. Disconnect or reconnect to continue.")
             }
         }
     }
@@ -60,8 +68,14 @@ nonisolated enum KillSwitchService {
     typealias ArmReply = (
         armed: Bool, wanted: Bool, live: Bool,
         healed: Bool, flushedStates: Bool, killedHosts: Int,
-        localNetworkDevices: Bool?
+        localNetworkDevices: Bool?, aiHomeScoped: Bool?
     )
+
+    /// Whether this arm belongs to an AI Home session (decision 130). Tests
+    /// replace it.
+    static var readAIHomeSession: () -> Bool = {
+        DesktopRoutingModeAdmission.persistedSession() == "ai-home"
+    }
 
     /// Helper IPC boundary of `arm`. Production delivers the prepared
     /// `/killswitch/arm` request and reads `/killswitch/status`; tests replace
@@ -162,6 +176,7 @@ nonisolated enum KillSwitchService {
         if !helperPrepared {
             try installIfNeeded()
         }
+        let aiHomeScoped = readAIHomeSession()
         do {
             let bootstrapPins = configuredBootstrapPins(for: apiHosts)
             // D7: the setting (with its generation) this arm sends. Recorded as
@@ -197,7 +212,8 @@ nonisolated enum KillSwitchService {
                 tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                 allowSystemResolution: allowSystemResolution,
                 reviewedBundleDirect: reviewedBundleDirect,
-                allowLocalNetworkDevices: localNetwork.allow
+                allowLocalNetworkDevices: localNetwork.allow,
+                aiHomeScoped: aiHomeScoped
             )
             guard status.armed, status.wanted, status.live else {
                 // The helper answered, so the outcome is known: a reply that
@@ -244,6 +260,11 @@ nonisolated enum KillSwitchService {
                 throw Error.localNetworkHelperTooOld
             }
             localNetworkOutcome = .known(localNetwork)
+            // Armed, but not with the scope this session needs: fail the arm
+            // rather than run AI Home under a ruleset that filters its DIRECT.
+            if aiHomeScoped, status.aiHomeScoped != true {
+                throw Error.aiHomeScopeUnconfirmed
+            }
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
         } catch HelperIPCError.commandFailed(let message, let code?)
@@ -251,6 +272,12 @@ nonisolated enum KillSwitchService {
             // The helper could not tighten to off and holds the protected
             // fault (block-all, or the Core stopped). It is still armed.
             isArmed = true
+            // An AI Home arm carries no LAN rule: the same fault is its scope
+            // switch failing, not the local network setting.
+            if aiHomeScoped {
+                LocalNetworkDevicesSync.recordFault(.aiHomeProtection(message))
+                throw Error.aiHomeProtectionFault(message)
+            }
             LocalNetworkDevicesSync.recordFault(.helper(message))
             throw Error.localNetworkFault(message)
         } catch HelperIPCError.commandFailed(let message, "KILLSWITCH_LIVE_REARM_FAILED") {
@@ -307,7 +334,8 @@ nonisolated enum KillSwitchService {
         tailscaleBootstrapEnabled: Bool?,
         allowSystemResolution: Bool,
         reviewedBundleDirect: Bool,
-        allowLocalNetworkDevices: Bool
+        allowLocalNetworkDevices: Bool,
+        aiHomeScoped: Bool
     ) throws -> ArmReply {
         func attempt() throws -> ArmReply {
             try armIPC.deliver {
@@ -321,7 +349,8 @@ nonisolated enum KillSwitchService {
                     allowSystemResolution: allowSystemResolution,
                     bootstrapPins: bootstrapPins,
                     reviewedBundleDirect: reviewedBundleDirect,
-                    allowLocalNetworkDevices: allowLocalNetworkDevices
+                    allowLocalNetworkDevices: allowLocalNetworkDevices,
+                    aiHomeScoped: aiHomeScoped
                 )
             }
         }

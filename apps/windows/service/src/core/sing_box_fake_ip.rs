@@ -1,6 +1,6 @@
 //! #1258 for the sing-box processes the Service starts on its own (WIN-SINGBOX-FAKEIP-SERVICE-RESTART).
 //!
-//! sing-box alpha.9 keeps its fake-IP table in memory and hands addresses out from the start of
+//! sing-box alpha.12 keeps its fake-IP table in memory and hands addresses out from the start of
 //! its range, so a process started on the range its predecessor used maps an address an app still
 //! has cached to whichever name it answers first. The App moves every document it composes to the
 //! next of eight slots (`tono-core` `sing_box/runtime.rs`, `fake_ipv4_range`). The Service also

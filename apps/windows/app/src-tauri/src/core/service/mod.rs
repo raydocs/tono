@@ -798,6 +798,23 @@ pub(crate) fn raise_release_fence() -> ReleaseTicket {
     }
 }
 
+/// The Restore internet a refused Connect runs for itself: like [`raise_release_fence`], but only
+/// while `claim` (that Connect's) still owns the epoch. `None`: a newer Restore or Connect the
+/// user began has it, and the automatic Restore must not start.
+pub(crate) fn raise_release_fence_after(claim: &ReleaseTicket) -> Option<ReleaseTicket> {
+    let mut epoch = release_epoch();
+    if epoch.serial != claim.serial {
+        return None;
+    }
+    epoch.serial += 1;
+    epoch.fenced = true;
+    Some(ReleaseTicket {
+        serial: epoch.serial,
+        fenced: true,
+        generation: epoch.generation,
+    })
+}
+
 /// Whether the operation holding `ticket` still owns the release epoch: no Restore internet and
 /// no user Connect has begun since it took the ticket.
 pub(crate) fn release_ticket_current(ticket: &ReleaseTicket) -> bool {
@@ -891,6 +908,13 @@ pub(crate) fn user_connect_stamp() -> ConnectStamp {
     ConnectStamp(release_epoch().serial)
 }
 
+/// The stamp for the Connect that follows the Restore internet holding `restore`: its claim
+/// succeeds only while that Restore still owns the epoch, so a Restore or Connect the user began
+/// meanwhile is never overtaken.
+pub(crate) fn connect_stamp_after(restore: &ReleaseTicket) -> ConnectStamp {
+    ConnectStamp(restore.serial)
+}
+
 /// An explicit Connect from the user claims the release epoch, so every ticket taken before the
 /// click is out of date and a Restore internet clicked after it wins (Sol R3-F1, R4-F1). The
 /// claim is a compare-and-swap against `stamp`: a Connect that a Restore internet or another
@@ -939,6 +963,32 @@ pub(crate) fn finish_user_connect(claim: &ReleaseTicket, generation: Option<u64>
 pub(crate) async fn begin_user_connect(claim: ReleaseTicket) -> bool {
     let generation = fresh_release_generation().await;
     finish_user_connect(&claim, generation)
+}
+
+/// Wait, up to the release's hard cap, for the release service to report that no release is
+/// running. `false` when it cannot be asked or the cap passed.
+#[cfg(windows)]
+pub(crate) async fn wait_release_worker_finished() -> bool {
+    let Ok(credentials) = current_owner_credentials() else {
+        return false;
+    };
+    let poll = async {
+        loop {
+            match tono_service_protocol::release_status(&credentials).await.map(|response| response.data) {
+                Ok(Some(status)) if !status.running => return true,
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => return false,
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    };
+    // One deadline for the whole wait, a status read in flight included.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(tono_service_protocol::release_wire::RELEASE_HARD_CAP_SECONDS),
+        poll,
+    )
+    .await
+    .unwrap_or(false)
 }
 
 /// What the release service answered for one Restore internet.

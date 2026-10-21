@@ -1768,7 +1768,7 @@ fn clash_rules_match(
             || proxy != Some(expected.proxy.as_str())
         {
             return Err(format!(
-                "sing-box controller rule {index} did not match the alpha.9 string"
+                "sing-box controller rule {index} did not match the alpha.12 string"
             ));
         }
     }

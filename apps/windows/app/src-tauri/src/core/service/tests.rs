@@ -1008,6 +1008,23 @@ fn an_older_restore_loses_ownership_once_a_newer_operation_begins() {
     assert!(super::release_ticket_current(&newer));
 }
 
+/// Sol P1 on PR #1705: the Restore a refused Connect runs for itself, and the Connect after it,
+/// each hold the step before them. A Restore the user clicks while that Restore runs keeps the
+/// epoch: the follow-up Connect cannot claim it, and the fence stays up.
+#[test]
+fn a_users_restore_during_the_automatic_one_stops_the_follow_up_connect() {
+    let _epoch = super::RELEASE_EPOCH_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let refused = super::claim_user_connect(super::user_connect_stamp()).unwrap();
+    let automatic = super::raise_release_fence_after(&refused).unwrap();
+    let users = super::raise_release_fence();
+    assert!(super::claim_user_connect(super::connect_stamp_after(&automatic)).is_none());
+    assert!(super::raise_release_fence_after(&refused).is_none());
+    assert!(super::release_fenced(), "the user's Restore keeps its fence");
+    assert!(super::release_ticket_current(&users));
+}
+
 /// Sol R3-F1 (b) on PR #1569: a Connect clicked before a Restore internet, whose generation read
 /// returns only after that Restore released the machine, neither lifts the fence nor adopts the
 /// released generation, so it cannot become the authority to start again.

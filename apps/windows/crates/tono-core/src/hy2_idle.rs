@@ -1,6 +1,6 @@
 //! Residential NAT keepalive for the same-node Hysteria2 hop.
 //!
-//! sing-box 1.15.0-alpha.9 (`132b38e9`) accepts `keep_alive_period` on a
+//! sing-box 1.15.0-alpha.12 (`25b0d5ea`) accepts `keep_alive_period` on a
 //! hysteria2 outbound. Leaving it unset uses sing-quic's 10s default.
 //! Chrome parrot (on unless `disable_chrome_parrot`) forces the idle timeout
 //! to 30s and ignores a longer `idle_timeout`. quic-go also clips a keepalive

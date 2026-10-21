@@ -6,13 +6,16 @@ final class RuntimeConfigTests: XCTestCase {
     func testRuntimeWriterKeepsCapturedStrictModeWhenPreferenceChanges() async throws {
         let defaults = AppProfile.defaults
         let previous = defaults.object(forKey: SettingsKey.desktopRoutingMode)
+        let previousSession = defaults.object(forKey: SettingsKey.routingSession)
         defer {
             if let previous { defaults.set(previous, forKey: SettingsKey.desktopRoutingMode) }
             else { defaults.removeObject(forKey: SettingsKey.desktopRoutingMode) }
+            if let previousSession { defaults.set(previousSession, forKey: SettingsKey.routingSession) }
+            else { defaults.removeObject(forKey: SettingsKey.routingSession) }
         }
         defaults.removeObject(forKey: SettingsKey.desktopRoutingMode)
-        XCTAssertEqual(try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode)), "stable")
-        XCTAssertEqual(SettingsKey.desktopRoutingModeOptions, ["stable", "three-tier"])
+        XCTAssertEqual(try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode)), "ai-home")
+        XCTAssertEqual(SettingsKey.desktopRoutingModeOptions, ["stable", "three-tier", "ai-home"])
         let runtime = CoreRuntimeManager()
         defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
         let mode = try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode))

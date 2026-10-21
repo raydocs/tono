@@ -38,7 +38,8 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 for (name, saved, captured) in [
                     ("stable", "stable", "stable"),
                     ("strict-next", "three-tier", "stable"),
-                    ("strict-retained-stable-next", "stable", "three-tier")
+                    ("strict-retained-stable-next", "stable", "three-tier"),
+                    ("ai-home-next", "ai-home", "stable")
                 ] {
                     defaults.set(saved, forKey: SettingsKey.desktopRoutingMode)
                     try fixture.app.coreRuntime.captureRoutingMode(captured, physicalInterface: nil)

@@ -62,13 +62,21 @@ final class UpdateRuntime {
         guard let previous = try firewall.loadState(), previous.armed else {
             throw HelperFailure.invalid("Cannot recover unknown update protection.")
         }
-        _ = try firewall.arm([
+        _ = try firewall.arm(Self.retainBootstrapRequest(previous: previous),
+                             commitAllowed: { self.power.isAwake() })
+    }
+
+    /// The bootstrap re-arm keeps the session's scope: an AI Home session
+    /// stays AI-scoped while the update runs.
+    static func retainBootstrapRequest(previous: KillSwitchState) -> [String: Any] {
+        [
             "apiHosts": previous.apiHosts,
             "exitHints": [], "tunnelInterfaces": [], "proxyEndpoints": [],
             "sessionDirectEndpoints": [], "tailscaleBootstrapEnabled": false,
             "allowSystemResolution": false, "reviewedBundleDirect": false,
             "bootstrapPins": previous.pinnedHosts.filter { previous.apiHosts.contains($0.key) },
-        ], commitAllowed: { self.power.isAwake() })
+            "aiHomeScoped": previous.aiHomeScoped,
+        ]
     }
 
     /// Prepare can refuse because another product's loopback proxy or DNS

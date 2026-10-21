@@ -293,12 +293,14 @@ pub(super) async fn release_unproven_wanted_session_unlocked() -> Result<()> {
     }
     // Held until WFP removal commits: no update writer can start under this release (#1292).
     let update_fence = update_release_fence()?;
+    let mut dns_restore_failed = false;
     if let Err(error) = bounded_dns_call(
         "wanted session core window",
         crate::core::dns::ensure_restored(),
     )
     .await
     {
+        dns_restore_failed = true;
         tracing::warn!(
             "wanted-session core window: DNS restore could not be proven; still removing WFP: {error:#}"
         );
@@ -311,6 +313,13 @@ pub(super) async fn release_unproven_wanted_session_unlocked() -> Result<()> {
         "wanted-session core window could not remove WFP; the block stays until the next tick",
     )?;
     clear_wanted_core_window();
+    // The startup retirement of an unverified barrier failed its own removal after a failed DNS
+    // restore and left this retry to finish it: the machine is released now, so the adapter
+    // fallback it owes is requested. Any other session released here is a runtime release and
+    // requests nothing. The debt is settled either way: a restore that proves needs no fallback.
+    if STARTUP_RETIREMENT_OWES_DNS_FALLBACK.swap(false, Ordering::AcqRel) && dns_restore_failed {
+        request_startup_dns_fallback();
+    }
     // The reconnect is owed to the owner of the released session only (#1291).
     let released_owner = armed_guard()
         .take()
@@ -619,13 +628,30 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
 /// The caller decides whether the on-disk intent bytes stay (corrupt evidence) or are
 /// replaced by a disarmed tombstone (a live session the watchdog gave up on).
 pub(super) async fn release_general_traffic_unlocked(reason: &str, replace_intent: bool) -> Result<()> {
+    release_general_traffic_requesting_dns_fallback(reason, replace_intent, false).await
+}
+
+/// [`release_general_traffic_unlocked`] for the startup paths (`request_dns_fallback`): when the
+/// exact DNS restore failed, the failure is remembered, and once the WFP removal has succeeded the
+/// adapter fallback is requested (see `request_startup_dns_fallback`), so a released machine does
+/// not stay on a dead Tono resolver. A runtime release (a live session the watchdog gave up on)
+/// does not ask for it.
+pub(super) async fn release_general_traffic_requesting_dns_fallback(
+    reason: &str,
+    replace_intent: bool,
+    request_dns_fallback: bool,
+) -> Result<()> {
+    // Startup calls this shared implementation directly, so it must respect the same strict
+    // hold as runtime recovery before attempting DNS restoration or removing any filters.
     if strict_kill_switch_enabled() {
         return restrict_bootstrap_unlocked().await;
     }
     tracing::warn!("wfp: {reason}; releasing general traffic and restoring DNS");
+    let mut dns_restore_failed = false;
     if let Err(error) = bounded_dns_call(reason, crate::core::dns::ensure_restored()).await {
         tracing::warn!("wfp: DNS restore during {reason} failed; still releasing WFP: {error:#}");
         *last_error_guard() = Some(format!("{error:#}"));
+        dns_restore_failed = true;
     } else {
         *last_error_guard() = None;
     }
@@ -653,11 +679,16 @@ pub(super) async fn release_general_traffic_unlocked(reason: &str, replace_inten
     // Crash/corrupt-state recovery must retain the secondary AI floor just like
     // other non-strict failure releases. Reapply it at the durable boundary.
     finish_release_follow_up(true).await;
+    if dns_restore_failed && request_dns_fallback {
+        // WFP is gone, so adapters can go back to automatic without a lookup leaving a physical
+        // adapter under the barrier.
+        request_startup_dns_fallback();
+    }
     Ok(())
 }
 
 pub(super) async fn release_general_traffic_on_startup_unlocked(reason: &str) -> Result<()> {
-    let result = release_general_traffic_unlocked(reason, false).await;
+    let result = release_general_traffic_requesting_dns_fallback(reason, false, true).await;
     if result.is_err() && armed_guard().is_none() {
         // No in-memory intent exists for the watchdog to reconcile after this startup failure.
         spawn_startup_release_retry();

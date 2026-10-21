@@ -841,7 +841,7 @@ final class SocketServer {
                 guard object.count == 3, let directory = object["configDir"] as? String,
                       let digest = object["configSHA256"] as? String,
                       let mode = object["routingMode"] as? String,
-                      ["stable", "three-tier"].contains(mode) else {
+                      ["stable", "three-tier", "ai-home"].contains(mode) else {
                     throw HelperFailure.invalid("Invalid runtime binding.")
                 }
                 killSwitch.strictProof = try core.bindRuntime(configDirectory: directory,

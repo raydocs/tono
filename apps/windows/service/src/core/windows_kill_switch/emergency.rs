@@ -18,17 +18,28 @@ use super::*;
 /// still present, which the uninstall helper's own sweep (`with_resolver_rule_proof`) checks
 /// again and blocks on with result 3.
 pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
-    emergency_disarm_with(false).await
+    emergency_disarm_with(false, None).await
+}
+
+/// [`emergency_disarm_windows_kill_switch`] for a caller that cancels the whole disarm at
+/// `deadline` (the release worker). Only the exact DNS restore is allocated against it: it is
+/// bounded at [`EMERGENCY_RESTORE_BUDGET`] so the WFP removal, the sweep and the single adapter
+/// reset attempt keep their time. Callers without a deadline keep the full DNS budget.
+pub async fn emergency_disarm_windows_kill_switch_until(deadline: std::time::Instant) -> Result<()> {
+    emergency_disarm_with(false, Some(deadline)).await
 }
 
 /// Automatic failed-update recovery uses the same WFP/DNS proof and reporting,
 /// but retains the secondary AI hold. The caller must first exclude strict mode
 /// and stop the Service while holding the repair and singleton owner gates.
 pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()> {
-    emergency_disarm_with(true).await
+    emergency_disarm_with(true, None).await
 }
 
-async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
+async fn emergency_disarm_with(
+    apply_narrow: bool,
+    deadline: Option<std::time::Instant>,
+) -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
     if apply_narrow && strict_kill_switch_enabled() {
         bail!("automatic emergency recovery cannot release strict protection");
@@ -75,9 +86,15 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
         )
         .await
     } else {
-        bounded_dns_call("emergency disarm", crate::core::dns::restore_protected())
-            .await
-            .map(|_| crate::core::dns::UninstallDnsRestore::Exact)
+        bounded_dns_call_within(
+            emergency_restore_budget(deadline.map(|deadline| {
+                deadline.saturating_duration_since(std::time::Instant::now())
+            })),
+            "emergency disarm",
+            crate::core::dns::restore_protected(),
+        )
+        .await
+        .map(|_| crate::core::dns::UninstallDnsRestore::Exact)
     };
 
     // Persist fail-open intent *before* removing WFP when we can. Service-start recovery sees
@@ -186,6 +203,70 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     // (the uninstall helper and the elevated recovery CLI) runs the sweep; the Service never does.
     const NRPT_SWEEP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
     let resolver_rule = crate::core::dns::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET);
+    // Owner rule: a released machine resolves through the home broadband's DNS, never through a
+    // dead Tono resolver. The exact restore could not be proven, so adapters may still point at
+    // Tono's target; WFP is gone, so they can now be put back on automatic (DHCP) without a
+    // lookup ever having left a physical adapter while the barrier was armed. This is ONE
+    // attempt and it never waits: an exact restore that timed out leaves its engine call running
+    // with the engine's single-writer claim, for as long as that call takes, and every engine
+    // call is refused until it returns. A refusal is deferred, not retried here: the release
+    // worker always restarts the main Service after this cleanup, and that fresh process (clean
+    // claim, no cleanup deadline) retries until it succeeds (`startup.rs`). The saved servers
+    // stay on disk, and the original DNS error is still what this function returns.
+    let fallback_note = if dns_restore.is_err() && !uninstall_ladder_requested() {
+        // Runs under the `WFP_OPERATION` this function already holds (the shared function takes
+        // only the DNS lock, after it), and marks itself in progress for its duration like the
+        // startup attempts do. Every engine call inside is bounded, refused while an abandoned one
+        // holds the claim, and cut to what is left of the attempt's budget; the future itself is
+        // never dropped, because that would not stop a blocking writer, only leave it running
+        // unobserved.
+        let marker = DnsFallbackMarker::set();
+        let attempt = crate::core::dns::reset_redirected_adapters_to_automatic(Some(
+            std::time::Instant::now() + crate::core::dns::DNS_FALLBACK_ATTEMPT_BUDGET,
+        ))
+        .await;
+        drop(marker);
+        Some(match attempt {
+            Ok(adapters) => {
+                tracing::warn!(
+                    "emergency disarm: DNS restore could not be proven; {} adapter(s) on a Tono \
+                     DNS target were set to automatic (DHCP) and the resolver policy was removed",
+                    adapters.len()
+                );
+                format!(
+                    "{DNS_FALLBACK_NOTE_PREFIX}: after WFP was removed, {} adapter(s) still on \
+                     Tono's DNS target were set back to automatic (DHCP) and Tono's resolver \
+                     policy was removed. The saved servers were kept. This is not the exact \
+                     previous configuration and does not make the restore proven.",
+                    adapters.len()
+                )
+            }
+            Err(error) if crate::core::dns::is_engine_busy_refusal(&error) => {
+                tracing::warn!(
+                    "emergency disarm: the DNS engine is still busy with the abandoned restore; \
+                     the adapter reset is deferred to the main Service's startup recovery"
+                );
+                format!(
+                    "{DNS_FALLBACK_NOTE_PREFIX}: the DNS engine was still busy with the \
+                     abandoned restore, so resetting adapters to automatic (DHCP) was deferred \
+                     to the main Service's startup recovery."
+                )
+            }
+            Err(error) => {
+                tracing::error!(
+                    "emergency disarm: DNS restore could not be proven and the adapter reset or \
+                     resolver-policy removal failed: {error:#}"
+                );
+                format!(
+                    "{DNS_FALLBACK_NOTE_PREFIX}: resetting adapters to automatic (DHCP) was \
+                     tried and did not complete: {error:#}. The main Service's startup recovery \
+                     tries again."
+                )
+            }
+        })
+    } else {
+        None
+    };
     // Everything below runs only once the WFP objects are provably gone: the engine_call `?`
     // above returns before it. Every imperfect DNS outcome is therefore tagged so the
     // uninstaller continues — the barrier that could leave a brick is already down.
@@ -227,8 +308,12 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
                  Recovery snapshot: {snapshot:?}. The network barrier is gone so install and \
                  uninstall may continue. If name resolution is still wrong, open Settings → \
                  Network & Internet → your adapter → DNS server assignment → Automatic (DHCP) \
-                 for both IPv4 and IPv6.",
+                 for both IPv4 and IPv6.{}",
                 crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX,
+                fallback_note
+                    .as_deref()
+                    .map(|note| format!(" {note}"))
+                    .unwrap_or_default(),
             ))
         }
     };

@@ -679,8 +679,13 @@ enum ReleaseChildren {
             let state = ReleaseProcessTable.state(of: pid)
             if state == .gone { continue }
             guard let path = ReleaseProcessTable.path(of: pid) else {
-                // An executable that cannot be read could be any of them.
-                if ReleaseProcessTable.state(of: pid) != .gone { unidentified.append(pid) }
+                // An executable that cannot be read could be any of them, or
+                // a Tono core whose file an upgrade replaced. A user's app
+                // updated while it runs has no path either; when the kernel
+                // shows it is neither root nor platform code it is neither,
+                // and must not hold every component busy.
+                if !ReleaseProcessTable.cannotWrite(pid),
+                   ReleaseProcessTable.state(of: pid) != .gone { unidentified.append(pid) }
                 continue
             }
             let verdict = classify(path: path, arguments: ReleaseProcessTable.arguments(of: pid),

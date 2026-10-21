@@ -12,7 +12,7 @@
 /// (`zoom.us` and similar stay tunnelled). The China-site suffixes below are
 /// product-direct: any process, TCP 80/443, same staged-core port permit as
 /// Bilibili.
-pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 49] = [
+pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 52] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -62,6 +62,9 @@ pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 49] = [
     "zhimg.com",
     "goofish.com",
     "1688.com",
+    "10086.cn",
+    "cmecloud.cn",
+    "miit.gov.cn",
 ];
 
 pub fn is_address_free_web_suffix(host: &str) -> bool {
@@ -69,7 +72,7 @@ pub fn is_address_free_web_suffix(host: &str) -> bool {
 }
 /// Always attached to a native-app DIRECT plan, even if the published policy
 /// omitted them. Unidentified helpers and browsers hit these trees.
-pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 45] = [
+pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 48] = [
     "qq.com",
     "baidu.com",
     "aliyuncs.com",
@@ -115,6 +118,9 @@ pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 45] = [
     "zhimg.com",
     "goofish.com",
     "1688.com",
+    "10086.cn",
+    "cmecloud.cn",
+    "miit.gov.cn",
 ];
 /// Dedicated Model Studio namespaces within Alibaba's general DIRECT tree.
 pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
@@ -129,7 +135,7 @@ pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
 /// with no process constraint, so Chrome / Edge / Arc count the same as
 /// the desktop apps. Cloud video exceptions precede Google and process
 /// fallbacks. Shared CDN/ByteDance parents and gstatic remain excluded.
-pub const CLAUDE_HOME_DOMAINS: [&str; 166] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 194] = [
     DEDICATED_MODEL_API_SUFFIXES[0],
     DEDICATED_MODEL_API_SUFFIXES[1],
     DEDICATED_MODEL_API_SUFFIXES[2],
@@ -221,6 +227,34 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 166] = [
     "poe.com",
     "groq.com",
     "cursor.sh",
+    "ampcode.com",
+    "cursor.com",
+    "cursorapi.com",
+    "js.workos.com",
+    "githubcopilot.com",
+    "kiro.dev",
+    "q.us-east-1.amazonaws.com",
+    "q.eu-central-1.amazonaws.com",
+    "windsurf.com",
+    "codeium.com",
+    "grazie.ai",
+    "grazie.aws.intellij.net",
+    "hark.com",
+    "mistral.ai",
+    "elevenlabs.io",
+    "elevenlabs.com",
+    "midjourney.com",
+    "suno.com",
+    "poecdn.net",
+    "pplx-res.cloudinary.com",
+    "ppl-ai-file-upload.s3.amazonaws.com",
+    "oaistatsig.com",
+    "openai-api.arkoselabs.com",
+    "labs.google",
+    "flow.google",
+    "opal.google",
+    "stitch.withgoogle.com",
+    "llama.com",
     "jasper.ai",
     "openart.ai",
     "clipdrop.co",

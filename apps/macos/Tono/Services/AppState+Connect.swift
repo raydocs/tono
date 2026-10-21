@@ -90,9 +90,12 @@ extension AppState {
                     // Recovery belongs to the admitted session, not the next
                     // preference saved in Settings. A fresh boot without held
                     // strict intent still uses the saved mode as before.
-                    capturedRoutingMode = try DesktopRoutingModeAdmission.capture(
-                        self.connectionCoordinator.capturedRoutingMode.map { $0 as Any }
-                            ?? AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode)
+                    // The Home-line fallback applies to a new session only: a
+                    // held session keeps its mode even before the catalog loads.
+                    capturedRoutingMode = try DesktopRoutingModeAdmission.admit(
+                        held: self.connectionCoordinator.capturedRoutingMode,
+                        saved: AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode),
+                        homeAvailable: self.managedCatalogRouting?.homeSocks5 != nil
                     )
                 } catch {
                     self.errorMessage = error.localizedDescription
@@ -270,6 +273,9 @@ extension AppState {
                     physicalInterface = await PrivilegedRuntimeCoordinator.shared
                         .primaryNetworkInterface()
                 }
+                // A Disconnect during the queries above retired this session's
+                // record; a cancelled attempt must not write it back.
+                try Task.checkCancellation()
                 try coreRuntime.captureRoutingMode(capturedRoutingMode, physicalInterface: physicalInterface)
                 let policyIsEmpty = trafficPolicy.domains.isEmpty
                     && trafficPolicy.webDomains.isEmpty
@@ -379,18 +385,26 @@ extension AppState {
                 )
                 try Task.checkCancellation()
                 self.connectionStage = .startingTunnel
-                try await CoreStartupReadiness.wait(
-                    start: {
-                        try await self.coreRuntime.start(
-                            overlay: overlay,
-                            customNodes: runtimeNodes,
-                            directPolicy: self.activeDirectPolicy,
-                            helperPrepared: true,
-                            precomputedDigest: digest
-                        )
-                    },
-                    controller: { try await api.waitUntilReady() }
-                )
+                do {
+                    try await CoreStartupReadiness.wait(
+                        start: {
+                            try await self.coreRuntime.start(
+                                overlay: overlay,
+                                customNodes: runtimeNodes,
+                                directPolicy: self.activeDirectPolicy,
+                                helperPrepared: true,
+                                precomputedDigest: digest
+                            )
+                        },
+                        controller: { try await api.waitUntilReady() }
+                    )
+                } catch let error where CorePortConflict.matches(error) {
+                    self.lastClassifiedFailure = Self.corePortConflictFailure(
+                        error,
+                        generation: self.connectionCoordinator.protectionOperationGeneration
+                    )
+                    throw error
+                }
                 // Confirmed start and controller readiness mean the process exists. Start the
                 // utun poll and loopback DNS now — not before spawn, or the
                 // 2 s interface budget can expire while /core/start is still
@@ -547,7 +561,7 @@ extension AppState {
                 case .failed(let failure):
                     self.lastClassifiedFailure = failure
                     domesticOnly = await self.proveIndependentDomesticPath(
-                        enabled: capturedRoutingMode == "three-tier"
+                        enabled: capturedRoutingMode == "three-tier" || capturedRoutingMode == "ai-home"
                     )
                     try Task.checkCancellation()
                     guard generation == self.connectionCoordinator.protectionOperationGeneration else { return }
@@ -2178,7 +2192,8 @@ extension AppState {
             // died. Require protected fake-IP DNS and certificate-checked TLS,
             // never controller/IPC success, before sparing this live Core.
             let domesticAlive = await self.proveIndependentDomesticPath(
-                enabled: AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent"),
+                enabled: AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+                    || self.coreRuntime.routingMode == "ai-home",
                 probe: domesticProbe
             )
             guard !Task.isCancelled, self.isConnected else { return .stopMonitoring }
@@ -2600,6 +2615,21 @@ extension AppState {
         return failure
     }
 
+    /// A core start the helper refused because another program holds one of
+    /// its loopback ports. The card shows the helper error's text, which names
+    /// the port and the program, not the generic failure sentence.
+    static func corePortConflictFailure(_ error: Error, generation: UInt64) -> ProtectedFailure {
+        var failure = ProtectedConnectivity.failure(
+            .localPortInUse,
+            stage: "startingTunnel",
+            attempt: 1,
+            generation: generation,
+            detail: String(describing: error)
+        )
+        failure.userMessage = error.localizedDescription
+        return failure
+    }
+
     /// A browser Secure DNS scan that is not clear. The card shows the scan's
     /// own steps (turn off Secure DNS, or quit the browsers), not the generic
     /// "wait and reconnect" text of a system resolver that is still settling.
@@ -2638,6 +2668,10 @@ extension AppState {
              HelperIPCError.boundToAnotherUser(_):
             true
         case is BrowserDNSDiagnostics.ConflictError:
+            true
+        // Another program's resolver or proxy keeps the port until the user
+        // quits it; every retry would fail the same way.
+        case _ where CorePortConflict.matches(error):
             true
         default:
             false
@@ -2720,6 +2754,13 @@ extension AppState {
         } else {
             noteProtectionLoss(NetworkLossReport.killSwitchStuck)
             disconnect(releaseKillSwitch: false)
+            // Strict keeps the barrier either way. A failure that needs the
+            // user (a port another program holds) would only repeat, so the
+            // loop waits for Retry now instead of dialling by itself.
+            if !resumeWhenReachable {
+                protectedReconnectPausedForUserAction = true
+                protectedReconnectPauseLiftsOnNetworkChange = false
+            }
             scheduleProtectedReconnect()
         }
     }
