@@ -3,8 +3,9 @@ import TonoKit
 import UIKit
 
 /// Home (direction B, shared with Android and the desktop): the sea carries the state at a glance;
-/// the thumb zone holds the state title, one status line, the primary capsule, the exit capsule and
-/// the Details entry. Routes, the full reason and the mode live in `DetailsSheet`.
+/// the thumb zone is one editorial block (the state title, one status line, the line in use with the
+/// live speed beside it), then exactly two controls: the primary capsule and a quiet glass dock
+/// (Settings, Details). Routes, the full reason and the mode live in `DetailsSheet`.
 struct HomeView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showLines = false
@@ -184,7 +185,13 @@ struct HomeView: View {
         }
     }
 
-    /// Everything the thumb needs, at the bottom: state, one line, one action, the exit, details.
+    /// Everything the thumb needs, at the bottom. One block of text on one left edge (title, status,
+    /// the line in use), then the two controls: the capsule, and under it the dock with the live
+    /// speed as its quiet left-hand meta. The text rows are 44 pt each, so the block sits on a
+    /// steady 24 pt rhythm and every tap target is full height.
+    ///
+    /// VoiceOver follows the screen: title → status → line → action → speed → dock (Android reads
+    /// the same order, and its screen-reader test pins it).
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The old title leaves before the new one arrives, in place (a ZStack, so they never stack
@@ -204,15 +211,17 @@ struct HomeView: View {
             ZStack(alignment: .leading) { statusLine }
                 .frame(minHeight: 32, alignment: .topLeading)
                 .padding(.top, 4)
-                .padding(.bottom, 10)
-            VStack(spacing: 10) {
-                ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince, glassTint: glassTint) { model.toggle($0) }
-                    .zoomSource("primary", in: zoom)
-                    .accessibilityIdentifier("primaryAction")
-                exitCapsule
-            }
-            .background { if !reduceTransparency { ReflectionColumn(color: reflection.color, x: reflection.x) } }
-            let footer = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout())
+            // The line in use is a row of the text block, not a capsule: a fact about the state,
+            // read before it is tapped.
+            exitCapsule
+            ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince, glassTint: glassTint) { model.toggle($0) }
+                .zoomSource("primary", in: zoom)
+                .accessibilityIdentifier("primaryAction")
+                .background { if !reduceTransparency { ReflectionColumn(color: reflection.color, x: reflection.x) } }
+                .padding(.top, 12)
+            // The dock sits under the capsule's trailing end, where the thumb rests; the speed is the
+            // row's quiet left-hand meta (under the dock at accessibility sizes).
+            let footer = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 12))
             footer {
                 if model.phase.tunnelUp {
                     Text(L.t("speed_line", Format.rate(model.rx), Format.rate(model.tx)))
@@ -223,50 +232,54 @@ struct HomeView: View {
                         // ("184/4 K", state-cycle @ b36d07d 17.3 s).
                         .contentTransition(model.rx == 0 && model.tx == 0 ? .identity : .numericText())
                         .animation(model.rx == 0 && model.tx == 0 ? nil : TonoMotion.state, value: model.rx)
-                        .frame(minHeight: 44)
+                        .lineLimit(2)
+                        .frame(minHeight: 44, alignment: .leading)
                         .accessibilityElement(children: .combine)
                         .transition(.opacity)
                 }
-                if !typeSize.isAccessibilitySize { Spacer() }
-                // Two separate glass controls with a clear gap, so Settings and Details never read
-                // as one button (round 9 review).
-                HStack(spacing: 14) {
-                    // A glass circle like the old top-right gear, so it reads as a control; the
-                    // glyph grows with the text size.
-                    Button { showSettings = true } label: {
-                        GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: gearGlyph)
-                            .frame(width: gearGlyph + 26, height: gearGlyph + 26)
-                            .glassSurface(Circle(), tint: glassTint, interactive: true)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(PressScale(glass: true))
-                    .zoomSource("settings", in: zoom)
-                    .accessibilityLabel(L.t("settings_title"))
-                    .accessibilityIdentifier("settingsButton")
-                    Button { showDetails = true } label: {
-                        HStack(spacing: 4) {
-                            Text(L.t("details")).tonoFont(15, .medium, relativeTo: .subheadline)
-                            GlyphIcon(glyph: .chevronUp, tint: TonoColor.textPrimary, size: 14)
-                        }
-                        .foregroundStyle(TonoColor.textPrimary)
-                        .padding(.horizontal, 16)
-                        .frame(minWidth: 64, minHeight: gearGlyph + 26)
-                        .glassSurface(Capsule(), tint: glassTint, interactive: true)
-                        .contentShape(Capsule())
-                        .accessibilityElement(children: .ignore)
-                    }
-                    .buttonStyle(PressScale(glass: true))
-                    .zoomSource("details", in: zoom)
-                    .accessibilityLabel(L.t("details"))
-                    .accessibilityIdentifier("detailsButton")
-                }
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+                dock
             }
-            .padding(.top, 4)
+            .padding(.top, 12)
         }
         .padding(.horizontal, 22)
-        .padding(.bottom, 6)
+        .padding(.bottom, 8)
         .animation(reduceMotion ? nil : TonoMotion.state, value: model.phase)
         .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
+    }
+
+    /// One glass dock: Settings as a gear, a hairline, Details with its chevron. One surface, two
+    /// segments, each its own 44 pt target (the hairline keeps them from reading as one button).
+    private var dock: some View {
+        let side = gearGlyph + 26
+        return HStack(spacing: 0) {
+            Button { showSettings = true } label: {
+                GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: gearGlyph)
+                    .frame(width: side, height: side)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressScale())
+            .zoomSource("settings", in: zoom)
+            .accessibilityLabel(L.t("settings_title"))
+            .accessibilityIdentifier("settingsButton")
+            Rectangle().fill(TonoColor.hairline).frame(width: 1, height: 20).accessibilityHidden(true)
+            Button { showDetails = true } label: {
+                HStack(spacing: 4) {
+                    Text(L.t("details")).tonoFont(15, .medium, relativeTo: .subheadline)
+                    GlyphIcon(glyph: .chevronUp, tint: TonoColor.textPrimary, size: 14)
+                }
+                .foregroundStyle(TonoColor.textPrimary)
+                .padding(.leading, 14).padding(.trailing, 16)
+                .frame(minWidth: 64, minHeight: side)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .ignore)
+            }
+            .buttonStyle(PressScale())
+            .zoomSource("details", in: zoom)
+            .accessibilityLabel(L.t("details"))
+            .accessibilityIdentifier("detailsButton")
+        }
+        .glassSurface(Capsule(), tint: glassTint)
     }
 
     /// One quiet line under the title: exits when connected, progress while connecting, the short
@@ -350,43 +363,40 @@ struct HomeView: View {
             guard let change, let asked else { return latency }
             return change.pending ? L.t("route_switching", asked) : L.t("route_unconfirmed", asked)
         }()
+        // A quiet row of the text block, not a capsule: the dot, the name, the latency and a chevron
+        // on one line; 44 pt tall, the whole row is the target.
         return Button { showLines = true } label: {
             Group {
                 if ax {
-                    // Accessibility sizes: the name gets the full width on its own lines (a capsule row
-                    // broke "Tokyo" mid-word), latency and the chevron sit under it.
+                    // Accessibility sizes: the name gets the full width on its own lines (a row broke
+                    // "Tokyo" mid-word), latency and the chevron sit under it.
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
                             nameText.fixedSize(horizontal: false, vertical: true)
                         }
                         if model.usingCachedCatalog { cached.fixedSize(horizontal: false, vertical: true) }
-                        HStack { trailing; Spacer(minLength: 8); chevron }
+                        HStack(spacing: 8) { trailing; chevron }
                     }
-                    .padding(.horizontal, 20).padding(.vertical, 14)
+                    .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous), tint: glassTint, interactive: true)
-                    .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                 } else {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
                         VStack(alignment: .leading, spacing: 2) {
                             nameText.lineLimit(1)
                             if model.usingCachedCatalog { cached.lineLimit(2) }
                         }
-                        Spacer(minLength: 0)
                         trailing.fixedSize()
                         chevron
                     }
-                    .padding(.horizontal, 18)
-                    .frame(minHeight: 52)
-                    .glassSurface(Capsule(), tint: glassTint, interactive: true)
-                    .contentShape(Capsule())
+                    .frame(minHeight: 44, alignment: .leading)
                 }
             }
+            .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
         }
-        .buttonStyle(PressScale(glass: true))
+        .buttonStyle(PressScale())
         .zoomSource("lines", in: zoom)
         .accessibilityLabel("\(L.t("lines_title")): \(name), \(status)")
         .accessibilityIdentifier("exitCapsule")
