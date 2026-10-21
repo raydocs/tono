@@ -239,7 +239,7 @@ it('general settings confirm saved choices across navigation and apply language 
   expect(
     screen.getByText(/Priority: 21 cloud-video exceptions/).textContent,
   ).toContain(
-    '167 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations',
+    '198 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations',
   )
   expect(
     screen.getByText(/ECH, cached\/raw IP or app DoH/).textContent,

@@ -695,7 +695,7 @@
       "routingMode": "路由模式",
       "routingStable": "稳定（默认）",
       "routingThreeTier": "三层路由",
-      "routingScope": "优先级：21 项云端视频例外 → 167 项 AI／指定 Home 条目 → 明确的云端列表 → 其他受支持流量默认 DIRECT 直连（含未分类目标）。命中 Home／云端后失败不会退回直连。ECH、缓存／裸 IP 或应用自带 DoH 可能隐藏 AI 身份而走默认直连；无法保证未识别的 AI 走 Home。",
+      "routingScope": "优先级：21 项云端视频例外 → 198 项 AI／指定 Home 条目 → 明确的云端列表 → 其他受支持流量默认 DIRECT 直连（含未分类目标）。命中 Home／云端后失败不会退回直连。ECH、缓存／裸 IP 或应用自带 DoH 可能隐藏 AI 身份而走默认直连；无法保证未识别的 AI 走 Home。",
       "routingLimits": "普通 DIRECT 仅支持公网 IPv4 的 TCP 80/443 端口；业务 UDP／QUIC、IPv6 及局域网均阻断。Core 停止时仍保持阻断保护。",
       "routingEffect": "保存后，仅在你显式断开再连接时生效，不会暗中改变当前连接的路由或保护。",
       "launchAtStartup": "登录电脑时打开",
