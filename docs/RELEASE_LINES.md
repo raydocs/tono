@@ -33,13 +33,15 @@ format and the release script passes and verifies the exact source commit.
 ## Current source and published state
 
 Source versions in this tree are **macOS 0.0.80 (build 81)** and **Windows
-0.0.80** (version only; Windows has no change since 0.0.79 and is not rebuilt
-for this candidate). 0.0.80 exists because the 0.0.79 qualification on a Devin
-macOS VM found that AI Home and Three-tier refused every Home line given as a
-gateway name (#1702, helper 4.52.62). It is a **test candidate** for
-installed-device qualification of AI Home (decision 131), not stable acceptance
-or customer-feed promotion. See `apps/macos/release-notes/build81.md` and
-[the delivery record](changelog.d/2026-10-20-desktop-0080-test.md).
+0.0.80**, rebuilt on both platforms by the owner's 2026-10-21 request: the first
+macOS-only 0.0.80 candidate (#1702, never distributed) is withdrawn and its
+artifacts deleted. 0.0.80 now carries the gateway-name Home lines (#1702), the
+194-entry AI list (#1706, helper 4.52.63), the Windows unfinished-restore
+self-heal (#1705) and the Windows background GPU fix (#1707). It is a **test
+candidate** for installed-device qualification of AI Home (decision 131), not
+stable acceptance or customer-feed promotion. See
+`apps/macos/release-notes/build81.md`, `apps/windows/release-notes/0.0.80.md`
+and [the delivery record](changelog.d/2026-10-20-desktop-0080-test.md).
 Both packages must bind the same source and release sequence; share verified
 bytes in a new, explicitly labelled prerelease, never by overwriting old assets.
 Installed-device results are collected after candidate creation, not invented
