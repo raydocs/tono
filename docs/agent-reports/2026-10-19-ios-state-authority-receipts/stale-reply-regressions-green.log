@@ -1,0 +1,38 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/9] Emitting module TonoKit
+[5/9] Compiling TonoKit TunnelConfirmation.swift
+[6/9] Compiling TonoKit RouteApply.swift
+[6/11] Write Objects.LinkFileList
+[7/16] Linking tono-config
+[8/16] Applying tono-config
+[10/16] Compiling TonoKitTests ConfirmationTrackerTests.swift
+[11/16] Compiling TonoKitTests TunnelGraphTests.swift
+[12/16] Emitting module TonoKitTests
+[13/16] Compiling TonoKitTests RouteApplyTests.swift
+[14/16] Compiling TonoKitTests AppStatusTests.swift
+[14/16] Write Objects.LinkFileList
+[15/16] Linking TonoKitPackageTests
+Build complete! (1.65s)
+Test Suite 'Selected tests' started at 2026-10-19 10:13:06.002.
+Test Suite 'TonoKitPackageTests.xctest' started at 2026-10-19 10:13:06.003.
+Test Suite 'ConfirmationTrackerTests' started at 2026-10-19 10:13:06.003.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration]' passed (0.001 seconds).
+Test Suite 'ConfirmationTrackerTests' passed at 2026-10-19 10:13:06.004.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'RouteApplyTests' started at 2026-10-19 10:13:06.004.
+Test Case '-[TonoKitTests.RouteApplyTests testAReplyAfterTheSessionEndedCannotPutOldInputsBack]' started.
+Test Case '-[TonoKitTests.RouteApplyTests testAReplyAfterTheSessionEndedCannotPutOldInputsBack]' passed (0.000 seconds).
+Test Suite 'RouteApplyTests' passed at 2026-10-19 10:13:06.005.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'TonoKitPackageTests.xctest' passed at 2026-10-19 10:13:06.005.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 10:13:06.005.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

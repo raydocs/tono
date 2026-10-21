@@ -1,0 +1,138 @@
+name: iOS CI
+
+# Tono iOS (apps/ios) is not part of ci-gate yet: it is a pre-release client on a feature branch
+# and not a SHIP_PLAN gate. This workflow runs on pushes to feat/ios-** and by hand, on GitHub's
+# hosted runners only. It builds the pinned libbox from source, compiles the app and the packet
+# tunnel for the simulator and for devices (unsigned), runs TonoKit's tests on macOS and Linux
+# with the sing-box CLI route checks, and captures the DEBUG design preview in a simulator.
+# Nothing is signed, uploaded to App Store Connect or published.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'feat/ios-**'
+    paths:
+      - apps/ios/**
+      - .github/workflows/ios-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODEGEN_VERSION: 2.44.1
+  XCODEGEN_COMMIT: 21ac9944b0ab546a07422dbed86f33dd2ebd76f8
+
+jobs:
+  routing:
+    name: TonoKit + sing-box route checks (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Swift toolchain
+        run: swift --version
+      - name: Desktop routing contract is in sync
+        run: python3 apps/ios/tools/sync-desktop-routing.py --check
+      - name: TonoKit tests
+        working-directory: apps/ios/TonoKit
+        run: swift test
+      - name: Pinned sing-box CLI accepts the graphs and routes them fail-closed
+        run: apps/ios/tools/check-singbox.sh "$RUNNER_TEMP/sing-box-cli"
+
+  apple:
+    name: Libbox + Xcode build + simulator preview (macOS)
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          swift --version
+      - name: TonoKit tests (macOS)
+        working-directory: apps/ios/TonoKit
+        run: swift test
+      # Caches downloads only (Go archive, module cache, sing-box checkout). The script re-checks the
+      # archive SHA-256, the source commit and clean tree, the patch SHA-256 and go.sum, extracts a
+      # fresh GOROOT and always rebuilds the framework.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/sing-box-apple
+          key: libbox-work-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/ios/supply-chain/**') }}
+      - name: Build Libbox.xcframework from the pinned sing-box source
+        env:
+          TONO_SB_WORK: ${{ runner.temp }}/sing-box-apple
+        run: apps/ios/supply-chain/build-libbox-apple.sh
+      - name: XcodeGen (pinned source build)
+        run: |
+          git clone --quiet --depth 1 --branch "$XCODEGEN_VERSION" https://github.com/yonaskolb/XcodeGen.git "$RUNNER_TEMP/XcodeGen"
+          test "$(git -C "$RUNNER_TEMP/XcodeGen" rev-parse HEAD)" = "$XCODEGEN_COMMIT"
+          swift build -c release --package-path "$RUNNER_TEMP/XcodeGen" --product xcodegen
+          "$RUNNER_TEMP/XcodeGen/.build/release/xcodegen" generate --spec apps/ios/project.yml
+      - name: Build for devices (Release, unsigned)
+        working-directory: apps/ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Tono.xcodeproj -scheme Tono -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/dd-device" \
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/build-device.log" 2>&1 \
+            || { grep -E "error:" "$RUNNER_TEMP/build-device.log" | sort -u | head -n 80; tail -n 20 "$RUNNER_TEMP/build-device.log"; exit 1; }
+          tail -n 20 "$RUNNER_TEMP/build-device.log"
+          APP="$RUNNER_TEMP/dd-device/Build/Products/Release-iphoneos/Tono.app"
+          test -d "$APP/PlugIns/PacketTunnel.appex"
+          test -d "$APP/PlugIns/TonoWidgets.appex"
+          # The design preview (fixture lines) is DEBUG-only and must not ship.
+          if strings "$APP/Tono" | grep -q -- "-TonoPreview"; then echo "Release contains the design preview" >&2; exit 1; fi
+          if strings "$APP/PlugIns/TonoWidgets.appex/TonoWidgets" | grep -q -- "-TonoPreview"; then echo "Widgets contain the design preview" >&2; exit 1; fi
+          lipo -info "$APP/Tono" "$APP/PlugIns/PacketTunnel.appex/PacketTunnel" "$APP/PlugIns/TonoWidgets.appex/TonoWidgets"
+          /usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPointIdentifier" "$APP/PlugIns/TonoWidgets.appex/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :NSSupportsLiveActivities" "$APP/Info.plist"
+          du -sh "$APP" "$APP/PlugIns/PacketTunnel.appex" "$APP/PlugIns/TonoWidgets.appex"
+      - name: Build for the simulator (Debug)
+        working-directory: apps/ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Tono.xcodeproj -scheme Tono -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd-sim" \
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/build-sim.log" 2>&1 \
+            || { grep -E "error:" "$RUNNER_TEMP/build-sim.log" | sort -u | head -n 80; tail -n 20 "$RUNNER_TEMP/build-sim.log"; exit 1; }
+          tail -n 20 "$RUNNER_TEMP/build-sim.log"
+      - name: Design preview screenshots (simulator, fixture lines, no tunnel)
+        run: |
+          apps/ios/tools/preview-screenshots.sh \
+            "$RUNNER_TEMP/dd-sim/Build/Products/Debug-iphonesimulator/Tono.app" "$RUNNER_TEMP/ios-preview"
+          cp apps/ios/Frameworks/Libbox.provenance.json "$RUNNER_TEMP/ios-preview/"
+      # XCUITest on the same simulator, still the DEBUG fixture preview (no account, no tunnel):
+      # taps connect / cancel / fail→retry / permission / disconnect, sheets and settings, checks the
+      # VoiceOver labels and runs Apple's accessibility audit on every screen. Recorded on video.
+      - name: UI tests + accessibility audit (simulator, fixture preview)
+        working-directory: apps/ios
+        run: |
+          UDID="$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for v in d.values() for x in v))')"
+          OUT="$RUNNER_TEMP/ios-preview"
+          set -o pipefail
+          xcodebuild build-for-testing -project Tono.xcodeproj -scheme Tono -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd-test" CODE_SIGNING_ALLOWED=NO | tail -n 20
+          xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$OUT/ui-tests.mp4" &
+          REC=$!
+          set +e
+          # TONO_SHOTS: the Live Activity test saves its Dynamic Island captures next to the screenshots.
+          TEST_RUNNER_TONO_SHOTS="$OUT" xcodebuild test-without-building -project Tono.xcodeproj -scheme Tono -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd-test" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO > "$OUT/ui-tests.log" 2>&1
+          STATUS=$?
+          kill -INT "$REC"; wait "$REC"
+          grep -E "Test Case|AUDIT|error:|Executed|\*\* TEST|measured \[" "$OUT/ui-tests.log" | tail -n 200
+          exit $STATUS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: ios-preview-screenshots
+          path: ${{ runner.temp }}/ios-preview
+          if-no-files-found: warn
+          retention-days: 14

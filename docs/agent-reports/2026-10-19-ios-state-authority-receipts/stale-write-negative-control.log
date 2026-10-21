@@ -1,0 +1,64 @@
+Building for debugging...
+[0/12] /private/var/folders/v4/1r21hprs5j97y_ky8qbhjvrw0000gn/T/tono-ios-stale-write.hWNAU6/.build/arm64-apple-macosx/debug/TonoKitPackageTests.derived/runner.swift
+[1/12] Write sources
+[5/12] Write tono-config-entitlement.plist
+[6/12] Write swift-version--58304C5D6DBC2206.txt
+[8/31] Compiling TonoKit StatusSnapshot.swift
+[9/31] Compiling TonoKit TunnelGraph.swift
+[10/31] Compiling TonoKit SharedStatus.swift
+[11/31] Compiling TonoKit SingBoxConfig.swift
+[12/31] Compiling TonoKit CatalogYAML.swift
+[13/31] Compiling TonoKit ConnectionState.swift
+[14/31] Compiling TonoKit ControlPlane.swift
+[15/31] Compiling TonoKit DesktopRoutingContract.swift
+[16/31] Compiling TonoKit Account.swift
+[17/31] Compiling TonoKit Catalog.swift
+[18/31] Emitting module TonoKit
+[19/31] Compiling TonoKit TunnelConfirmation.swift
+[20/31] Compiling TonoKit StatusFile.swift
+[21/31] Compiling TonoKit RouteApply.swift
+[22/31] Compiling TonoKit RouteExplainer.swift
+[23/31] Compiling TonoKit SHA256.swift
+[24/31] Compiling TonoKit SampleCatalog.swift
+[25/31] Compiling TonoKit JSON.swift
+[26/31] Compiling TonoKit ProviderReply.swift
+[27/32] Compiling TonoKit TunnelInputs.swift
+[28/46] Compiling TonoConfigTool main.swift
+[29/46] Emitting module TonoConfigTool
+[29/46] Write Objects.LinkFileList
+[30/46] Linking tono-config
+[31/46] Applying tono-config
+[33/46] Compiling TonoKitTests SharedStatusTests.swift
+[34/46] Compiling TonoKitTests CatalogTests.swift
+[35/47] Compiling TonoKitTests StatusSnapshotTests.swift
+[36/47] Compiling TonoKitTests ConnectionStateTests.swift
+[37/47] Compiling TonoKitTests StatusFileTests.swift
+[38/47] Compiling TonoKitTests ProviderReplyTests.swift
+[39/47] Compiling TonoKitTests RoutingTests.swift
+[40/47] Compiling TonoKitTests RouteApplyTests.swift
+[41/47] Compiling TonoKitTests AppStatusTests.swift
+[42/47] Compiling TonoKitTests ConfirmationTrackerTests.swift
+[43/47] Emitting module TonoKitTests
+[44/47] Compiling TonoKitTests AccountTests.swift
+[45/47] Compiling TonoKitTests TunnelGraphTests.swift
+[46/49] Compiling TonoKitPackageTests runner.swift
+[47/49] Emitting module TonoKitPackageTests
+[47/49] Write Objects.LinkFileList
+[48/49] Linking TonoKitPackageTests
+Build complete! (15.07s)
+Test Suite 'Selected tests' started at 2026-10-19 10:14:05.428.
+Test Suite 'TonoKitPackageTests.xctest' started at 2026-10-19 10:14:05.429.
+Test Suite 'RouteApplyTests' started at 2026-10-19 10:14:05.429.
+Test Case '-[TonoKitTests.RouteApplyTests testAReplyAfterTheSessionEndedCannotPutOldInputsBack]' started.
+/private/var/folders/v4/1r21hprs5j97y_ky8qbhjvrw0000gn/T/tono-ios-stale-write.hWNAU6/Tests/TonoKitTests/RouteApplyTests.swift:114: error: -[TonoKitTests.RouteApplyTests testAReplyAfterTheSessionEndedCannotPutOldInputsBack] : XCTAssertEqual failed: ("[TonoKit.RouteSettings(mode: TonoKit.RoutingMode.stable, node: Optional("tokyo-1")), TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1"))]") is not equal to ("[TonoKit.RouteSettings(mode: TonoKit.RoutingMode.stable, node: Optional("tokyo-1"))]") - an obsolete response must not roll the new session's inputs back
+Test Case '-[TonoKitTests.RouteApplyTests testAReplyAfterTheSessionEndedCannotPutOldInputsBack]' failed (0.092 seconds).
+Test Suite 'RouteApplyTests' failed at 2026-10-19 10:14:05.521.
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.092 (0.093) seconds
+Test Suite 'TonoKitPackageTests.xctest' failed at 2026-10-19 10:14:05.521.
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.092 (0.093) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 10:14:05.521.
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.092 (0.094) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

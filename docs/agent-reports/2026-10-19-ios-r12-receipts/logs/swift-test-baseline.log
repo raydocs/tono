@@ -1,0 +1,194 @@
+commit: abc03885ad4118b6a7b3dbf01dda31bfdc1d031f  ios tree changed files: 0
+$ cd apps/ios/TonoKit && swift test
+Building for debugging...
+[Using on-disk description]
+Build complete! (0.54 secs)
+Test Suite 'All tests' started at 2026-10-19 02:51:50.807
+Test Suite 'Debug-linux-x86_64.xctest' started at 2026-10-19 02:51:50.808
+Test Suite 'AccountTests' started at 2026-10-19 02:51:50.808
+Test Case 'AccountTests.testAPIErrorIsFinalAndNotRetriedOnARelay' started at 2026-10-19 02:51:50.808
+Test Case 'AccountTests.testAPIErrorIsFinalAndNotRetriedOnARelay' passed (0.001 seconds)
+Test Case 'AccountTests.testEdgeFiveHundredWithoutAnAPIBodyTriesTheNextPath' started at 2026-10-19 02:51:50.809
+Test Case 'AccountTests.testEdgeFiveHundredWithoutAnAPIBodyTriesTheNextPath' passed (0.0 seconds)
+Test Case 'AccountTests.testEmailShapeCheck' started at 2026-10-19 02:51:50.809
+Test Case 'AccountTests.testEmailShapeCheck' passed (0.0 seconds)
+Test Case 'AccountTests.testExpiredAccessTokenIsRefreshedAndRotatedBeforeTheCatalogCall' started at 2026-10-19 02:51:50.809
+Test Case 'AccountTests.testExpiredAccessTokenIsRefreshedAndRotatedBeforeTheCatalogCall' passed (0.002 seconds)
+Test Case 'AccountTests.testNetworkOutageReusesARecentCatalogButHomeUnavailableNeverDoes' started at 2026-10-19 02:51:50.812
+Test Case 'AccountTests.testNetworkOutageReusesARecentCatalogButHomeUnavailableNeverDoes' passed (0.002 seconds)
+Test Case 'AccountTests.testOlderCatalogRevisionIsRefusedAsRollback' started at 2026-10-19 02:51:50.813
+Test Case 'AccountTests.testOlderCatalogRevisionIsRefusedAsRollback' passed (0.002 seconds)
+Test Case 'AccountTests.testRelayRequestCarriesTheAPIHostAndBasePath' started at 2026-10-19 02:51:50.815
+Test Case 'AccountTests.testRelayRequestCarriesTheAPIHostAndBasePath' passed (0.0 seconds)
+Test Case 'AccountTests.testRelayResponseParserReadsChunkedAndSizedBodies' started at 2026-10-19 02:51:50.815
+Test Case 'AccountTests.testRelayResponseParserReadsChunkedAndSizedBodies' passed (0.0 seconds)
+Test Case 'AccountTests.testSignOutClearsLocallyEvenWhenTheServerIsUnreachable' started at 2026-10-19 02:51:50.815
+Test Case 'AccountTests.testSignOutClearsLocallyEvenWhenTheServerIsUnreachable' passed (0.0 seconds)
+Test Case 'AccountTests.testUnreachableSystemPathFallsBackToARelayAndReportsTheFailedPath' started at 2026-10-19 02:51:50.816
+Test Case 'AccountTests.testUnreachableSystemPathFallsBackToARelayAndReportsTheFailedPath' passed (0.0 seconds)
+Test Case 'AccountTests.testWeekOldCacheIsNotUsed' started at 2026-10-19 02:51:50.816
+Test Case 'AccountTests.testWeekOldCacheIsNotUsed' passed (0.001 seconds)
+Test Suite 'AccountTests' passed at 2026-10-19 02:51:50.817
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.009 (0.009) seconds
+Test Suite 'CatalogTests' started at 2026-10-19 02:51:50.817
+Test Case 'CatalogTests.testAdmitsFixtureWithSocksHomeAndKeepsBothCloudNodes' started at 2026-10-19 02:51:50.817
+Test Case 'CatalogTests.testAdmitsFixtureWithSocksHomeAndKeepsBothCloudNodes' passed (0.001 seconds)
+Test Case 'CatalogTests.testAssignedHomeMissingFromCatalogRefusesInsteadOfFallingBackToCloud' started at 2026-10-19 02:51:50.818
+Test Case 'CatalogTests.testAssignedHomeMissingFromCatalogRefusesInsteadOfFallingBackToCloud' passed (0.001 seconds)
+Test Case 'CatalogTests.testCatalogNodeHomeIsRemovedFromTheCloudList' started at 2026-10-19 02:51:50.819
+Test Case 'CatalogTests.testCatalogNodeHomeIsRemovedFromTheCloudList' passed (0.001 seconds)
+Test Case 'CatalogTests.testEmptyRoutingDigestMatchesTheWorkerRecipe' started at 2026-10-19 02:51:50.820
+Test Case 'CatalogTests.testEmptyRoutingDigestMatchesTheWorkerRecipe' passed (0.001 seconds)
+Test Case 'CatalogTests.testHy2BlockIsStrippedNotAdmittedAsASecondIdentity' started at 2026-10-19 02:51:50.821
+Test Case 'CatalogTests.testHy2BlockIsStrippedNotAdmittedAsASecondIdentity' passed (0.001 seconds)
+Test Case 'CatalogTests.testJSONRoundTripKeepsOrderAndEscapes' started at 2026-10-19 02:51:50.822
+Test Case 'CatalogTests.testJSONRoundTripKeepsOrderAndEscapes' passed (0.0 seconds)
+Test Case 'CatalogTests.testLineLabelShowsOnlyWhenACityHasTwoLines' started at 2026-10-19 02:51:50.822
+Test Case 'CatalogTests.testLineLabelShowsOnlyWhenACityHasTwoLines' passed (0.0 seconds)
+Test Case 'CatalogTests.testPrivateOrBenchmarkServerAddressIsRefused' started at 2026-10-19 02:51:50.822
+Test Case 'CatalogTests.testPrivateOrBenchmarkServerAddressIsRefused' passed (0.001 seconds)
+Test Case 'CatalogTests.testReservedNodeNameIsRefused' started at 2026-10-19 02:51:50.823
+Test Case 'CatalogTests.testReservedNodeNameIsRefused' passed (0.001 seconds)
+Test Case 'CatalogTests.testRoutingDocumentWithoutItsDigestIsRefused' started at 2026-10-19 02:51:50.824
+Test Case 'CatalogTests.testRoutingDocumentWithoutItsDigestIsRefused' passed (0.0 seconds)
+Test Case 'CatalogTests.testSHA256MatchesKnownVector' started at 2026-10-19 02:51:50.824
+Test Case 'CatalogTests.testSHA256MatchesKnownVector' passed (0.0 seconds)
+Test Case 'CatalogTests.testSkipCertVerifyIsRefused' started at 2026-10-19 02:51:50.825
+Test Case 'CatalogTests.testSkipCertVerifyIsRefused' passed (0.001 seconds)
+Test Case 'CatalogTests.testTamperedYamlFailsTheDigest' started at 2026-10-19 02:51:50.825
+Test Case 'CatalogTests.testTamperedYamlFailsTheDigest' passed (0.0 seconds)
+Test Case 'CatalogTests.testYamlKeepsHashInsideQuotesAndStripsComments' started at 2026-10-19 02:51:50.826
+Test Case 'CatalogTests.testYamlKeepsHashInsideQuotesAndStripsComments' passed (0.0 seconds)
+Test Case 'CatalogTests.testYamlRejectsAnchorsAndDuplicateKeys' started at 2026-10-19 02:51:50.826
+Test Case 'CatalogTests.testYamlRejectsAnchorsAndDuplicateKeys' passed (0.0 seconds)
+Test Case 'CatalogTests.testYamlRejectsTabIndentation' started at 2026-10-19 02:51:50.826
+Test Case 'CatalogTests.testYamlRejectsTabIndentation' passed (0.0 seconds)
+Test Suite 'CatalogTests' passed at 2026-10-19 02:51:50.826
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.009 (0.009) seconds
+Test Suite 'ConnectionStateTests' started at 2026-10-19 02:51:50.826
+Test Case 'ConnectionStateTests.testCloudCheckFailureIsDegradedWithTheOtherLineAction' started at 2026-10-19 02:51:50.826
+Test Case 'ConnectionStateTests.testCloudCheckFailureIsDegradedWithTheOtherLineAction' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testEndedSessionShowsSignInWithItsReason' started at 2026-10-19 02:51:50.826
+Test Case 'ConnectionStateTests.testEndedSessionShowsSignInWithItsReason' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testHomeCheckFailureIsDegradedNotDisconnected' started at 2026-10-19 02:51:50.826
+Test Case 'ConnectionStateTests.testHomeCheckFailureIsDegradedNotDisconnected' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testJWTExpiry' started at 2026-10-19 02:51:50.827
+Test Case 'ConnectionStateTests.testJWTExpiry' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testNetworkChangeSunSitsBelowAPartlyWorkingTunnel' started at 2026-10-19 02:51:50.827
+Test Case 'ConnectionStateTests.testNetworkChangeSunSitsBelowAPartlyWorkingTunnel' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testReassertingReadsAsConnectingNotConnected' started at 2026-10-19 02:51:50.827
+Test Case 'ConnectionStateTests.testReassertingReadsAsConnectingNotConnected' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testStoppedTunnelWithAFailureIsFailedWithRetry' started at 2026-10-19 02:51:50.827
+Test Case 'ConnectionStateTests.testStoppedTunnelWithAFailureIsFailedWithRetry' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testTraceLocationAndFormatting' started at 2026-10-19 02:51:50.827
+Test Case 'ConnectionStateTests.testTraceLocationAndFormatting' passed (0.0 seconds)
+Test Case 'ConnectionStateTests.testTunnelUpWithChecksPendingStillReadsConnecting' started at 2026-10-19 02:51:50.827
+Test Case 'ConnectionStateTests.testTunnelUpWithChecksPendingStillReadsConnecting' passed (0.0 seconds)
+Test Suite 'ConnectionStateTests' passed at 2026-10-19 02:51:50.827
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'PrimaryActionTests' started at 2026-10-19 02:51:50.827
+Test Case 'PrimaryActionTests.testHapticsOnlyForAStartReachingConnectedOrFailing' started at 2026-10-19 02:51:50.827
+Test Case 'PrimaryActionTests.testHapticsOnlyForAStartReachingConnectedOrFailing' passed (0.0 seconds)
+Test Case 'PrimaryActionTests.testInFlightStartOffersCancelAndRunningTunnelOffersDisconnect' started at 2026-10-19 02:51:50.828
+Test Case 'PrimaryActionTests.testInFlightStartOffersCancelAndRunningTunnelOffersDisconnect' passed (0.0 seconds)
+Test Suite 'PrimaryActionTests' passed at 2026-10-19 02:51:50.828
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+Test Suite 'RouteApplyTests' started at 2026-10-19 02:51:50.828
+Test Case 'RouteApplyTests.testAFailedPutBackOfTheFileIsReportedNotSwallowed' started at 2026-10-19 02:51:50.828
+Test Case 'RouteApplyTests.testAFailedPutBackOfTheFileIsReportedNotSwallowed' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither' started at 2026-10-19 02:51:50.828
+Test Case 'RouteApplyTests.testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode' started at 2026-10-19 02:51:50.829
+Test Case 'RouteApplyTests.testConfirmedReloadIsTheOnlyWayARunningTunnelReportsTheNewMode' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect' started at 2026-10-19 02:51:50.829
+Test Case 'RouteApplyTests.testNoReplyAndNoStatusIsUnconfirmedNotThePreviousModeInEffect' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testNoReplyIsSettledByWhatTheTunnelSaysItRuns' started at 2026-10-19 02:51:50.829
+Test Case 'RouteApplyTests.testNoReplyIsSettledByWhatTheTunnelSaysItRuns' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testRefusedReloadReportsTheGraphTheExtensionStillRuns' started at 2026-10-19 02:51:50.829
+Test Case 'RouteApplyTests.testRefusedReloadReportsTheGraphTheExtensionStillRuns' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp' started at 2026-10-19 02:51:50.830
+Test Case 'RouteApplyTests.testRefusedReloadWithNoGraphLeftIsFailedWhileTheTunnelIsUp' passed (0.0 seconds)
+Test Case 'RouteApplyTests.testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads' started at 2026-10-19 02:51:50.830
+Test Case 'RouteApplyTests.testSaveRejectedKeepsThePreviousModeInEffectAndNeverReloads' passed (0.0 seconds)
+Test Suite 'RouteApplyTests' passed at 2026-10-19 02:51:50.830
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'RoutingTests' started at 2026-10-19 02:51:50.830
+Test Case 'RoutingTests.testAIWithoutAssignedHomeGoesToCloudNeverDirect' started at 2026-10-19 02:51:50.830
+Test Case 'RoutingTests.testAIWithoutAssignedHomeGoesToCloudNeverDirect' passed (0.002 seconds)
+Test Case 'RoutingTests.testContractCountsMatchTheDesktopLists' started at 2026-10-19 02:51:50.832
+Test Case 'RoutingTests.testContractCountsMatchTheDesktopLists' passed (0.0 seconds)
+Test Case 'RoutingTests.testDirectAAAAIsEmptyOnlyWhenTheNetworkHasNoIPv6' started at 2026-10-19 02:51:50.832
+Test Case 'RoutingTests.testDirectAAAAIsEmptyOnlyWhenTheNetworkHasNoIPv6' passed (0.003 seconds)
+Test Case 'RoutingTests.testGraphCarriesNoPerAppRules' started at 2026-10-19 02:51:50.836
+Test Case 'RoutingTests.testGraphCarriesNoPerAppRules' passed (0.003 seconds)
+Test Case 'RoutingTests.testHomeTrafficOnUDPIsRejectedSoQUICFallsBackToTCP' started at 2026-10-19 02:51:50.839
+Test Case 'RoutingTests.testHomeTrafficOnUDPIsRejectedSoQUICFallsBackToTCP' passed (0.002 seconds)
+Test Case 'RoutingTests.testLANStaysLocalInBothModes' started at 2026-10-19 02:51:50.840
+Test Case 'RoutingTests.testLANStaysLocalInBothModes' passed (0.002 seconds)
+Test Case 'RoutingTests.testRawAnthropicAddressFollowsHome' started at 2026-10-19 02:51:50.842
+Test Case 'RoutingTests.testRawAnthropicAddressFollowsHome' passed (0.003 seconds)
+Test Case 'RoutingTests.testRouteCheckAnswersInUserTerms' started at 2026-10-19 02:51:50.845
+Test Case 'RoutingTests.testRouteCheckAnswersInUserTerms' passed (0.003 seconds)
+Test Case 'RoutingTests.testSelectorFallsBackToTheAccountDefaultWhenTheSavedNodeVanished' started at 2026-10-19 02:51:50.848
+Test Case 'RoutingTests.testSelectorFallsBackToTheAccountDefaultWhenTheSavedNodeVanished' passed (0.001 seconds)
+Test Case 'RoutingTests.testStaleFakeAddressIsRejectedNotSentDirect' started at 2026-10-19 02:51:50.849
+Test Case 'RoutingTests.testStaleFakeAddressIsRejectedNotSentDirect' passed (0.003 seconds)
+Test Case 'RoutingTests.testThreeTierSendsUnlistedTrafficDirectAndStableSendsItToCloud' started at 2026-10-19 02:51:50.853
+Test Case 'RoutingTests.testThreeTierSendsUnlistedTrafficDirectAndStableSendsItToCloud' passed (0.005 seconds)
+Test Case 'RoutingTests.testTunUsesNetworkExtensionMTUAndCapturesIPv6' started at 2026-10-19 02:51:50.857
+Test Case 'RoutingTests.testTunUsesNetworkExtensionMTUAndCapturesIPv6' passed (0.002 seconds)
+Test Case 'RoutingTests.testTunnelInputsRoundTripAndTheExtensionReAdmitsTheBody' started at 2026-10-19 02:51:50.859
+Test Case 'RoutingTests.testTunnelInputsRoundTripAndTheExtensionReAdmitsTheBody' passed (0.003 seconds)
+Test Case 'RoutingTests.testVideoExceptionWinsOverTheBroadHomeParent' started at 2026-10-19 02:51:50.862
+Test Case 'RoutingTests.testVideoExceptionWinsOverTheBroadHomeParent' passed (0.002 seconds)
+Test Suite 'RoutingTests' passed at 2026-10-19 02:51:50.864
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.033 (0.033) seconds
+Test Suite 'StatusFileTests' started at 2026-10-19 02:51:50.864
+Test Case 'StatusFileTests.testAppDecidingWhileTheTunnelWritesDoesNotOverwriteIt' started at 2026-10-19 02:51:50.864
+Test Case 'StatusFileTests.testAppDecidingWhileTheTunnelWritesDoesNotOverwriteIt' passed (0.505 seconds)
+Test Case 'StatusFileTests.testAppRoutesStoppedFromOlderKnowledgeDoesNotHideARestoredGraph' started at 2026-10-19 02:51:51.369
+Test Case 'StatusFileTests.testAppRoutesStoppedFromOlderKnowledgeDoesNotHideARestoredGraph' passed (0.002 seconds)
+Test Case 'StatusFileTests.testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped' started at 2026-10-19 02:51:51.371
+Test Case 'StatusFileTests.testForegroundAppWithOlderKnowledgeDoesNotHideRoutesStopped' passed (0.003 seconds)
+Test Case 'StatusFileTests.testWriteWaitsWhileAnotherProcessHoldsTheLock' started at 2026-10-19 02:51:51.374
+Test Case 'StatusFileTests.testWriteWaitsWhileAnotherProcessHoldsTheLock' passed (0.864 seconds)
+Test Suite 'StatusFileTests' passed at 2026-10-19 02:51:52.238
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.374 (1.374) seconds
+Test Suite 'StatusSnapshotTests' started at 2026-10-19 02:51:52.238
+Test Case 'StatusSnapshotTests.testAppDisconnectingIsOffAndPreparingIsConnecting' started at 2026-10-19 02:51:52.238
+Test Case 'StatusSnapshotTests.testAppDisconnectingIsOffAndPreparingIsConnecting' passed (0.0 seconds)
+Test Case 'StatusSnapshotTests.testNoSnapshotIsUnavailableNotOff' started at 2026-10-19 02:51:52.238
+Test Case 'StatusSnapshotTests.testNoSnapshotIsUnavailableNotOff' passed (0.0 seconds)
+Test Case 'StatusSnapshotTests.testOutsideCommandsCannotStartWithoutAccountPermissionOrInputs' started at 2026-10-19 02:51:52.239
+Test Case 'StatusSnapshotTests.testOutsideCommandsCannotStartWithoutAccountPermissionOrInputs' passed (0.0 seconds)
+Test Case 'StatusSnapshotTests.testRoundTripAndOtherVersionsAreUnreadable' started at 2026-10-19 02:51:52.239
+Test Case 'StatusSnapshotTests.testRoundTripAndOtherVersionsAreUnreadable' passed (0.001 seconds)
+Test Case 'StatusSnapshotTests.testSnapshotFromTheFutureIsNotFresh' started at 2026-10-19 02:51:52.239
+Test Case 'StatusSnapshotTests.testSnapshotFromTheFutureIsNotFresh' passed (0.0 seconds)
+Test Case 'StatusSnapshotTests.testSnapshotTurnsStaleAfterFifteenMinutesAndStaleNeverReadsOn' started at 2026-10-19 02:51:52.240
+Test Case 'StatusSnapshotTests.testSnapshotTurnsStaleAfterFifteenMinutesAndStaleNeverReadsOn' passed (0.0 seconds)
+Test Case 'StatusSnapshotTests.testTunnelHeartbeatKeepsTheAppsDegradedStateForTheSameSession' started at 2026-10-19 02:51:52.240
+Test Case 'StatusSnapshotTests.testTunnelHeartbeatKeepsTheAppsDegradedStateForTheSameSession' passed (0.0 seconds)
+Test Case 'StatusSnapshotTests.testTunnelStopWithAFailureIsFailedAndClearsSince' started at 2026-10-19 02:51:52.241
+Test Case 'StatusSnapshotTests.testTunnelStopWithAFailureIsFailedAndClearsSince' passed (0.0 seconds)
+Test Suite 'StatusSnapshotTests' passed at 2026-10-19 02:51:52.241
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'TunnelGraphTests' started at 2026-10-19 02:51:52.241
+Test Case 'TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected' started at 2026-10-19 02:51:52.241
+Test Case 'TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected' passed (0.002 seconds)
+Test Suite 'TunnelGraphTests' passed at 2026-10-19 02:51:52.243
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'TunnelStopTests' started at 2026-10-19 02:51:52.243
+Test Case 'TunnelStopTests.testUserStartFailureIsNotTreatedLikeASystemStop' started at 2026-10-19 02:51:52.243
+Test Case 'TunnelStopTests.testUserStartFailureIsNotTreatedLikeASystemStop' passed (0.0 seconds)
+Test Suite 'TunnelStopTests' passed at 2026-10-19 02:51:52.244
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+Test Suite 'Debug-linux-x86_64.xctest' passed at 2026-10-19 02:51:52.244
+	 Executed 74 tests, with 0 failures (0 unexpected) in 1.434 (1.434) seconds
+Test Suite 'All tests' passed at 2026-10-19 02:51:52.244
+	 Executed 74 tests, with 0 failures (0 unexpected) in 1.434 (1.434) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.4.1 (804dc4530ef3666)
+↳ Target Platform: x86_64-unknown-linux-gnu
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+exit: 0

@@ -1,0 +1,26 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Emitting module TonoKitTests
+[4/5] Compiling TonoKitTests ConfirmationTrackerTests.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking TonoKitPackageTests
+Build complete! (1.18s)
+Test Suite 'Selected tests' started at 2026-10-19 10:12:24.028.
+Test Suite 'TonoKitPackageTests.xctest' started at 2026-10-19 10:12:24.029.
+Test Suite 'ConfirmationTrackerTests' started at 2026-10-19 10:12:24.029.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration]' started.
+/Users/ruirui/t3work/tono-ios/apps/ios/TonoKit/Tests/TonoKitTests/ConfirmationTrackerTests.swift:177: error: -[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration] : XCTAssertFalse failed
+/Users/ruirui/t3work/tono-ios/apps/ios/TonoKit/Tests/TonoKitTests/ConfirmationTrackerTests.swift:178: error: -[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration] : XCTAssertEqual failed: ("graph(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1")))") is not equal to ("unknown")
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testSilenceDoesNotEraseTheLastKnownGraphGeneration]' failed (0.086 seconds).
+Test Suite 'ConfirmationTrackerTests' failed at 2026-10-19 10:12:24.115.
+	 Executed 1 test, with 2 failures (0 unexpected) in 0.086 (0.086) seconds
+Test Suite 'TonoKitPackageTests.xctest' failed at 2026-10-19 10:12:24.115.
+	 Executed 1 test, with 2 failures (0 unexpected) in 0.086 (0.086) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 10:12:24.115.
+	 Executed 1 test, with 2 failures (0 unexpected) in 0.086 (0.087) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

@@ -1,0 +1,26 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.17s)
+Test Suite 'Selected tests' started at 2026-10-19 10:11:35.913.
+Test Suite 'TonoKitPackageTests.xctest' started at 2026-10-19 10:11:35.916.
+Test Suite 'ConfirmationTrackerTests' started at 2026-10-19 10:11:35.916.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion]' started.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion]' passed (0.002 seconds).
+Test Suite 'ConfirmationTrackerTests' passed at 2026-10-19 10:11:35.918.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'SharedStatusTests' started at 2026-10-19 10:11:35.918.
+Test Case '-[TonoKitTests.SharedStatusTests testALateBeatCannotMoveTheSameGraphConfirmationBackwards]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testALateBeatCannotMoveTheSameGraphConfirmationBackwards]' passed (0.000 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch]' started.
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch]' passed (0.000 seconds).
+Test Suite 'SharedStatusTests' passed at 2026-10-19 10:11:35.919.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'TonoKitPackageTests.xctest' passed at 2026-10-19 10:11:35.919.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 10:11:35.919.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.002 (0.005) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

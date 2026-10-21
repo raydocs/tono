@@ -1,0 +1,41 @@
+$ mutation M4-refused-inputs-left-in-file in Sources/TonoKit/TunnelGraph.swift
+--- /home/user/workspace/repo/apps/ios/TonoKit/Sources/TonoKit/TunnelGraph.swift	2026-10-18 21:12:49.436960708 +0000
++++ TonoKit/Sources/TonoKit/TunnelGraph.swift	2026-10-19 02:51:11.468684123 +0000
+@@ -50,7 +50,7 @@
+             // Nothing runs after this fails too; the tunnel stays up and the app offers Retry.
+             try? run(last, build: build, start: start)
+         }
+-        if let last = inputs { persist(last) }
++
+         return .refused(code: code, running: runningSettings)
+     }
+ 
+
+$ swift test --filter TunnelGraphTests
+Building for debugging...
+[Computing dependencies]
+[Planning 24 / 153]
+[37 / 64] TonoKit
+[38 / 64] TonoKit
+[49 / 74] TonoKitTests-product
+[57 / 75] tono-config-product
+[60 / 75] tono-config-product
+[64 / 75] TonoKit-product
+[64 / 75] TonoKitTests-product
+[68 / 76] TonoKitTests-product
+[72 / 79] TonoKitTests-test-runner
+[76 / 79] TonoKitTests-test-runner
+[80 / 80] TonoKitTests-test-runner
+Build complete! (8.21 secs)
+Test Suite 'Selected tests' started at 2026-10-19 02:51:20.551
+Test Suite 'TunnelGraphTests' started at 2026-10-19 02:51:20.552
+Test Case 'TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected' started at 2026-10-19 02:51:20.552
+/tmp/tmp.lIsrjwp2IH/TonoKit/Tests/TonoKitTests/TunnelGraphTests.swift:22: error: TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected : XCTAssertEqual failed: ("TunnelInputs(catalogBody: "catalog", mode: TonoKit.RoutingMode.stable, selectedNode: Optional("tokyo-1"), logLevel: "warn")") is not equal to ("TunnelInputs(catalogBody: "catalog", mode: TonoKit.RoutingMode.threeTier, selectedNode: Optional("tokyo-1"), logLevel: "warn")") - 
+Test Case 'TunnelGraphTests.testRebuildAndRestoreBothRefusedMakeTheHeartbeatSayRoutesStoppedNotConnected' failed (0.003 seconds)
+Test Suite 'TunnelGraphTests' failed at 2026-10-19 02:51:20.555
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 02:51:20.555
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.003 (0.003) seconds
+Note: Some test targets reported failures:
+  - TonoKitTests (XCTest)
+exit: 1

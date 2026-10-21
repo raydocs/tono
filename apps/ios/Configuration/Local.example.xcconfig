@@ -1,0 +1,6 @@
+// Copy to Local.xcconfig (gitignored) and fill in. Bundle IDs and the App Group must be
+// registered in your Apple Developer account with the Network Extension (packet tunnel)
+// and App Groups capabilities.
+DEVELOPMENT_TEAM = ABCDE12345
+// TONO_BUNDLE_ID = com.example.tono
+// TONO_APP_GROUP = group.com.example.tono

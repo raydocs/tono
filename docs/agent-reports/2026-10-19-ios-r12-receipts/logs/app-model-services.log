@@ -1,0 +1,6 @@
+commit: abc03885ad4118b6a7b3dbf01dda31bfdc1d031f  ios tree changed files: 0
+swift: Swift version 6.4.1 (swift-6.4.1-RELEASE)
+$ swiftc -emit-module TonoKit
+exit: 0
+$ swiftc -typecheck -D DEBUG App/Model/AppModel.swift App/Services/Storage.swift App/Services/TrafficMonitor.swift App/Services/Transport.swift App/Services/TunnelController.swift App/Services/TunnelCommand.swift Shared/NodeLatency.swift Shared/SharedFiles.swift Status/StatusReload.swift Status/StatusStore.swift Status/TunnelIntents.swift
+exit: 0

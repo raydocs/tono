@@ -1,0 +1,37 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Compiling TonoKitTests SharedStatusTests.swift
+[4/6] Compiling TonoKitTests ConfirmationTrackerTests.swift
+[5/6] Emitting module TonoKitTests
+[5/7] Write Objects.LinkFileList
+[6/7] Linking TonoKitPackageTests
+Build complete! (1.17s)
+Test Suite 'Selected tests' started at 2026-10-19 02:17:04.943.
+Test Suite 'TonoKitPackageTests.xctest' started at 2026-10-19 02:17:04.944.
+Test Suite 'ConfirmationTrackerTests' started at 2026-10-19 02:17:04.944.
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion]' started.
+/Users/ruirui/t3work/tono-ios/apps/ios/TonoKit/Tests/TonoKitTests/ConfirmationTrackerTests.swift:116: error: -[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion] : XCTAssertFalse failed
+/Users/ruirui/t3work/tono-ios/apps/ios/TonoKit/Tests/TonoKitTests/ConfirmationTrackerTests.swift:117: error: -[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion] : XCTAssertEqual failed: ("graph(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1")))") is not equal to ("unknown")
+Test Case '-[TonoKitTests.ConfirmationTrackerTests testAnEarlierPositiveReplyCannotUndoALaterUnansweredQuestion]' failed (0.105 seconds).
+Test Suite 'ConfirmationTrackerTests' failed at 2026-10-19 02:17:05.049.
+	 Executed 1 test, with 2 failures (0 unexpected) in 0.105 (0.105) seconds
+Test Suite 'SharedStatusTests' started at 2026-10-19 02:17:05.049.
+Test Case '-[TonoKitTests.SharedStatusTests testALateBeatCannotMoveTheSameGraphConfirmationBackwards]' started.
+/Users/ruirui/t3work/tono-ios/apps/ios/TonoKit/Tests/TonoKitTests/SharedStatusTests.swift:162: error: -[TonoKitTests.SharedStatusTests testALateBeatCannotMoveTheSameGraphConfirmationBackwards] : XCTAssertNil failed: "SharedStatus(tunnel: Optional(TonoKit.TunnelReport(session: "s1", opened: 2027-01-15 08:00:00 +0000, generation: 1, running: true, routing: Optional(TonoKit.RouteSettings(mode: TonoKit.RoutingMode.threeTier, node: Optional("tokyo-1"))), since: Optional(2027-01-15 08:00:00 +0000), failure: nil, beatAt: 2027-01-15 08:00:10 +0000)), app: nil)"
+Test Case '-[TonoKitTests.SharedStatusTests testALateBeatCannotMoveTheSameGraphConfirmationBackwards]' failed (0.001 seconds).
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch]' started.
+/Users/ruirui/t3work/tono-ios/apps/ios/TonoKit/Tests/TonoKitTests/SharedStatusTests.swift:156: error: -[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch] : XCTAssertFalse failed
+/Users/ruirui/t3work/tono-ios/apps/ios/TonoKit/Tests/TonoKitTests/SharedStatusTests.swift:157: error: -[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch] : XCTAssertEqual failed: ("true") is not equal to ("false")
+Test Case '-[TonoKitTests.SharedStatusTests testAnUnconfirmedReadingNeverHasAnOnSwitch]' failed (0.000 seconds).
+Test Suite 'SharedStatusTests' failed at 2026-10-19 02:17:05.051.
+	 Executed 2 tests, with 3 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'TonoKitPackageTests.xctest' failed at 2026-10-19 02:17:05.051.
+	 Executed 3 tests, with 5 failures (0 unexpected) in 0.107 (0.107) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 02:17:05.051.
+	 Executed 3 tests, with 5 failures (0 unexpected) in 0.107 (0.108) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
