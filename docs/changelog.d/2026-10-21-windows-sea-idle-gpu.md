@@ -1,6 +1,6 @@
 ## 2026-10-21 · Windows 海景在后台不再占 GPU
 
-- 归属：客户 Windows / 0.0.75 实测。Tono 在后台时，WebView2 的 GPU 进程持续占用 Intel 集显 3D 引擎（12 秒采样，平均 72%，峰值 95%）。
+- 归属：客户 Windows / 0.0.75 实测（[WIN-SEA-GPU-BACKGROUND](../findings.d/WIN-SEA-GPU-BACKGROUND.md)）。Tono 在后台时，WebView2 的 GPU 进程持续占用 Intel 集显 3D 引擎（12 秒采样，平均 72%，峰值 95%）。
 - 来源：分支 `fix/windows-sea-gpu-background`，基于 main `e24adbc21`。
 - 缺陷修复：
   - 窗口在其他应用后面、最小化或收进托盘时，海景的循环动画、WebGL 水面和画质探测都暂停，停在当前一帧；窗口回到前台时从原处接着动。原来只在页面 `hidden` 时才暂停，而 WebView2 窗口在后台、最小化或隐藏时，页面通常仍算可见。
