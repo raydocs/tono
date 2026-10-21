@@ -35,7 +35,7 @@ with the desktop three-tier routing. Not a SHIP_PLAN gate and not an App Store r
 ## Routing (same order as desktop and Android)
 
 1. DNS hijack. 2. 21 cloud video exceptions → cloud (TCP; UDP/QUIC refused), ahead of the broad
-Home parents. 3. 166 named Home entries and Anthropic's `160.79.104.0/21` → cloud → assigned Home
+Home parents. 3. 194 named Home entries and Anthropic's `160.79.104.0/21` → cloud → assigned Home
 (TCP; UDP refused). 4. Remaining protected Tono hosts and the explicit overseas list → cloud.
 5. Stale fake IPs refused. 6. LAN/private → DIRECT. 7. Everything else: DIRECT (three-tier) or cloud
 with UDP refused (stable). A matched route that fails is refused, never retried DIRECT.

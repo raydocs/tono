@@ -8,7 +8,7 @@ final class RoutingTests: XCTestCase {
 
     func testContractCountsMatchTheDesktopLists() {
         XCTAssertEqual(DesktopRoutingContract.cloudVideoSuffixes.count, 21)
-        XCTAssertEqual(DesktopRoutingContract.homeSuffixes.count, 166)
+        XCTAssertEqual(DesktopRoutingContract.homeSuffixes.count, 194)
         XCTAssertEqual(DesktopRoutingContract.homeIPv4CIDRs, ["160.79.104.0/21"])
     }
 

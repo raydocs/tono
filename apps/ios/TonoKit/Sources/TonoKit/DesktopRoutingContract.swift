@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "0e02ea47371630a5bc35948dd18bf0b9e2ee03edf6ada397d65dad734e513673"
+    public static let sourceDigest = "8241722b40c90467243d6730b0cebba5d3370a19ee86a8a5c7f6984581506f75"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -119,6 +119,34 @@ public enum DesktopRoutingContract {
         "poe.com",
         "groq.com",
         "cursor.sh",
+        "ampcode.com",
+        "cursor.com",
+        "cursorapi.com",
+        "js.workos.com",
+        "githubcopilot.com",
+        "kiro.dev",
+        "q.us-east-1.amazonaws.com",
+        "q.eu-central-1.amazonaws.com",
+        "windsurf.com",
+        "codeium.com",
+        "grazie.ai",
+        "grazie.aws.intellij.net",
+        "hark.com",
+        "mistral.ai",
+        "elevenlabs.io",
+        "elevenlabs.com",
+        "midjourney.com",
+        "suno.com",
+        "poecdn.net",
+        "pplx-res.cloudinary.com",
+        "ppl-ai-file-upload.s3.amazonaws.com",
+        "oaistatsig.com",
+        "openai-api.arkoselabs.com",
+        "labs.google",
+        "flow.google",
+        "opal.google",
+        "stitch.withgoogle.com",
+        "llama.com",
         "jasper.ai",
         "openart.ai",
         "clipdrop.co",

@@ -51,7 +51,7 @@ def generate() -> str:
     video = rust_array(rust_text, "CLOUD_VIDEO_DOMAINS")
     cidrs = rust_array(rust_text, "CLAUDE_HOME_IPV4_CIDRS")
     protected = rust_array(rust_text, "PROTECTED_DIRECT_SUFFIXES")
-    assert len(home) == 166 and len(video) == 21, (len(home), len(video))
+    assert len(home) == 194 and len(video) == 21, (len(home), len(video))
     assert template["version"] == 2
     digest = hashlib.sha256((rust_text + "\0" + template_text).encode()).hexdigest()
     return (
