@@ -1,7 +1,7 @@
 ## 2026-10-21 · Windows 连接遇到「上次恢复没完成」时自己恢复再连
 
 - 归属：客户 Windows 11 Pro / 0.0.79 实测（[WIN-RELEASE-UNFINISHED-CONNECT-LOOP](../findings.d/WIN-RELEASE-UNFINISHED-CONNECT-LOOP.md)）。重启后每次点连接都被 `TONO_RELEASE_UNFINISHED` 挡回，界面要求再点「恢复正常网络」，用户只会反复点连接。
-- 来源：分支 `fix/windows-release-self-heal`，基于 main `b3688fba6`；未合 main。
+- 来源：[#1705](https://github.com/raydocs/tono/pull/1705)，分支 `fix/windows-release-self-heal`，基于 main `b3688fba6`；未合 main。
 - 缺陷修复：
   - 用户点「连接」被这个拒绝挡回、且原因不是「需要重启 Windows」时，App 自己跑一次「恢复正常网络」，然后再连一次，相当于替用户点了恢复和连接。每次点击最多一次，不循环。
   - 恢复服务在 25 秒答复时间内只回「unknown」、后台还在做时，等它真正结束（上限是恢复的 90 秒硬上限）再连；最终放不放行仍由服务端准入决定，判据不放宽。
