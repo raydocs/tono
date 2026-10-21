@@ -85,7 +85,7 @@
     <string name="mode_three_tier">三层路由（默认）</string>
     <string name="mode_three_tier_short">三层路由</string>
     <string name="mode_three_tier_desc">AI\u00A0→\u00A0家宽\u00A0· 视频\u00A0→\u00A0云\u00A0· 其他直连</string>
-    <string name="mode_stable">稳定（全部经云）</string>
+    <string name="mode_stable">稳定</string>
     <string name="mode_stable_desc">AI\u00A0→\u00A0家宽\u00A0· 其他全部\u00A0→\u00A0云</string>
     <string name="mode_stable_short">稳定</string>
     <string name="mode_applies">修改会立即应用到正在运行的连接。</string>

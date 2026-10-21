@@ -273,8 +273,9 @@ private fun Expandable(title: String, content: @Composable () -> Unit) {
 }
 
 /**
- * A mode to choose: both titles in the same ink on the one left edge; the chosen one carries its
- * one-line description and the radio in the trailing slot is filled with the sun. The row's
+ * A mode to choose: both titles in the same ink on the one left edge, each with its one-line
+ * description (what goes where is read before choosing), and the radio in the trailing slot is
+ * filled with the sun on the chosen one. The row's
  * `selectable` semantics (radio role, selected state) tell TalkBack which is on; the radio itself
  * is drawn only.
  */
@@ -286,7 +287,7 @@ private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () 
         style = TonoType.Title,
         trailing = { _ -> RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent, unselectedColor = TonoColors.TextTertiary)) },
     ) {
-        AnimatedVisibility(selected) { ArrowText(desc, TonoType.Meta, TonoColors.TextSecondary, Modifier.padding(top = 4.dp)) }
+        ArrowText(desc, TonoType.Meta, TonoColors.TextSecondary, Modifier.padding(top = 4.dp))
     }
 }
 

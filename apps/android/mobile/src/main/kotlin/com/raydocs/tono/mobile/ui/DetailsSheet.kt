@@ -151,17 +151,27 @@ private fun Lane(glyph: Glyph, name: String, dest: String, probe: ExitProbe?, li
         // Two lines, so neither the lane nor its destination is cut off at large font sizes.
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(name, style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextPrimary)
-            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val firstLine = with(androidx.compose.ui.platform.LocalDensity.current) { MaterialTheme.typography.labelMedium.lineHeight.toDp() }
-                androidx.compose.foundation.layout.Box(Modifier.height(firstLine), contentAlignment = Alignment.Center) {
-                    GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 12.dp)
-                }
-                Text(dest, style = MaterialTheme.typography.labelMedium, color = TonoColors.TextSecondary, modifier = Modifier.weight(1f, fill = false))
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val firstLine = with(density) { MaterialTheme.typography.labelMedium.lineHeight.toDp() }
+            // At large font sizes the destination keeps its own line and the dot + status follow on the
+            // next, each dot centred on its text's first line, instead of splitting "Home ● … broadband".
+            val stacked = density.fontScale > 1.3f
+            @Composable fun Probe() {
                 if (probeColor != null) {
-                    StatusDot(probeColor, size = 6)
-                    if (!status.isNullOrEmpty()) Text(status, style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary)
+                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.height(firstLine), contentAlignment = Alignment.Center) { StatusDot(probeColor, size = 6) }
+                        if (!status.isNullOrEmpty()) Text(status, style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary)
+                    }
                 }
             }
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.height(firstLine), contentAlignment = Alignment.Center) {
+                    GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 12.dp)
+                }
+                Text(dest, style = MaterialTheme.typography.labelMedium, color = TonoColors.TextSecondary, modifier = Modifier.weight(1f, fill = stacked))
+                if (!stacked) Probe()
+            }
+            if (stacked && probeColor != null) Box(Modifier.padding(start = 18.dp)) { Probe() }
         }
     }
 }
