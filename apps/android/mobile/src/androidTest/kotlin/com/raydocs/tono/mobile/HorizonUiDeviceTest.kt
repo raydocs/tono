@@ -505,10 +505,11 @@ class HorizonUiDeviceTest {
         File(out, "screen-reader-order.txt").writeText(seen.joinToString("\n"))
         assertTrue("focusable but silent for a screen reader: $unlabelled", unlabelled.isEmpty())
         fun at(text: String) = seen.indexOfFirst { it.contains(text) }.also { assertTrue("\"$text\" is read: $seen", it >= 0) }
-        // The state first, then the actions in screen order; Settings now sits in the dock beside Details.
+        // The state first, then the controls in screen order: the line is a row of the text block
+        // above the capsule; Settings sits in the dock beside Details.
         val order = listOf(
-            at(str(R.string.state_degraded)), at(str(R.string.action_disconnect)),
-            at("Tokyo"), at(str(R.string.settings_title)), at(str(R.string.details)),
+            at(str(R.string.state_degraded)), at("Tokyo"), at(str(R.string.action_disconnect)),
+            at(str(R.string.settings_title)), at(str(R.string.details)),
         )
         assertEquals("reading order follows the screen: $seen", order.sorted(), order)
         assertTrue("nothing is announced twice: $seen", seen.none { line -> line.split(", ").let { it.size != it.toSet().size } || Regex("for (\\S+) \\1").containsMatchIn(line) })
@@ -544,7 +545,8 @@ class HorizonUiDeviceTest {
             Math.abs(android.graphics.Color.red(p) - android.graphics.Color.red(q)) + Math.abs(android.graphics.Color.green(p) - android.graphics.Color.green(q)) +
                 Math.abs(android.graphics.Color.blue(p) - android.graphics.Color.blue(q)) > 60
         }.toDouble() / a.size
-        val tags = listOf("primary", "exit", "settings", "details")
+        // Screen order: the line row above the capsule, then the dock.
+        val tags = listOf("exit", "primary", "settings", "details")
         val unfocused = tags.associateWith(::ringBand)
         val report = mutableListOf<String>()
         for ((i, tag) in tags.withIndex()) {
@@ -565,12 +567,12 @@ class HorizonUiDeviceTest {
             assertEquals("Tab stop ${i + 1}: $report", tag, holder)
             assertTrue("focus on \"$tag\" is visible: $report", ring > 0.2)
         }
-        // Back to the capsule (Shift+Tab three times) and act on it with Enter.
-        repeat(3) { device.pressKeyCode(android.view.KeyEvent.KEYCODE_TAB, android.view.KeyEvent.META_SHIFT_ON); compose.waitForIdle() }
+        // Back to the capsule (Shift+Tab twice) and act on it with Enter.
+        repeat(2) { device.pressKeyCode(android.view.KeyEvent.KEYCODE_TAB, android.view.KeyEvent.META_SHIFT_ON); compose.waitForIdle() }
         calls.clear()
         device.pressKeyCode(android.view.KeyEvent.KEYCODE_ENTER)
         compose.waitForIdle()
-        report += "Shift+Tab ×3, Enter → ${calls.joinToString().ifEmpty { "(nothing)" }}"
+        report += "Shift+Tab ×2, Enter → ${calls.joinToString().ifEmpty { "(nothing)" }}"
         assertEquals("Enter on the focused capsule: $report", listOf("disconnect"), calls.toList())
 
         // TalkBack's double-tap: ACTION_CLICK on the platform accessibility node of each control.

@@ -116,8 +116,10 @@ private val TUNNEL_PHASES = setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNE
 fun unconfirmedActionFor(last: Phase): PrimaryAction = if (last in TUNNEL_PHASES) PrimaryAction.DISCONNECT else PrimaryAction.CONNECT
 
 /**
- * Home. The sea scene carries the state at a glance; the thumb zone holds only the state word, one
- * status line, the primary capsule and the exit. Everything explanatory lives in Details.
+ * Home. The sea scene carries the state at a glance; the thumb zone is one block of text on one left
+ * edge (the state word, one status line, the line in use), then exactly two controls: the primary
+ * capsule and a quiet glass dock (Settings, Details) with the live speed beside it. Everything
+ * explanatory lives in Details.
  *
  * When [link] is not [EngineLink.LIVE], [s] is the engine's last word, not its current one: Home says
  * "Status unknown" and drops everything that would claim a tunnel (sun, fill, timer, speed).
@@ -146,13 +148,19 @@ fun HomeScreen(
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxWidth().verticalScroll(scroll).heightIn(min = maxHeight), verticalArrangement = Arrangement.SpaceBetween) {
                     TopBar()
-                    // A thumb-width column: on a landscape phone or a tablet the capsules do not stretch across the sea.
-                    Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)).padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
+                    // A thumb-width column: on a landscape phone or a tablet the capsule does not stretch across the sea.
+                    // Screen readers follow the screen: state, the line, the action, then the dock.
+                    Column(
+                        Modifier.widthIn(max = 560.dp).fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0)
+                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+                            .padding(horizontal = 20.dp).padding(bottom = 8.dp),
+                    ) {
                         StateHeader(s, link, headlineAlpha)
-                        Spacer(Modifier.height(18.dp))
+                        Spacer(Modifier.height(6.dp))
+                        LineRow(s, onOpenLines, live = !unconfirmed)
+                        Spacer(Modifier.height(14.dp))
                         PrimaryCapsule(s, onConnect, onDisconnect, link)
-                        Spacer(Modifier.height(10.dp))
-                        ExitPill(s, onOpenLines, live = !unconfirmed)
+                        Spacer(Modifier.height(12.dp))
                         Footer(s, onOpenDetails, onOpenSettings, link)
                     }
                 }
@@ -363,8 +371,13 @@ private fun ConnectedTimer(since: Long) {
     Text(text, style = MaterialTheme.typography.titleSmall, color = TonoColors.TextSecondary, modifier = Modifier.clearAndSetSemantics { contentDescription = a11y })
 }
 
+/**
+ * The line in use as a row of the text block, not a capsule: dot, name, latency and a chevron on
+ * the title's left edge; the whole 48 dp row opens the picker, and answers the press by scale (no
+ * ripple), as the capsule does.
+ */
 @Composable
-private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit, live: Boolean) {
+private fun LineRow(s: EngineSnapshot, onOpenLines: () -> Unit, live: Boolean) {
     val zh = isChinese()
     val nameToShow = if (live && s.tunnelUp) TunnelAuthority.appliedNode(s) else s.selectedNode
     val node = s.nodes.firstOrNull { it.name == nameToShow }
@@ -377,15 +390,22 @@ private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit, live: Boolean) 
     val latency = node?.latencyMs?.let { stringResource(R.string.latency_ms, it.toInt()) }
     val pick = stringResource(R.string.lines_title)
     val source = remember { MutableInteractionSource() }
-    Glass(RoundedCornerShape(24.dp), Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("exit"), tintAlpha = 0.26f) {
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, TonoMotion.press, label = "press")
+    val shape = RoundedCornerShape(14.dp)
+    // 8 dp of breathing room inside the focus ring, offset back so the dot stays on the left edge.
+    // The tag stays on a wrapper (as the glass was), so the clickable row is its descendant in the
+    // merged tree too.
+    Box(Modifier.fillMaxWidth().offset(x = (-8).dp).testTag("exit")) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 52.dp).focusRing(source, RoundedCornerShape(24.dp))
-                .clickable(source, LocalIndication.current, role = Role.Button, onClickLabel = pick, onClick = onOpenLines).padding(horizontal = 18.dp),
+            Modifier.fillMaxWidth().scale(scale).heightIn(min = 48.dp).focusRing(source, shape)
+                .clickable(source, indication = null, role = Role.Button, onClickLabel = pick, onClick = onOpenLines)
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             StatusDot(if (node?.latencyMs == null && answered) TonoColors.Connected else Format.latencyColor(node?.latencyMs))
-            Text(name, style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(name, style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             if (latency != null) Text(latency, style = MaterialTheme.typography.labelLarge, color = TonoColors.TextSecondary)
             GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = 16.dp)
         }
@@ -400,6 +420,8 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings:
     val settings = stringResource(R.string.settings_title)
     val gearSource = remember { MutableInteractionSource() }
     val detailsSource = remember { MutableInteractionSource() }
+    // Under the capsule's trailing end, where the thumb rests: the live speed as the row's quiet
+    // left-hand meta, the one dock at the right.
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         AnimatedVisibility(tunnelUp, enter = fadeIn(tween(350)), exit = fadeOut(tween(220)), modifier = Modifier.weight(1f)) {
             Text(
