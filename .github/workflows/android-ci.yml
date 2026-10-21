@@ -1,0 +1,444 @@
+name: android-ci
+
+# Android test client (apps/android). Not part of ci-gate yet: it runs on PRs that touch
+# apps/android and on dispatch, builds libbox from the pinned sing-box source, runs JVM tests,
+# builds a debug-signed test APK (no release variant exists), then installs it on a KVM-backed
+# x86_64 emulator and records on-device evidence. Artifacts expire; nothing is published.
+on:
+  pull_request:
+    paths:
+      - apps/android/**
+      - .github/workflows/android-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: apps/android
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    outputs:
+      apk: ${{ steps.apk.outputs.name }}
+    steps:
+      # The PR head itself (not the merge ref), so the APK name and bytes map to one pushed commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          ref: ${{ env.SOURCE_SHA }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore libbox built from the pin
+        id: libbox
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: apps/android/mobile/libs/libbox.aar
+          key: libbox-${{ hashFiles('apps/android/supply-chain/sing-box/**') }}
+      - name: Build libbox from the pinned sing-box source
+        if: steps.libbox.outputs.cache-hit != 'true'
+        env:
+          GOMAXPROCS: '4'
+        run: supply-chain/sing-box/build-libbox.sh mobile/libs
+      # The Gradle build re-verifies libbox.aar against supply-chain/sing-box/libbox.aar.sha256
+      # whether it came from the cache or the build above.
+      - name: Routing lists match this desktop checkout
+        run: python3 scripts/routing/sync-desktop-routing.py --desktop "$GITHUB_WORKSPACE" --check
+      - name: Unit tests, lint, debug APK and instrumentation APK
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :routing:testDebugUnitTest :mobile:testDebugUnitTest
+          :mobile:lintDebug :mobile:assembleDebug :mobile:assembleDebugAndroidTest
+      - name: Generated configs pass the pinned sing-box CLI check
+        run: scripts/routing/check-singbox-configs.sh routing/build/singbox-configs
+      - name: Name the test APK
+        id: apk
+        run: |
+          version="$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' mobile/build.gradle.kts)"
+          name="tono-mobile-${version}-test-${SOURCE_SHA::9}"
+          mkdir -p out
+          cp mobile/build/outputs/apk/debug/mobile-debug.apk "out/$name.apk"
+          cp mobile/build/outputs/apk/androidTest/debug/mobile-debug-androidTest.apk out/instrumentation.apk
+          (cd out && sha256sum "$name.apk" | tee "$name.apk.sha256")
+          echo "source $SOURCE_SHA" >> "out/$name.apk.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: |
+            apps/android/out/${{ steps.apk.outputs.name }}.apk
+            apps/android/out/${{ steps.apk.outputs.name }}.apk.sha256
+          retention-days: 90
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: instrumentation-apk
+          path: apps/android/out/instrumentation.apk
+          retention-days: 14
+          if-no-files-found: error
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: android-test-reports
+          path: |
+            apps/android/routing/build/reports/
+            apps/android/mobile/build/reports/
+            apps/android/routing/build/test-results/
+            apps/android/mobile/build/test-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  emulator:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    # Three emulators side by side, each running a third of the device tests: an emulator lives a
+    # third as long (hosted emulators were seen dying or slowing to a crawl 15+ minutes in), and every
+    # shard must pass for a green run.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [system, tunnel, ui]
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      # Only the local-tunnel stand-ins and the sing-box pin; the app itself comes from the build job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: |
+            apps/android/scripts/local-tunnel
+            apps/android/supply-chain/sing-box
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ${{ needs.build.outputs.apk }}
+          path: apk
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: instrumentation-apk
+          path: apk
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # The local tunnel tests (tunnel shard): stand-in control plane, cloud exit and Home exit on this
+      # runner, never a Tono server. The exits listen on two public-looking addresses bound to the
+      # loopback (the app admits only public IPv4 exits); the REJECT rule keeps anything addressed to
+      # them off the network. The emulator's user-mode network carries the phone's connections to them.
+      - name: Local stand-in servers for the tunnel test
+        if: matrix.shard == 'tunnel'
+        run: |
+          source apps/android/supply-chain/sing-box/sing-box.pin
+          mkdir -p "$RUNNER_TEMP/sb" "$RUNNER_TEMP/local-tunnel"
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/sb/sb.tgz" \
+            "https://github.com/SagerNet/sing-box/releases/download/$SING_BOX_TAG/$SING_BOX_LINUX_AMD64_ASSET"
+          echo "$SING_BOX_LINUX_AMD64_SHA256  $RUNNER_TEMP/sb/sb.tgz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/sb/sb.tgz" -C "$RUNNER_TEMP/sb"
+          sudo ip addr add 198.20.0.10/32 dev lo
+          sudo ip addr add 198.20.0.11/32 dev lo
+          sudo iptables -I OUTPUT -d 198.20.0.10,198.20.0.11 ! -o lo -j REJECT
+          nohup python3 apps/android/scripts/local-tunnel/fixture-servers.py serve \
+            "$RUNNER_TEMP/sb/sing-box-$SING_BOX_VERSION-linux-amd64/sing-box" "$RUNNER_TEMP/local-tunnel" \
+            > "$RUNNER_TEMP/local-tunnel/serve.out" 2>&1 &
+          for i in $(seq 30); do curl -fs http://127.0.0.1:28080/healthz && break; sleep 1; done
+          cat "$RUNNER_TEMP/local-tunnel/serve.out"
+          echo "LOCAL_TUNNEL=$RUNNER_TEMP/local-tunnel" >> "$GITHUB_ENV"
+      # Hosted emulators were seen vanishing mid-run with no crash report and no OOM kill; run 39113297176
+      # showed exit status 139 (SIGSEGV) three times. Record how the emulator ends, keep a small core
+      # (the guest RAM, a shared mapping, is left out) and print the faulting thread's stack from it.
+      - name: Record how the emulator ends
+        run: |
+          mkdir -p host-watch
+          command -v gdb > /dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb > /dev/null) || true
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/host-watch/core.%e.%p"
+          cat > wrap-emulator.sh <<'SH'
+          set -eu
+          E="$ANDROID_HOME/emulator"
+          grep -q emulator-exit "$E/emulator" 2>/dev/null && exit 0
+          mv -f "$E/emulator" "$E/emulator.real"
+          cat > "$E/emulator" <<'W'
+          #!/bin/bash
+          W="$GITHUB_WORKSPACE/host-watch"
+          ulimit -c unlimited
+          echo 0x11 > /proc/self/coredump_filter
+          "$0.real" "$@"
+          code=$?
+          echo "$(date -u +%FT%TZ) emulator exited with status $code" >> "$W/emulator-exit.txt"
+          for core in "$W"/core.*; do
+            [ -f "$core" ] || continue
+            exe=$(find "$(dirname "$0")/qemu" -name 'qemu-system-x86_64*' -type f | head -1)
+            { echo "== $core ($(du -h "$core" | cut -f1))"; timeout 300 gdb -batch -ex bt -ex 'info registers rip' -ex 'info sharedlibrary' "$exe" "$core" 2>&1 | grep -v '^\[New LWP' | head -200; } >> "$W/emulator-crash-stack.txt"
+            rm -f "$core"
+          done
+          exit $code
+          W
+          chmod +x "$E/emulator"
+          SH
+          nohup bash -c 'while true; do
+            p=$(pgrep -f "[q]emu-system-x86_64" | head -1)
+            if [ -n "$p" ]; then echo "$(date -u +%T) pid $p rss_kb,stat,elapsed $(ps -o rss=,stat=,etime= -p "$p" | xargs) load $(cut -d" " -f1 /proc/loadavg) avail_kb $(awk "/MemAvailable/{print \$2}" /proc/meminfo)"
+            else echo "$(date -u +%T) no emulator process"; fi
+            sleep 5
+          done' > host-watch/emulator-watch.txt 2>&1 &
+      - name: Write the on-device evidence script
+        run: |
+          cat > evidence.sh <<'SH'
+          set -euxo pipefail
+          APP=com.raydocs.tono.mobile.test
+          # A retry keeps the first attempt's evidence next to the second's.
+          if [ -d evidence ]; then mv evidence "evidence-attempt-$(date +%s)"; fi
+          mkdir -p evidence
+          adb shell getprop ro.build.fingerprint | tee evidence/device.txt
+          adb shell getprop ro.product.cpu.abi | tee -a evidence/device.txt
+          adb shell wm size | tee -a evidence/device.txt
+          adb shell wm density | tee -a evidence/device.txt
+          adb shell settings put system screen_off_timeout 1800000
+          adb shell svc power stayon true
+          adb shell input keyevent 82 || true
+          # Let the launcher finish its first-boot work; on swiftshader it can otherwise raise an ANR
+          # dialog over the app. The test answers only foreign ANR dialogs and logs each one.
+          sleep 60
+          adb shell input keyevent 3
+          # No -g: runtime permissions and VPN consent stay as on a fresh install.
+          adb install -r apk/*-test-*.apk
+          adb install -r apk/instrumentation.apk
+          # Emulator health gate, measured before the tests: the median frame time of Tono's own
+          # animated sign-in screen over 8 s. Emulators at 300–750 ms ran every test at normal speed.
+          # From 800 ms up, tests hung in waits for an idle main thread under the animated sea (runs
+          # 39153105611, 39159687608, 39163947970); those waits are gone or run with animations
+          # removed, and the motion tests start still. At 775 ms the gate stopped all four ui and
+          # tunnel emulators of run 39167725741 twice (850–1000 ms), so it now stops only emulators
+          # slower than the slowest seen so far: above 1000 ms. Above it this attempt stops
+          # before the tests and the fresh-emulator retry starts early.
+          set +e
+          adb shell am start -W -n $APP/com.raydocs.tono.mobile.ui.MainActivity > /dev/null
+          sleep 3
+          adb shell dumpsys gfxinfo $APP reset > /dev/null
+          sleep 8
+          median=$(adb shell dumpsys gfxinfo $APP | sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p' | head -1)
+          adb shell am force-stop $APP
+          set -e
+          echo "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 1000 ms)" | tee evidence/health.txt >> evidence/summary.txt
+          if [ -n "$median" ] && [ "$median" -gt 1000 ]; then
+            echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 1000 ms); no tests run in this attempt" >> evidence/summary.txt
+            timeout 60 adb logcat -d > evidence/logcat.txt || true
+            exit 1
+          fi
+          # The tunnel test's stand-in control plane, on the phone's loopback (the only address the
+          # debug build's LocalTestServer accepts).
+          [ "$SHARD" = tunnel ] && adb reverse tcp:28080 tcp:28080
+          # One instrumentation call per test, pulling evidence after each, so an emulator crash
+          # (seen on hosted runners) costs one test's evidence rather than all of it.
+          set +e
+          failed=""
+          # Streamed from the host, so an emulator that dies mid-run still leaves its last log lines.
+          adb logcat -v threadtime > evidence/logcat-live.txt 2>&1 &
+          logcat=$!
+          case "$SHARD" in
+            system) tests="DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog
+            DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+            DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme
+            SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+            SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates" ;;
+            tunnel) tests="DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice
+            DeviceEvidenceTest#b3_fixtureAtLargeFontScale LocalTunnelDeviceTest#t2_realAppTurnsWithKeyboardAndConsentOpen
+            LocalTunnelDeviceTest#t1_realTunnelThroughLocalFixtureServers LocalTunnelDeviceTest#t3_realAppStatesAndSkyOnMainActivity
+            LocalTunnelDeviceTest#t4_realAppAtLargestSystemText LocalTunnelDeviceTest#t5_engineDiesWithNoAppOpen
+            LocalTunnelDeviceTest#t6_engineDiesInDozeAndTogetherWithItsWatch" ;;
+            ui) tests="HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps
+            HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt
+            HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome
+            HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps
+            HorizonUiDeviceTest#u9_keyboardFocusIsVisibleAndAccessibilityActionsWork
+            LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable
+            LandscapeDeviceTest#l3_landscapeKeepsEverythingReadableAndReachable" ;;
+            *) echo "unknown shard $SHARD"; exit 1 ;;
+          esac
+          echo "shard $SHARD" > evidence/shard.txt
+          for c in $tests; do
+            t="${c#*#}"
+            # A pathologically slow emulator (run 39126740818: a1 took 163 s instead of ~30 s) would
+            # otherwise use the whole step; stop the attempt so the fresh-emulator retry has time.
+            if [ "$SECONDS" -gt 2100 ]; then
+              echo "TIME-BUDGET: attempt stopped after ${SECONDS}s before $t; later tests not run in this attempt" >> evidence/summary.txt
+              failed="$failed time-budget"
+              break
+            fi
+            rec=""
+            if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then
+              # Recorded from the host: a screenrecord started inside the test kept the run open.
+              adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &
+              rec=$!
+            fi
+            if [ "$t" = t3_realAppStatesAndSkyOnMainActivity ]; then
+              # The real app's own motion through its states, at the emulator's real (software) frame rate.
+              adb shell screenrecord --time-limit 180 --bit-rate 6000000 /sdcard/Download/tono-real-motion.mp4 &
+              rec=$!
+            fi
+            # On a software-GPU emulator the animated sea keeps the app's main thread busy, and every
+            # wait for an idle main thread (ActivityScenario.launch among them) then takes minutes:
+            # at 850 ms per frame, launching the app took 9 minutes (run 39163947970). Tests that are
+            # not about motion run with Android's "Remove animations"; a5, b2, u8 and t3 are the
+            # motion evidence and keep it on (a5 and t3 launch still and turn motion on themselves).
+            case "$t" in
+              a5_*|b2_*|u8_*|t3_*) motion=1 ;;
+              *) motion=0 ;;
+            esac
+            adb shell settings put global animator_duration_scale $motion
+            echo "$t: animator_duration_scale $motion" >> evidence/animations.txt
+            # The tunnel test is judged again from the stand-in exits' own logs, from this point on.
+            [ "$t" = t1_realTunnelThroughLocalFixtureServers ] && from=$(stat -c %s "$LOCAL_TUNNEL/sing-box.log")
+            timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \
+              $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"
+            if [ $? -eq 124 ]; then
+              # Hung: keep what was on screen and in front before stopping it (run 39138009249 had none).
+              echo "HANG: $t stopped after 600 s" >> evidence/summary.txt
+              timeout 30 adb exec-out screencap -p > "evidence/hang-$t.png"
+              timeout 30 adb shell uiautomator dump /sdcard/hang.xml > /dev/null && timeout 30 adb pull /sdcard/hang.xml "evidence/hang-$t.xml"
+              timeout 30 adb shell dumpsys activity top | head -300 > "evidence/hang-$t-activity.txt"
+              timeout 30 adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|isn.t responding' > "evidence/hang-$t-window.txt"
+              timeout 30 adb shell am force-stop $APP
+            fi
+            # The real-app recording ends with the test (SIGINT lets screenrecord finish the file).
+            [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 10 adb shell pkill -2 screenrecord
+            [ -n "$rec" ] && { timeout 200 tail --pid="$rec" -f /dev/null || kill "$rec"; }
+            grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }
+            timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/
+            [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+            [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 120 adb pull /sdcard/Download/tono-real-motion.mp4 evidence/local-real-motion.mp4
+            if [ "$t" = t1_realTunnelThroughLocalFixtureServers ]; then
+              mkdir -p evidence/local-tunnel
+              tail -c +$((from + 1)) "$LOCAL_TUNNEL/sing-box.log" > evidence/local-tunnel/exits.log
+              cp "$LOCAL_TUNNEL/control-plane.log" evidence/local-tunnel/
+              if python3 apps/android/scripts/local-tunnel/fixture-servers.py check evidence/local-tunnel/exits.log \
+                  evidence/local-tunnel-requests.txt > evidence/local-tunnel-routing.txt; then
+                echo "PASS t1-routing-matches-exit-logs" >> evidence/summary.txt
+              else
+                echo "FAIL t1-routing-matches-exit-logs" >> evidence/summary.txt; failed="$failed t1-routing"
+              fi
+              cat evidence/local-tunnel-routing.txt
+            fi
+            # A dead emulator fails every later test with no output; say so once and stop, so the
+            # fresh-emulator retry starts sooner. Every test must still pass in a single session.
+            if [ "$(timeout 30 adb get-state 2>/dev/null)" != device ]; then
+              echo "DEVICE-OFFLINE after $t; later tests not run in this attempt" >> evidence/summary.txt
+              failed="$failed device-offline"
+              break
+            fi
+            # Isolation: a shade a test left open would cover the next test's app.
+            timeout 30 adb shell cmd statusbar collapse
+          done
+          kill $logcat
+          if [ "$SHARD" = system ] && [ "$(timeout 30 adb get-state 2>/dev/null)" = device ]; then
+            # Measurements only, on an emulator with a software GPU: not a phone, not a pass/fail gate.
+            # Animations back on first: the last test ran with them removed, which left gfxinfo with no
+            # frames to count (run 39176556620).
+            adb shell settings put global animator_duration_scale 1
+            { set +x; } 2>/dev/null
+            {
+              echo "emulator $(cat evidence/device.txt | tr '\n' ' ')"
+              echo "APK size: $(stat -c %s apk/*-test-*.apk) bytes"
+              for i in 1 2 3 4 5; do
+                adb shell am start -W -S -n $APP/com.raydocs.tono.mobile.ui.MainActivity | grep -E 'TotalTime|WaitTime' | tr '\n' ' '
+                echo
+                sleep 3
+              done
+              adb shell dumpsys gfxinfo $APP reset > /dev/null
+              sleep 10
+              adb shell dumpsys gfxinfo $APP | grep -E 'Total frames|Janky frames|percentile'
+              adb shell dumpsys meminfo $APP | grep -E 'TOTAL PSS|TOTAL RSS'
+            } > evidence/perf.txt 2>&1
+            set -x
+            adb shell am force-stop $APP
+          fi
+          # Leave the shared emulator settings as found, whatever a failed test left behind.
+          adb shell settings put system font_scale 1.0
+          adb shell settings put global animator_duration_scale 1
+          adb shell cmd uimode night no
+          adb shell wm size reset
+          adb shell wm density reset
+          adb shell settings put system user_rotation 0
+          timeout 60 adb logcat -d > evidence/logcat.txt
+          ls -la evidence
+          cat evidence/summary.txt
+          set -e
+          [ -z "$failed" ]
+          SH
+      - name: Install and run on an Android 14 x86_64 emulator
+        id: attempt1
+        continue-on-error: true
+        timeout-minutes: 55
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: false
+          emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+          pre-emulator-launch-script: bash wrap-emulator.sh
+          script: SHARD=${{ matrix.shard }} bash evidence.sh
+      # A timed-out attempt leaves its emulator running; the retry must not share the host with it.
+      - name: Stop the first emulator
+        if: steps.attempt1.outcome == 'failure'
+        run: |
+          adb emu kill || true
+          sleep 5
+          pkill -9 -f "[q]emu-system-x86_64" || true
+          sleep 3
+          pgrep -fa "[q]emu-system-x86_64" || echo "no emulator left running"
+      # One bounded retry: software-GPU emulators on hosted runners occasionally die mid-run.
+      - name: Retry once on a fresh emulator
+        if: steps.attempt1.outcome == 'failure'
+        timeout-minutes: 55
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: false
+          emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
+          pre-emulator-launch-script: bash wrap-emulator.sh
+          script: SHARD=${{ matrix.shard }} bash evidence.sh
+      # A shard that passed only on the fresh emulator is reported as such, not as a first-time pass.
+      - name: Mark a pass on the retry as flaky
+        if: steps.attempt1.outcome == 'failure' && success()
+        run: |
+          echo "FLAKY: the first attempt failed (its evidence is in evidence-attempt-*/); this shard passed only on the fresh-emulator retry" | tee -a evidence/summary.txt
+          echo "::warning title=${{ matrix.shard }} shard flaky::passed only on the fresh-emulator retry; see evidence-attempt-*/summary.txt"
+      # Why an emulator went offline: its own crash reports, the host kernel log (OOM kills) and memory.
+      - name: Host diagnostics for emulator crashes
+        if: always()
+        run: |
+          mkdir -p evidence/host
+          sudo dmesg -T 2>&1 | tail -300 > evidence/host/dmesg.txt || true
+          free -m > evidence/host/free.txt || true
+          nproc >> evidence/host/free.txt || true
+          cp -r /tmp/android-runner/emu-crash-*.db evidence/host/ 2>/dev/null || true
+          cp host-watch/*.txt evidence/host/ 2>/dev/null || true
+          ls -laR evidence/host > evidence/host/listing.txt || true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: android-emulator-evidence-${{ matrix.shard }}
+          path: |
+            evidence/
+            evidence-attempt-*/
+          retention-days: 90
+          if-no-files-found: warn

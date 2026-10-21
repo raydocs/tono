@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>80/100，保护状态误导否决仍成立</title>
+<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--surface: #f6f7f9;
+				--border: #e1e4ea;
+				--line: #aeb6c4;
+				--text: #1b1f27;
+				--muted: #5d6675;
+				--accent: #2f5fd0;
+				--accent-soft: #eaf0fd;
+				--ok: #1f7a4d;
+				--ok-soft: #e4f4ec;
+				--warn: #8a5a00;
+				--warn-soft: #fdf1d8;
+				--bad: #b3261e;
+				--bad-soft: #fde8e6;
+				--sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+				--mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #14161a;
+					--surface: #1c1f25;
+					--border: #2c313a;
+					--line: #566070;
+					--text: #e7e9ee;
+					--muted: #9ba3b1;
+					--accent: #8fb0ff;
+					--accent-soft: #1e2a47;
+					--ok: #6fd3a0;
+					--ok-soft: #173326;
+					--warn: #f0c36a;
+					--warn-soft: #3a2e12;
+					--bad: #ff9d94;
+					--bad-soft: #401f1c;
+				}
+			}
+			* {
+				box-sizing: border-box;
+			}
+			html {
+				scroll-behavior: smooth;
+			}
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--text);
+				font: 16px/1.55 var(--sans);
+				-webkit-text-size-adjust: 100%;
+			}
+			.layout {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr);
+				max-width: 46rem;
+				margin: 0 auto;
+				/* Bottom space keeps the last block clear of the review button in the corner. */
+				padding: 2.5rem 1.25rem 6rem;
+			}
+			.toc {
+				display: none;
+			}
+			@media (min-width: 64rem) {
+				.layout {
+					grid-template-columns: 13rem minmax(0, 46rem);
+					gap: 3rem;
+					max-width: 64rem;
+				}
+				.toc {
+					display: block;
+					position: sticky;
+					top: 2.5rem;
+					align-self: start;
+					max-height: calc(100vh - 5rem);
+					overflow-y: auto;
+					font-size: 0.875rem;
+				}
+			}
+			.toc ol {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+			}
+			.toc a {
+				display: block;
+				padding: 0.3rem 0.6rem;
+				border-left: 2px solid var(--border);
+				color: var(--muted);
+				text-decoration: none;
+			}
+			.toc a:hover,
+			.toc a[aria-current='true'] {
+				border-left-color: var(--accent);
+				color: var(--text);
+			}
+			h1,
+			h2,
+			h3 {
+				line-height: 1.25;
+				text-wrap: balance;
+			}
+			h1 {
+				margin: 0.4rem 0 0.75rem;
+				font-size: 2rem;
+				letter-spacing: -0.01em;
+			}
+			h2 {
+				margin: 0 0 0.9rem;
+				font-size: 1.3rem;
+			}
+			h3 {
+				margin: 0;
+				font-size: 1.02rem;
+			}
+			p,
+			ul,
+			ol,
+			dl,
+			figure,
+			pre {
+				margin: 0 0 0.9rem;
+			}
+			a {
+				color: var(--accent);
+			}
+			section {
+				margin-top: 2.75rem;
+			}
+			[id] {
+				scroll-margin-top: 1.5rem;
+			}
+			.kicker,
+			.meta {
+				margin: 0;
+				color: var(--muted);
+				font-size: 0.875rem;
+			}
+			.meta {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.5rem 0.75rem;
+				align-items: center;
+			}
+			.lede {
+				font-size: 1.15rem;
+				color: var(--text);
+			}
+
+			/* Summary: the part every reader sees. */
+			.facts {
+				display: grid;
+				gap: 1px;
+				margin: 0;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				background: var(--border);
+				overflow: hidden;
+			}
+			.facts > div {
+				display: grid;
+				grid-template-columns: 8.5rem minmax(0, 1fr);
+				gap: 1rem;
+				padding: 0.7rem 1rem;
+				background: var(--surface);
+			}
+			.facts dt {
+				color: var(--muted);
+				font-size: 0.875rem;
+				font-weight: 600;
+			}
+			.facts dd {
+				margin: 0;
+			}
+			/* The first row is what the reader is asked to do, so it stands out from the rest. */
+			.facts > .ask {
+				background: var(--accent-soft);
+			}
+			.facts > .ask dt {
+				color: var(--accent);
+			}
+			@media (max-width: 34rem) {
+				h1 {
+					font-size: 1.6rem;
+				}
+				.facts > div {
+					grid-template-columns: minmax(0, 1fr);
+					gap: 0.15rem;
+				}
+			}
+
+			/* Items: one decision, step, or alternative per block, so one comment hits one thing. */
+			.items {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+				display: grid;
+				gap: 0.75rem;
+			}
+			.item {
+				padding: 0.9rem 1rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+			}
+			.item > :last-child {
+				margin-bottom: 0;
+			}
+			.item-head {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.5rem 0.6rem;
+				align-items: center;
+				margin-bottom: 0.5rem;
+			}
+			.item-head h3 {
+				flex: 1 1 12rem;
+			}
+			.tag {
+				padding: 0.05rem 0.4rem;
+				border-radius: 5px;
+				background: var(--accent-soft);
+				color: var(--accent);
+				font: 600 0.8rem/1.5 var(--mono);
+				white-space: nowrap;
+			}
+			:target {
+				outline: 2px solid var(--accent);
+				outline-offset: 3px;
+				border-radius: 10px;
+			}
+			.chip {
+				display: inline-block;
+				padding: 0.05rem 0.55rem;
+				border-radius: 999px;
+				background: var(--surface);
+				border: 1px solid var(--border);
+				color: var(--muted);
+				font-size: 0.78rem;
+				font-weight: 600;
+				white-space: nowrap;
+			}
+			.chip.review,
+			.chip.doing {
+				background: var(--warn-soft);
+				border-color: transparent;
+				color: var(--warn);
+			}
+			.chip.done,
+			.chip.pick {
+				background: var(--ok-soft);
+				border-color: transparent;
+				color: var(--ok);
+			}
+			.chip.blocked {
+				background: var(--bad-soft);
+				border-color: transparent;
+				color: var(--bad);
+			}
+			.options {
+				padding-left: 1.2rem;
+				list-style: disc;
+			}
+			.options li {
+				margin-bottom: 0.3rem;
+			}
+			.detail {
+				display: grid;
+				grid-template-columns: 4.5rem minmax(0, 1fr);
+				gap: 0.25rem 0.75rem;
+				font-size: 0.92rem;
+			}
+			.detail dt {
+				color: var(--muted);
+				font-weight: 600;
+			}
+			.detail dd {
+				margin: 0;
+			}
+			.quiet {
+				color: var(--muted);
+				font-size: 0.92rem;
+			}
+
+			.note {
+				margin: 0 0 0.9rem;
+				padding: 0.75rem 1rem;
+				border-left: 3px solid var(--accent);
+				border-radius: 0 8px 8px 0;
+				background: var(--accent-soft);
+			}
+			.note.warn {
+				border-left-color: var(--warn);
+				background: var(--warn-soft);
+			}
+			.note > :last-child {
+				margin-bottom: 0;
+			}
+
+			.table-wrap {
+				margin: 0 0 0.9rem;
+				overflow-x: auto;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+			}
+			table {
+				width: 100%;
+				/* On a phone the table scrolls sideways instead of squeezing its columns. */
+				min-width: 34rem;
+				border-collapse: collapse;
+				font-size: 0.92rem;
+			}
+			th,
+			td {
+				padding: 0.55rem 0.8rem;
+				border-bottom: 1px solid var(--border);
+				text-align: left;
+				vertical-align: top;
+			}
+			th {
+				background: var(--surface);
+				color: var(--muted);
+				font-size: 0.82rem;
+			}
+			tr:last-child td {
+				border-bottom: 0;
+			}
+			td:has(> .tag:only-child) {
+				width: 1%;
+				white-space: nowrap;
+			}
+
+			code {
+				padding: 0.1em 0.3em;
+				border-radius: 4px;
+				background: var(--surface);
+				font: 0.88em var(--mono);
+				overflow-wrap: anywhere;
+			}
+			pre {
+				padding: 0.8rem 1rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				background: var(--surface);
+				overflow-x: auto;
+				font: 0.84rem/1.45 var(--mono);
+			}
+			pre code {
+				padding: 0;
+				background: none;
+				font: inherit;
+				overflow-wrap: normal;
+			}
+			/* Box-drawing diagrams need tight lines, or the vertical strokes show gaps. */
+			figure pre {
+				line-height: 1.2;
+			}
+			/* Before and After side by side; the panes stack when the page is narrow. */
+			.compare {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+				gap: 0.75rem;
+				margin: 0 0 0.9rem;
+			}
+			.compare > div {
+				min-width: 0;
+			}
+			.compare pre {
+				margin: 0;
+			}
+			.pane {
+				margin: 0 0 0.3rem;
+				color: var(--muted);
+				font-size: 0.82rem;
+				font-weight: 600;
+			}
+			/* The script at the end of the page adds these classes. */
+			pre .hot {
+				color: var(--accent);
+			}
+			.line {
+				display: block;
+			}
+			.line.add {
+				background: var(--ok-soft);
+				color: var(--ok);
+			}
+			.line.del {
+				background: var(--bad-soft);
+				color: var(--bad);
+			}
+			/* Visuals. .viz frames one picture. .flow, .parts, and .bars are ready-made pictures. */
+			.viz {
+				container-type: inline-size;
+				padding: 1.1rem 1rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				background: var(--surface);
+				overflow-x: auto;
+			}
+			.viz > :last-child {
+				margin-bottom: 0;
+			}
+			.viz svg {
+				margin: 0 auto;
+				color: var(--text);
+				font-family: var(--sans);
+			}
+			.compare > div {
+				display: flex;
+				flex-direction: column;
+			}
+			.compare .viz {
+				flex: 1;
+			}
+
+			/* A flow: nodes joined by edges, top to bottom. */
+			.flow {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+			}
+			.node {
+				min-width: 6.5rem;
+				max-width: 100%;
+				padding: 0.45rem 0.85rem;
+				border: 1.5px solid var(--line);
+				border-radius: 8px;
+				background: var(--bg);
+				font-size: 0.92rem;
+				font-weight: 600;
+				line-height: 1.3;
+				text-align: center;
+			}
+			.node small {
+				display: block;
+				margin-top: 0.15rem;
+				color: var(--muted);
+				font-size: 0.8rem;
+				font-weight: 400;
+			}
+			.node.hot {
+				border-color: var(--accent);
+				background: var(--accent-soft);
+			}
+			.node.ok {
+				border-color: var(--ok);
+				background: var(--ok-soft);
+			}
+			.node.bad {
+				border-color: var(--bad);
+				background: var(--bad-soft);
+			}
+			.node.gone {
+				border-style: dashed;
+				background: none;
+				color: var(--muted);
+			}
+			/* The line is a background, the arrowhead is ::after, and ::before is the moving dot. */
+			.edge {
+				position: relative;
+				align-self: stretch;
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+				column-gap: 1.2rem;
+				min-height: 2.5rem;
+				margin: 2px 0;
+				color: var(--line);
+				background: linear-gradient(currentColor, currentColor) top center / 1.5px calc(100% - 5px)
+					no-repeat;
+			}
+			.edge::after {
+				content: '';
+				position: absolute;
+				left: 50%;
+				bottom: 0;
+				translate: -50% 0;
+				border: 5px solid transparent;
+				border-top: 7px solid currentColor;
+				border-bottom-width: 0;
+			}
+			.edge > span {
+				grid-column: 2;
+				align-self: center;
+				padding: 0.4rem 0 0.6rem;
+				color: var(--muted);
+				font-size: 0.8rem;
+				line-height: 1.25;
+			}
+			.edge.hot,
+			.edge.hot > span {
+				color: var(--accent);
+			}
+			/* Nodes that belong together or run in parallel. */
+			.group {
+				position: relative;
+				display: flex;
+				flex-wrap: wrap;
+				align-items: flex-start;
+				justify-content: center;
+				gap: 0.5rem;
+				max-width: 100%;
+				padding: 1.7rem 0.6rem 0.6rem;
+				border: 1.5px dashed var(--line);
+				border-radius: 10px;
+			}
+			.group::before {
+				content: attr(data-label);
+				position: absolute;
+				top: 0.35rem;
+				left: 0.7rem;
+				color: var(--muted);
+				font-size: 0.75rem;
+				font-weight: 600;
+			}
+			/* Left to right, when the picture is wide enough. */
+			@container (min-width: 34rem) {
+				.flow.row {
+					flex-direction: row;
+					justify-content: center;
+				}
+				.flow.row > .edge {
+					align-self: center;
+					flex: 1 1 3rem;
+					min-width: 3rem;
+					max-width: 10rem;
+					grid-template-columns: minmax(0, 1fr);
+					grid-template-rows: 1fr 1fr;
+					min-height: 2.6rem;
+					margin: 0 2px;
+					background-position: left center;
+					background-size: calc(100% - 5px) 1.5px;
+				}
+				.flow.row > .edge::after {
+					left: auto;
+					right: 0;
+					bottom: auto;
+					top: 50%;
+					translate: 0 -50%;
+					border: 5px solid transparent;
+					border-left: 7px solid currentColor;
+					border-right-width: 0;
+				}
+				.flow.row > .edge > span {
+					grid-column: 1;
+					grid-row: 1;
+					align-self: end;
+					padding: 0 0.6rem 0.3rem 0.2rem;
+					text-align: center;
+				}
+				.flow.row > .group {
+					flex-direction: column;
+					align-items: stretch;
+				}
+			}
+
+			/* One text split into labelled parts. */
+			.parts {
+				display: grid;
+				gap: 0.5rem;
+			}
+			.parts > div {
+				display: grid;
+				grid-template-columns: 8.5rem minmax(0, 1fr);
+				gap: 0.75rem;
+				align-items: start;
+			}
+			.parts dt {
+				padding-top: 0.55rem;
+				color: var(--muted);
+				font-size: 0.8rem;
+				font-weight: 600;
+			}
+			.parts dd {
+				margin: 0;
+				padding: 0.5rem 0.8rem;
+				border: 1.5px solid var(--line);
+				border-radius: 8px;
+				background: var(--bg);
+				font-size: 0.92rem;
+			}
+			.parts.code dd {
+				font: 0.84rem/1.5 var(--mono);
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+			.parts > .hot dt {
+				color: var(--accent);
+			}
+			.parts > .hot dd {
+				border-color: var(--accent);
+				background: var(--accent-soft);
+			}
+			@container (max-width: 26rem) {
+				.parts > div {
+					grid-template-columns: minmax(0, 1fr);
+					gap: 0.15rem;
+				}
+				.parts dt {
+					padding-top: 0;
+				}
+			}
+
+			/* Bars: --v on each row is its length in percent of the longest bar. */
+			.bars {
+				display: grid;
+				grid-template-columns: auto minmax(3rem, 1fr) auto;
+				gap: 0.45rem 0.7rem;
+				padding: 0;
+				list-style: none;
+				font-size: 0.9rem;
+			}
+			.bars li {
+				display: grid;
+				grid-column: 1 / -1;
+				grid-template-columns: subgrid;
+				align-items: center;
+			}
+			.bars li::after {
+				content: '';
+				grid-column: 2;
+				grid-row: 1;
+				width: calc(var(--v, 0) * 1%);
+				min-width: 2px;
+				height: 0.85rem;
+				border-radius: 3px;
+				background: var(--line);
+				/* A script that changes --v gets a smooth change. */
+				transition: width 0.25s ease-out;
+			}
+			.bars li > span {
+				grid-column: 1;
+				max-width: 11rem;
+			}
+			.bars li > b {
+				grid-column: 3;
+				font: 600 0.84rem var(--mono);
+			}
+			.bars li.hot::after {
+				background: var(--accent);
+			}
+			.bars li.hot > b {
+				color: var(--accent);
+			}
+
+			/* Motion. Every picture is complete when it stands still: in print, in a screenshot, and
+			   for a reader who turned motion off. */
+			@media screen and (prefers-reduced-motion: no-preference) {
+				/* A dot travels along a live edge. Use it for the path that the data takes. */
+				.edge.live::before {
+					content: '';
+					position: absolute;
+					left: 50%;
+					top: 0;
+					width: 7px;
+					height: 7px;
+					margin: -3.5px;
+					border-radius: 50%;
+					background: var(--accent);
+					animation: travel-down 1.8s linear infinite;
+				}
+				@keyframes travel-down {
+					0% {
+						top: 0;
+						opacity: 0;
+					}
+					15%,
+					80% {
+						opacity: 1;
+					}
+					100% {
+						top: calc(100% - 6px);
+						opacity: 0;
+					}
+				}
+				@container (min-width: 34rem) {
+					.flow.row > .edge.live::before {
+						left: 0;
+						top: 50%;
+						animation-name: travel-right;
+					}
+				}
+				@keyframes travel-right {
+					0% {
+						left: 0;
+						opacity: 0;
+					}
+					15%,
+					80% {
+						opacity: 1;
+					}
+					100% {
+						left: calc(100% - 6px);
+						opacity: 0;
+					}
+				}
+				/* The script at the end of the page adds .play when the figure scrolls into view. */
+				.play .seq > * {
+					animation: appear 0.45s ease-out both;
+					animation-delay: calc(var(--i, 0) * 0.3s);
+				}
+				.play .bars li::after {
+					transform-origin: left;
+					animation: grow 0.8s ease-out both;
+				}
+				@keyframes appear {
+					from {
+						opacity: 0;
+						transform: translateY(-6px);
+					}
+				}
+				@keyframes grow {
+					from {
+						transform: scaleX(0);
+					}
+				}
+			}
+			.replay {
+				margin-left: 0.5rem;
+				padding: 0;
+				border: 0;
+				background: none;
+				color: var(--accent);
+				font: inherit;
+				text-decoration: underline;
+				cursor: pointer;
+			}
+			@media print {
+				.replay {
+					display: none;
+				}
+			}
+			figure svg,
+			figure img {
+				display: block;
+				max-width: 100%;
+				height: auto;
+			}
+			figcaption {
+				margin-top: 0.4rem;
+				color: var(--muted);
+				font-size: 0.875rem;
+			}
+			details {
+				margin: 0 0 0.6rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+			}
+			summary {
+				padding: 0.6rem 1rem;
+				cursor: pointer;
+				font-weight: 600;
+			}
+			details > :not(summary) {
+				margin-left: 1rem;
+				margin-right: 1rem;
+			}
+			@media print {
+				.toc {
+					display: none;
+				}
+				.layout {
+					display: block;
+					max-width: none;
+					padding: 0;
+				}
+			}
+		</style></head><body>
+<div class="layout"><nav class="toc" aria-label="目录"></nav><main>
+<header id="top">
+  <p class="kicker">独立盲审 · raydocs/tono PR #1673 · 第 8 轮</p>
+  <h1>80/100，保护状态误导否决仍成立</h1>
+  <p class="lede">真实应用连本地替身的证据充分，但后台 VPN 消失后，通知仍显示 Connected 约 57 秒。本轮不通过；没有达到 85 分门槛，也没有达到两份独立盲审各 ≥95 的用户目标。</p>
+  <p class="meta"><span class="chip blocked">不通过 · 一票否决</span><span>2026-10-19 · 本线程本人独立完成</span></p>
+</header>
+
+<section id="verdict" data-toc="结论与范围">
+  <h2>分数与否决分别成立，不互相替代</h2>
+  <dl class="facts">
+    <div class="ask" id="verdict-action"><dt>结论</dt><dd><strong>80/100；严重保护状态误导，一票否决。</strong>状态动效 60%、真实性性能 60%，均低于单项 70% 下限。未发现主操作难发现或持续不可读的额外否决依据。</dd></div>
+    <div id="verdict-source"><dt>固定源码</dt><dd><a href="https://github.com/raydocs/tono/commit/1cb5b59bb9d25335d185c3ec5c588192f24a36a6"><code>1cb5b59bb9d25335d185c3ec5c588192f24a36a6</code></a>。未用当前工作树替代此源码。</dd></div>
+    <div id="verdict-ci"><dt>固定 CI</dt><dd><a href="https://github.com/raydocs/tono/actions/runs/39184008733">android-ci 39184008733</a>，整体 run attempt 1、success；tunnel job 内曾全新模拟器重试，不能写成首次全绿。</dd></div>
+    <div id="verdict-comment"><dt>唯一评论</dt><dd><a href="https://github.com/raydocs/tono/pull/1673#issuecomment-6257957522">6257957522 无分数证据评论</a>。其结论和计数均当作待核实主张，而非裁决。</dd></div>
+    <div id="verdict-method"><dt>方法</dt><dd>本人读取固定源码、原始 CI 日志、XML、截图与视频；未新建线程、未调用其他评审或子代理、未联系实施线程。没有执行新的 Android 测试。</dd></div>
+  </dl>
+  <p id="blind-boundary" class="note">未读取其他 PR 评论、旧评分、旧 rubric 文件、其他评审或实施线程、密封自评、docs/agent-reports 报告。只采用用户逐字给出的 rubric。允许评论内关于旧轮次的文字不可避免可见，但未打开其链接、旧 run 或归档，不作为基线。曾读取固定源码的 LESSONS 程序性仓库指导；未为程序性要求去读会污染本审查的旧 finding/report。</p>
+  <p id="delivery-boundary">本次仅产出本地报告与证据文件，保存在隔离目录；未修改产品代码、提交、推送、在 GitHub 发言或发布。报告制作工具只用于排版和本地浏览，不提供产品评审意见。</p>
+</section>
+
+<section id="scores" data-toc="七项评分">
+  <h2>按原 rubric 计分，不按 ≥95 目标反推</h2>
+  <p id="rubric-exact">原文：统一100分：信息层级减字20、交互连贯单手20、高级克制及最新桌面品牌一致15、Liquid Glass材质15、状态动效15、可访问性适配10、真实性性能5；&gt;=85且各项&gt;=70%，严重状态误导/主操作难发现/不可读一票否决。</p>
+  <div class="table-wrap"><table><thead><tr><th>项目</th><th>得分 / 满分</th><th>比例</th><th>独立判断与扣分理由</th></tr></thead><tbody>
+    <tr id="score-hierarchy"><td>信息层级减字</td><td>18 / 20</td><td>90%</td><td>状态 → 主操作 → 线路 → Details 的阅读顺序明确；关键失败短句准确。已连接摘要仍重复 Cloud / Home 地名，底部线路、流量和设置 / Details 多个胶囊的密度略高，细部还可减字。</td></tr>
+    <tr id="score-interaction"><td>交互连贯单手</td><td>18 / 20</td><td>90%</td><td>Connect / Cancel / Disconnect / Retry 固定在下方，详情有显式入口且支持上滑；授权说明、系统框、旋转保留内容、键盘操作有记录。200% 时仍可滚动使用；无实机拇指或触感验证。首次 t1 发码后未找到输入框的问题未解释，完整流程可靠性有保留。</td></tr>
+    <tr id="score-brand"><td>高级克制及最新桌面品牌一致</td><td>12 / 15</td><td>80%</td><td>日月海平线、暖杏珊瑚主操作和烟色次级表面，与固定源码中当前桌面 Sea 系统一致，并非拿旧紫色主题作唯一参照。Android 海面反射呈规律横线梯，边缘高光在多个小胶囊上重复，质感偏图解，未达到细腻克制的高分段。桌面比较为源码比较，未声称运行桌面并排验证。</td></tr>
+    <tr id="score-glass"><td>Liquid Glass 材质</td><td>11 / 15</td><td>73.3%</td><td>真实 backdrop 录制与 RenderEffect 模糊，不是假透明；模糊条纹对照有效。但成片的主要感知仍是深色填充、固定亮边和顶面白色渐变，液态透光、环境响应与层次感有限。可读性优先的实色 sheet 可以成立，不因没做透明 sheet 本身扣分。</td></tr>
+    <tr id="score-state"><td>状态动效</td><td>9 / 15</td><td><strong>60%，不达下限</strong></td><td>真实五态、连接中低太阳、失败落日和 reduced-motion 均有依据；但无界面死亡后的 Connected 错报约 57 秒是严重反证。前台快速 UNKNOWN 不能抵销后台错误；非精确 alarm 的未测边界不能由 green CI 补齐。</td></tr>
+    <tr id="score-a11y"><td>可访问性适配</td><td>9 / 10</td><td>90%</td><td>设备级无标签、48 dp、文字行宽 / 截断检查，200% 真实已连接 / 部分 / 失败，非空 cutout 的 90° / 270°，键盘焦点、读屏顺序语义和中文均有较强证据。未做 TalkBack 实际听读，不能将语义断言称为实际读屏验收。</td></tr>
+    <tr id="score-authenticity"><td>真实性性能</td><td>3 / 5</td><td><strong>60%，不达下限</strong></td><td>真实 MainActivity、真实 libbox 和本地替身出口有进程、请求与路径日志，不只是 fixture 静态图。但没有真实 Tono 服务、真机 GPU / 帧时 / 电耗证据；现有软件 GPU 数据很慢，健康 gate 仅是测试准入。真实性已获分，不能将未验证的性能按优秀给分。</td></tr>
+    <tr id="score-total"><td><strong>合计</strong></td><td><strong>80 / 100</strong></td><td>门槛 85</td><td><strong>总分不达标，两项不达单项下限，另有独立否决。</strong></td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="notification" data-toc="通知否决证据">
+  <h2>VPN 已消失，通知仍断言 Connected</h2>
+  <p id="finding-veto"><span class="tag">F1 · 严重</span> 通知是应用未打开时用户判断保护状态的主要表面。它显示不带“上次”“待确认”限定的 Connected，并带 Cloud / Home 线路摘要；VPN 已不存在后继续显示近一分钟，足以让用户据此进行敏感操作。这不是数百毫秒过渡或纯装饰不同步，触发原 rubric 的严重状态误导否决。最终能改成 Tono stopped 是收敛证据，不是窗口内没有误导的证据。</p>
+  <div class="table-wrap"><table><thead><tr><th>t5 原始观测</th><th>首轮</th><th>fresh-emulator 重试</th></tr></thead><tbody>
+    <tr id="death-pid"><td>被杀旧 PID</td><td>8552</td><td>8760</td></tr>
+    <tr id="death-gone"><td>旧进程与 VPN 均首次观测消失</td><td>507 ms</td><td>511 ms</td></tr>
+    <tr id="death-honest"><td>通知首次不再声称隧道（从 kill 计）</td><td>57,798 ms</td><td>57,410 ms</td></tr>
+    <tr id="death-window"><td>首次确认无 VPN → 首次确认通知纠正</td><td>57,291 ms</td><td>56,899 ms</td></tr>
+    <tr id="death-restart"><td>观察窗内 Android 引擎重启</td><td>无</td><td>无</td></tr>
+    <tr id="death-final"><td>最终通知</td><td>Tono stopped</td><td>Tono stopped</td></tr>
+  </tbody></table></div>
+  <p id="death-precision">每 500 ms 轮询；上表是采样观测时间差，非精确到毫秒的真实边沿时刻。两次均明确记录无 VPN 且标题仍为 Connected，误导不依赖这一采样误差。</p>
+  <figure id="death-timeline" class="viz"><div class="flow">
+    <div class="node">t5 关闭 MainActivity<small>无活动；ViewModel 已清；应用 hasBound=false</small></div>
+    <div class="edge"><span>桌面在前 · 杀掉 :vpn</span></div>
+    <div class="node bad">约 0.51 s：VPN 消失<small>通知仍显示 Connected</small></div>
+    <div class="edge"><span>约 57 秒观测窗口 · 未重启引擎</span></div>
+    <div class="node ok">约 57.4 / 57.8 s：通知纠正<small>watchdog 日志证实替换，不是重连</small></div>
+  </div><figcaption>由两份 local-tunnel-t5.txt 的采样序列绘制；不是模拟的产品动效。</figcaption></figure>
+  <pre id="death-raw"><code>t5: 511ms vpn=false title=Connected phase=CONNECTED engine=false
+t5: 57410ms vpn=false title=Tono stopped phase=null engine=false
+replaced a stale CONNECTED notification (surface UNKNOWN, VPN network false)
+t5: notification still claimed a tunnel after the VPN network went: true</code></pre>
+  <figure id="death-screenshots"><img src="visual/t5-shade.jpg" alt="原始 t5 通知截图的前后拼图：Connected 与 Tono stopped" /><figcaption>两张原图的缩小拼图。左图在 kill 前，右图在纠正后；图片本身不能证明中间 57 秒，持续时间来自上述原始日志。</figcaption></figure>
+  <p id="death-sources">原始路径：<code>raw/12157754971/evidence-attempt-1792373454/local-tunnel-t5.txt</code>、<code>raw/12157754971/evidence/local-tunnel-t5.txt</code>、两处 <code>local-t5-engine-bindings.txt</code> 与 <code>logcat.txt</code>。截图为 <code>local-19-no-app-shade-connected.png</code> 和 <code>local-20-no-app-shade-after-death.png</code>，原图仍在各 evidence 目录。</p>
+  <p id="death-test-contract"><strong>测试为何能绿：</strong><code>LocalTunnelDeviceTest.kt:819–849,858</code> 只将超过 <code>STALE_MS=90,000</code> 后的无 VPN 声称计入失败；它确实检查旧进程消失、VPN 断开和最终替换。本轮 t5 不是空过，但接受 90 秒内的错误窗口比用户 rubric 宽。不能将这条测试阈值偷换成用户接受的安全语义。</p>
+  <p id="death-code"><strong>源码推论：</strong><code>NotificationWatchdog.kt:27–39</code> 由每次共享状态写入设定 <code>HEARTBEAT_MS+10,000 = 40,000 ms</code> 的 <code>AlarmManager.set(ELAPSED_REALTIME,…)</code>；这是非精确、非唤醒 alarm。<code>SystemSurfaces.kt:25–36</code> 在共享写入后 arm；<code>PublicStatus.kt:70–84</code> heartbeat 30 秒、过期 90 秒，VPN false 可将 view 判 UNKNOWN，但只有执行检查并替换后，已贴出的通知才改变。<code>AndroidManifest.xml:79–82</code> 接收器无单独 process，<code>NotificationWatchdog.kt:66–70</code> 在应用主进程检查。</p>
+  <p id="death-limitations" class="note warn"><strong>执行边界：</strong>本轮关闭的是所有 Activity 和应用引擎绑定，不是杀掉整个主进程；主进程承载 instrumentation 仍存活，设备醒着。主进程不存在时的接收器冷启动、Doze / 待机限制、唤醒后何时修正都未设备验证。源码注释的“10–70 s”或“下次醒来”不能当作严格时延上界，更不能证明唤醒可见首帧已诚实。这是覆盖缺口，不是我实测出新的更长延迟。</p>
+  <p id="death-widget">Widget 另有 <code>TonoWidget.kt:85</code> 的 <code>STALE_MS+10,000≈100 s</code> 非精确 alarm；未见相同边界的执行证明，不外推通知实测时长到 widget。未访问或使用旧 run 39181991820；其 t5 空过不能作为本次通过或失败依据。<strong>本报告没有声称发生过未经测量的流量泄漏。</strong></p>
+</section>
+
+<section id="counts" data-toc="CI 数量与失败">
+  <h2>原始记录是 29 个设备测试加 1 个路由检查</h2>
+  <p id="count-correction"><span class="tag">F2 · 证据计数</span> 用户消息和唯一评论中的 tunnel 9、设备总数 30、全部 31，均与原始记录不符。固定 workflow 列出 b1–b3 三个和 t1–t5 五个，共八个；对应八份 instrumentation，每份 <code>numtests=1</code>，重试每份均 <code>OK (1 test)</code>。第九条 PASS 是 <code>t1-routing-matches-exit-logs</code>，不能既算为设备测试又另加一次。</p>
+  <div class="table-wrap"><table><thead><tr><th>分片 / 检查</th><th>首次</th><th>重试</th><th>独立核实结果</th></tr></thead><tbody>
+    <tr id="count-system"><td>system</td><td>9/9</td><td>未需重试</td><td>a1–a6、s1–s3；9 份 instrument 文件，各 1 test</td></tr>
+    <tr id="count-ui"><td>UI</td><td>12/12</td><td>未需重试</td><td>u1–u9、l1–l3；12 份，各 1 test</td></tr>
+    <tr id="count-tunnel"><td>tunnel 设备</td><td>7/8；t1 失败</td><td>8/8</td><td>b1–b3、t1–t5；8 份，各 1 test；FLAKY</td></tr>
+    <tr id="count-route"><td>出口日志路由核对</td><td>失败，依赖 t1</td><td>1/1</td><td>host 脚本检查，不是第九个 Android 测试</td></tr>
+    <tr id="count-jvm-mobile"><td>mobile JVM XML</td><td colspan="2">49 发现 − 17 skipped = 32 执行；0 failure / error</td><td>17 为截图与动效渲染项；不可写成 49 全部执行</td></tr>
+    <tr id="count-jvm-routing"><td>routing JVM XML</td><td colspan="2">16 执行；0 failure / error</td><td>RoutingPolicy 9、Catalog 6、ConfigSnapshotWriter 1</td></tr>
+  </tbody></table></div>
+  <p id="count-total">最终成功路径合计 <strong>9 + 12 + 8 = 29 个设备测试，另 1 路由检查，共 30 项</strong>。首次尝试合计 28 个设备通过、1 设备失败，路由检查另失败。不能将重试执行次数叠加成不同测试数量。之前本线程进度中沿用的 30+1 也以本独立复点更正。</p>
+  <p id="count-origin">可复核位置：<code>source/.github/workflows/android-ci.yml:254–267</code>；三个分片的 <code>summary.txt</code>、<code>instrument-*.txt</code>；<code>raw/12157945155/</code> 下 JUnit XML。CI 日志中的 shard retry 与 artifact 的 <code>FLAKY</code> 相互吻合；整个 workflow run 没有重新 run。</p>
+  <p id="t1-failure"><span class="tag">F3 · 未明失败</span> 首次 tunnel 健康帧时 950 ms，小于 1000 ms 准入上限，随后 t1 报 <code>AssertionError: code step</code>（<code>LocalTunnelDeviceTest.kt:240</code>；31.286 s 总测试时间）。01:23:35.755 有真实点击日志，替身控制面约 01:23:36 收到 <code>/auth/email/start</code> 并 200 应答；20 秒等待中没有找到 code 控件。该失败路径没有截图。<strong>只能确认发码请求已送达且服务器应答，不能确认 UI 已收到 / 处理，也不能诊断为丢点击、网络失败或单纯机器慢。</strong>fresh-emulator 800 ms 时成功，并不解释首次失败；保留 FLAKY。</p>
+  <p id="t1-failure-path">证据：<code>raw/12157754971/evidence-attempt-1792373454/</code> 下的 <code>instrument-t1_realTunnelThroughLocalFixtureServers.txt</code>、<code>logcat-live.txt</code>、<code>local-tunnel/control-plane.log</code>、<code>summary.txt</code>，以及 tunnel job 的原始 log。首次失败没有生成 <code>local-tunnel-requests.txt</code>；该文件只在成功重试存在。未补造失败图。</p>
+</section>
+
+<section id="real-flow" data-toc="真实应用与适配">
+  <h2>本地替身上的真实路径有覆盖，不等于生产验收</h2>
+  <ul class="items">
+    <li class="item" id="real-t1"><div class="item-head"><h3>t1：登录、授权、真实内核与前台故障</h3><span class="tag">执行</span></div><p>真实 MainActivity 通过 Tono 说明 → Continue → Android VPN 框，并允许通知；真实 libbox 建 TUN，控制面与出口是 loopback 替身，界面有“Local test server · not Tono”标记。日志含 cloud / home engine probe、YouTube 302、Anthropic 404、direct example.com 200；出口链路 host 核对在重试通过。HTTP 404 本身不能解释为路由失败。</p><p>从 Connect 到 Connected 11,305 ms，包括授权点击；连接时 PSS app 79 MB、:vpn 74 MB。前台杀引擎后 454 ms 观测 VPN 消失与 Status unknown，8,289 ms fresh Connected。回桌面再返回 870 ms 显示 Connected，采样未见 UNKNOWN。此路径关动画，未录回前台首帧，不把这些时间外推到后台、真机或可见首帧。</p></li>
+    <li class="item" id="real-t2"><div class="item-head"><h3>t2：真实旋转和非空 cutout</h3><span class="tag">执行＋源码</span></div><p>旋转时验证码保留“246”，键盘高 578 px、输入框底 480 px，小于键盘 top 502 px；授权说明转回竖屏仍开着。90° cutout 为 Rect(0,470–128,588)，270° 为 Rect(2272,492–2400,610)，2400×1080。90° 首页、90° Details、270° 首页均记录无相交。</p><p><code>LocalTunnelDeviceTest.kt:452–467</code> 要求 cutout 非空，遍历文字 / contentDescription 的可见框。除空标签和本地测试标记外，只排除标签精确为 Close sheet 且覆盖全窗的 scrim，不是排除全部 sheet 子节点。证据并非所有品牌挖孔设备的普适保证，也没覆盖 270° Details。</p></li>
+    <li class="item" id="real-t4"><div class="item-head"><h3>t4：200% 包含真实连接、部分和失败</h3><span class="tag">执行＋视觉</span></div><p>检查真实登录、code step、未连接首页、Connected、Partly working、Didn't connect、Details、设置。原始 report 明确无截断、操作控件 ≥48 dp 且有标签；并非只给 fixture 200% 后外推。原图中主操作仍清楚，状态解释换行没有遮住主操作。</p></li>
+    <li class="item" id="real-a11y"><div class="item-head"><h3>设备 A11yContract 的覆盖有效，但不冒充听读</h3><span class="tag">执行＋源码</span></div><p>无标签检查覆盖所有 enabled OnClick 节点，不依赖 role；行宽按每行 right−left 与文本框宽比较，也检查 ellipsis、高度 / maxLines。设备副本实际由 u1、u7、l1–l3、t4 使用，不能把 Robolectric 不可靠的字宽测量当成设备证明。</p><p>u9 有 Tab 主操作→线路→设置→Details 的顺序、可见焦点像素变化，Shift+Tab / Enter 和 ACTION_CLICK 能触发动作。u6 的语义顺序与状态文案有记录；天空装饰不进入语义树。计时器用 Tunnel up for，而非对部分可用读 Connected；引擎失联为 Tono stopped responding。没有实际 TalkBack 听读验证。</p></li>
+  </ul>
+  <figure id="real-state-figure"><img src="visual/real-states.jpg" alt="真实 MainActivity 的未连接、连接中、已连接、部分可用、失败五态" /><figcaption>重试原始 local-10 至 local-14 的派生拼图，不是产品 mockup；本地替身标记保留。</figcaption></figure>
+  <figure id="real-font-figure"><img src="visual/real-200.jpg" alt="200% 的真实登录、未连接、已连接、部分可用、失败" /><figcaption>local-15、local-16、local-16b / c / d。其余 200% Details / 设置原图及派生拼图也已保留。</figcaption></figure>
+  <figure id="real-landscape-figure"><img src="visual/real-landscape.jpg" alt="真实横屏键盘、首页、详情、270度首页与授权转屏" /><figcaption>横屏视觉复核与 t2 的窗口坐标日志结合，未将空 cutout 当通过。</figcaption></figure>
+</section>
+
+<section id="visual" data-toc="品牌、材质与动效">
+  <h2>层级与品牌成立，材质和海面仍非高分段</h2>
+  <p id="desktop-comparison"><strong>最新桌面参照：</strong>固定源码的 macOS <code>SeaComponents.swift</code>、<code>SeaHomePillStyle.swift</code>、<code>SeaSceneParameters.swift</code>、<code>SeaSceneWater.swift</code> 与 Windows <code>SeaScene.tsx</code> / <code>sea-scene.css</code>。暖色 primary gradient、烟色 ultraThinMaterial 次操作、night / dawn / day / dusk 的语义对应成立。不是用历史紫色 TonoTheme 指控暖色偏离品牌；遵守用户要求，未读取禁止的报告或 rubric 文件。</p>
+  <p id="visual-restraint">Android 原始截图和原片中，留白把主状态与底部操作明确分开；日月是状态的辅助，不是唯一状态标识。但海面是规则细线展开的反射柱，缺少桌面水面多层光路 / 波面细节；黑色胶囊的固定亮边重复较多，稍显组件展览感。这些是本人对已见视觉的判断，不是自动测试失败，也不据此制造主操作难发现否决。</p>
+  <p id="glass-verification"><strong>真实模糊核实：</strong><code>Glass.kt:44–104</code> 共享 GraphicsLayer backdrop，局部 RenderEffect blur，之后烟色 tint、渐变内光和 1 dp rim；低于 API31 使用更实色 tint。u4 原始条纹振幅 bare 162.5、仅 tint 83.2、Tono glass 0.1、platform blur 0.4，能区分有无真正模糊。它证明背景高频被压低，不证明液态折射、所有真实天空上的对比度或真机低开销。API34 成片观感仍偏“smoked pills”，所以有技术实现分而非满材质分。</p>
+  <figure id="sheet-figure"><img src="visual/sheets.jpg" alt="设备 fixture 详情、设置及其他 sheet 的派生拼图" /><figcaption>fixture 状态标记与原图来源保留。Sheet 使用较实的表面保证内容可读，不冒充真实隧道状态。</figcaption></figure>
+  <p id="motion-method"><strong>动态核实方法：</strong>读取并解码原始 <code>local-real-motion.mp4</code>（1080×2400，178.7917 s，463 个可变时距视频帧），检查 5 秒概览及连接 87–100 s、断开 102–114 s、失败 142–152 s 的连续解码帧；另检 u8 测试时钟产出的 392 张 16 ms 帧中连接 / 断开 / 失败邻帧。已保留原片、frame PTS CSV 及有帧号 / 时间标记的派生接触表。低帧率原片不能揭示其间未采到的全部转场。</p>
+  <p id="motion-judgment">五态天空有区别：记录亮度 27.3 / 54.7 / 80.9 / 63.1 / 48.6；连接中的单次亮度只是观测，不是稳定终点断言。<code>SeaScene.kt:43–62</code> RISING=0.5、DAY=1，减弱连接中 / 已连接混淆，断开与失败 650 ms settle，arrival spring 和 1.8 s ambient 有源码支持。u8 邻帧中主标题交叉淡化短暂接近低可见，约百毫秒级；未见持续不可读，故不另加不可读否决。无障碍 reduced-motion 会停掉无限动画。</p>
+  <p id="motion-not-performance" class="note warn">u8 的 392×16 ms 是 Compose 测试时钟按时间位置渲染，不是设备真实 60 fps。真实录屏用于判断状态、天空与文案协同；不能因为视频或测试名含 motion / 60fps 就声称流畅。</p>
+  <figure id="motion-figure"><img src="visual/real-video-overview.jpg" alt="原始真实应用视频每五秒取样的接触表" /><figcaption>只用于检视流程与状态跨度，不将重采样后的静帧当作真实帧率。</figcaption></figure>
+</section>
+
+<section id="performance" data-toc="性能与未验证项">
+  <h2>准入 gate 通过，没有证明真机流畅或真实服务可用</h2>
+  <p id="perf-values">system 的 <code>perf.txt</code>：70 帧，69 janky（98.57%），p50 350 ms，p90 / p95 / p99 450 ms；APK 65,079,135 bytes，启动 TotalTime 五次 1090 / 1400 / 1193 / 963 / 1252 ms。测帧前已恢复动画。软件 GPU / swangle_indirect 的 API34 x86_64 Pixel 6 模拟器数据，不是手机上的性能。既不能称 60fps，也不能反向定论所有手机都这么慢。</p>
+  <p id="perf-gate">健康 gate 测动效登录页 8 秒 median：system 400 ms、UI 600 ms、tunnel 首次 950 ms / 重试 800 ms，阈值 1000 ms。它允许 runner 继续测试；不是产品性能门槛、不是流畅性达标，更不能解释掉首轮 t1 的未知失败。</p>
+  <ul id="not-verified">
+    <li>真实 Tono 控制面、真实账号验证码、生产出口与真实网络切换，未验证。</li>
+    <li>真机帧率、GPU 模糊成本、触觉反馈、温控与电量，未验证。</li>
+    <li>TalkBack 真实听读、实际用户单手操作，未验证。</li>
+    <li>主进程不存在与 Doze / 待机限制下通知替换时间、唤醒后可见首帧，未验证。</li>
+    <li>前台返回的首帧与真实动画下失联刷新宽限，未验证；当前 t1 使用 remove animations。</li>
+    <li>未开展完整网络安全审计，也未测出 / 声称新的包泄漏；本轮是固定 UI / 状态证据审查。</li>
+  </ul>
+</section>
+
+<section id="evidence" data-toc="证据、完整性与复核">
+  <h2>原件、派生图和固定源码分开保存</h2>
+  <p id="inventory-location">本报告所在隔离目录：<code>/home/user/workspace/repo/.amp/in/artifacts/pr1673-r8-sol-independent/</code>。<a href="evidence-inventory.json">evidence-inventory.json</a> 列出每个保存文件的相对路径、bytes、SHA256 与来源种类；<a href="SHA256SUMS">SHA256SUMS</a> 可用 sha256sum -c 校验；清单自身与报告的 hash 另见最终交付消息。清单排除自身和 SHA256SUMS，避免循环 hash。</p>
+  <div class="table-wrap"><table><thead><tr><th>原始 artifact ZIP</th><th>内容</th><th>本地 SHA256，均匹配 GitHub digest</th></tr></thead><tbody>
+    <tr id="artifact-tunnel"><td>12157754971</td><td>tunnel，两次尝试原件</td><td><code>96937f1bbac37f3335d03edf30e632a26e1af96764a4055f23619a53c8a8488d</code></td></tr>
+    <tr id="artifact-system"><td>12157692258</td><td>system</td><td><code>16155b45d8cf842a5db14c14997334ea8a04daae16db08c5b34885369e09849e</code></td></tr>
+    <tr id="artifact-ui"><td>12157169775</td><td>UI</td><td><code>7e0349c6477a3f8d6cb8695d4497e122d01240e71311132056948d5bc5f50604</code></td></tr>
+    <tr id="artifact-jvm"><td>12157945155</td><td>JVM XML 与 lint</td><td><code>266ed0023a9d9612adb3fdf690b8cdbd8f543454383d32753a6f941273fd8492</code></td></tr>
+    <tr id="artifact-apk"><td>12157576991</td><td>产品 APK 与校验信息</td><td><code>57507ed4064b5674e02efac2c7a0fdae36689e934ea88caf00b679e60bc555e0</code></td></tr>
+    <tr id="artifact-instrument"><td>12157711346</td><td>instrumentation APK</td><td><code>be5fd24f1ce12a50a711f8aefba9bf75504643f63cd2eca6122aab5454eb28fe</code></td></tr>
+  </tbody></table></div>
+  <p id="apk-hash">实际产品 APK SHA256：<code>39a6d99f5cfe1bd3b5544f043183996d17c4cac8a0dbdee1dd53644c3ffa2ac1</code>，与 artifact 内校验文件相符。run 元数据的 head_sha 与固定源码相同；ZIP digest 匹配说明原件完整性，不等于行为验收通过。</p>
+  <p id="inventory-groups"><code>raw/</code>：六份 ZIP、全部解包文件、run / jobs / artifacts / 唯一 comment API JSON、四份 job 原始日志。<code>source/</code>：固定 Android、workflow、当前桌面 Sea 参照文件，逐文件 Git blob 校验。<code>visual/</code>：原图 / 原片的派生拼图及 PTS CSV；只作视觉索引，原件优先。<code>verification-receipt.json</code>：本次离线复点结果、XML 计数、artifact digest 和源码 blob 核对结果，不是重新执行产品测试的凭据。</p>
+  <p id="recheck-command">复核命令：在此目录运行 <code>sha256sum -c SHA256SUMS</code>。设备计数可枚举各 <code>instrument-*.txt</code> 的 <code>numtests=1</code> 与 <code>OK (1 test)</code>，对照 workflow 的 tests 字符串；XML 按 tests−skipped 得执行数。原始 t5 日志中的 vpn=false / Connected 是否决事实，不依赖本人评分偏好。</p>
+  <p id="final-conclusion"><strong>最终：</strong>信息层级与单手入口有较好基础，真实设备层级与 200% 覆盖也有实质证据；但约 57 秒错误保护声称必须按原 rubric 否决。修复宣称、最终收敛、green CI、95 分目标均不能改变这一裁决。未要求或实施产品修改；保留现有失败和未验证边界。</p>
+</section>
+</main></div><script>
+			// Builds the side contents list from the sections, so it cannot drift from the page.
+			const toc = document.querySelector('.toc')
+			const sections = [...document.querySelectorAll('main > section[id]')]
+			const list = document.createElement('ol')
+			const links = new Map()
+			for (const section of sections) {
+				const label = section.dataset.toc || section.querySelector('h2')?.textContent.trim()
+				if (!label) continue
+				const link = document.createElement('a')
+				link.href = `#${section.id}`
+				link.textContent = label
+				const count = section.querySelectorAll('.item, tbody > tr[id]').length
+				if (count > 0) link.textContent += ` (${count})`
+				links.set(section, link)
+				const entry = document.createElement('li')
+				entry.append(link)
+				list.append(entry)
+			}
+			toc.append(list)
+			const observer = new IntersectionObserver(
+				(entries) => {
+					for (const entry of entries) {
+						if (!entry.isIntersecting) continue
+						for (const link of links.values()) link.removeAttribute('aria-current')
+						links.get(entry.target)?.setAttribute('aria-current', 'true')
+					}
+				},
+				{ rootMargin: '0px 0px -70% 0px' },
+			)
+			for (const section of links.keys()) observer.observe(section)
+
+			// A line break before the end tag of a view would show as an empty last line.
+			for (const pre of document.querySelectorAll('figure pre')) {
+				const last = pre.lastChild
+				if (last?.nodeType === Node.TEXT_NODE) last.data = last.data.trimEnd()
+			}
+
+			// Colors the heavy glyphs in a drawing, so the changed parts stand out from the light lines.
+			const heavy = /([━┃┏┓┗┛┣┫┳┻╋▶◀▲▼●◆■]+)/
+			for (const pre of document.querySelectorAll('pre.diagram')) {
+				const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT)
+				const texts = []
+				while (walker.nextNode()) texts.push(walker.currentNode)
+				for (const text of texts) {
+					const parts = text.data.split(heavy)
+					if (parts.length === 1) continue
+					const pieces = parts.map((part, index) => {
+						if (index % 2 === 0) return part
+						const span = document.createElement('span')
+						span.className = 'hot'
+						span.textContent = part
+						return span
+					})
+					text.replaceWith(...pieces)
+				}
+			}
+
+			// Colors the added and removed lines in a diff view. The view holds text only.
+			for (const pre of document.querySelectorAll('pre.diff')) {
+				const lines = pre.textContent.split('\n').map((line) => {
+					const span = document.createElement('span')
+					span.className = line.startsWith('+') ? 'line add' : line.startsWith('-') ? 'line del' : 'line'
+					span.textContent = line === '' ? ' ' : line
+					return span
+				})
+				pre.replaceChildren(...lines)
+			}
+
+			// Plays the one-shot motion of a picture when it scrolls into view, and adds a Replay
+			// button. Without this script the pictures are complete and still.
+			if (matchMedia('(prefers-reduced-motion: no-preference)').matches) {
+				const play = new IntersectionObserver((entries) => {
+					for (const entry of entries) {
+						if (!entry.isIntersecting) continue
+						entry.target.classList.add('play')
+						play.unobserve(entry.target)
+					}
+				})
+				for (const figure of document.querySelectorAll('figure')) {
+					if (!figure.querySelector('.seq, .bars')) continue
+					for (const sequence of figure.querySelectorAll('.seq')) {
+						;[...sequence.children].forEach((child, index) => child.style.setProperty('--i', index))
+					}
+					play.observe(figure)
+					// A picture with its own controls needs no Replay button.
+					if (figure.querySelector('input, select, button')) continue
+					const button = document.createElement('button')
+					button.type = 'button'
+					button.className = 'replay'
+					button.textContent = 'Replay'
+					button.addEventListener('click', () => {
+						figure.classList.remove('play')
+						void figure.offsetWidth
+						figure.classList.add('play')
+					})
+					const caption = figure.querySelector('figcaption') ?? figure
+					caption.append(button)
+				}
+			}
+		</script></body></html>

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TonoMobile"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".engine.TonoVpnService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:process=":vpn"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started VPN tunnel (sing-box) that routes AI, video and local traffic" />
+        </service>
+        <service
+            android:name=".surface.TonoTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_standby"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <!-- Not an active tile: Android re-asks it every time Quick Settings opens, so it re-reads the
+                 shared status (and its staleness rule) whenever someone can see it. The engine also asks
+                 for a redraw on every state change while the panel is open. -->
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />
+        </service>
+
+        <receiver
+            android:name=".surface.TonoWidget"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/tono_widget_info" />
+        </receiver>
+        <!-- Keep the engine's notification honest after the engine's process died: the watch hears the
+             engine's binder die; the alarm (armed by the engine) is the backstop. Own small process. -->
+        <service
+            android:name=".surface.EngineWatchService"
+            android:exported="false"
+            android:process=":watch" />
+        <receiver
+            android:name=".surface.NotificationWatchdog$Receiver"
+            android:process=":watch"
+            android:exported="false" />
+    </application>
+</manifest>

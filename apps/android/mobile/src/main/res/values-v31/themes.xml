@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TonoMobile" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tono_night</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <!-- First paint matches the desktop splash ground (brand/splash.svg #0B0A12) with the new mark. -->
+        <item name="android:windowSplashScreenBackground">#FF0B0A12</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+    </style>
+</resources>

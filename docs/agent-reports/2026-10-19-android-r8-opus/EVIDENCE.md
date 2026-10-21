@@ -1,0 +1,63 @@
+# PR1673 第8轮盲审证据清单
+源码 1cb5b59bb9d25335d185c3ec5c588192f24a36a6；run 39184008733 attempt 1 success
+
+## CI artifact（GitHub digest）
+12157945155 android-test-reports sha256:266ed0023a9d9612adb3fdf690b8cdbd8f543454383d32753a6f941273fd8492
+12157754971 android-emulator-evidence-tunnel sha256:96937f1bbac37f3335d03edf30e632a26e1af96764a4055f23619a53c8a8488d
+12157692258 android-emulator-evidence-system sha256:16155b45d8cf842a5db14c14997334ea8a04daae16db08c5b34885369e09849e
+12157169775 android-emulator-evidence-ui sha256:7e0349c6477a3f8d6cb8695d4497e122d01240e71311132056948d5bc5f50604
+
+## 证据评论
+issuecomment-6257957522 body sha256 0974c60d0237e44339e4137e9fa2568bd325bc93694deee580810de619919e0e
+
+## 关键文件（全部 672 个文件见 ci-artifact-files.sha256）
+732aef407e8895420defbe9abf9e766c2d02451807437706ff5dbd16e4ab7158  ./android-emulator-evidence-system/evidence/perf.txt
+bac1965e010d8a9cdbf8d1a34ccfa42a82a8889bf6ef025fb31fbb7aae7b6a13  ./android-emulator-evidence-system/evidence/summary.txt
+cc47ac870c758b18924caab87b75fbc36c981ee27f7494ac3b439570e9b9d78a  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/instrument-t1_realTunnelThroughLocalFixtureServers.txt
+b61bf27d76f2869d7d25fa8511c4a2cdd78f55802fef0f86cb0ef84863872d88  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-11-real-connecting.png
+9ec687cb85d5ec391b6aaf1031e62941b026341ea7e12437cb4404baccf8a280  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-14-real-failed.png
+ab9c627a333c8615eab35e8310d14b896710f021d7968355e647804ae65abccc  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-15-real-font-2.0-signin.png
+96c94ad637d059a0cb13746b0cf5e00d11f8f3e1d8969389d43301beb9135a7e  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-19-no-app-shade-connected.png
+27f2b9f62ec0b58a39818982b81bc824c70b91259a75ff16cb74913a57300cff  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-20-no-app-shade-after-death.png
+6617153de1884d46fb4e58054386408fb97de958c40cb15ff5b3be8af2fd1a9b  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-real-motion.mp4
+d15d73392c3248ac0f1c5333665eaa14046cf40b4b0fb04b28143e26cf0bc7f1  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-t5-engine-bindings.txt
+13bd40bc488d5397e6e437435b4757b4bb0babfbe39fb80244fce2e776d48e6e  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-tunnel-t2.txt
+b4a413ae32b9551de757a3982d94872a14b7a53531e61c47674b3bda4c7d1a3d  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-tunnel-t5.txt
+d3a95669796e09c79ed7aefd64504c746a90a97cad371dd20bf48c990387cebd  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/local-tunnel/control-plane.log
+dcbc1b54a9d20632c22d2409041aacc5bc2e04ed87e57aa350d9317bb6287eb5  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/logcat-live.txt
+ef56a20cf0dfec8fb1a4b23137720a64c498cecfe67f26d40651721ee0d57929  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/real-font-2.0-report.txt
+e43967c228a588d5be93134ec63b078f194fdfaf41addecd5e3dd7ac25bbc6fb  ./android-emulator-evidence-tunnel/evidence-attempt-1792373454/summary.txt
+5ea263d53f30ff8b056fa1686b3dfa8b0db9fbf259321e0760f445fcfd87adaa  ./android-emulator-evidence-tunnel/evidence/instrument-t1_realTunnelThroughLocalFixtureServers.txt
+a167492ef133e8779469dda7b2b9145167051a350462a53e6b91afff4623c51b  ./android-emulator-evidence-tunnel/evidence/local-04b-engine-lost.png
+9cc6c2d749ff4aa4a78e9da7965d61979466ce12ab16d2eea0a3dac03053a8ce  ./android-emulator-evidence-tunnel/evidence/local-11-real-connecting.png
+18302b826b89845070fb771a3d0ecba8bc193cbbb7a25e694cccccc536a9f7c6  ./android-emulator-evidence-tunnel/evidence/local-14-real-failed.png
+6825f24626890e712db64f21664b26de7a96a3957e9b29e8dc6844ad8fe9996a  ./android-emulator-evidence-tunnel/evidence/local-15-real-font-2.0-signin.png
+9fde843689bee5a5de8b4a3e3daca9e5867643004a525bd051f384b3f7992825  ./android-emulator-evidence-tunnel/evidence/local-19-no-app-shade-connected.png
+57059a13e9687d8aa20f846c3fec9555ebd1d2de36e21d8b65c0d20b1f0ce019  ./android-emulator-evidence-tunnel/evidence/local-20-no-app-shade-after-death.png
+e94417b1b4ad81608a6faf2fb82c16204bf92153a64721594f12453b6d142c2c  ./android-emulator-evidence-tunnel/evidence/local-real-motion.mp4
+17f5a1bbaf6f9847acf44a684e455770a139aee7487f4457d7847a5629bbfa0b  ./android-emulator-evidence-tunnel/evidence/local-t5-engine-bindings.txt
+13bd40bc488d5397e6e437435b4757b4bb0babfbe39fb80244fce2e776d48e6e  ./android-emulator-evidence-tunnel/evidence/local-tunnel-t2.txt
+1277017540507ed3170346046591d42b733fb1565a903cdf5eeb01df343ff188  ./android-emulator-evidence-tunnel/evidence/local-tunnel-t5.txt
+ef56a20cf0dfec8fb1a4b23137720a64c498cecfe67f26d40651721ee0d57929  ./android-emulator-evidence-tunnel/evidence/real-font-2.0-report.txt
+fe228d7a6daf6fe4f43df54b57f1d78d2bffec8bc07084c8b31a2468a7e89d9e  ./android-emulator-evidence-tunnel/evidence/summary.txt
+352db7c8f44d1b1941ba0161046c584fe9fcf9cea53de1edcb4b6d2c5cd6dd92  ./android-emulator-evidence-ui/evidence/glass-report.txt
+68365b889fb7bc3cd3ecc60cdf3e3400129806ea45c995da710894e614d5b22e  ./android-emulator-evidence-ui/evidence/motion-frames.txt
+54a4e5a317e345fc462daf579f9831bbff7e63930a41233028520273cc078338  ./android-emulator-evidence-ui/evidence/screen-reader-order.txt
+48b13c222344d597b66dcd7a188c0be37e5002382730f50fd6c8235326d605f7  ./android-emulator-evidence-ui/evidence/summary.txt
+203c29be2900d0456b099dd46c7ae58965822ae8b1cedd232687bab498bfe6bc  ./android-test-reports/mobile/build/test-results/testDebugUnitTest/TEST-com.raydocs.tono.mobile.surface.NotificationWatchdogTest.xml
+
+## 本评审生成的拼图（review-contact-sheets.sha256）
+bbc060579f6ef15b298940e36c9587487045fd15ad8d3e5a78d302f60346ae34  brand.png
+1431136a78c699a1c4d6bb94195c8284f37d651f1d369155665743071b74741a  real_motion.png
+f3cd268aca88a841add5cbc753ccdb5e624f6e46515b3617fa4bbdec5e27a5e1  s_surfaces.png
+15c03e8eb58b2bff47e01d24e2f1ea0fab908ec14a099d6143993970030075f2  t_flow.png
+dddc34a0af788b453027af694d57dd4d61d7ed8b417f166f0961dcc8ac1d53c9  t_flow2.png
+001ede8355e69790fe56aef88b1f3b97bb9c58550f9df52387d9282c54d1bc5d  t_font1.png
+af33a303060ca958ff54e7e2cb0b444cb38520413eed46c7c097ae33c669697e  t_font2.png
+66ac5fa4af945134232cbe38163b2a97e364224cf7c767350757dd2cfe4dd347  t_land.png
+28e07a98a1882fb303f69846d27209b05705f133bc8dc3cd64ac780d569ed7cc  t_land2.png
+920339484e17fcdd99570fa83f77bf8ec65774df373603ff9a21a9d9b35740dd  t_shade.png
+5fab0b900b02462340d1dd1945d7ad064c38470ffdb46881582c0555ca995e82  t_states.png
+9c60f1597bf1baa76fd1c0d5d8db4afd021d1f7b18949a62e3a19d5e47e1b8c0  u_misc.png
+0b0d4ab3d1bbc82a8f25e8f83e467970ea4a1b1b89ca76fa13c1c242bbcf0cf3  u_motion.png
+e30baad8654c97c374de35b3220652439cf6ba29a150a4d51960c219951ff84d  verify_seq.png
