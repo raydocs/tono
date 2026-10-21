@@ -516,7 +516,11 @@ nonisolated enum HelperProtocolVersion {
     ///   a Home SOCKS server given as an ordinary public DNS name (provider
     ///   gateways such as `isp.decodo.com`), not only a public IPv4 literal.
     ///   An older daemon refuses such a runtime at bind.
-    static let current = "4.52.62"
+    /// - 4.52.62 → 4.52.63: the generated AI Home suffix list gains
+    ///   `ampcode.com` and the sign-in, API and product hosts audited with it
+    ///   (Amp's WorkOS script, Cursor, Copilot, Kiro, Windsurf, JetBrains AI,
+    ///   Hark and others; 194 entries). An older daemon would route them DIRECT.
+    static let current = "4.52.63"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

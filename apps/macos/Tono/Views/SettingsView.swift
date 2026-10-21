@@ -190,7 +190,7 @@ struct SettingsView: View {
             }
             // Only the selected mode's notes; Stable needs none.
             if desktopRoutingMode == "three-tier" {
-                Text("Priority: 21 cloud-video exceptions → 166 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations. Failed Home/cloud matches never fall back DIRECT. ECH, cached/raw IP or app DoH can hide AI identity and take default DIRECT; unidentified AI is not guaranteed Home routing.")
+                Text("Priority: 21 cloud-video exceptions → 194 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations. Failed Home/cloud matches never fall back DIRECT. ECH, cached/raw IP or app DoH can hide AI identity and take default DIRECT; unidentified AI is not guaranteed Home routing.")
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
