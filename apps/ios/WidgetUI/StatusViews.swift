@@ -156,7 +156,7 @@ struct StatusWidgetView: View {
                     .fixedSize(horizontal: false, vertical: whole)
             }
             if middle, let since = p.since {
-                Text(since, style: .timer).font(.body.monospacedDigit()).lineLimit(1)
+                Text(timerInterval: since...Date.distantFuture, countsDown: false).font(.body.monospacedDigit()).lineLimit(1)
             } else if middle, let detail = p.detail {
                 Text(detail).font(.body).lineLimit(2).fixedSize(horizontal: false, vertical: whole)
             }
@@ -209,7 +209,7 @@ struct StatusWidgetView: View {
                 .lineLimit(whole ? 3 : 2).minimumScaleFactor(whole ? 1 : 0.7)
                 .fixedSize(horizontal: false, vertical: whole)
             if timer, let since = p.since {
-                Text(since, style: .timer)
+                Text(timerInterval: since...Date.distantFuture, countsDown: false)
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(TonoColor.textSecondary)
                     .lineLimit(1)
@@ -294,10 +294,12 @@ struct ActivityLockView: View {
             VStack(alignment: .trailing, spacing: 4) {
                 if preview { PreviewTag() }
                 if let since = p.since {
-                    Text(since, style: .timer)
+                    Text(timerInterval: since...Date.distantFuture, countsDown: false)
                         .font(.title3.monospacedDigit().weight(.medium))
                         .foregroundStyle(TonoColor.textPrimary)
                         .multilineTextAlignment(.trailing)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .frame(maxWidth: 96, alignment: .trailing)
                 }
             }
