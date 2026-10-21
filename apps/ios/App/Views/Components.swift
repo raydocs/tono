@@ -197,16 +197,21 @@ struct TonoField: View {
     /// Grows to a second and third line instead of clipping large text (the field in a narrow row);
     /// the caller turns a typed return into submit.
     var wraps = false
+    /// The text control is one line tall inside the 54 pt box; a tap anywhere on the box focuses it.
+    @FocusState private var tapped: Bool
 
     var body: some View {
         field
+            .focused($tapped)
             .tonoFont(large ? 24 : 17, large ? .medium : .regular, relativeTo: large ? .title2 : .body, design: large ? .rounded : .default)
             .foregroundStyle(TonoColor.textPrimary)
             .tint(TonoColor.accent)
             .padding(.horizontal, 16)
-            .frame(minHeight: 54)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
             .background(TonoColor.nightDeep.opacity(0.4), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(TonoColor.hairline, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .onTapGesture { tapped = true }
     }
 
     @ViewBuilder private var field: some View {

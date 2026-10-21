@@ -35,10 +35,14 @@ struct TonoLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     if let since = p.since {
-                        Text(since, style: .timer)
+                        // A counting interval renders as clock digits (47:07) on one line; the
+                        // `.timer` style was laid out as "47 minutes" in the island's width cap.
+                        Text(timerInterval: since...Date.distantFuture, countsDown: false)
                             .font(.headline.monospacedDigit())
                             .foregroundStyle(TonoColor.textPrimary)
                             .multilineTextAlignment(.trailing)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                             .frame(maxWidth: 72, alignment: .trailing)
                             .padding(.trailing, 4)
                     }
@@ -68,8 +72,10 @@ struct TonoLiveActivityWidget: Widget {
                     .foregroundStyle(TonoColor.sunMid)
             } compactTrailing: {
                 if let since = p.since {
-                    Text(since, style: .timer)
+                    Text(timerInterval: since...Date.distantFuture, countsDown: false)
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .frame(maxWidth: 52)
                         .foregroundStyle(TonoColor.textPrimary)
                 } else {
