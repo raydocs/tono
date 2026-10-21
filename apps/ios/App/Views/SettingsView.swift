@@ -2,6 +2,10 @@ import SwiftUI
 import TonoKit
 import UIKit
 
+/// Sign out's red, muted to the night surfaces (5.8:1 on Smoke, 6.2:1 on Night) instead of the
+/// system alert red, which was the one saturated colour on the screen.
+private let signOutRed = Color(hex: 0xE27068)
+
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -36,7 +40,7 @@ struct SettingsView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 10)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("settingsModeWhere")
 
@@ -51,11 +55,9 @@ struct SettingsView: View {
                             fine(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off"))
                             fine(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
                         }
-                        .padding(.top, 8).padding(.bottom, 12)
+                        .padding(.top, 4).padding(.bottom, 10)
                     } label: {
-                        title(L.t("routing_scope_title"))
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        act(L.t("routing_scope_title"))
                     }
                     .tint(TonoColor.textTertiary)
                     .accessibilityIdentifier("scopeDisclosure")
@@ -75,7 +77,6 @@ struct SettingsView: View {
                         Text(L.t("system_include_all_pending")).tonoFont(15, relativeTo: .subheadline)
                             .foregroundStyle(TonoColor.warning)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(.bottom, 8)
                             .accessibilityIdentifier("includeAllPending")
                     }
                     // The mechanics (restart hold, Connect On Demand) one tap away, as the routing scope.
@@ -86,11 +87,9 @@ struct SettingsView: View {
                             Text(L.t("system_limit")).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.warning)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.top, 8).padding(.bottom, 12)
+                        .padding(.top, 4).padding(.bottom, 10)
                     } label: {
-                        title(L.t("system_how_title"))
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        act(L.t("system_how_title"))
                     }
                     .tint(TonoColor.textTertiary)
 
@@ -109,30 +108,27 @@ struct SettingsView: View {
                     // gets the sentence (Apple's audit flagged the bare address as not human-readable).
                     title(model.email ?? "")
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 10)
                         .accessibilityLabel(L.t("settings_signed_in_as", model.email ?? ""))
-                    // A text action, not a capsule, in the one weight of the screen: red alone marks it.
+                    // A text action, not a capsule, in the one weight of the screen: its red alone marks
+                    // it, muted to the sheet rather than the system alert red.
                     Button { confirmSignOut = true } label: {
-                        Text(L.t("settings_sign_out")).tonoFont(17, relativeTo: .body)
-                            .foregroundStyle(TonoColor.error)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                        act(L.t("settings_sign_out"), color: signOutRed).contentShape(Rectangle())
                     }
                     .buttonStyle(PressScale())
-                    .padding(.top, 4)
 
-                    // About as a colophon: the one line on the screen, then small print.
-                    Rectangle().fill(contrast == .increased ? Color.white.opacity(0.4) : TonoColor.hairline)
-                        .frame(height: 1).padding(.top, 40)
-                        .accessibilityHidden(true)
-                    SettingsLabel(text: L.t("settings_about"), first: true)
+                    // About as a colophon in small print, set apart by the same space as any group;
+                    // no rule, the one line the screen had.
+                    SettingsLabel(text: L.t("settings_about"))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L.t("about_version", AppModel.appVersion)).tonoFont(13, relativeTo: .footnote)
                             .foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
-                        fine(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion))
+                        // Word joiners after each solidus: the source address moves to the next line whole
+                        // instead of breaking after "github.com/".
+                        fine((model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion))
+                            .replacingOccurrences(of: "/", with: "/\u{2060}"))
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 10)
                 }
                 .padding(.horizontal, 20).padding(.bottom, 32)
             }
@@ -158,19 +154,31 @@ struct SettingsView: View {
     private var closeButton: some View {
         Button { dismiss() } label: {
             // Fixed glyph inside the fixed 44 pt circle: at AX5 a body-scaled xmark grew past the circle.
+            // A flat disc, as Kura's map controls: no sheen or rim, lighter than anything in the content.
             Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).foregroundStyle(TonoColor.textPrimary)
                 .frame(width: 44, height: 44)
-                .glassSurface(Circle(), interactive: true)
+                .background(Color.white.opacity(contrast == .increased ? 0.14 : 0.08), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0), lineWidth: 1))
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressScale())
         .accessibilityLabel(L.t("settings_close"))
         .accessibilityIdentifier("settingsClose")
     }
 
-    /// Row title: the larger of the two sizes; hierarchy comes from size and tone, not weight.
+    /// Row title for what *is* (a value, a state): the large size; hierarchy comes from size and tone, not weight.
     private func title(_ text: String) -> some View {
         Text(text).tonoFont(20, relativeTo: .title3).foregroundStyle(TonoColor.textPrimary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A row that *acts* (reveals, opens, signs out): body size, so reading and acting are two sizes,
+    /// not one style told apart by a chevron. Same 10 pt rhythm as every row; at least 44 pt tall.
+    private func act(_ text: String, color: Color = TonoColor.textPrimary) -> some View {
+        Text(text).tonoFont(17, relativeTo: .body).foregroundStyle(color)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 
     private func meta(_ text: String) -> some View {
@@ -193,7 +201,8 @@ private struct SettingsLabel: View {
             .tonoFont(13, relativeTo: .footnote)
             .foregroundStyle(TonoColor.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, first ? 16 : 40)
+            // Rows carry 10 pt above and below: 30 here makes the group gap 40 and the label-to-row gap 10.
+            .padding(.top, first ? 16 : 30)
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -326,11 +335,12 @@ private struct RowToggle: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 // Drawn only; the row's button takes the tap.
-                Toggle("", isOn: configuration.$isOn).labelsHidden().tint(TonoColor.accent).allowsHitTesting(false)
+                // The deeper sun for "on": the pale accent sat too close to the white knob.
+                Toggle("", isOn: configuration.$isOn).labelsHidden().tint(TonoColor.sunEdge).allowsHitTesting(false)
                     .padding(.trailing, 4)
             }
-            .padding(.vertical, 12)
-            .frame(minHeight: 56)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
