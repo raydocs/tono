@@ -23,19 +23,22 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,9 +63,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import com.raydocs.tono.mobile.BuildConfig
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
@@ -73,6 +81,12 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/**
+ * Sign out's red, muted to the night surfaces (6.2:1 on Night, 5.8:1 on Smoke) instead of the system
+ * alert red, which was the one saturated colour on the screen.
+ */
+private val SignOutRed = Color(0xFFE27068)
 
 @Composable
 fun SettingsScreen(
@@ -97,13 +111,14 @@ fun SettingsScreen(
         // Only the back circle stays fixed. The title opens the page on the content's own left edge
         // and scrolls away with it: one axis for every word on the screen, as in a book.
         Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) { BackCircle(onBack) }
-        // Editorial layout: no cards or dividers; groups are set apart by space, controls on one right edge.
+        // Editorial layout: no cards, rules or dividers. One rhythm: rows carry 10 dp above and
+        // below, a label sits 30 dp under the previous row (a 40 dp group gap) and 10 dp over its first.
         Column(
             Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 32.dp),
         ) {
             Text(
                 stringResource(R.string.settings_title), style = TonoType.Display, color = TonoColors.TextPrimary,
-                modifier = Modifier.padding(top = 4.dp).semantics { heading() },
+                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).semantics { heading() },
             )
 
             SectionLabel(stringResource(R.string.settings_routing))
@@ -111,12 +126,12 @@ fun SettingsScreen(
                 ModeRow(stringResource(R.string.mode_three_tier), stringResource(R.string.mode_three_tier_desc), s.mode == RoutingMode.THREE_TIER) { onMode(RoutingMode.THREE_TIER) }
                 ModeRow(stringResource(R.string.mode_stable), stringResource(R.string.mode_stable_desc), s.mode == RoutingMode.STABLE) { onMode(RoutingMode.STABLE) }
             }
-            // The chosen mode is the white one; this line says the grey one is a tap away.
-            Text(stringResource(R.string.settings_mode_hint), style = TonoType.Fine, color = TonoColors.TextTertiary)
             Expandable(stringResource(R.string.routing_scope_title)) {
                 Text(stringResource(R.string.routing_scope), style = TonoType.Meta, color = TonoColors.TextSecondary)
                 Text(stringResource(R.string.routing_platform), style = TonoType.Meta, color = TonoColors.TextSecondary)
                 Text(stringResource(if (s.underlyingIpv6) R.string.ipv6_on else R.string.ipv6_off), style = TonoType.Fine, color = TonoColors.TextTertiary)
+                // The contract the lists come from belongs with the lists, not in the colophon.
+                Text(stringResource(R.string.about_contract, DesktopRoutingContract.SOURCE_COMMIT.take(9)), style = TonoType.Fine, color = TonoColors.TextTertiary)
             }
 
             SectionLabel(stringResource(R.string.settings_check))
@@ -143,16 +158,16 @@ fun SettingsScreen(
 
             SectionLabel(stringResource(R.string.settings_account))
             // The address itself is the value under the label (the device test finds it by exact text).
-            Text(s.email ?: "", style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(top = 12.dp))
-            TextAction(stringResource(R.string.settings_sign_out), onSignOut, color = TonoColors.Error)
+            Text(s.email ?: "", style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(vertical = 10.dp))
+            TextAction(stringResource(R.string.settings_sign_out), onSignOut, color = SignOutRed)
 
-            // About as a colophon: the one line on the screen, then small print.
-            Box(Modifier.padding(top = 40.dp).fillMaxWidth().height(1.dp).background(TonoColors.Hairline))
-            SectionLabel(stringResource(R.string.settings_about), first = true)
-            Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // About as a colophon in small print, set apart by the same space as any group.
+            SectionLabel(stringResource(R.string.settings_about))
+            Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME), style = TonoType.Fine, color = TonoColors.TextSecondary)
-                Text(stringResource(R.string.about_core, BuildConfig.SING_BOX_VERSION), style = TonoType.Fine, color = TonoColors.TextTertiary)
-                Text(stringResource(R.string.about_contract, DesktopRoutingContract.SOURCE_COMMIT.take(9)), style = TonoType.Fine, color = TonoColors.TextTertiary)
+                // Word joiners after each solidus: the source address moves to the next line whole
+                // instead of breaking after "github.com/".
+                Text(stringResource(R.string.about_core, BuildConfig.SING_BOX_VERSION).replace("/", "/\u2060"), style = TonoType.Fine, color = TonoColors.TextTertiary)
                 Text(stringResource(R.string.about_test), style = TonoType.Fine, color = TonoColors.TextTertiary)
             }
             NavRow(stringResource(R.string.about_licenses), onOpenLicenses)
@@ -178,33 +193,36 @@ private fun BackCircle(onBack: () -> Unit) {
 }
 
 /**
- * Every row in Settings: a title on the left edge, anything under it (a description, a state line)
- * in the smaller grey tone, and at most one quiet mark on the right edge, centred on the title's
- * first line so wrapped titles at large text keep it in place. The caller's modifier carries the
- * tap (`clickable`, `selectable`), so the whole row is the target and the semantics are one node.
+ * Every row in Settings: a title on the left edge with at most one quiet mark on the right edge,
+ * centred on the title's first line so wrapped titles at large text keep it in place; anything
+ * under the title (a description, a state line) takes the full width in the smaller grey tone.
+ * Rows that *are* something (a mode, the account) set the title at 20 sp; rows that *act* (open,
+ * reveal) at 17 sp, so reading and acting are two sizes, not one style told apart by a chevron.
+ * The caller's modifier carries the tap (`clickable`, `selectable`), so the whole row is the target
+ * and the semantics are one node.
  */
 @Composable
 private fun SettingsRow(
     title: String,
     modifier: Modifier = Modifier,
+    style: TextStyle = TonoType.Action,
     titleColor: Color = TonoColors.TextPrimary,
     trailing: (@Composable () -> Unit)? = null,
     under: @Composable ColumnScope.() -> Unit = {},
 ) {
-    val titleLine = with(LocalDensity.current) { TonoType.Title.lineHeight.toDp() }
-    // ≥ 48 dp even when collapsed to its title (the device accessibility check found 38 dp).
-    Row(modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 12.dp), verticalAlignment = Alignment.Top) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = TonoType.Title, color = titleColor)
-            under()
+    val titleLine = with(LocalDensity.current) { style.lineHeight.toDp() }
+    Column(modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.Top) {
+            Text(title, style = style, color = titleColor, modifier = Modifier.weight(1f))
+            if (trailing != null) {
+                Box(Modifier.padding(start = 12.dp).width(18.dp).height(titleLine), contentAlignment = Alignment.Center) { trailing() }
+            }
         }
-        if (trailing != null) {
-            Box(Modifier.padding(start = 12.dp).width(18.dp).height(titleLine), contentAlignment = Alignment.Center) { trailing() }
-        }
+        under()
     }
 }
 
-/** A row that opens another screen: the value in title size, a quiet chevron at the end. */
+/** A row that opens another screen in Tono: a quiet chevron at the end. */
 @Composable
 private fun NavRow(text: String, onClick: () -> Unit) {
     SettingsRow(
@@ -234,25 +252,50 @@ private fun Expandable(title: String, content: @Composable () -> Unit) {
         Modifier.clickable(role = Role.Button, onClickLabel = title) { open = !open }.semantics { stateDescription = state },
         trailing = { GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = 18.dp, modifier = Modifier.rotate(turn)) },
     )
-    AnimatedVisibility(open) { Column(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
+    AnimatedVisibility(open) { Column(Modifier.padding(top = 4.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
 }
 
 /**
- * A mode to choose, set like Kura's filters: the chosen one is white, carries its one-line
- * description and a sun dot where other rows keep their chevron; the other is grey. The row's
- * `selectable` semantics (radio role, selected state) tell TalkBack which is on, so the dot is
- * never the only cue.
+ * A mode to choose, set like Kura's filters: the chosen one is white and carries its one-line
+ * description; the other is grey (a luminance step, 55 % of the same ink, not a hue). Nothing else
+ * marks it: the row's `selectable` semantics (radio role, selected state) tell TalkBack which is on.
  */
 @Composable
 private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
     SettingsRow(
         title,
         Modifier.selectable(selected, role = Role.RadioButton, onClick = onClick),
-        titleColor = if (selected) TonoColors.TextPrimary else TonoColors.TextSecondary,
-        trailing = { if (selected) StatusDot(TonoColors.Accent) },
+        style = TonoType.Title,
+        titleColor = if (selected) TonoColors.TextPrimary else TonoColors.TextTertiary,
     ) {
-        AnimatedVisibility(selected) { Text(desc, style = TonoType.Meta, color = TonoColors.TextSecondary, modifier = Modifier.padding(top = 4.dp)) }
+        AnimatedVisibility(selected) { ArrowText(desc, TonoType.Meta, TonoColors.TextSecondary, Modifier.padding(top = 4.dp)) }
     }
+}
+
+/**
+ * Text whose "→" is Tono's own arrow glyph at the text's size: Roboto has no arrow, and the
+ * fallback glyph sat small and under the x-height. TalkBack still reads the arrow (alternate text).
+ */
+@Composable
+private fun ArrowText(text: String, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
+    val parts = text.split("→")
+    if (parts.size == 1) {
+        Text(text, style = style, color = color, modifier = modifier)
+        return
+    }
+    val annotated = buildAnnotatedString {
+        parts.forEachIndexed { i, part ->
+            append(part)
+            if (i < parts.lastIndex) appendInlineContent("arrow", "→")
+        }
+    }
+    val glyph = with(LocalDensity.current) { style.fontSize.toDp() }
+    val inline = mapOf(
+        "arrow" to InlineTextContent(Placeholder(1.em, 1.em, PlaceholderVerticalAlign.TextCenter)) {
+            GlyphIcon(Glyph.ARROW, color, size = glyph)
+        },
+    )
+    Text(annotated, style = style, color = color, modifier = modifier, inlineContent = inline)
 }
 
 @Composable
@@ -277,22 +320,34 @@ private fun RouteCheck(onExplain: (String) -> Map<String, Any?>?) {
             }
         }
     }
-    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
+    Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // A filled field, not a stroked one: the only box on the screen is a soft lift of the night,
+        // brighter while it has focus; the accent is kept for the caret.
+        TextField(
             value = host,
             onValueChange = { host = it.take(253) },
             placeholder = { Text(stringResource(R.string.check_hint)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Search, autoCorrectEnabled = false),
             keyboardActions = KeyboardActions(onSearch = { run() }),
-            colors = fieldColors(),
-            // The same soft corner as the iOS field; the one outline on the screen is the field's.
             shape = RoundedCornerShape(14.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.White.copy(alpha = 0.10f),
+                unfocusedContainerColor = Color.White.copy(alpha = 0.06f),
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent,
+                cursorColor = TonoColors.Accent,
+                focusedTextColor = TonoColors.TextPrimary,
+                unfocusedTextColor = TonoColors.TextPrimary,
+                focusedPlaceholderColor = TonoColors.TextTertiary,
+                unfocusedPlaceholderColor = TonoColors.TextTertiary,
+            ),
             modifier = Modifier.weight(1f),
         )
-        TextAction(stringResource(R.string.check_go), { run() }, color = TonoColors.Accent, fill = false)
+        TextAction(stringResource(R.string.check_go), { run() }, fill = false)
     }
     result?.let {
-        Text(it, style = TonoType.Title, color = TonoColors.TextPrimary, modifier = Modifier.padding(top = 12.dp).animateContentSize().semantics { liveRegion = LiveRegionMode.Polite })
+        ArrowText(it, TonoType.Title, TonoColors.TextPrimary, Modifier.padding(top = 10.dp).animateContentSize().semantics { liveRegion = LiveRegionMode.Polite })
     }
 }

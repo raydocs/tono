@@ -89,12 +89,15 @@ fun StatusDot(color: Color, modifier: Modifier = Modifier, size: Int = 8) {
     Box(modifier.size(size.dp).clip(CircleShape).background(color))
 }
 
-/** A group heading: sentence case, small and in the quietest tone, set apart by space above; the rows under it carry the size. */
+/**
+ * A group heading: sentence case, small and in the quietest tone; the rows under it carry the size.
+ * Rows carry 10 dp above and below, so 30 dp here makes the group gap 40 and the label-to-row gap 10.
+ */
 @Composable
-fun SectionLabel(text: String, first: Boolean = false) {
+fun SectionLabel(text: String) {
     Text(
         text, style = TonoType.Label, color = TonoColors.TextTertiary,
-        modifier = Modifier.padding(top = if (first) 8.dp else 40.dp).semantics { heading() },
+        modifier = Modifier.padding(top = 30.dp).semantics { heading() },
     )
 }
 
