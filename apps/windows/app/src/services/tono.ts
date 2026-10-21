@@ -405,6 +405,11 @@ const mappedTonoActionErrorKey = (raw: string): string | null => {
   if (raw.includes('CORE_EXIT_UNREACHABLE')) {
     return 'tono.dashboard.errors.nodeUnreachable'
   }
+  // The one unfinished-release refusal no Restore internet can clear; Connect already ran
+  // Restore internet itself for the others.
+  if (raw.includes('TONO_RELEASE_UNFINISHED:') && raw.includes('restart Windows')) {
+    return 'tono.dashboard.errors.releaseNeedsRestart'
+  }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
       return key

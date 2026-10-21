@@ -893,6 +893,7 @@ export const translationKeys = [
   'tono.dashboard.errors.sendDiagnostics',
   'tono.dashboard.errors.releaseInProgress',
   'tono.dashboard.errors.releaseUnfinished',
+  'tono.dashboard.errors.releaseNeedsRestart',
   'tono.dashboard.errors.releaseRecordCorrupt',
   'tono.dashboard.errors.staleGeneration',
   'tono.dashboard.status.connecting',

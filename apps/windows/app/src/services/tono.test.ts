@@ -460,6 +460,17 @@ describe('describeTonoActionError', () => {
     ).toBe('translated:tono.dashboard.errors.serviceBusy')
   })
 
+  it('asks for a restart when the unfinished release names one', () => {
+    expect(
+      describeTonoActionError(
+        new Error(
+          'TONO_RELEASE_UNFINISHED: the last network restore has not finished: WMI DNS batch from process 9564 (not seen to finish) may still take effect; restart Windows, then choose Restore internet',
+        ),
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.dashboard.errors.releaseNeedsRestart' })
+  })
+
   it('says a dead loopback system proxy is the problem', () => {
     expect(
       describeTonoActionError(
