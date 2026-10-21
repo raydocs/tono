@@ -32,15 +32,23 @@ const subscribe = (notify: () => void) => {
   const queries = MEDIA.map((query) => window.matchMedia(query))
   for (const query of queries) query.addEventListener('change', notify)
   document.addEventListener('visibilitychange', notify)
+  window.addEventListener('focus', notify)
+  window.addEventListener('blur', notify)
   return () => {
     for (const query of queries) query.removeEventListener('change', notify)
     document.removeEventListener('visibilitychange', notify)
+    window.removeEventListener('focus', notify)
+    window.removeEventListener('blur', notify)
   }
 }
 
+// A window behind another app, minimised or hidden to the tray holds the scene
+// like a hidden page: WebView2 keeps such a page "visible", and the loops and
+// water would otherwise keep the GPU busy with nobody looking.
 const snapshot = () => {
   const reduced = MEDIA.some((query) => window.matchMedia(query).matches)
-  return (reduced ? 1 : 0) | (document.hidden ? 2 : 0)
+  const away = document.hidden || !document.hasFocus()
+  return (reduced ? 1 : 0) | (away ? 2 : 0)
 }
 
 const fill: CSSProperties = { position: 'absolute', inset: 0 }

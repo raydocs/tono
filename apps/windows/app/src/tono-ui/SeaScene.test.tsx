@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { SeaScene } from './SeaScene'
 
+beforeEach(() => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+})
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -62,6 +65,33 @@ it('keeps its phase DOM and follows reduced-motion and visibility changes', () =
   act(() => {
     change.dispatchEvent(new Event('change'))
   })
+})
+
+it('holds the scene while another app has focus and resumes on return', () => {
+  vi.stubGlobal('CSS', { supports: () => true })
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  const focus = vi.mocked(document.hasFocus)
+  const { container } = render(<SeaScene phase="connected" />)
+  const scene = container.firstElementChild
+  expect(scene?.getAttribute('data-paused')).toBe('false')
+
+  focus.mockReturnValue(false)
+  act(() => {
+    window.dispatchEvent(new Event('blur'))
+  })
+  expect(scene?.getAttribute('data-paused')).toBe('true')
+  // Held, not switched off: the same quality comes back with focus.
+  expect(scene?.getAttribute('data-motion')).toBe('ambient')
+
+  focus.mockReturnValue(true)
+  act(() => {
+    window.dispatchEvent(new Event('focus'))
+  })
+  expect(scene?.getAttribute('data-paused')).toBe('false')
 })
 
 it('freezes hidden phase transitions and resumes only live scene transitions', () => {
