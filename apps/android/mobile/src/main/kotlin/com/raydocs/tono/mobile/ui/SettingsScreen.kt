@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -36,6 +39,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -51,6 +56,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -69,6 +75,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.raydocs.tono.mobile.BuildConfig
@@ -107,14 +114,15 @@ fun SettingsScreen(
             view.parent?.notifySubtreeAccessibilityStateChanged(view, view, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE)
         }
     }
-    Column(Modifier.fillMaxSize().background(TonoColors.Night)) {
-        // Only the back circle stays fixed. The title opens the page on the content's own left edge
-        // and scrolls away with it: one axis for every word on the screen, as in a book.
-        Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) { BackCircle(onBack) }
+    // The fixed band: status bar plus the 48 dp back circle with its 4 dp above and below.
+    val band = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
+    Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
         // Editorial layout: no cards, rules or dividers. One rhythm: rows carry 10 dp above and
         // below, a label sits 30 dp under the previous row (a 40 dp group gap) and 10 dp over its first.
+        // The title opens the page on the content's own left edge and scrolls away with it: one axis
+        // for every word on the screen, as in a book.
         Column(
-            Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 32.dp),
+            Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 20.dp).padding(top = band, bottom = 32.dp),
         ) {
             Text(
                 stringResource(R.string.settings_title), style = TonoType.Display, color = TonoColors.TextPrimary,
@@ -149,7 +157,7 @@ fun SettingsScreen(
             SettingsRow(
                 stringResource(R.string.system_open),
                 Modifier.clickable(role = Role.Button) { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) },
-                trailing = { GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 18.dp) },
+                trailing = { GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = it) },
             ) {
                 // Settings can change independently while the VPN remains up. No cached flag
                 // can promise what Android will do after this tunnel stops.
@@ -171,6 +179,12 @@ fun SettingsScreen(
                 Text(stringResource(R.string.about_test), style = TonoType.Fine, color = TonoColors.TextTertiary)
             }
             NavRow(stringResource(R.string.about_licenses), onOpenLicenses)
+        }
+        // Only the back circle stays fixed, on a band of night that fades out over 24 dp, so content
+        // scrolls under it without a hard edge through the glyphs.
+        Column(Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth().height(band).background(TonoColors.Night).statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) { BackCircle(onBack) }
+            Box(Modifier.fillMaxWidth().height(24.dp).background(Brush.verticalGradient(listOf(TonoColors.Night, TonoColors.Night.copy(alpha = 0f)))))
         }
     }
 }
@@ -207,15 +221,18 @@ private fun SettingsRow(
     modifier: Modifier = Modifier,
     style: TextStyle = TonoType.Action,
     titleColor: Color = TonoColors.TextPrimary,
-    trailing: (@Composable () -> Unit)? = null,
+    trailing: (@Composable (Dp) -> Unit)? = null,
     under: @Composable ColumnScope.() -> Unit = {},
 ) {
     val titleLine = with(LocalDensity.current) { style.lineHeight.toDp() }
+    // Marks grow with the text (up to 1.5x) and share one centre line with the 20 dp radio.
+    val mark = 18.dp * minOf(LocalDensity.current.fontScale, 1.5f)
+    val slot = maxOf(mark, 24.dp)
     Column(modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Text(title, style = style, color = titleColor, modifier = Modifier.weight(1f))
             if (trailing != null) {
-                Box(Modifier.padding(start = 12.dp).width(18.dp).height(titleLine), contentAlignment = Alignment.Center) { trailing() }
+                Box(Modifier.padding(start = 12.dp).width(slot).height(titleLine), contentAlignment = Alignment.Center) { trailing(mark) }
             }
         }
         under()
@@ -227,7 +244,7 @@ private fun SettingsRow(
 private fun NavRow(text: String, onClick: () -> Unit) {
     SettingsRow(
         text, Modifier.clickable(role = Role.Button, onClick = onClick),
-        trailing = { GlyphIcon(Glyph.CHEVRON_RIGHT, TonoColors.TextTertiary, size = 18.dp) },
+        trailing = { GlyphIcon(Glyph.CHEVRON_RIGHT, TonoColors.TextTertiary, size = it) },
     )
 }
 
@@ -250,15 +267,16 @@ private fun Expandable(title: String, content: @Composable () -> Unit) {
     SettingsRow(
         title,
         Modifier.clickable(role = Role.Button, onClickLabel = title) { open = !open }.semantics { stateDescription = state },
-        trailing = { GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = 18.dp, modifier = Modifier.rotate(turn)) },
+        trailing = { GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = it, modifier = Modifier.rotate(turn)) },
     )
     AnimatedVisibility(open) { Column(Modifier.padding(top = 4.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
 }
 
 /**
- * A mode to choose, set like Kura's filters: the chosen one is white and carries its one-line
- * description; the other is grey (a luminance step, 55 % of the same ink, not a hue). Nothing else
- * marks it: the row's `selectable` semantics (radio role, selected state) tell TalkBack which is on.
+ * A mode to choose: both titles in the same ink on the one left edge; the chosen one carries its
+ * one-line description and the radio in the trailing slot is filled with the sun. The row's
+ * `selectable` semantics (radio role, selected state) tell TalkBack which is on; the radio itself
+ * is drawn only.
  */
 @Composable
 private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
@@ -266,7 +284,7 @@ private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () 
         title,
         Modifier.selectable(selected, role = Role.RadioButton, onClick = onClick),
         style = TonoType.Title,
-        titleColor = if (selected) TonoColors.TextPrimary else TonoColors.TextTertiary,
+        trailing = { _ -> RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent, unselectedColor = TonoColors.TextTertiary)) },
     ) {
         AnimatedVisibility(selected) { ArrowText(desc, TonoType.Meta, TonoColors.TextSecondary, Modifier.padding(top = 4.dp)) }
     }
@@ -345,7 +363,8 @@ private fun RouteCheck(onExplain: (String) -> Map<String, Any?>?) {
             ),
             modifier = Modifier.weight(1f),
         )
-        TextAction(stringResource(R.string.check_go), { run() }, fill = false)
+        // The accent names the action; white beside the filled field read as a label.
+        TextAction(stringResource(R.string.check_go), { run() }, color = TonoColors.Accent, fill = false)
     }
     result?.let {
         ArrowText(it, TonoType.Title, TonoColors.TextPrimary, Modifier.padding(top = 10.dp).animateContentSize().semantics { liveRegion = LiveRegionMode.Polite })
