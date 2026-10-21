@@ -2137,7 +2137,7 @@ reality-opts:
             "accounts.google.com",
             "cdn.usefathom.com", "g.ai", "dify.ai", "poe.com", "groq.com",
             "sora.com", "cursor.sh", "ampcode.com", "jasper.ai", "openart.ai", "clipdrop.co",
-            "cursor.com", "workos.com", "githubcopilot.com", "kiro.dev", "hark.com",
+            "cursor.com", "js.workos.com", "githubcopilot.com", "kiro.dev", "hark.com",
             "chatgpt.site", "deepmind.com", "ai.google.dev", "gemini.google",
             "openrouter.ai", "api.github.com", "deepmind.google", "api.jetbrains.ai",
             "jules.google.com", "notebooklm.google", "antigravity.google",

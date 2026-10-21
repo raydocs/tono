@@ -135,7 +135,7 @@ pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
 /// with no process constraint, so Chrome / Edge / Arc count the same as
 /// the desktop apps. Cloud video exceptions precede Google and process
 /// fallbacks. Shared CDN/ByteDance parents and gstatic remain excluded.
-pub const CLAUDE_HOME_DOMAINS: [&str; 198] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 194] = [
     DEDICATED_MODEL_API_SUFFIXES[0],
     DEDICATED_MODEL_API_SUFFIXES[1],
     DEDICATED_MODEL_API_SUFFIXES[2],
@@ -230,8 +230,7 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 198] = [
     "ampcode.com",
     "cursor.com",
     "cursorapi.com",
-    "workos.com",
-    "workoscdn.com",
+    "js.workos.com",
     "githubcopilot.com",
     "kiro.dev",
     "q.us-east-1.amazonaws.com",
@@ -251,14 +250,11 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 198] = [
     "ppl-ai-file-upload.s3.amazonaws.com",
     "oaistatsig.com",
     "openai-api.arkoselabs.com",
-    "client-api.arkoselabs.com",
-    "ai.studio",
     "labs.google",
     "flow.google",
     "opal.google",
     "stitch.withgoogle.com",
     "llama.com",
-    "fbsbx.com",
     "jasper.ai",
     "openart.ai",
     "clipdrop.co",
