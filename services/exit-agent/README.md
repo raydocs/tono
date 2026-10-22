@@ -159,6 +159,13 @@ Run the regression suite with:
 python3 services/exit-agent/test_reconcile_and_report.py
 ```
 
+## systemd timer deployment evidence
+
+The deployed exit-agent service/timer are not yet versioned here. Before
+changing boot scheduling, follow the [timer evidence diagnosis](TIMER_BOOT_DIAGNOSIS.md).
+It records the missing deployment contract and read-only checks; it is not an
+installation recipe or proof of cold-boot recovery.
+
 ## hy2 roster ownership (G2)
 
 An installed `/opt/tono-hy2/` opts the node into roster enforcement for hy2.
