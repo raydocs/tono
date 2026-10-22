@@ -668,6 +668,34 @@ describe('dashboard claude residential route badge', () => {
     expect(screen.queryByText('First connect')).toBeNull()
   })
 
+  it('shows the system-DNS advisory on Home without changing Connected or protection', async () => {
+    setNewAppearance(true)
+    const protectedSession = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'Tokyo · Sakura',
+      protectionBlocked: true,
+      killSwitch: {
+        wanted: true, live: true, mode: 'armed',
+        tunnel_luid: 42, endpoints: [], last_error: null,
+      },
+    })
+    mocks.status = {
+      ...protectedSession,
+      resolverPolicyWarning: 'TONO_DNS_SYSTEM_UNVERIFIED: system query did not answer',
+    }
+    const view = renderDashboard()
+    expect(await screen.findByText('System DNS unverified. Connection and protection stay on.')).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Check DNS / diagnostics' }).getAttribute('href')).toBe('/support')
+    expect(screen.getByRole('button', { name: 'Connected — Click to disconnect' })).toBeDefined()
+    expect(screen.queryByText('Protection not verified')).toBeNull()
+    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
+    mocks.status = { ...protectedSession, resolverPolicyWarning: null }
+    view.rerender(<MemoryRouter><DashboardPage /></MemoryRouter>)
+    expect(screen.queryByText('System DNS unverified. Connection and protection stay on.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Connected — Click to disconnect' })).toBeDefined()
+  })
+
   it('offers another route when the connected route keeps dropping', () => {
     mocks.status = makeStatus({
       uiState: 'connected',
