@@ -26,6 +26,29 @@ function requireYaml(value: unknown): string {
   return value;
 }
 
+// Union of macOS ConfigPipeline.validatedOwnedNodes (ConfigPipeline+Nodes.swift,
+// constants in ConfigPipeline.swift) and Windows tono_core::node::validate_node_set
+// (node.rs). Keep exact, case-sensitive full names, as both clients do.
+const RESERVED_CATALOG_PROXY_NAMES = new Set([
+  'Home-US',
+  'Tono-Exit',
+  'Tono-Claude-Home',
+  'Tono-Home-Residential',
+  'Tono-China-Direct',
+  'Tono-China-Web-Direct',
+  'Tono-China-Web',
+  'Tono-China-App',
+  '__tono_tailnet',
+  'DIRECT',
+  'GLOBAL',
+  'REJECT',
+  'REJECT-DROP',
+  'COMPATIBLE',
+  'PASS',
+  'PASS-RULE',
+]);
+const RESERVED_CATALOG_PROXY_PREFIX = 'Tono-WeChat-TCP-';
+
 export function managedCatalogYAML(value: unknown): string {
   const yaml = requireYaml(value);
   if (
@@ -63,6 +86,14 @@ export function managedCatalogYAML(value: unknown): string {
       'INVALID_CATALOG',
       'Every catalog proxy must start with its name as single-line plain text in NFC (no escapes, quotes inside, comments, anchors, tags or block scalars)',
     );
+  }
+  const names = new Set(RESERVED_CATALOG_PROXY_NAMES);
+  for (const { name } of items) {
+    if (names.has(name) || name.startsWith(RESERVED_CATALOG_PROXY_PREFIX)) {
+      throw new ApiError(400, 'INVALID_CATALOG', `Catalog proxy name is duplicate or reserved by a desktop runtime: ${name}`);
+    }
+    // VLESS X and its backup X · hy2 are distinct proxy names, not duplicates.
+    names.add(name);
   }
   if (items.some(({ block }) => !catalogProxyUsesManagedIdentity(block))) {
     throw new ApiError(

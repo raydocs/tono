@@ -35,6 +35,53 @@ function hy2CatalogWith(pinLines: string[]): string {
   ].join('\n') + '\n';
 }
 
+describe('catalog name-set admission', () => {
+  const vless = (name: string) => [
+    `  - name: ${name}`,
+    '    type: vless',
+    '    server: 8.8.4.4',
+    '    port: 443',
+    '    uuid: {{TONO_CLIENT_UUID}}',
+  ].join('\n');
+  const catalog = (...blocks: string[]) => ['proxies:', ...blocks, ''].join('\n');
+
+  it('rejects duplicate full proxy names without folding the same-node hy2 suffix', () => {
+    const dualTransport = hy2CatalogWith([]);
+    expect(managedCatalogYAML(dualTransport)).toBe(dualTransport);
+    expectInvalidCatalog(catalog(vless('Tokyo · Sakura'), vless('"Tokyo · Sakura"')));
+    expectInvalidCatalog(dualTransport + dualTransport.slice(dualTransport.indexOf('  - name: Tokyo · Sakura · hy2')));
+  });
+
+  it('rejects the union of macOS and Windows reserved runtime names', () => {
+    // ConfigPipeline.validatedOwnedNodes / tono_core::node::RESERVED_NODE_NAMES.
+    expectInvalidCatalog(catalog(vless('Home-US')));
+    expectInvalidCatalog(catalog(vless('Tono-Exit')));
+    expectInvalidCatalog(catalog(vless('Tono-Claude-Home')));
+    expectInvalidCatalog(catalog(vless('Tono-Home-Residential')));
+    expectInvalidCatalog(catalog(vless('Tono-China-Direct')));
+    expectInvalidCatalog(catalog(vless('Tono-China-Web-Direct')));
+    expectInvalidCatalog(catalog(vless('Tono-China-Web')));
+    expectInvalidCatalog(catalog(vless('Tono-China-App')));
+    expectInvalidCatalog(catalog(vless('__tono_tailnet')));
+    expectInvalidCatalog(catalog(vless('DIRECT')));
+    expectInvalidCatalog(catalog(vless('GLOBAL')));
+    expectInvalidCatalog(catalog(vless('REJECT')));
+    expectInvalidCatalog(catalog(vless('REJECT-DROP')));
+    expectInvalidCatalog(catalog(vless('COMPATIBLE')));
+    expectInvalidCatalog(catalog(vless('PASS')));
+    expectInvalidCatalog(catalog(vless('PASS-RULE')));
+    const nearMatches = catalog(vless('direct'), vless('Tono-Exit Tokyo'));
+    expect(managedCatalogYAML(nearMatches)).toBe(nearMatches);
+  });
+
+  it('rejects the macOS managed direct-fallback group prefix', () => {
+    expectInvalidCatalog(catalog(vless('Tono-WeChat-TCP-')));
+    expectInvalidCatalog(catalog(vless('Tono-WeChat-TCP-WeChat')));
+    const nearMatch = catalog(vless('Tono-WeChat-TCP'));
+    expect(managedCatalogYAML(nearMatch)).toBe(nearMatch);
+  });
+});
+
 describe('catalog hy2 contract', () => {
   it('admits a same-node hy2 block, rejects one without fingerprint, and retires both with the base name', () => {
     const vless = (name: string, ip: string) => [

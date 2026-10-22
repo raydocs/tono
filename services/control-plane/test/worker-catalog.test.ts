@@ -106,7 +106,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // fresh devices would get no catalog at all.
     const yaml = [
       'proxies:',
-      '  - name: Tono-Exit',
+      '  - name: Managed Exit',
       '    type: vless',
       '    server: exit.example.com',
       '    port: 443',
@@ -133,7 +133,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       '    reality-opts:',
       '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       '      short-id: abcd1234',
-      '  - name: Tono-Exit · hy2',
+      '  - name: Managed Exit · hy2',
       '    type: hysteria2',
       '    server: 203.0.113.9',
       '    password: {{TONO_CLIENT_UUID}}',
@@ -147,8 +147,47 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(error.message).toContain('Tono-Bare: servername, reality-opts');
     // Windows reads the port as a number; a quoted one fails its whole catalog.
     expect(error.message).toContain('Tono-Quoted: port');
-    expect(error.message).toContain('Tono-Exit · hy2: port, sni');
+    expect(error.message).toContain('Managed Exit · hy2: port, sni');
     expect(await env.DB.prepare('SELECT revision FROM managed_exit_catalog').first()).toBeNull();
+  });
+
+  it('refuses inadmissible catalog name sets without replacing a valid same-node dual transport catalog', async () => {
+    const vless = (name: string) => [
+      `  - name: ${name}`,
+      '    type: vless',
+      '    server: 8.8.4.4',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
+    ].join('\n');
+    const hy2 = [
+      '  - name: Managed Exit · hy2',
+      '    type: hysteria2',
+      '    server: 8.8.4.4',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      '    sni: www.microsoft.com',
+      `    fingerprint: ${'ab'.repeat(32)}`,
+    ].join('\n');
+    const catalog = (...blocks: string[]) => ['proxies:', ...blocks, ''].join('\n');
+    const yaml = catalog(vless('Managed Exit'), hy2);
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const stored = await env.DB.prepare('SELECT * FROM managed_exit_catalog').first();
+    expect(stored?.revision).toBe(1);
+    const refuses = async (invalid: string) => {
+      const response = await admin('exit-catalog', { yaml: invalid, expectedRevision: 1 }, 'PUT');
+      expect(response.status).toBe(400);
+      expect((await response.json() as any).error.code).toBe('INVALID_CATALOG');
+      expect(await env.DB.prepare('SELECT * FROM managed_exit_catalog').first()).toEqual(stored);
+    };
+    await refuses(catalog(vless('Managed Exit'), vless('"Managed Exit"')));
+    await refuses(catalog(vless('DIRECT')));
+    await refuses(catalog(vless('GLOBAL')));
+    await refuses(catalog(vless('Tono-WeChat-TCP-WeChat')));
   });
 
   it('encrypts, versions, and serves the managed exit catalog only to authenticated users', async () => {
