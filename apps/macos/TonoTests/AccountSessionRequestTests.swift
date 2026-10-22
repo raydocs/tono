@@ -67,6 +67,71 @@ private final class RecordSwitch: @unchecked Sendable {
     func turnOn() { lock.lock(); on = true; lock.unlock() }
 }
 
+/// A TLS-ready transport that sends the request but holds the response. All
+/// deadlines and callbacks run on the transport queue under explicit test control.
+nonisolated private final class ManualPinnedTransport: @unchecked Sendable {
+    private let lock = NSLock()
+    private var instant: TimeInterval = 0
+    private var timers: [(TimeInterval, DispatchQueue, @Sendable () -> Void)] = []
+    private var queue: DispatchQueue?
+    private var receiver: (@Sendable (Data?, Bool, NWError?) -> Void)?
+    private var state: (@Sendable (NWConnection.State) -> Void)?
+    private var cancellations = 0
+    private var sends = 0
+    let waiting = XCTestExpectation(description: "TLS ready, request sent, response held")
+    let scheduled = XCTestExpectation(description: "whole-exchange deadline installed")
+
+    var cancelCount: Int { lock.lock(); defer { lock.unlock() }; return cancellations }
+    var sendCount: Int { lock.lock(); defer { lock.unlock() }; return sends }
+    var runtime: PinnedExchangeRuntime {
+        PinnedExchangeRuntime(
+            now: { [self] in lock.lock(); defer { lock.unlock() }; return instant },
+            schedule: { [self] queue, delay, action in
+                lock.lock()
+                timers.append((instant + delay, queue, action))
+                lock.unlock()
+                if delay == PinnedControlPlaneExchange.exchangeBudget { scheduled.fulfill() }
+            },
+            transport: { [self] _, _ in
+                PinnedExchangeTransport(
+                    start: { [self] queue, state in
+                        lock.lock(); self.queue = queue; self.state = state; lock.unlock()
+                        queue.async { state(.ready) }
+                    },
+                    send: { [self] _, completion in
+                        lock.lock(); sends += 1; lock.unlock()
+                        completion(nil)
+                    },
+                    receive: { [self] receiver in
+                        lock.lock(); self.receiver = receiver; lock.unlock()
+                        waiting.fulfill()
+                    },
+                    cancel: { [self] in lock.lock(); cancellations += 1; lock.unlock() }
+                )
+            }
+        )
+    }
+
+    func advance(to instant: TimeInterval) {
+        lock.lock()
+        self.instant = instant
+        let due = timers.filter { $0.0 <= instant }.sorted { $0.0 < $1.0 }
+        timers.removeAll { $0.0 <= instant }
+        lock.unlock()
+        for (_, queue, action) in due { queue.sync(execute: action) }
+    }
+
+    func respond(_ response: String, end: Bool) {
+        lock.lock(); let queue = queue; let receiver = receiver; lock.unlock()
+        queue?.sync { receiver?(Data(response.utf8), end, nil) }
+    }
+
+    func lateReady() {
+        lock.lock(); let queue = queue; let state = state; lock.unlock()
+        queue?.sync { state?(.ready) }
+    }
+}
+
 @MainActor
 final class AccountSessionRequestTests: XCTestCase {
     private func fixture(
@@ -959,6 +1024,37 @@ final class AccountSessionRequestTests: XCTestCase {
         _ = try await launch().startEmailSignIn(request)
         XCTAssertEqual(systemRequests.count, 1, "an expired probe result does not reorder the paths")
         XCTAssertEqual(relayAttempts.count, 2, "the usual walk still reaches the relay")
+    }
+
+    func testASilentPinnedReadClosesItsRequestAtTheHeadBudget() async throws {
+        let fixture = ManualPinnedTransport()
+        let host = "pinned-budget.invalid"
+        let path = ControlPlanePath.pinned(
+            host: host, endpoints: [.init(address: "192.0.2.1", port: 443)], runtime: fixture.runtime
+        )
+        let request = URLRequest(url: URL(string: "https://\(host)/api/v1/auth/methods")!)
+        let task = Task {
+            // The old production path has no bounded exchange: exercise that
+            // same unbounded send, rather than failing on a missing test API.
+            if let bounded = path.exchangeWithinHeadBudget {
+                return try await bounded(request, 1024, 15)
+            }
+            return try await path.exchange(request, 1024)
+        }
+        await fulfillment(of: [fixture.waiting, fixture.scheduled], timeout: 5)
+        fixture.advance(to: 15)
+        XCTAssertEqual(fixture.cancelCount, 1, "a silent TLS-ready pinned read must close at the head budget")
+        fixture.lateReady()
+        fixture.respond("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", end: true)
+        XCTAssertEqual(fixture.sendCount, 1, "callbacks from the expired request must not send again")
+        task.cancel() // deterministic cleanup of the old unbounded implementation
+        do {
+            _ = try await task.value
+            XCTFail("a late response must not replace the expired head budget")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .timedOut)
+        }
+        XCTAssertEqual(fixture.cancelCount, 1, "expiry and cancellation settle exactly once")
     }
 
     /// Simulated blackholed resolver answer: the system path never returns a
