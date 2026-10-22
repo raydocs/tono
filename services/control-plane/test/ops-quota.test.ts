@@ -272,6 +272,59 @@ describe('rollNodeCycle', () => {
     expect(await openCount('B')).toBe(0);
   });
 
+  it('does not recount a stale sample when a successor is updated before its creator resumes', async () => {
+    const end = utc(2025, 4, 1);
+    const profile = { cycle_kind: 'calendar_day', cycle_anchor_day: 1, quota_counts: 'in_out' };
+    const predecessor = await rollNodeCycle(
+      db(), 'Successor', profile, { in: 100, out: 0, at: end - 60 }, end - 60,
+    );
+    const other = await rollNodeCycle(
+      db(), 'Other node', profile, { in: 500, out: 20, at: end - 60 }, end - 60,
+    );
+    let committed!: () => void;
+    let resume!: () => void;
+    const successorCommitted = new Promise<void>((resolve) => { committed = resolve; });
+    const released = new Promise<void>((resolve) => { resume = resolve; });
+    // Execute real D1 SQL/transactions. Delay only delivery of A's batch result,
+    // leaving its invocation in flight while B reads and updates the successor.
+    const delayed = new Proxy(db(), {
+      get(target, prop) {
+        if (prop === 'batch') return async (statements: D1PreparedStatement[]) => {
+          const result = await target.batch(statements);
+          committed();
+          await released;
+          return result;
+        };
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const stale = rollNodeCycle(
+      delayed, 'Successor', profile, { in: 150, out: 0, at: end + 60 }, end + 60,
+    );
+    let newer: Record<string, any> | null;
+    try {
+      await Promise.race([successorCommitted, stale.then(() => { throw new Error('roll completed before barrier'); })]);
+      newer = await rollNodeCycle(
+        db(), 'Successor', profile, { in: 200, out: 0, at: end + 120 }, end + 120,
+      );
+    } finally {
+      resume();
+    }
+    const after = await stale;
+    expect(Number(newer!.used_bytes)).toBe(100);
+    expect({ used: after?.used_bytes, last: after?.counter_in_last, resets: after?.resets_detected })
+      .toEqual({ used: 100, last: 200, resets: 0 });
+    expect(after?.id).toBe(newer!.id);
+    expect(await openCount('Successor')).toBe(1);
+    const closed = await db().prepare('SELECT * FROM node_traffic_cycles WHERE id = ?')
+      .bind(predecessor!.id).first<Record<string, unknown>>();
+    expect(closed?.status).toBe('closed');
+    expect(Number(closed?.used_bytes)).toBe(0);
+    expect(await db().prepare('SELECT * FROM node_traffic_cycles WHERE id = ?')
+      .bind(other!.id).first()).toEqual(other);
+  });
+
   it('drops a reading overtaken by a newer roll instead of counting a reset (#1181)', async () => {
     const profile = { cycle_kind: 'calendar_day', cycle_anchor_day: 1, traffic_quota_bytes: 1_000, quota_counts: 'in_out' };
     const now = utc(2025, 6, 10, 4);
