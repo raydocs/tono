@@ -70,6 +70,8 @@ class RoutingPolicyTest {
         assertEquals(exit, outbound(threeTier, Connection(domain = "abs.twimg.com")))
         assertEquals(exit, outbound(threeTier, Connection(domain = "pbs.twimg.com")))
         assertEquals(exit, outbound(threeTier, Connection(domain = "video.twimg.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "ton.twimg.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "cdn.syndication.twimg.com")))
         assertEquals(exit, outbound(threeTier, Connection(domain = "t.co")))
         assertEquals(exit, outbound(threeTier, Connection(domain = "api.x.com", packageName = "com.twitter.android")))
         assertEquals("reject", outbound(threeTier, Connection(domain = "x.com", network = "udp")))
