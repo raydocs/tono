@@ -74,12 +74,25 @@ nonisolated private final class ManualPinnedTransport: @unchecked Sendable {
     private var instant: TimeInterval = 0
     private var timers: [(TimeInterval, DispatchQueue, @Sendable () -> Void)] = []
     private var queue: DispatchQueue?
-    private var receiver: (@Sendable (Data?, Bool, NWError?) -> Void)?
+    private var receivers: [(DispatchQueue, @Sendable (Data?, Bool, NWError?) -> Void)] = []
     private var state: (@Sendable (NWConnection.State) -> Void)?
     private var cancellations = 0
     private var sends = 0
+    private var starts = 0
+    private let connectsOnAttempt: Int
+    let attempts: AsyncStream<Void>
+    private let attemptSignal: AsyncStream<Void>.Continuation
     let waiting = XCTestExpectation(description: "TLS ready, request sent, response held")
     let scheduled = XCTestExpectation(description: "whole-exchange deadline installed")
+
+    init(connectsOnAttempt: Int = 1) {
+        self.connectsOnAttempt = connectsOnAttempt
+        let stream = AsyncStream<Void>.makeStream()
+        attempts = stream.stream
+        attemptSignal = stream.continuation
+        waiting.assertForOverFulfill = false
+        scheduled.assertForOverFulfill = false
+    }
 
     var cancelCount: Int { lock.lock(); defer { lock.unlock() }; return cancellations }
     var sendCount: Int { lock.lock(); defer { lock.unlock() }; return sends }
@@ -90,20 +103,28 @@ nonisolated private final class ManualPinnedTransport: @unchecked Sendable {
                 lock.lock()
                 timers.append((instant + delay, queue, action))
                 lock.unlock()
-                if delay == PinnedControlPlaneExchange.exchangeBudget { scheduled.fulfill() }
+                if delay == PinnedControlPlaneExchange.exchangeBudget {
+                    scheduled.fulfill()
+                    attemptSignal.yield(())
+                }
             },
             transport: { [self] _, _ in
                 PinnedExchangeTransport(
                     start: { [self] queue, state in
-                        lock.lock(); self.queue = queue; self.state = state; lock.unlock()
-                        queue.async { state(.ready) }
+                        lock.lock()
+                        self.queue = queue; self.state = state; starts += 1
+                        let connects = starts >= connectsOnAttempt
+                        lock.unlock()
+                        if connects { queue.async { state(.ready) } }
                     },
                     send: { [self] _, completion in
                         lock.lock(); sends += 1; lock.unlock()
                         completion(nil)
                     },
                     receive: { [self] receiver in
-                        lock.lock(); self.receiver = receiver; lock.unlock()
+                        lock.lock()
+                        if let queue { receivers.append((queue, receiver)) }
+                        lock.unlock()
                         waiting.fulfill()
                     },
                     cancel: { [self] in lock.lock(); cancellations += 1; lock.unlock() }
@@ -121,9 +142,16 @@ nonisolated private final class ManualPinnedTransport: @unchecked Sendable {
         for (_, queue, action) in due { queue.sync(execute: action) }
     }
 
-    func respond(_ response: String, end: Bool) {
-        lock.lock(); let queue = queue; let receiver = receiver; lock.unlock()
-        queue?.sync { receiver?(Data(response.utf8), end, nil) }
+    func flush() {
+        lock.lock(); let queue = queue; lock.unlock()
+        queue?.sync {}
+    }
+
+    func respond(_ response: String, end: Bool, read: Int? = nil) {
+        lock.lock()
+        let receiver = read.map { receivers[$0] } ?? receivers.last
+        lock.unlock()
+        if let (queue, receive) = receiver { queue.sync { receive(Data(response.utf8), end, nil) } }
     }
 
     func lateReady() {
@@ -1055,6 +1083,97 @@ final class AccountSessionRequestTests: XCTestCase {
             XCTAssertEqual((error as? URLError)?.code, .timedOut)
         }
         XCTAssertEqual(fixture.cancelCount, 1, "expiry and cancellation settle exactly once")
+    }
+
+    func testAPinnedReadDoesNotAbandonAnAnsweredSlowBody() async throws {
+        let fixture = ManualPinnedTransport()
+        let path = ControlPlanePath.pinned(
+            host: "slow-body.invalid", endpoints: [.init(address: "192.0.2.1", port: 443)], runtime: fixture.runtime
+        )
+        let bounded = try XCTUnwrap(path.exchangeWithinHeadBudget)
+        let task = Task {
+            try await bounded(URLRequest(url: URL(string: "https://slow-body.invalid/")!), 1024, 15)
+        }
+        await fulfillment(of: [fixture.waiting, fixture.scheduled], timeout: 5)
+        fixture.respond("HTTP/1.1 401 Unauthorized\r\nContent-Length: 2\r\n\r\n", end: false)
+        fixture.advance(to: 15)
+        XCTAssertEqual(fixture.cancelCount, 0, "the final status disarms the head deadline, not the body deadline")
+        fixture.respond("{}", end: true)
+        let answer = try await task.value
+        XCTAssertEqual(answer.status, 401, "a slow refusal must not become a retryable timeout")
+        XCTAssertEqual(answer.body, Data("{}".utf8))
+        XCTAssertNil(answer.bodyFailure)
+    }
+
+    func testThePinnedHeadDeadlineIsSharedByAllAddresses() async throws {
+        let fixture = ManualPinnedTransport(connectsOnAttempt: 2)
+        var attempts = fixture.attempts.makeAsyncIterator()
+        let path = ControlPlanePath.pinned(
+            host: "shared-budget.invalid",
+            endpoints: [.init(address: "192.0.2.1", port: 443), .init(address: "192.0.2.2", port: 443)],
+            runtime: fixture.runtime
+        )
+        let bounded = try XCTUnwrap(path.exchangeWithinHeadBudget)
+        let task = Task {
+            try await bounded(URLRequest(url: URL(string: "https://shared-budget.invalid/")!), 1024, 15)
+        }
+        _ = await attempts.next()
+        fixture.advance(to: 5) // first of two pins spends its half of the 10 s connect budget
+        _ = await attempts.next()
+        fixture.flush() // the second pin accepts TLS but holds the response
+        fixture.advance(to: 15)
+        XCTAssertEqual(fixture.cancelCount, 2, "the second pin gets 10 s remaining, not a fresh 15 s")
+        task.cancel()
+        do { _ = try await task.value; XCTFail("silent second pin must time out") }
+        catch { XCTAssertEqual((error as? URLError)?.code, .timedOut) }
+        XCTAssertEqual(fixture.sendCount, 1, "only the connected pin sends HTTP")
+    }
+
+    func testCancellingAPinnedReadIsolatesItsLateCallbackFromTheNextRead() async throws {
+        let fixture = ManualPinnedTransport()
+        var attempts = fixture.attempts.makeAsyncIterator()
+        let path = ControlPlanePath.pinned(
+            host: "cancel-budget.invalid", endpoints: [.init(address: "192.0.2.1", port: 443)], runtime: fixture.runtime
+        )
+        let bounded = try XCTUnwrap(path.exchangeWithinHeadBudget)
+        let request = URLRequest(url: URL(string: "https://cancel-budget.invalid/")!)
+        let first = Task { try await bounded(request, 1024, 15) }
+        _ = await attempts.next()
+        fixture.flush()
+        first.cancel()
+        do { _ = try await first.value; XCTFail("caller cancellation must propagate") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(fixture.cancelCount, 1, "the old connection is closed before its waiter resumes")
+        let second = Task { try await bounded(request, 1024, 15) }
+        _ = await attempts.next()
+        fixture.flush()
+        fixture.respond("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n", end: true, read: 0)
+        XCTAssertEqual(fixture.cancelCount, 1, "the retired callback cannot settle the new request")
+        fixture.respond("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", end: true)
+        let answer = try await second.value
+        XCTAssertEqual(answer.status, 200)
+        fixture.advance(to: 45)
+        XCTAssertEqual(fixture.cancelCount, 2, "late timers cannot complete either request twice")
+        XCTAssertEqual(fixture.sendCount, 2)
+    }
+
+    func testAPinnedPostNeverUsesTheReadHeadBudget() async throws {
+        let fixture = ManualPinnedTransport()
+        let path = ControlPlanePath.pinned(
+            host: "post-budget.invalid", endpoints: [.init(address: "192.0.2.1", port: 443)], runtime: fixture.runtime
+        )
+        let bounded = try XCTUnwrap(path.exchangeWithinHeadBudget)
+        var request = URLRequest(url: URL(string: "https://post-budget.invalid/api/v1/auth/email/start")!)
+        request.httpMethod = "POST"
+        let post = request
+        let task = Task { try await bounded(post, 1024, 15) }
+        await fulfillment(of: [fixture.waiting, fixture.scheduled], timeout: 5)
+        fixture.advance(to: 15)
+        XCTAssertEqual(fixture.cancelCount, 0, "a possibly delivered POST keeps its original exchange deadline")
+        task.cancel()
+        do { _ = try await task.value; XCTFail("caller cancellation must propagate") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(fixture.sendCount, 1, "the POST is never resent")
     }
 
     /// Simulated blackholed resolver answer: the system path never returns a
