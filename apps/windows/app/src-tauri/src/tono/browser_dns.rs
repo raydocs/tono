@@ -160,13 +160,27 @@ fn message(browser: &str, issue: BrowserDnsIssue) -> String {
 fn scan_user_data_root(root: &Path, policy: &ManagedPolicy, total_bytes: &mut u64) -> Result<(), BrowserDnsIssue> {
     // Chromium registers desktop Secure DNS in browser-wide Local State. The policy metadata is
     // likewise `per_profile: false`; profile `Preferences` are neither authoritative nor scanned.
-    // Chromium writes Local State on its first launch, so a root without one has never been
-    // used by that browser (Chinese Chromium shells create Google\Chrome\User Data and keep
-    // their settings elsewhere). Classify it like a missing root: defaults plus managed policy.
-    // A real browser that later writes Local State is caught by the periodic recheck.
     let source = match read_json_source(&root.join("Local State"), total_bytes)? {
         Some(local_state) => preference_source(&local_state)?,
-        None => PreferenceSource::default(),
+        None => {
+            // A running Chromium holds `lockfile` (delete-on-close) in its User Data root and
+            // keeps Secure DNS in memory; it does not rewrite a deleted Local State on its own,
+            // so that case stays incomplete unless policy forces Off. With no lockfile the next
+            // launch reads defaults, which is also what a Chinese Chromium shell leaves behind
+            // when it creates Google\Chrome\User Data without ever writing Local State.
+            let in_use = root
+                .join("lockfile")
+                .try_exists()
+                .map_err(|_| BrowserDnsIssue::IncompleteScan)?;
+            let managed_off = policy
+                .mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("off"));
+            if in_use && !managed_off {
+                return Err(BrowserDnsIssue::IncompleteScan);
+            }
+            PreferenceSource::default()
+        }
     };
     classify_source(policy, &source)
 }
@@ -468,6 +482,37 @@ mod tests {
             ),
             Err(BrowserDnsIssue::AutomaticCustomProvider)
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn running_browser_without_local_state_stays_incomplete_unless_managed_off() {
+        // A running Chromium may hold Secure DNS only in memory after Local State is removed;
+        // every recheck must keep failing until the browser exits or writes the file again.
+        let root = temp_root("running-missing-local-state");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("lockfile"), b"").unwrap();
+
+        for _ in 0..2 {
+            assert_eq!(
+                scan_user_data_root(&root, &ManagedPolicy::default(), &mut 0),
+                Err(BrowserDnsIssue::IncompleteScan)
+            );
+        }
+        assert_eq!(
+            scan_user_data_root(
+                &root,
+                &ManagedPolicy {
+                    mode: Some("off".to_owned()),
+                    templates: None,
+                },
+                &mut 0,
+            ),
+            Ok(())
+        );
+
+        fs::remove_file(root.join("lockfile")).unwrap();
+        assert_eq!(scan_user_data_root(&root, &ManagedPolicy::default(), &mut 0), Ok(()));
         fs::remove_dir_all(root).unwrap();
     }
 

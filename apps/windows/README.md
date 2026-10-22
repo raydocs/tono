@@ -256,10 +256,12 @@ It does not inspect portable/custom `--user-data-dir` locations, other browsers,
 other OS users, command-line switches, extensions, or live in-memory resolver state.
 Each file is limited to 4 MiB and each browser family to 16 MiB; malformed/unreadable
 data, an unreadable managed policy, and a 5-second scan timeout all remain fail-closed.
-A data directory without `Local State` (Chromium writes it on first launch; Chinese
-Chromium shells often create `Google\Chrome\User Data` without one) is classified like a
-missing directory: browser defaults plus the managed policy. An unreadable policy names
-its scope and registry value (for example `HKLM DnsOverHttpsMode`) in the error.
+A data directory without `Local State` and without Chromium's `lockfile` (no browser is
+using it; Chinese Chromium shells often create `Google\Chrome\User Data` without either)
+is classified like a missing directory: browser defaults plus the managed policy. With
+`lockfile` present the running browser may hold Secure DNS only in memory, so it stays
+incomplete unless policy forces Off. An unreadable policy names its scope and registry
+value (for example `HKLM DnsOverHttpsMode`) in the error.
 The 60-second recheck is a nominal interval, not a maximum leak window: scan time,
 scheduling delays and other awaited maintenance can extend the observation gap.
 This is not a system-wide zero-leak guarantee.
