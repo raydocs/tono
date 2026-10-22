@@ -37,7 +37,7 @@ function openCycleInsert(
        id, node_name, cycle_start, cycle_end, quota_bytes, used_bytes,
        counter_in_start, counter_out_start, counter_in_last, counter_out_last,
        resets_detected, status, updated_at
-     ) VALUES(?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 'open', ?)`,
+     ) VALUES(?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 'open', ?) RETURNING *`,
   ).bind(
     cycleId, nodeName, bounds.start, bounds.end, quota,
     counters.in, counters.out,
@@ -45,7 +45,7 @@ function openCycleInsert(
     previous?.counter_out_last ?? counters.out,
     nowSec,
   );
-  return { cycleId, statement };
+  return { statement };
 }
 
 export async function insertOpenCycle(
@@ -57,11 +57,10 @@ export async function insertOpenCycle(
   nowSec: number,
   previous: Row | null = null,
 ): Promise<Row> {
-  const { cycleId, statement } = openCycleInsert(
+  const { statement } = openCycleInsert(
     db, nodeName, bounds, quota, counters, nowSec, previous,
   );
-  await statement.run();
-  return (await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>())!;
+  return (await statement.first<Row>())!;
 }
 
 /** Close the expired row and insert its successor in one batch. No successor
@@ -83,6 +82,8 @@ export async function replaceExpiredOpenCycle(
     return null;
   }
   const replacement = openCycleInsert(db, nodeName, bounds, quota, counters, nowSec, expired);
-  await db.batch([close, replacement.statement]);
-  return db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(replacement.cycleId).first<Row>();
+  const [, inserted] = await db.batch<Row>([close, replacement.statement]);
+  // Preserve the insert-time counters for rollNodeCycle's compare-and-set. A
+  // later SELECT could read a newer roll and mistake our older sample for a reset.
+  return inserted!.results[0] ?? null;
 }
