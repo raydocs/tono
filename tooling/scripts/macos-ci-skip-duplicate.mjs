@@ -75,6 +75,15 @@ function matchMacosPath(file, pattern) {
   return file === pattern
 }
 
+// An exclusion may only skip files strictly inside a literal `prefix/**`; the
+// bare prefix (a file replacing the directory) and any other shape stay unknown.
+function matchExcludedTree(file, pattern) {
+  if (!pattern.endsWith('/**')) return null
+  const prefix = pattern.slice(0, -3)
+  if (prefix === '' || /[*?[\]{}!]/.test(prefix)) return null
+  return file.startsWith(`${prefix}/`)
+}
+
 export function classifyMacosDiff({ files, truncated, patterns }) {
   if (truncated || !Array.isArray(files) || !Array.isArray(patterns) || patterns.length === 0) return 'unknown'
   for (const pattern of patterns) {
@@ -83,11 +92,15 @@ export function classifyMacosDiff({ files, truncated, patterns }) {
   }
   for (const file of files) {
     if (typeof file !== 'string' || file === '') return 'unknown'
+    // GitHub's order: the last matching pattern decides, and `!` excludes.
+    let selected = false
     for (const pattern of patterns) {
-      const hit = matchMacosPath(file, pattern)
+      const negated = pattern.startsWith('!')
+      const hit = negated ? matchExcludedTree(file, pattern.slice(1)) : matchMacosPath(file, pattern)
       if (hit === null) return 'unknown'
-      if (hit) return 'changed'
+      if (hit) selected = !negated
     }
+    if (selected) return 'changed'
   }
   return 'empty'
 }

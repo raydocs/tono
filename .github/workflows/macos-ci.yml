@@ -30,6 +30,8 @@ on:
       - release/windows
     paths:
       - apps/macos/**
+      # Release notes are read only by the release workflows, never by these jobs.
+      - '!apps/macos/release-notes/**'
       - tooling/scripts/**
       - .github/workflows/macos-ci.yml
       - apps/windows/crates/tono-core/src/update_contract.rs

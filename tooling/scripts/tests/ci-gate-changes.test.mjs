@@ -21,6 +21,7 @@ const heavy = ['macos', 'windows', 'services', 'singBox', 'connectBench']
 
 const MACOS_PATHS = [
   'apps/macos/**',
+  '!apps/macos/release-notes/**',
   'tooling/scripts/**',
   '.github/workflows/macos-ci.yml',
   'apps/windows/crates/tono-core/src/update_contract.rs',
@@ -167,6 +168,19 @@ test('a touched path selects the workflow that lists it', () => {
   assert.equal(bench.connectBench, true)
   assert.equal(bench.macos, false)
   assert.equal(bench.windows, false)
+})
+
+test('macOS release notes alone do not queue the macOS jobs', () => {
+  const notes = matchingWorkflows([
+    'apps/macos/release-notes/build81.md',
+    'apps/macos/release-notes/build81.zh.md',
+  ], filters)
+  assert.equal(notes.macos, false)
+  const withCode = matchingWorkflows([
+    'apps/macos/release-notes/build81.md',
+    'apps/macos/Tono/App.swift',
+  ], filters)
+  assert.equal(withCode.macos, true)
 })
 
 test('a screenshots-nightly edit runs the services gate that holds its split test', () => {

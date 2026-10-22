@@ -103,10 +103,21 @@ export function filtersFromRepo(repoRoot = root) {
   return filters
 }
 
+// GitHub's `paths` semantics: patterns apply in order and the last one that
+// matches decides, so a `!pattern` after a broader one excludes those files.
+function pathSelected(file, patterns) {
+  let selected = false
+  for (const pattern of patterns) {
+    const negated = pattern.startsWith('!')
+    if (path.matchesGlob(file, negated ? pattern.slice(1) : pattern)) selected = !negated
+  }
+  return selected
+}
+
 export function matchingWorkflows(changedFiles, filters) {
   const selected = {}
   for (const [key, patterns] of Object.entries(filters)) {
-    selected[key] = changedFiles.some((file) => patterns.some((pattern) => path.matchesGlob(file, pattern)))
+    selected[key] = changedFiles.some((file) => pathSelected(file, patterns))
   }
   return selected
 }
