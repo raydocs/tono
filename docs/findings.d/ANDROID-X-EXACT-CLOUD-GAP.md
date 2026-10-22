@@ -38,7 +38,8 @@
 使用现有脚本同步 Android/iOS/macOS；Windows Core/Service 编译同一模板。
 不手改 GENERATED，不变更签名策略、版本 2 schema 或默认模式。
 macOS helper 精确准入图随之改变，需 4.52.63 → 4.52.64 保证重装。
-这是共享分类变更，非 Android 私有热补丁；独立高风险审查尚未运行，禁止合并/部署。
+这是共享分类变更，非 Android 私有热补丁；R1 已覆盖原 head，修正 delta 待父任务 R2，
+本次不合并/部署。
 
 ## 验证
 
@@ -78,7 +79,46 @@ SHA-256 `1841d78af4c096db21f7b5b2f9f568db81937a5c80897485fc6da0e90d7b6ca4`。
 - 本地与云端三个同步检查及同步器 Node 回归（1 pass）通过。
   源码/实际 Android 图除 15 个 exact host 追加外不变；两个 macOS 生成图同样
   只追加该表，不改变 Home/video 优先级、DNS 服务器或 actions/order。
-- 未运行/未验收：独立高风险审查、macOS/iOS/Windows 原生套件、Android
-  emulator/实机/签名构建；未等待或监控 PR CI。最终记录提交仅 docs，产品验证
-  覆盖上列 GREEN SHA，不将其改写成其他 SHA 上的运行结果。
+- 未运行/未验收：macOS app/iOS/Windows 原生套件、Android emulator/实机/签名构建；
+  未等待或监控 PR CI。`412374029` 相对产品 GREEN 仅 docs；原产品验证仍覆盖
+  上列 GREEN SHA，不将其改写成本次 contract 修正上的运行结果。
 用户设备、真实 X 服务、排除项、ECH/DoH、QUIC 回退未验证，不声称事故已解决。
+
+
+## R1 P2：helper 生成记录续修
+
+- [独立 R1 comment](https://github.com/raydocs/tono/pull/1719#issuecomment-6353785381)
+  覆盖 `412374029ebd7481c659d5ab3e07d5b3cf4ac599`：15 exact hosts、Grok Home、
+  video/DIRECT、UDP fail-closed、同步及原 RED/GREEN 证据通过；唯一 P2 为 helper
+  已升 4.52.64，`CONTRACT.sha256` 仍记 4.52.63，触发 release pretest 差异门禁。
+  最新核对 main `a358512867665c30bc25e5d83c10e5f627d56d1d` 为 4.52.63，无碰撞，
+  不另改版本或产品代码。仅 contract 和本 PR 现有 changelog/finding 续记。
+- 优先下载 [ci-gate run 39873014935 artifact 12465994988](https://github.com/raydocs/tono/actions/runs/39873014935/artifacts/12465994988)：
+  zip SHA-256 `09e9925d49a7c5abe87cae5b31a34ce935793886be1aad5fec37ca7c323c5b20`；
+  只有 helper binary/`.built`，没有生成 contract。CI checkout 为 PR merge tree，
+  不冒充精确 source head；取得缺失输出才使用下列托管生成，没有再 dispatch CI/release。
+- [Devin macOS session 3aae4123754c4ba3bc33ee89cb2d1e6c](https://app.devin.ai/sessions/3aae4123754c4ba3bc33ee89cb2d1e6c)：
+  macOS 26.6.2 / Xcode 26.6，精确 detached `412374029ebd7481c659d5ab3e07d5b3cf4ac599`，
+  原样 `tooling/scripts/build-core-helper.sh` 单次执行，`EXIT_CODE=0`、输出 `4.52.64`。
+  [原始生成证据包](https://app.devin.ai/attachments/3114639a-7747-477b-a675-d73761758f93/tono-helper-contract-evidence.tar.gz)
+  SHA-256 `5ed57f8939fb6b08a7251d5fa3c55212c4e0c307b4e95c9020d4599c13d501bd`，含原始生成日志、
+  stale/generated records、guard diff/退出码、25 个源码输入及 builder 校验清单和 `.built`。
+- [生成的原始 CONTRACT.sha256](https://app.devin.ai/attachments/7818468c-4c1f-428b-9c0f-fbb0844faa45/CONTRACT.sha256)
+  文件 SHA-256 `e5b15e12b160ac82887c97476a5a0fc17ae82e80b2255ced3e89419a5d80f2eb`；
+  内容 `4.52.64 fedc99798999a8b68a9fad6cb3224e699efb6ccd99a90d3bdc63c9fe91933b08`。
+  本修正任务下载核对 56 个包内文件、26 个源码/脚本校验项及独立附件字节一致，原样复制，未手填 hash。
+  生成 binary SHA-256 `bd791aa4d3702b12e24fd784575ea479e55fbcf3a2c71c0abe4f065592dda69f`、
+  build fingerprint `8832ffe82341301a0423b5cc119cf0a14b73c2cfc1a6c37c09afad44177f8fdb`
+  与已下载 ci-gate artifact 的 `.built` 完全一致；不提交 binary。
+- **RED guard**：真实生成后原样 `git diff --exit-code -- tooling/scripts/core-helper/CONTRACT.sha256`
+  返回 `EXIT_CODE=1`，完整 diff 为旧 4.52.63/`4d95c342…` → 上述新记录；包内保留原始输出。
+  **GREEN guard**：本地原样复制附件并暂存记录后，同一命令 `EXIT=0`；提交 head 的同一
+  guard 输出另记 PR 验证 comment。这验证 tracked record 与确切生成输出一致，未在 MacBook
+  重编译，也不冒充完整 `macos-release.yml` 执行。
+- 托管 `tooling/scripts/test-core-helper-contract-guard.sh`：`PASS build-core-helper contract guard`、
+  `EXIT_CODE=0`；本地 `ruby tooling/scripts/tests/macos-candidate-workflow.test.rb`：
+  `11 branch cases and update-authority guards passed`、`EXIT=0`（仅 synthetic unsigned fixtures）。
+- 未运行：完整 release pretest/core 输入验证、app/Xcode 构建、独立原生/root 套件、设备与真实服务；
+  generator 内置 self-test 提示 `PF syntax check skipped (needs root)`，未隐去或冒充 root 通过。
+  只用 builder 普通 ad-hoc 签名，未调用 Developer ID、签名/release workflow、客户发布或生产。
+  修正明确 supersedes 有缺陷旧候选；仅一次非 force push，修正 delta 交父任务 R2，复用原覆盖。
