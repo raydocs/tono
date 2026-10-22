@@ -1,6 +1,6 @@
 ## 2026-10-22 · 目录发布补齐两桌面客户端名称集合准入（C3-PC-F3）
 - 归属：ops plan [§7.2 目录 schema 与后台归属](../ops/plan-2026-09-11.md)；仅控制面目录发布可靠性，不推进桌面发布冻结或客户发布门。
-- 来源：基线 `d1232520a742b3e747f7b9a228361d696f24a172` → 本 PR head；分支 `t3/catalog-publish-validation`；未合 main。
+- 来源：基线 `d1232520a742b3e747f7b9a228361d696f24a172` → [#1713](https://github.com/raydocs/tono/pull/1713) head（Draft）；分支 `t3/catalog-publish-validation`；未合 main。
 - 缺陷修复：`managedCatalogYAML` 原来只逐条查名称/身份，重复节点名、客户端保留名或 macOS 拒收前缀仍能经 `PUT exit-catalog` 返回 200。
   现在按完整 proxy 名做集合校验，拒绝两桌面客户端保留名的并集和 `Tono-WeChat-TCP-` 前缀，返回 400 `INVALID_CATALOG`，已存目录不变。
   对照合同为 macOS `ConfigPipeline.validatedOwnedNodes`（`ConfigPipeline+Nodes.swift`，常量在 `ConfigPipeline.swift`）与 Windows `node.rs` 的 `validate_node_set` / `RESERVED_NODE_NAMES`。
