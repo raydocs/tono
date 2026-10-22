@@ -15,9 +15,9 @@ export async function open(
 ): Promise<void> {
   const params = new URLSearchParams();
   if (fixtures !== 'default') params.set('fixtures', fixtures);
-  // A test that writes asks for its own copy of the mutable store, so an ack
-  // in the light project cannot change what the dark project screenshots.
-  if (session) params.set('session', session);
+  // Even opening inventory writes (automatic egress lookups). Isolate every
+  // test, not just explicit write flows; keep the same store on navigation.
+  params.set('session', session ?? sessionFor(`${test.info().testId}-${fixtures}`));
   const query = params.toString();
   await page.goto(`/ops/${query ? `?${query}` : ''}#${hash}`, { waitUntil: 'networkidle' });
   await settle(page);
