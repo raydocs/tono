@@ -373,6 +373,7 @@ final class AppModel: ObservableObject {
     }
 
     func disconnect() async {
+        traffic.stop()
         wantOn = false
         userStarting = false
         userStopping = tunnelStatus != .disconnected && tunnelStatus != .invalid
@@ -796,7 +797,8 @@ final class AppModel: ObservableObject {
         switch status {
         case .connected:
             userStarting = false
-            traffic.start()
+            if signedIn, !signingOut, !userStopping { traffic.start(session: since) }
+            else { traffic.stop() }
             // The exit checks start once the tunnel confirms a graph (`recompute`).
             Task { await readStatus() }
         case .disconnected, .invalid:
@@ -820,7 +822,7 @@ final class AppModel: ObservableObject {
             userStarting = false
             userStopping = false
         default:
-            break
+            traffic.stop()
         }
         recompute()
     }

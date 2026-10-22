@@ -54,6 +54,8 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           swift --version
+      - name: Statistics socket lifecycle regressions
+        run: apps/ios/tools/test-traffic-monitor.sh
       - name: TonoKit tests (macOS)
         working-directory: apps/ios/TonoKit
         run: swift test
