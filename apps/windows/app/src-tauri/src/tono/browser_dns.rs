@@ -25,15 +25,24 @@ enum BrowserDnsIssue {
     AutomaticCustomProvider,
     UnsupportedMode,
     IncompleteScan,
+    /// A managed-policy key or value exists but cannot be read; names the scope and item so
+    /// support can find the program that wrote or locked it.
+    UnreadablePolicy {
+        scope: &'static str,
+        item: &'static str,
+    },
 }
 
 impl BrowserDnsIssue {
-    fn detail(self) -> &'static str {
+    fn detail(self) -> String {
         match self {
-            Self::Secure => "Secure DNS is set to Secure",
-            Self::AutomaticCustomProvider => "Secure DNS is Automatic with a custom provider",
-            Self::UnsupportedMode => "Secure DNS has an unsupported configuration",
-            Self::IncompleteScan => "the bounded Secure DNS configuration scan is incomplete",
+            Self::Secure => "Secure DNS is set to Secure".to_owned(),
+            Self::AutomaticCustomProvider => "Secure DNS is Automatic with a custom provider".to_owned(),
+            Self::UnsupportedMode => "Secure DNS has an unsupported configuration".to_owned(),
+            Self::IncompleteScan => "the bounded Secure DNS configuration scan is incomplete".to_owned(),
+            Self::UnreadablePolicy { scope, item } => {
+                format!("the managed Secure DNS policy ({scope} {item}) could not be read")
+            }
         }
     }
 }
@@ -135,6 +144,9 @@ fn message(browser: &str, issue: BrowserDnsIssue) -> String {
         BrowserDnsIssue::IncompleteScan => {
             "Tono could not verify the configuration; this does not mean Secure DNS is enabled. Fully close the browser and retry connecting. If this persists, ask support to check Local State readability, valid JSON, scan limits, and policy access; do not delete browser data or disable Tono protection"
         }
+        BrowserDnsIssue::UnreadablePolicy { .. } => {
+            "Tono could not verify the configuration; this does not mean Secure DNS is enabled. Another program may have written this policy with an unexpected type or locked its permissions; ask support to check that registry value. Do not delete browser data or disable Tono protection"
+        }
         _ => {
             "Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono. If the setting is managed, ask your administrator to check DnsOverHttpsMode and DnsOverHttpsTemplates"
         }
@@ -148,19 +160,29 @@ fn message(browser: &str, issue: BrowserDnsIssue) -> String {
 fn scan_user_data_root(root: &Path, policy: &ManagedPolicy, total_bytes: &mut u64) -> Result<(), BrowserDnsIssue> {
     // Chromium registers desktop Secure DNS in browser-wide Local State. The policy metadata is
     // likewise `per_profile: false`; profile `Preferences` are neither authoritative nor scanned.
-    match read_json_source(&root.join("Local State"), total_bytes)? {
-        Some(local_state) => classify_source(policy, &preference_source(&local_state)?)?,
+    let source = match read_json_source(&root.join("Local State"), total_bytes)? {
+        Some(local_state) => preference_source(&local_state)?,
         None => {
+            // A running Chromium holds `lockfile` (delete-on-close) in its User Data root and
+            // keeps Secure DNS in memory; it does not rewrite a deleted Local State on its own,
+            // so that case stays incomplete unless policy forces Off. With no lockfile the next
+            // launch reads defaults, which is also what a Chinese Chromium shell leaves behind
+            // when it creates Google\Chrome\User Data without ever writing Local State.
+            let in_use = root
+                .join("lockfile")
+                .try_exists()
+                .map_err(|_| BrowserDnsIssue::IncompleteScan)?;
             let managed_off = policy
                 .mode
                 .as_deref()
                 .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("off"));
-            if !managed_off {
+            if in_use && !managed_off {
                 return Err(BrowserDnsIssue::IncompleteScan);
             }
+            PreferenceSource::default()
         }
-    }
-    Ok(())
+    };
+    classify_source(policy, &source)
 }
 
 fn read_json_source(path: &Path, total_bytes: &mut u64) -> Result<Option<Value>, BrowserDnsIssue> {
@@ -242,13 +264,17 @@ fn read_managed_policy(browser: BrowserSpec) -> Result<ManagedPolicy, BrowserDns
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 
-    let machine = read_policy_scope(&RegKey::predef(HKEY_LOCAL_MACHINE), browser.policy_key)?;
-    let user = read_policy_scope(&RegKey::predef(HKEY_CURRENT_USER), browser.policy_key)?;
+    let machine = read_policy_scope(&RegKey::predef(HKEY_LOCAL_MACHINE), "HKLM", browser.policy_key)?;
+    let user = read_policy_scope(&RegKey::predef(HKEY_CURRENT_USER), "HKCU", browser.policy_key)?;
     Ok(merge_policy(machine, user))
 }
 
 #[cfg(windows)]
-fn read_policy_scope(root: &winreg::RegKey, policy_key: &str) -> Result<ManagedPolicy, BrowserDnsIssue> {
+fn read_policy_scope(
+    root: &winreg::RegKey,
+    scope: &'static str,
+    policy_key: &'static str,
+) -> Result<ManagedPolicy, BrowserDnsIssue> {
     use winreg::enums::KEY_READ;
 
     let key = match root.open_subkey_with_flags(policy_key, KEY_READ) {
@@ -256,20 +282,29 @@ fn read_policy_scope(root: &winreg::RegKey, policy_key: &str) -> Result<ManagedP
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ManagedPolicy::default());
         }
-        Err(_) => return Err(BrowserDnsIssue::IncompleteScan),
+        Err(_) => {
+            return Err(BrowserDnsIssue::UnreadablePolicy {
+                scope,
+                item: policy_key,
+            });
+        }
     };
     Ok(ManagedPolicy {
-        mode: read_policy_string(&key, "DnsOverHttpsMode")?,
-        templates: read_policy_string(&key, "DnsOverHttpsTemplates")?,
+        mode: read_policy_string(&key, scope, "DnsOverHttpsMode")?,
+        templates: read_policy_string(&key, scope, "DnsOverHttpsTemplates")?,
     })
 }
 
 #[cfg(windows)]
-fn read_policy_string(key: &winreg::RegKey, name: &str) -> Result<Option<String>, BrowserDnsIssue> {
+fn read_policy_string(
+    key: &winreg::RegKey,
+    scope: &'static str,
+    name: &'static str,
+) -> Result<Option<String>, BrowserDnsIssue> {
     match key.get_value(name) {
         Ok(value) => Ok(Some(value)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(BrowserDnsIssue::IncompleteScan),
+        Err(_) => Err(BrowserDnsIssue::UnreadablePolicy { scope, item: name }),
     }
 }
 
@@ -407,14 +442,13 @@ mod tests {
     }
 
     #[test]
-    fn existing_root_without_local_state_is_incomplete_unless_managed_off() {
+    fn existing_root_without_local_state_uses_browser_defaults_and_policy() {
+        // Chinese Chromium shells can create Google\Chrome\User Data without ever writing
+        // Chrome's Local State; that must not block a machine where Chrome never ran.
         let root = temp_root("missing-local-state");
         fs::create_dir_all(&root).unwrap();
 
-        assert_eq!(
-            scan_user_data_root(&root, &ManagedPolicy::default(), &mut 0),
-            Err(BrowserDnsIssue::IncompleteScan)
-        );
+        assert_eq!(scan_user_data_root(&root, &ManagedPolicy::default(), &mut 0), Ok(()));
         assert_eq!(
             scan_user_data_root(
                 &root,
@@ -426,6 +460,59 @@ mod tests {
             ),
             Ok(())
         );
+        assert_eq!(
+            scan_user_data_root(
+                &root,
+                &ManagedPolicy {
+                    mode: Some("secure".to_owned()),
+                    templates: None,
+                },
+                &mut 0,
+            ),
+            Err(BrowserDnsIssue::Secure)
+        );
+        assert_eq!(
+            scan_user_data_root(
+                &root,
+                &ManagedPolicy {
+                    mode: None,
+                    templates: Some("https://dns.example/dns-query".to_owned()),
+                },
+                &mut 0,
+            ),
+            Err(BrowserDnsIssue::AutomaticCustomProvider)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn running_browser_without_local_state_stays_incomplete_unless_managed_off() {
+        // A running Chromium may hold Secure DNS only in memory after Local State is removed;
+        // every recheck must keep failing until the browser exits or writes the file again.
+        let root = temp_root("running-missing-local-state");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("lockfile"), b"").unwrap();
+
+        for _ in 0..2 {
+            assert_eq!(
+                scan_user_data_root(&root, &ManagedPolicy::default(), &mut 0),
+                Err(BrowserDnsIssue::IncompleteScan)
+            );
+        }
+        assert_eq!(
+            scan_user_data_root(
+                &root,
+                &ManagedPolicy {
+                    mode: Some("off".to_owned()),
+                    templates: None,
+                },
+                &mut 0,
+            ),
+            Ok(())
+        );
+
+        fs::remove_file(root.join("lockfile")).unwrap();
+        assert_eq!(scan_user_data_root(&root, &ManagedPolicy::default(), &mut 0), Ok(()));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -450,6 +537,20 @@ mod tests {
         assert!(text.contains("does not mean Secure DNS is enabled"));
         assert!(text.contains("retry connecting"));
         assert!(text.contains("Local State readability"));
+        assert!(!text.contains("Set Secure DNS to Off"));
+    }
+
+    #[test]
+    fn unreadable_policy_names_the_registry_value_without_prescribing_dns_changes() {
+        let text = message(
+            "Chrome",
+            BrowserDnsIssue::UnreadablePolicy {
+                scope: "HKLM",
+                item: "DnsOverHttpsMode",
+            },
+        );
+        assert!(text.starts_with("Chrome: the managed Secure DNS policy (HKLM DnsOverHttpsMode) could not be read."));
+        assert!(text.contains("does not mean Secure DNS is enabled"));
         assert!(!text.contains("Set Secure DNS to Off"));
     }
 
