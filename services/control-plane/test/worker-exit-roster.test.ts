@@ -113,7 +113,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   it('keeps catalogs on an acknowledged legacy user credential while the device credential propagates', async () => {
     await env.DB.prepare('DELETE FROM exit_nodes').run();
     const account = await createAccount('dual-rollout-fallback');
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+    const yaml = `proxies:\n  - name: Managed Roster Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     // The served exit acknowledged a roster after the shared credential was
     // created but before this device's credential existed.
@@ -125,7 +125,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).bind(account.user.id, crypto.randomUUID(), deviceCreated - 100).run();
     await env.DB.prepare(
       `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
-       VALUES('exit-tono', 'Tono-Exit', ?, 'active', ?, ?, ?)`,
+       VALUES('exit-tono', 'Managed Roster Exit', ?, 'active', ?, ?, ?)`,
     ).bind(await sha256('exit-tono-token-with-at-least-32-characters'), deviceCreated - 50, deviceCreated, deviceCreated).run();
 
     const catalog = await api('exit-catalog', {
@@ -154,9 +154,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   it('never serves a new dual account an exit identity no served exit has acknowledged', async () => {
     await env.DB.prepare('DELETE FROM exit_nodes').run();
     const account = await createAccount('dual-unacked-shared');
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+    const yaml = `proxies:\n  - name: Managed Roster Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
-    const node = await admin('exit-nodes', { id: 'exit-unacked', name: 'Tono-Exit' });
+    const node = await admin('exit-nodes', { id: 'exit-unacked', name: 'Managed Roster Exit' });
     const nodeToken = String((await node.json() as any).token);
 
     const propagating = await api('exit-catalog', {
@@ -191,7 +191,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect(second.status).toBe(200);
     const survivor = await second.json() as any;
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+    const yaml = `proxies:\n  - name: Managed Roster Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
     // The shared credential a revoked device may hold.
@@ -221,7 +221,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const survivorCredential = await env.DB.prepare(
       'SELECT client_uuid, created_at FROM device_exit_credentials WHERE device_id = ?',
     ).bind(survivor.device.id).first<any>();
-    const node = await admin('exit-nodes', { id: 'exit-tono', name: 'Tono-Exit' });
+    const node = await admin('exit-nodes', { id: 'exit-tono', name: 'Managed Roster Exit' });
     const nodeToken = String((await node.json() as any).token);
     expect((await api('home/roster-ack', json({
       observedAt: Number(survivorCredential.created_at) + 1,
@@ -251,13 +251,13 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     await env.DB.prepare(
       'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
     ).bind(account.user.id, crypto.randomUUID()).run();
-    const served = '  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n';
+    const served = '  - name: Managed Roster Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n';
     const published = await admin('exit-catalog', { yaml: `proxies:\n${served}`, expectedRevision: 0 }, 'PUT');
     expect(published.status).toBe(200);
     const timestamp = Math.floor(Date.now() / 1000);
     await env.DB.prepare(
       `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
-       VALUES('exit-served', 'Tono-Exit', ?, 'active', ?, ?, ?)`,
+       VALUES('exit-served', 'Managed Roster Exit', ?, 'active', ?, ?, ?)`,
     ).bind(await sha256('exit-served-token-with-at-least-32-characters'), timestamp + 3600, timestamp, timestamp).run();
     // Registered and active (last_roster_at 0) but not yet published.
     expect((await admin('exit-nodes', { id: 'exit-unpublished', name: 'Unpublished Exit' })).status).toBe(201);
@@ -271,7 +271,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).bind(account.device.id).first<any>();
     expect((await catalog.json() as any).yaml).toContain(device.client_uuid);
 
-    const unpublished = served.replace('Tono-Exit', 'Unpublished Exit').replace('exit.example.com', 'late.example.com');
+    const unpublished = served.replace('Managed Roster Exit', 'Unpublished Exit').replace('exit.example.com', 'late.example.com');
     expect((await admin('exit-catalog', {
       yaml: `proxies:\n${served}${unpublished}`,
       expectedRevision: (await published.json() as any).revision,
@@ -290,11 +290,11 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const account = await createAccount('catalog-home-ready');
     const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', {
-      yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Home Residential A', 'home.example.com')}`,
+      yaml: `proxies:\n${block('Managed Roster Exit', 'exit.example.com')}${block('Home Residential A', 'home.example.com')}`,
       expectedRevision: 0,
     }, 'PUT')).status).toBe(200);
     // exit-default is seeded active with an acknowledgement an hour ahead.
-    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Managed Roster Exit' WHERE id = 'exit-default'").run();
     const home = await admin('home-exits', { proxyName: 'Home Residential A', displayName: 'Home A' });
     expect((await admin(
       `users/${account.user.id}/home-binding`,
@@ -321,11 +321,11 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).bind(account.user.id, crypto.randomUUID()).run();
     const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', {
-      yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Collision', 'collision.example.com')}`,
+      yaml: `proxies:\n${block('Managed Roster Exit', 'exit.example.com')}${block('Collision', 'collision.example.com')}`,
       expectedRevision: 0,
     }, 'PUT')).status).toBe(200);
     // exit-default is seeded active with an acknowledgement an hour ahead.
-    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Managed Roster Exit' WHERE id = 'exit-default'").run();
     // Registered and active, but it has never acknowledged a roster.
     expect((await admin('exit-nodes', { id: 'exit-collision', name: 'Collision' })).status).toBe(201);
     const home = await admin('home-exits', { proxyName: 'Collision', displayName: 'Collision home' });
@@ -721,8 +721,8 @@ rules: []
   });
 
   it('does not treat a same-second roster acknowledgement as covering a new credential', async () => {
-    await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Managed Roster Exit' WHERE id = 'exit-default'").run();
+    const yaml = `proxies:\n  - name: Managed Roster Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     expect((await admin('exit-credential-rollout', { phase: 'device_only' })).status).toBe(200);
 
@@ -756,9 +756,9 @@ rules: []
     const startedAt = Math.floor(Date.now() / 1_000) * 1_000 + offset;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
     try {
-      await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
+      await env.DB.prepare("UPDATE exit_nodes SET name = 'Managed Roster Exit' WHERE id = 'exit-default'").run();
       const account = await createAccount('credential-rollout');
-      const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+      const yaml = `proxies:\n  - name: Managed Roster Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
       expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
       const advanced = await admin('exit-credential-rollout', { phase: 'device_only' });
