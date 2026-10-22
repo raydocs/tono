@@ -44,10 +44,10 @@ nonisolated struct ControlPlanePath: Sendable {
     /// the path cannot be probed; the pre-login probe then says nothing.
     var handshake: (@Sendable () async -> Bool)? = nil
     /// The same exchange, given up with `URLError(.timedOut)` when no status
-    /// line has arrived within the budget (the last argument, seconds). Only
-    /// the system resolver has one: its `URLSession` otherwise waits out its
-    /// own 30 s request and 45 s resource timeouts on an address that drops
-    /// every packet. The walk uses it for a read with another path behind it,
+    /// line has arrived within the budget (the last argument, seconds). The
+    /// system resolver and pinned addresses have one; otherwise a silent
+    /// connection holds the next path back for the full exchange timeout.
+    /// The walk uses it for a read with another path behind it,
     /// never for a mutating request, which may already have arrived.
     var exchangeWithinHeadBudget: (@Sendable (URLRequest, Int, TimeInterval) async throws -> ControlPlaneAnswer)? = nil
 
@@ -143,6 +143,13 @@ nonisolated struct ControlPlanePath: Sendable {
             .filter { IPv4Address($0) != nil }
         guard !addresses.isEmpty else { return nil }
         let endpoints = addresses.map { ControlPlaneEndpoint(address: $0, port: 443) }
+        return pinned(host: host, endpoints: endpoints)
+    }
+
+    /// Shared construction for the production pins and deterministic transport fixtures.
+    nonisolated static func pinned(
+        host: String, endpoints: [ControlPlaneEndpoint], runtime: PinnedExchangeRuntime = .live
+    ) -> ControlPlanePath {
         var path = ControlPlanePath(label: "pinned") { request, maximumResponseBytes in
             try await PinnedControlPlaneExchange.send(
                 request,
@@ -151,7 +158,16 @@ nonisolated struct ControlPlanePath: Sendable {
                 endpoints: endpoints,
                 connectBudget: PinnedControlPlaneExchange.connectBudget,
                 userAgent: userAgent,
-                maximumResponseBytes: maximumResponseBytes
+                maximumResponseBytes: maximumResponseBytes,
+                runtime: runtime
+            )
+        }
+        path.exchangeWithinHeadBudget = { request, maximumResponseBytes, budget in
+            try await PinnedControlPlaneExchange.send(
+                request, label: "pinned", host: host, endpoints: endpoints,
+                connectBudget: PinnedControlPlaneExchange.connectBudget,
+                userAgent: userAgent, maximumResponseBytes: maximumResponseBytes,
+                runtime: runtime, headBudget: budget
             )
         }
         path.handshake = { await ControlPlaneHandshake.reaches(endpoints, host: host) }
@@ -373,6 +389,44 @@ nonisolated enum PinnedTLS {
     }
 }
 
+/// Per-exchange dependencies; fixtures can accept TLS and hold response bytes,
+/// then advance deadlines without sleeping or opening a socket.
+nonisolated struct PinnedExchangeRuntime: Sendable {
+    let now: @Sendable () -> TimeInterval
+    let schedule: @Sendable (DispatchQueue, TimeInterval, @escaping @Sendable () -> Void) -> Void
+    let transport: @Sendable (ControlPlaneEndpoint, String) -> PinnedExchangeTransport
+
+    static let live = PinnedExchangeRuntime(
+        now: { ProcessInfo.processInfo.systemUptime },
+        schedule: { queue, delay, action in queue.asyncAfter(deadline: .now() + delay, execute: action) },
+        transport: { endpoint, host in
+            let connection = PinnedTLS.connection(to: endpoint, host: host)
+            return PinnedExchangeTransport(
+                start: { queue, handler in
+                    connection.stateUpdateHandler = handler
+                    connection.start(queue: queue)
+                },
+                send: { content, completion in
+                    connection.send(content: content, completion: .contentProcessed(completion))
+                },
+                receive: { completion in
+                    connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, end, error in
+                        completion(data, end, error)
+                    }
+                },
+                cancel: { connection.stateUpdateHandler = nil; connection.cancel() }
+            )
+        }
+    )
+}
+
+nonisolated struct PinnedExchangeTransport: Sendable {
+    let start: @Sendable (DispatchQueue, @escaping @Sendable (NWConnection.State) -> Void) -> Void
+    let send: @Sendable (Data, @escaping @Sendable (NWError?) -> Void) -> Void
+    let receive: @Sendable (@escaping @Sendable (Data?, Bool, NWError?) -> Void) -> Void
+    let cancel: @Sendable () -> Void
+}
+
 /// HTTP/1.1 over one TLS connection to a pinned address (#584).
 ///
 /// `URLSession` cannot dial a fixed address for a host name, so this is the
@@ -415,7 +469,9 @@ nonisolated enum PinnedControlPlaneExchange {
         endpoints: [ControlPlaneEndpoint],
         connectBudget: TimeInterval,
         userAgent: String,
-        maximumResponseBytes: Int
+        maximumResponseBytes: Int,
+        runtime: PinnedExchangeRuntime = .live,
+        headBudget: TimeInterval? = nil
     ) async throws -> ControlPlaneAnswer {
         guard let message = requestBytes(request, host: host, userAgent: userAgent) else {
             // Nothing was sent, so another path may still carry it.
@@ -423,24 +479,31 @@ nonisolated enum PinnedControlPlaneExchange {
                 NSLocalizedDescriptionKey: "\(label): the request could not be framed",
             ])
         }
-        let started = Date()
+        let started = runtime.now()
+        // Defense in depth: even a caller outside the path walk cannot apply
+        // this ambiguous-failure fallback budget to a login or mutation.
+        let headDeadline = (request.httpMethod ?? "GET") == "GET" ? headBudget.map { started + $0 } : nil
         var failures: [String] = []
         var clockRejected = false
         var trustRejected = false
         for (index, endpoint) in endpoints.enumerated() {
             try Task.checkCancellation()
-            let remaining = connectBudget - Date().timeIntervalSince(started)
+            let elapsed = runtime.now() - started
+            if let headDeadline, headDeadline <= runtime.now() { throw URLError(.timedOut) }
+            let remaining = connectBudget - elapsed
             guard remaining > 0 else { break }
             let connection = PinnedConnection(
                 endpoint: endpoint,
                 host: host,
                 label: label,
                 message: message,
-                maximumResponseBytes: maximumResponseBytes
+                maximumResponseBytes: maximumResponseBytes,
+                runtime: runtime
             )
             switch await connection.run(
                 connectBudget: remaining / Double(endpoints.count - index),
-                exchangeBudget: exchangeBudget
+                exchangeBudget: exchangeBudget,
+                headDeadline: headDeadline
             ) {
             case let .answered(answer):
                 return answer
@@ -531,7 +594,8 @@ nonisolated private enum PinnedOutcome: Sendable {
 
 /// One pinned endpoint, one request.
 nonisolated private final class PinnedConnection: @unchecked Sendable {
-    private let connection: NWConnection
+    private let connection: PinnedExchangeTransport
+    private let runtime: PinnedExchangeRuntime
     private let label: String
     private let message: Data
     private let maximumResponseBytes: Int
@@ -548,18 +612,24 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     private var received = Data()
 
     init(
-        endpoint: ControlPlaneEndpoint, host: String, label: String, message: Data, maximumResponseBytes: Int
+        endpoint: ControlPlaneEndpoint, host: String, label: String, message: Data, maximumResponseBytes: Int,
+        runtime: PinnedExchangeRuntime
     ) {
-        connection = PinnedTLS.connection(to: endpoint, host: host)
+        self.runtime = runtime
+        connection = runtime.transport(endpoint, host)
         self.label = label
         self.message = message
         self.maximumResponseBytes = maximumResponseBytes
     }
 
-    func run(connectBudget: TimeInterval, exchangeBudget: TimeInterval) async -> PinnedOutcome {
+    func run(
+        connectBudget: TimeInterval, exchangeBudget: TimeInterval, headDeadline: TimeInterval?
+    ) async -> PinnedOutcome {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<PinnedOutcome, Never>) in
-                self.start(continuation, connectBudget: connectBudget, exchangeBudget: exchangeBudget)
+                self.start(
+                    continuation, connectBudget: connectBudget, exchangeBudget: exchangeBudget, headDeadline: headDeadline
+                )
             }
         } onCancel: {
             // The parse state lives on `queue`.
@@ -570,7 +640,8 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     private func start(
         _ continuation: CheckedContinuation<PinnedOutcome, Never>,
         connectBudget: TimeInterval,
-        exchangeBudget: TimeInterval
+        exchangeBudget: TimeInterval,
+        headDeadline: TimeInterval?
     ) {
         lock.lock()
         if let early = outcome {
@@ -581,13 +652,25 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
         }
         self.continuation = continuation
         lock.unlock()
-        connection.stateUpdateHandler = { [self] state in handle(state) }
-        connection.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + connectBudget) { [self] in
+        connection.start(queue, { [self] state in handle(state) })
+        if let headDeadline {
+            // The absolute deadline belongs to the whole path, not each pin.
+            runtime.schedule(queue, max(0, headDeadline - runtime.now())) { [self] in
+                guard !isFinished else { return }
+                // A final status line is already the server's answer, even
+                // if its headers/body are slow. Never turn it into a retry.
+                if case .incomplete(.none, _) = PinnedResponse.interpret(
+                    received, atEnd: false, limit: maximumResponseBytes
+                ) {
+                    finish(.failedAfterConnect(URLError(.timedOut)))
+                }
+            }
+        }
+        runtime.schedule(queue, connectBudget) { [self] in
             guard !connected else { return }
             finish(notConnected(lastWaiting ?? "no TLS connection within \(Int(connectBudget.rounded(.up))) s"))
         }
-        queue.asyncAfter(deadline: .now() + exchangeBudget) { [self] in
+        runtime.schedule(queue, exchangeBudget) { [self] in
             finish(ending(with: URLError(.timedOut)))
         }
     }
@@ -621,7 +704,8 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
         case .ready:
             guard !isFinished else { return }
             connected = true
-            connection.send(content: message, completion: .contentProcessed { [self] error in
+            connection.send(message) { [self] error in
+                guard !isFinished else { return }
                 if let error {
                     finish(.failedAfterConnect(URLError(.networkConnectionLost, userInfo: [
                         NSLocalizedDescriptionKey: "\(label) send: \(error)",
@@ -629,7 +713,7 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                     return
                 }
                 receive()
-            })
+            }
         case let .waiting(error):
             // A certificate the clock cannot date will not pass on a retry.
             if !connected, CertificateClock.isDateFailure(error) {
@@ -651,14 +735,15 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 ]))
                 : notConnected("\(error)"))
         case .cancelled:
-            connection.stateUpdateHandler = nil
+            break
         default:
             break
         }
     }
 
     private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [self] data, _, isComplete, error in
+        guard !isFinished else { return }
+        connection.receive { [self] data, isComplete, error in
             guard !isFinished else { return }
             if let data { received.append(data) }
             guard received.count <= maximumResponseBytes + PinnedResponse.headLimit else {
