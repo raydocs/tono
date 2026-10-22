@@ -116,6 +116,17 @@ test.describe('设置', () => {
     await expect(page.locator('tbody tr')).toHaveCount(1);
   });
 
+  test('默认打开的操作记录不混入其他测试触发的出口查询', async ({ page }) => {
+    // Opening inventory can write without a click. Reproduce the lookup a
+    // previous test left in the dev server's shared default store.
+    const looked = await page.request.post('/api/v1/ops/home-exits/home_fixture_01/egress');
+    expect(looked.ok()).toBe(true);
+
+    await open(page, '/settings/audit');
+    await expect(page.locator('tbody tr').first()).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'home.egress', exact: true })).toHaveCount(0);
+  });
+
   /** Every write on the other five sections has to show up here, or it is not a log. */
   test('别的分节动过什么，操作记录里看得到', async ({ page }, testInfo) => {
     const session = `audit-${testInfo.project.name}`;
