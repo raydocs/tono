@@ -92,6 +92,8 @@ pub struct TonoStatus {
     pub selected_server: Option<String>,
     pub protection_blocked: bool,
     pub kill_switch: Option<KillSwitchStatus>,
+    /// Optional additive App UI projection of the existing Service advisory.
+    pub resolver_policy_warning: Option<String>,
     pub catalog_revision: Option<i64>,
     pub catalog_requires_choice: bool,
     /// Opaque process-local auth scope; never the persisted account ID.
@@ -280,6 +282,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         selected_server: inner.selected_node.clone(),
         protection_blocked: status.is_protection_blocked,
         kill_switch: inner.kill_switch.clone(),
+        resolver_policy_warning: if status.is_connected { inner.resolver_policy_warning.clone() } else { None },
         catalog_revision: (revision >= 0).then_some(revision),
         catalog_requires_choice: inner.catalog_requires_choice,
         route_preference_scope: crate::tono::route_preferences::scope_of(inner),

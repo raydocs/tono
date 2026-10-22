@@ -1000,8 +1000,15 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // overwrite a kill switch the Service has since replaced (a DIRECT reload moves to
         // Blocked while this task is still in the probe). Read the generation again and
         // publish only a reading that is still current.
+        let mut dns_observation_current = false;
         let fresh_kill_switch = match service::tono_service_status_snapshot().await {
             Ok(fresh) => {
+                // The untagged DNS status read belongs only to an unchanged Service owner/Core
+                // observation window. Failed/moved reads do not erase a prior warning.
+                dns_observation_current = fresh.is_active && snapshot.is_active
+                    && fresh.snapshot_generation == snapshot.snapshot_generation
+                    && fresh.active_generation == snapshot.active_generation
+                    && fresh.core_generation == snapshot.core_generation;
                 observe_network_events(&mut uplink_events_seen, fresh.network_events.counter);
                 Some((fresh.snapshot_generation, fresh.kill_switch))
             }
@@ -1025,6 +1032,15 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 }
                 CapturedKillSwitchPublish::Skip => None,
             };
+            let mut dns_warning_changed = false;
+            if dns_observation_current
+                && captured_connect_generation == inner.connect_generation
+                && inner.fsm.status().is_connected
+                && let Some(dns) = protected_dns.as_ref()
+            {
+                dns_warning_changed = inner.resolver_policy_warning != dns.resolver_policy_warning;
+                inner.resolver_policy_warning = dns.resolver_policy_warning.clone();
+            }
             // L3: surface kill switch changes as they are observed. A skipped publish leaves
             // the previous reading; it does not clear a barrier the Service still holds.
             let kill_switch_changed = published.is_some() && inner.kill_switch != published;
@@ -1098,7 +1114,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             }
 
             // Under the lock, like every status publisher (H16-C-F3).
-            if kill_switch_changed {
+            if kill_switch_changed || dns_warning_changed {
                 commands::emit_status(&app, &commands::status_of(&inner));
             }
             let mut events: Vec<AuditEvent> = Vec::new();

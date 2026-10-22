@@ -42,6 +42,9 @@ pub(crate) async fn status() -> DnsProtectionStatus {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
+    // Retired Core/session evidence must not survive a cached IPC read.
+    status.resolver_policy_warning = cached_resolver_policy_warning()
+        .filter(|_| status.enabled && status.snapshot_present);
     // #1145: the secondary AI hold lives while protection is released, when the cached
     // observation carries no policy verdict. Its degraded reason rides in the same advisory.
     if status.resolver_policy_warning.is_none() {
@@ -290,11 +293,10 @@ pub(super) async fn observe_status_unlocked() -> Result<(DnsProtectionStatus, bo
     // X2-2: adapter registry health is not the resolver policy Windows applies. Report the
     // watchdog's last policy verdict as an advisory beside `last_error`, never inside it.
     let resolver_policy_warning = if enabled && snapshot.is_some() && PROTECTION_WANTED.load(Ordering::Acquire) {
-        RESOLVER_POLICY_CONFLICT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        cached_resolver_policy_warning()
     } else {
+        // Also retire the stored verdict, not just this status projection.
+        cached_resolver_policy_warning();
         None
     };
     let status = DnsProtectionStatus {

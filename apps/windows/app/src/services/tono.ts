@@ -102,6 +102,8 @@ export interface TonoStatus {
   selectedServer: string | null
   protectionBlocked: boolean
   killSwitch: TonoKillSwitch | null
+  /** Existing Service DNS advisory; never changes connection/protection state. */
+  resolverPolicyWarning?: string | null
   catalogRevision: number | null
   catalogRequiresChoice: boolean
   /** Opaque, process-local account scope for preferences; never an account ID. */

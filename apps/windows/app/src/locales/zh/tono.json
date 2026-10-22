@@ -330,6 +330,9 @@
     "statusReality": "云端线路"
   },
   "dashboard": {
+    "systemDnsUnverified": "系统 DNS 未验证，部分网站可能无法打开。",
+    "dnsPolicyWarning": "Windows DNS 策略需要检查，部分网站可能无法打开。",
+    "dnsDiagnostics": "检查 DNS / 诊断",
     "title": "总览",
     "subtitle": "云端保护",
     "connect": "连接",

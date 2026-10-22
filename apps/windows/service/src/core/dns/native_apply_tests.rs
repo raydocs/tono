@@ -1094,6 +1094,38 @@ async fn repeated_system_dns_failure_warns_without_releasing_protection() -> Res
     let recovered = facade::observe_for_update().await?;
     assert!(recovered.resolver_policy_warning.is_none());
     assert!(recovered.enabled && recovered.last_error.is_none());
+
+    // Complete an old observer after a new Core publication (including PID reuse). Only OS
+    // reads are injected: the real async observer parks at the production DNS_OPERATION fence.
+    use crate::core::manager::set_running_core_identity_for_kill_switch_tests as set_core;
+    set_core(Some((4242, 1))).await;
+    test_io::with(|io| io.system_lookup = Err("previous system lookup still in flight".into())).unwrap();
+    facade::refresh_resolver_policy_observation().await;
+    assert!(facade::observe_for_update().await?.resolver_policy_warning.is_some());
+    let held = facade::test_hooks::hold_dns_operation().await;
+    let late = facade::refresh_resolver_policy_observation();
+    tokio::pin!(late);
+    tokio::select! {
+        biased;
+        _ = &mut late => panic!("observer must wait for DNS_OPERATION before publication"),
+        _ = std::future::ready(()) => {}
+    }
+    set_core(Some((4242, 2))).await;
+    drop(held);
+    late.await;
+    let next = facade::observe_for_update().await;
+    set_core(None).await;
+    let next = next?;
+    assert!(next.resolver_policy_warning.is_none(), "old observer crossed Core generation: {next:?}");
+    assert!(next.enabled && next.last_error.is_none());
+
+    facade::refresh_resolver_policy_observation().await;
+    assert!(facade::observe_for_update().await?.resolver_policy_warning.is_some());
+    let disconnected = facade::restore_protected().await?;
+    assert!(disconnected.resolver_policy_warning.is_none());
+    let new_session = facade::enable().await?;
+    assert!(new_session.resolver_policy_warning.is_none());
+    assert!(new_session.enabled && new_session.last_error.is_none());
     Ok(())
 }
 

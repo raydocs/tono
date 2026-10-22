@@ -11,6 +11,9 @@ use super::*;
 /// cannot change group policy or a VPN profile, so re-running it would only spin.
 pub(crate) const DNS_RESOLVER_POLICY_CONFLICT_PREFIX: &str = "TONO_DNS_POLICY_CONFLICT";
 
+/// Decision 060: no answer is not a foreign-policy verdict or a protection failure.
+pub(crate) const DNS_SYSTEM_UNVERIFIED_PREFIX: &str = "TONO_DNS_SYSTEM_UNVERIFIED";
+
 /// Stable marker for "the selective AI hold wrote its per-suffix NRPT rules, but the DNS Client is
 /// not applying them" (#1145): domain (Group Policy) NRPT policy exists, and while it holds any
 /// rule Windows ignores the local store where the hold lives, even for an unrelated namespace.
@@ -42,6 +45,26 @@ pub(super) const RESOLVER_POLICY_CHECK_INTERVAL: std::time::Duration = std::time
 /// The last policy verdict, written by [`refresh_resolver_policy_observation`] and folded into
 /// every status observation while protection is wanted.
 pub(super) static RESOLVER_POLICY_CONFLICT: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+// The existing coherent Core identity changes across starts/replacements, including PID reuse.
+// DNS is machine-wide; the owner-gated lifecycle admits the Core before enabling DNS. No new
+// Service IPC field or ownership authority is introduced for this read-only advisory.
+static RESOLVER_POLICY_CORE: Lazy<Mutex<Option<crate::core::manager::CoreInstanceId>>> =
+    Lazy::new(|| Mutex::new(None));
+
+pub(super) fn cached_resolver_policy_warning() -> Option<String> {
+    let core = crate::core::manager::security_core_instance_snapshot();
+    let mut observed_core = RESOLVER_POLICY_CORE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut warning = RESOLVER_POLICY_CONFLICT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !PROTECTION_WANTED.load(Ordering::Acquire) || *observed_core != core {
+        *warning = None;
+        *observed_core = core;
+    }
+    warning.clone()
+}
 
 /// Pure X2-2 verdict over the effective NRPT and one cache-bypassing system lookup. Only an
 /// observation that succeeded and contradicts protected DNS is a conflict. A read or lookup that
@@ -120,11 +143,29 @@ pub(crate) fn effective_nrpt_rules_now() -> std::result::Result<Vec<EffectiveNrp
 /// outside `DNS_OPERATION`: a lookup that policy sends to a resolver WFP drops waits out the DNS
 /// Client's own timeout, and no restore or repair may queue behind it.
 pub(super) async fn refresh_resolver_policy_observation() {
-    let verdict = if PROTECTION_WANTED.load(Ordering::Acquire) {
-        observe_resolver_policy().await
-    } else {
-        None
-    };
+    // Never hold DNS_OPERATION across the slow system query. A lifecycle move during it
+    // invalidates the result even if protection became wanted again before it completed.
+    let (generation, operation) = crate::core::operation::snapshot();
+    let core = crate::core::manager::security_core_instance_snapshot();
+    if operation.is_some() || !PROTECTION_WANTED.load(Ordering::Acquire) {
+        cached_resolver_policy_warning();
+        return;
+    }
+    let verdict = observe_resolver_policy().await;
+    let _operation = DNS_OPERATION.lock().await;
+    let (current_generation, operation) = crate::core::operation::snapshot();
+    if current_generation != generation
+        || operation.is_some()
+        || core != crate::core::manager::security_core_instance_snapshot()
+        || !PROTECTION_WANTED.load(Ordering::Acquire)
+    {
+        cached_resolver_policy_warning();
+        return;
+    }
+    let mut observed_core = RESOLVER_POLICY_CORE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *observed_core = core;
     *RESOLVER_POLICY_CONFLICT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = verdict;
@@ -135,10 +176,23 @@ pub(super) async fn observe_resolver_policy() -> Option<String> {
     {
         let rules = engine::effective_nrpt_rules().await;
         let lookup = engine::system_lookup_a(RESOLVER_POLICY_PROBE_HOST).await;
-        return resolver_policy_conflict(
+        let conflict = resolver_policy_conflict(
             rules.as_deref().map_err(String::as_str),
             lookup.as_deref().map_err(String::as_str),
         );
+        // A fresh successful Tono answer clears unverified-system-DNS. Configuration/status
+        // reads and repeated query errors cannot clear it. Keep contrary policy evidence too.
+        return if lookup.is_err() {
+            let unverified = format!(
+                "{DNS_SYSTEM_UNVERIFIED_PREFIX}: the cache-bypassing system DNS query did not answer"
+            );
+            Some(conflict.map_or_else(
+                || unverified.clone(),
+                |conflict| format!("{conflict}; {unverified}"),
+            ))
+        } else {
+            conflict
+        };
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {

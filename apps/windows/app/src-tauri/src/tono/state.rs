@@ -286,6 +286,8 @@ pub struct TonoInner {
     pub fsm: ConnectionFsm,
     /// Last observed kill switch aggregate.
     pub kill_switch: Option<KillSwitchStatus>,
+    /// Read-only Service DNS advisory for this connect generation; never a health-failure leg.
+    pub resolver_policy_warning: Option<String>,
     /// The last completed release kept the secondary AI hold (Quit or a replacement sign-in,
     /// decision 125). An idle App still owes the user a full release on an explicit Sign Out.
     pub ai_hold_retained: bool,
@@ -653,6 +655,7 @@ impl TonoInner {
     fn retire_connection_generation_as(&mut self, release_on_stale: bool, automatic: bool) {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
+        self.resolver_policy_warning = None;
         // The retry loop of the retired session is aborted or stops at its next ownership
         // check; its right to retry must not outlive the session.
         self.retry_owner = None;
@@ -851,6 +854,7 @@ impl TonoState {
                 server_test_cancellation: None,
                 fsm: ConnectionFsm::new(),
                 kill_switch: None,
+                resolver_policy_warning: None,
                 ai_hold_retained: false,
                 network_events_counter: None,
                 controller_secret: None,
