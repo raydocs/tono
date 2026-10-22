@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-DNS-RACE-MASKS-SYSTEM | TUN-only 准入后，Service 系统 DNS 查询持续 Err/超时可无 advisory，首页缺少系统 DNS 未验证告警 | open | 本轮独立 draft；见分支 t3/system-dns-warning | 中·推导 | 原生 RED/GREEN 与生命周期独立审查见 delivering PR；Win10/11 系统解析及 UI 待实机；仅修 DNS 可见性，不涉及缺上行、自动修复/释放/重连 |
+| WIN-DNS-RACE-MASKS-SYSTEM | TUN-only 准入后，Service 系统 DNS 查询持续 Err/超时可无 advisory，首页缺少系统 DNS 未验证告警 | open | [draft #1720](https://github.com/raydocs/tono/pull/1720) | 中·推导 | 原生 RED/GREEN 与生命周期独立审查见 delivering PR；Win10/11 系统解析及 UI 待实机；仅修 DNS 可见性，不涉及缺上行、自动修复/释放/重连 |
 
 原核验记录于 #1386 / #1395：系统 DNS 并非「连接后从不测」，X2-2（fixed d98b217d）已约每 30 秒测有效 NRPT 和系统查询；缺的是 Err/超时的独立可见状态。Support 诊断已读取现有 advisory，旧文「App 健康也不读 advisory」过宽；本轮补首页展示。
 

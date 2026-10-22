@@ -1067,7 +1067,9 @@ async fn repeated_system_dns_failure_warns_without_releasing_protection() -> Res
     use super::super::test_io::{self, Fixture};
     use crate::core::dns as facade;
 
-    let _fixture = Fixture::new(vec![effective(&entry(1), [9, 9, 9, 9], true)])?;
+    let adapter = effective(&entry(1), [9, 9, 9, 9], true);
+    let guid = adapter.guid.clone();
+    let _fixture = Fixture::new(vec![adapter])?;
     let connected = facade::enable().await?;
     assert!(connected.enabled && connected.last_error.is_none());
     test_io::with(|io| {
@@ -1121,8 +1123,18 @@ async fn repeated_system_dns_failure_warns_without_releasing_protection() -> Res
 
     facade::refresh_resolver_policy_observation().await;
     assert!(facade::observe_for_update().await?.resolver_policy_warning.is_some());
+    // This existing fixture deliberately refuses live restore/DHCP. As in the native restore
+    // regressions below, unplug the adapter: production restore still restores its registry
+    // and retires the snapshot without requesting unsupported live OS effects.
+    test_io::with(|io| { io.absent.insert(guid.clone()); }).unwrap();
     let disconnected = facade::restore_protected().await?;
+    assert!(!disconnected.enabled && !disconnected.snapshot_present);
     assert!(disconnected.resolver_policy_warning.is_none());
+    test_io::with(|io| {
+        io.absent.remove(&guid);
+        // Returning adapter: the effective resolver now reflects the completed restore.
+        io.adapters = vec![effective(&entry(1), [9, 9, 9, 9], true)];
+    }).unwrap();
     let new_session = facade::enable().await?;
     assert!(new_session.resolver_policy_warning.is_none());
     assert!(new_session.enabled && new_session.last_error.is_none());

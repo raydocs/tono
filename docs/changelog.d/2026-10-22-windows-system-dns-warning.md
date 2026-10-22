@@ -1,6 +1,6 @@
 ## 2026-10-22 · Windows 系统 DNS 未验证告警
 - 归属：SHIP_PLAN §2 item 10；WIN-DNS-RACE-MASKS-SYSTEM；decision 060 / 已合 #1397 的 DNS 切片，不包含缺上行恢复。
-- 来源：基线 origin/main `a742adf21`；分支 `t3/system-dns-warning`，独立 draft PR，尚未合 main。
+- 来源：基线 origin/main `a742adf21`；分支 `t3/system-dns-warning`，[draft #1720](https://github.com/raydocs/tono/pull/1720)，尚未合 main。
 - 缺陷修复：健康 Tono NRPT 下系统查询 Err/超时不再静默；经现有 `resolver_policy_warning` 传递独立 `TONO_DNS_SYSTEM_UNVERIFIED`，不冒充 POLICY_CONFLICT，不写 `last_error`。
 - 新增/优化：首页复用现有 DNS 告警卡，简短中英提示和检查 DNS / 诊断入口；旧/新外观使用同一告警。保留 verify_fake_ip 的 TUN-only 准入、Connected/Core/WFP；不改自动释放、重连、企业 NRPT、FSM、helper/安装器。
 - 工程与测试：一个 native tokio 回归复用真实 Fixture/test_io，健康 Tono NRPT + 两次显式 query Err observer，无 sleep；同一回归覆盖 fresh success、disconnect/re-enable、同 PID 换 Core 代次时旧 observer 完成。Service 复用已有 Core 实例 identity / lifecycle snapshot_generation，App 复用 connect_generation；Service IPC 不新增字段，仅 App→前端增加可选 resolverPolicyWarning 展示投影。
@@ -8,3 +8,5 @@
 - 原生证据：测试先行 `8eea216d9`，hosted Windows RED [39871991551](https://github.com/raydocs/tono/actions/runs/39871991551)；结果和后续 GREEN 的精确 SHA / 原始日志在 PR 验证评论。未在 Mac 跑 native cargo/Swift/Xcode；不把编译失败、跳过或零测试当 RED/GREEN。
 - 候选/发布：仅源码，无新候选、合并、部署、auto-merge 或 PR 监控。
 - 剩余限制：生命周期高风险部分待父线程独立审查，不自批准；Win10/11 浏览器实际系统解析与安装后 UI/辅助功能仍待实机。30 秒现有 observer 周期不变，不提供自动 DNS 修复或企业策略改写。
+
+2026-10-22 验证续记：首次 GREEN 尝试 [39872684904](https://github.com/raydocs/tono/actions/runs/39872684904)，源码 `cca08fc50` / CI merge checkout `69df064faaf0cb27a3964ff1330885c370b617b3`。前端 60 文件 / 425 测试、App 原生 771 测试通过；native DNS 回归在执行 disconnect 验证时触发 Fixture 原有“this fixture must not exercise restore/DHCP”断言，随后两例因锁中毒失败，不能记为 GREEN。修正仅限新测试的 OS 边界：沿用既有 native restore 测试的适配器离线场景执行真实 restore，重连后继续 enable；不放宽 Fixture，不修改产品恢复行为。修正后 hosted 结果见 PR 验证评论；失败原始日志保留。
