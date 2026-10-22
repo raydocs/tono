@@ -28,5 +28,5 @@
   [historical upload/API compatibility](https://blog.x.com/developer/en_us/a/2011/photo-upload-api),
   [link service](https://help.x.com/en/using-x/url-shortener).
   These establish service ownership, not which hosts a user's unknown App/version calls.
-- Applied in: `t3/android-x-twitter-routing`, draft only; ops plan §P2 Android/iOS.
+- Applied in: [#1719](https://github.com/raydocs/tono/pull/1719), draft only; ops plan §P2 Android/iOS.
   Independent routing review and platform CI remain required before merge/deploy.

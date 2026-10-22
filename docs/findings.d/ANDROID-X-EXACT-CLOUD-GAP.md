@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| ANDROID-X-EXACT-CLOUD-GAP | Android 默认 three-tier 未收录 X 网页/API/媒体精确主机，按默认规则走 DIRECT/本地 DNS | open | 待 draft PR | 中·推导 | 配置缺口待云端引擎回执；用户模式、版本、App/browser、排除项未知，无用户设备因果证据 |
+| ANDROID-X-EXACT-CLOUD-GAP | Android 默认 three-tier 未收录 X 网页/API/媒体精确主机，按默认规则走 DIRECT/本地 DNS | in-PR | [#1719](https://github.com/raydocs/tono/pull/1719) | 中·已确认（配置层） | 用户模式、版本、App/browser、排除项未知，无用户设备因果证据 |
 
 ## 链路与边界
 
@@ -32,7 +32,7 @@
 
 ## 修复范围与跨平台
 
-拟追加 15 个有官方依据的精确服务主机，见
+已追加 15 个有官方依据的精确服务主机，见
 [provisional decision 132](../decisions/132-2026-10-22-x-exact-cloud-hosts.md)。
 权威源为 `tooling/scripts/sing-box/three-tier-template.json` 的 `overseas_full`，
 使用现有脚本同步 Android/iOS/macOS；Windows Core/Service 编译同一模板。
@@ -42,5 +42,43 @@ macOS helper 精确准入图随之改变，需 4.52.63 → 4.52.64 保证重装�
 
 ## 验证
 
-待云端原始日志/配置与真实 RED/GREEN 后填入；不以源码推断代替已运行结果。
+[Devin Linux session](https://app.devin.ai/sessions/ca8e2c3dd1974ec6a641199cfd956511)，
+[原始证据包](https://app.devin.ai/attachments/4c82e30f-318f-43bd-b728-6cea446a97e7/x-routing-evidence.tar.gz)
+SHA-256 `1841d78af4c096db21f7b5b2f9f568db81937a5c80897485fc6da0e90d7b6ca4`。
+包内保留三阶段 SHA、原始日志/JUnit、脱敏实际配置、独立临时探针脚本和校验清单；
+本任务已下载逐项复核关键日志、JUnit、配置差分与包内 SHA256SUMS，而非只接受 verifier 结论。
+
+- 基线 `d1f948f88efd4e778b92f0df44b3b1f4a0a5ae82`：实际运行
+  `ConfigSnapshotWriter` 生成四份配置，CLI 全通过。真实 pinned sing-box
+  18-host 探针中 `x.com`、`api.x.com`、`api.twitter.com`、`abs.twimg.com`、
+  `pbs.twimg.com`、`video.twimg.com`、`t.co` 在 three-tier 为 direct，stable
+  为 cloud，`grok.x.com`/`grok.com` 均为 home。实际 DNS 有序规则匹配显示
+  three-tier X 为 local，stable 为 fakeip；没有把本地解析器的真实可达性
+  冒充已验（探针在只有 loopback 的 network namespace）。
+- **RED** `300fe0be49d0daf51e97f8b492149263576a427b`：新回归在旧合同真实运行，
+  `RoutingPolicyTest.kt:61` 报
+  `org.junit.ComparisonFailure: expected:<[Tono-Exi]t> but was:<[direc]t>`；
+  `1 test completed, 1 failed`、`BUILD FAILED in 12s`，非编译失败或 skipped。
+- **GREEN** `d09c296e3cd71b3f57bbac3d2448a7917e8d687f`：
+  `./gradlew --no-daemon :routing:testDebugUnitTest --rerun-tasks`，
+  `BUILD SUCCESSFUL in 14s`；JUnit 18 tests / 0 failures / 0 errors / 0 skipped，
+  含同名新回归。四份配置均通过 pinned `1.15.0-alpha.12` CLI 与更新后的
+  engine harness（50/48/48/50 条输出），包括云停止后 X/Grok 失败而非 DIRECT。
+- 四配置的生成 DNS 规则检查 192 项（其中 X A/AAAA 120 项）通过；额外真实
+  引擎 DNS hijack → fake-IP → 纯数字 IPv4/IPv6 SOCKS ATYP 1/4 连接探针
+  共 40 次查询、40 次映射路由通过，HTTP Host 使用数字地址而非原名称，
+  `DIRECT_STUB_REQUESTS=0`，X 为 cloud、Grok 保持对应 Home/未绑定云。
+  该探针未改生产 route/DNS 规则，仍不等于真实 Android TUN 或 QUIC 回退。
+- 完整 stable 配置原字节 SHA-256 前后均为
+  `09b0fc5830bfb2b0d710eaf604f22312a575237cdf76302749fc8982d1e4219c`，
+  canonical graph SHA-256 前后均为
+  `0c25bf236b65fa81dcf832e3512674df1772a0842495c584bdb2c30b74cb4cc0`；
+  本任务另比较了完整脱敏配置相等。stable IPv6-off 只有规则顺序分析，
+  不声称独立 runtime fixture 已跑。
+- 本地与云端三个同步检查及同步器 Node 回归（1 pass）通过。
+  源码/实际 Android 图除 15 个 exact host 追加外不变；两个 macOS 生成图同样
+  只追加该表，不改变 Home/video 优先级、DNS 服务器或 actions/order。
+- 未运行/未验收：独立高风险审查、macOS/iOS/Windows 原生套件、Android
+  emulator/实机/签名构建；未等待或监控 PR CI。最终记录提交仅 docs，产品验证
+  覆盖上列 GREEN SHA，不将其改写成其他 SHA 上的运行结果。
 用户设备、真实 X 服务、排除项、ECH/DoH、QUIC 回退未验证，不声称事故已解决。
