@@ -36,6 +36,16 @@ These targeted cloud checks do not expand the permanent API 34 CI matrix or qual
 Real phone handoffs, always-on/lockdown, background restrictions and signed updates need their own
 evidence; see [Android's verification limits](../apps/android/README.md).
 
+For live uplink metadata, the tunnel shard also runs
+`UnderlyingNetworkDeviceTest#establishedVpnTracksPhysicalHandoffAndMeterednessWithoutReplacingTheTun`.
+It needs the existing local-tunnel stand-in servers, `adb reverse tcp:28080 tcp:28080`, and real
+Wi-Fi plus cellular networks on the emulator. It uses the shipped service/core/TUN and normal Android
+consent, then checks public VPN transport/metered capabilities through handoff, loss and recovery.
+A TUN replacement or unavailable second network is a fixture/environment failure, not the expected
+old-behavior RED. Preserve the `underlying-*-connectivity.txt` dumps and one executed test result;
+network preflight alone is not VPN evidence. The test restores its radio/animation settings and
+local-only account, and does not qualify physical radios, OEM behavior or real Tono services.
+
 ## Execution lanes
 
 | Lane | Host | Boundary |

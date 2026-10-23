@@ -260,7 +260,8 @@ jobs:
             DeviceEvidenceTest#b3_fixtureAtLargeFontScale LocalTunnelDeviceTest#t2_realAppTurnsWithKeyboardAndConsentOpen
             LocalTunnelDeviceTest#t1_realTunnelThroughLocalFixtureServers LocalTunnelDeviceTest#t3_realAppStatesAndSkyOnMainActivity
             LocalTunnelDeviceTest#t4_realAppAtLargestSystemText LocalTunnelDeviceTest#t5_engineDiesWithNoAppOpen
-            LocalTunnelDeviceTest#t6_engineDiesInDozeAndTogetherWithItsWatch" ;;
+            LocalTunnelDeviceTest#t6_engineDiesInDozeAndTogetherWithItsWatch
+            UnderlyingNetworkDeviceTest#establishedVpnTracksPhysicalHandoffAndMeterednessWithoutReplacingTheTun" ;;
             ui) tests="HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps
             HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt
             HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome

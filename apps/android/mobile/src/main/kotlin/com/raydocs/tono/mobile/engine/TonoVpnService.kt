@@ -526,6 +526,7 @@ class TonoVpnService : VpnService() {
     }
 
     private fun onUnderlyingChanged(u: NetworkMonitor.Underlying?) {
+        platform.updateUnderlyingNetworks()
         val v6 = u?.globalIpv6 == true
         val before = snapshot.get()
         val changed = u?.network != lastUnderlying

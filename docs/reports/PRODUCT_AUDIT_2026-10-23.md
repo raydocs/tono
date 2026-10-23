@@ -83,6 +83,8 @@ Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydoc
 2. **P2 候选，Wi-Fi/蜂窝与 underlying network**：`BoxPlatform` 仅建 TUN 时设置 underlying network，
    后续 `NetworkMonitor` 变化是否同步到 VPN 的 transport/metered 属性需用 `dumpsys connectivity` 验证。
    修复要与 TUN 所属代次和销毁绑定，不能把旧回调写入新 VPN。
+   续核：target Q+ 的 VPN 默认始终 metered，原“自动跟随”注释不成立；不能据静态上行声明推断已发生蜂窝计费泄漏。
+   当前修复/运行证据状态见 `ANDROID-UNDERLYING-NETWORK-DRIFT` 分片。
 3. **P2/P3 候选，无上行与失败意图**：cached catalog + 离线不应无限停在 Connecting；Core 启动失败后
    `wantConnected` 的保留/清除需按自动恢复意图定义，避免之后意外重连。验收包括取消、服务重建和无网络预算届满。
 4. **P2，跨端首连契约**：`503 EXIT_IDENTITY_PROPAGATING` 在移动端按失败结束，桌面有有界等待。

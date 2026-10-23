@@ -50,9 +50,17 @@ class BoxPlatform(
     private val dnsExecutor = Executors.newCachedThreadPool()
     private val interfaceListeners = HashMap<InterfaceUpdateListener, (NetworkMonitor.Underlying?) -> Unit>()
 
+    @Synchronized
     fun closeTun() {
         tun?.let { runCatching { it.close() } }
         tun = null
+    }
+
+    /** Refresh only the current TUN, using the latest physical link rather than a queued callback. */
+    @Synchronized
+    fun updateUnderlyingNetworks() {
+        if (tun == null) return
+        service.setUnderlyingNetworks(monitor.current?.network?.let { arrayOf(it) } ?: emptyArray())
     }
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
@@ -62,13 +70,15 @@ class BoxPlatform(
         if (!service.protect(fd)) throw IllegalStateException("VpnService.protect failed")
     }
 
+    @Synchronized
     override fun openTun(options: TunOptions): Int {
         if (android.net.VpnService.prepare(service) != null) throw IllegalStateException("VPN_PERMISSION_REVOKED")
         val builder = service.Builder()
             .setSession("Tono")
             .setMtu(options.mtu)
             .setConfigureIntent(service.configureIntent())
-        // Metered state follows the underlying network (default since API 29), so cellular stays metered.
+            // Target Q+ defaults to always metered; false inherits the live physical link instead.
+            .setMetered(false)
         val inet4 = options.inet4Address.toList()
         val inet6 = options.inet6Address.toList()
         (inet4 + inet6).forEach { builder.addAddress(it.address(), it.prefix()) }
@@ -87,11 +97,13 @@ class BoxPlatform(
         options.excludePackage.forEachString { pkg ->
             if (pkg != service.packageName) runCatching { builder.addDisallowedApplication(pkg) }
         }
-        builder.setUnderlyingNetworks(monitor.current?.network?.let { arrayOf(it) })
+        builder.setUnderlyingNetworks(monitor.current?.network?.let { arrayOf(it) } ?: emptyArray())
         val pfd = builder.establish() ?: throw IllegalStateException("VPN_PERMISSION_REVOKED")
         tun?.let { runCatching { it.close() } }
         tun = pfd
         tunsEstablished++
+        // The link may have changed while establish() was in flight.
+        updateUnderlyingNetworks()
         return pfd.fd
     }
 
