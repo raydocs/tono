@@ -136,6 +136,10 @@ object SingBoxConfig {
         // A fake address without a live mapping (e.g. cached across a restart) never leaves the phone.
         rules += reject(linkedMapOf("ip_cidr" to listOf(FAKEIP_INET4, FAKEIP_INET6)))
         rules += route(linkedMapOf("ip_is_private" to true), DIRECT_TAG)
+        // Overseas UDP and raw-IP STUN probes (e.g. 74.125.250.129:19302) are rejected in every mode
+        // while domestic UDP (WeChat voice/video, Douyin QUIC, LAN cast) stays direct in Three-Tier.
+        rules += reject(linkedMapOf("network" to udpIcmp, "port" to DesktopRoutingContract.STUN_UDP_PORTS))
+        rules += reject(linkedMapOf("network" to udpIcmp, "ip_cidr" to DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS))
         if (!threeTier) rules += reject(linkedMapOf("network" to udpIcmp))
 
         val fakeipSuffixes = video + homeSuffixes + protected

@@ -2,14 +2,16 @@ import XCTest
 @testable import TonoKit
 
 final class RoutingTests: XCTestCase {
-    private func verdict(_ config: JSON, domain: String? = nil, ip: String? = nil, network: String = "tcp") throws -> RouteExplainer.Verdict {
-        try RouteExplainer.explain(config, .init(domain: domain, ip: ip, network: network))
+    private func verdict(_ config: JSON, domain: String? = nil, ip: String? = nil, port: Int = 443, network: String = "tcp") throws -> RouteExplainer.Verdict {
+        try RouteExplainer.explain(config, .init(domain: domain, ip: ip, port: port, network: network))
     }
 
     func testContractCountsMatchTheDesktopLists() {
         XCTAssertEqual(DesktopRoutingContract.cloudVideoSuffixes.count, 21)
         XCTAssertEqual(DesktopRoutingContract.homeSuffixes.count, 194)
         XCTAssertEqual(DesktopRoutingContract.homeIPv4CIDRs, ["160.79.104.0/21"])
+        XCTAssertEqual(DesktopRoutingContract.stunUDPPorts, [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309])
+        XCTAssertEqual(DesktopRoutingContract.overseasUDPRejectIPv4CIDRs.count, 29)
     }
 
     func testVideoExceptionWinsOverTheBroadHomeParent() throws {
@@ -78,9 +80,43 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(SingBoxConfig.selectedNode(input).name, "Los Angeles · Grove")
     }
 
+    func testOverseasUDPAndSTUNAreRejectedWhileDomesticUDPStaysDirectInThreeTier() throws {
+        let threeTier = SampleCatalog.config()
+        let stable = SampleCatalog.config(mode: .stable)
+
+        for config in [threeTier, stable] {
+            for port in DesktopRoutingContract.stunUDPPorts {
+                if case .reject = try verdict(config, ip: "74.125.250.129", port: port, network: "udp") {} else {
+                    XCTFail("Google STUN raw IP 74.125.250.129:\(port) must be rejected")
+                }
+                if case .reject = try verdict(config, domain: "stun1.l.google.com", port: port, network: "udp") {} else {
+                    XCTFail("Google STUN domain on port \(port) must be rejected")
+                }
+            }
+            for ip in ["74.125.250.129", "142.250.80.46", "172.217.160.142", "8.8.8.8", "1.1.1.1", "104.16.132.229", "160.79.104.10", "151.101.1.69", "149.154.167.91", "157.240.22.35"] {
+                for port in [443, 3478, 5349] {
+                    if case .reject = try verdict(config, ip: ip, port: port, network: "udp") {} else {
+                        XCTFail("Overseas UDP \(ip):\(port) must be rejected")
+                    }
+                }
+            }
+        }
+
+        // Domestic UDP (Douyin QUIC, WeChat voice/video, smart home P2P, NTP, LAN cast) stays direct in Three-Tier.
+        XCTAssertEqual(try verdict(threeTier, domain: "quic.example.cn", port: 443, network: "udp").outbound, SingBoxConfig.directTag)
+        XCTAssertEqual(try verdict(threeTier, domain: "weixin.qq.com", port: 8000, network: "udp").outbound, SingBoxConfig.directTag)
+        XCTAssertEqual(try verdict(threeTier, ip: "101.1.2.6", port: 8000, network: "udp").outbound, SingBoxConfig.directTag)
+        XCTAssertEqual(try verdict(threeTier, ip: "43.146.27.17", port: 8000, network: "udp").outbound, SingBoxConfig.directTag)
+        XCTAssertEqual(try verdict(threeTier, ip: "223.5.5.5", port: 3478, network: "udp").outbound, SingBoxConfig.directTag)
+        XCTAssertEqual(try verdict(threeTier, ip: "114.114.114.114", port: 123, network: "udp").outbound, SingBoxConfig.directTag)
+        XCTAssertEqual(try verdict(threeTier, ip: "192.168.1.20", port: 5353, network: "udp").outbound, SingBoxConfig.directTag)
+    }
+
     func testRouteCheckAnswersInUserTerms() {
         let answer = RouteExplainer.answer(config: SampleCatalog.config(), catalog: SampleCatalog.catalog(), host: "https://Claude.ai/new?x=1")
         XCTAssertEqual(answer, RouteAnswer(host: "claude.ai", tcp: .home, udp: .blocked))
+        let stunAnswer = RouteExplainer.answer(config: SampleCatalog.config(), catalog: SampleCatalog.catalog(), host: "74.125.250.129:19302")
+        XCTAssertEqual(stunAnswer, RouteAnswer(host: "74.125.250.129", tcp: .direct, udp: .blocked))
         XCTAssertEqual(RouteExplainer.cleanHost("[2001:db8::1]:443"), "2001:db8::1")
         XCTAssertNil(RouteExplainer.cleanHost("   "))
     }

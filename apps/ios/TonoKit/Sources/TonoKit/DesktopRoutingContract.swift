@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "ae825bb68d0db0fca74d2fd4cf3e367ed5a7a1a19e6798a4a826958384203e0e"
+    public static let sourceDigest = "dff9c8e6d387e05b4aefd2610fd4faa78cdf6024a2f99f7f473146034f7b9e73"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -233,6 +233,51 @@ public enum DesktopRoutingContract {
     /// Anthropic's own IPv4 range for raw-IP dials.
     public static let homeIPv4CIDRs: [String] = [
         "160.79.104.0/21",
+    ]
+
+    /// Google WebRTC STUN UDP ports rejected across routing modes so raw-IP STUN probes cannot leak the physical egress IP.
+    public static let stunUDPPorts: [Int] = [
+        19302,
+        19303,
+        19304,
+        19305,
+        19306,
+        19307,
+        19308,
+        19309,
+    ]
+
+    /// Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP is rejected while domestic UDP stays direct.
+    public static let overseasUDPRejectIPv4CIDRs: [String] = [
+        "74.125.0.0/16",
+        "142.250.0.0/15",
+        "172.217.0.0/16",
+        "172.253.0.0/16",
+        "216.58.192.0/19",
+        "64.233.160.0/19",
+        "108.177.0.0/17",
+        "209.85.128.0/17",
+        "8.8.8.0/24",
+        "8.8.4.0/24",
+        "1.1.1.0/24",
+        "1.0.0.0/24",
+        "104.16.0.0/12",
+        "172.64.0.0/13",
+        "162.159.0.0/16",
+        "160.79.104.0/21",
+        "151.101.0.0/16",
+        "199.232.0.0/16",
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.12.0/22",
+        "91.108.16.0/22",
+        "91.108.56.0/22",
+        "149.154.160.0/20",
+        "31.13.24.0/21",
+        "31.13.64.0/18",
+        "157.240.0.0/16",
+        "179.60.192.0/22",
+        "185.60.216.0/22",
     ]
 
     /// Hosts that no rule may ever send DIRECT.

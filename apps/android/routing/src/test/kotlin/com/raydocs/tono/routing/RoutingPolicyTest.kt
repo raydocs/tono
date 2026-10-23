@@ -36,6 +36,33 @@ class RoutingPolicyTest {
     }
 
     @Test
+    fun overseasUdpAndStunAreRejectedWhileDomesticUdpStaysDirectInThreeTier() {
+        assertEquals(listOf(19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309), DesktopRoutingContract.STUN_UDP_PORTS)
+        assertEquals(29, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS.size)
+
+        for (config in listOf(threeTier, stable)) {
+            for (port in DesktopRoutingContract.STUN_UDP_PORTS) {
+                assertEquals("reject", outbound(config, Connection(ip = "74.125.250.129", port = port, network = "udp")))
+                assertEquals("reject", outbound(config, Connection(domain = "stun1.l.google.com", port = port, network = "udp")))
+            }
+            for (ip in listOf("74.125.250.129", "142.250.80.46", "172.217.160.142", "8.8.8.8", "1.1.1.1", "104.16.132.229", "160.79.104.10", "151.101.1.69", "149.154.167.91", "157.240.22.35")) {
+                for (port in listOf(443, 3478, 5349)) {
+                    assertEquals("reject", outbound(config, Connection(ip = ip, port = port, network = "udp")))
+                }
+            }
+        }
+
+        // Domestic UDP (Douyin QUIC, WeChat voice/video, smart home P2P, NTP, LAN cast) stays direct in Three-Tier.
+        assertEquals(direct, outbound(threeTier, Connection(domain = "quic.example.cn", port = 443, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(domain = "weixin.qq.com", port = 8000, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "101.1.2.6", port = 8000, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "43.146.27.17", port = 8000, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "223.5.5.5", port = 3478, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "114.114.114.114", port = 123, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "192.168.1.20", port = 5353, network = "udp")))
+    }
+
+    @Test
     fun rawAnthropicAddressAndAiAppsFollowHome() {
         assertEquals(home, outbound(threeTier, Connection(ip = "160.79.104.10")))
         assertEquals(direct, outbound(threeTier, Connection(ip = "160.79.112.1")))

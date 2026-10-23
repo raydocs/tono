@@ -144,11 +144,28 @@ extension RouteExplainer {
         return s
     }
 
+    private static func cleanPort(_ input: String) -> Int? {
+        var s = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        for scheme in ["https://", "http://"] where s.hasPrefix(scheme) { s.removeFirst(scheme.count) }
+        if let slash = s.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) { s = String(s[..<slash]) }
+        if s.hasPrefix("["), let close = s.firstIndex(of: "]") {
+            let rest = s[s.index(after: close)...]
+            if rest.hasPrefix(":"), let p = Int(rest.dropFirst()), (1...65535).contains(p) { return p }
+            return nil
+        }
+        if s.filter({ $0 == ":" }).count == 1, let colon = s.firstIndex(of: ":"),
+           let p = Int(s[s.index(after: colon)...]), (1...65535).contains(p) {
+            return p
+        }
+        return nil
+    }
+
     public static func answer(config: JSON, catalog: ExitCatalog, host input: String) -> RouteAnswer? {
         guard let host = cleanHost(input) else { return nil }
+        let port = cleanPort(input) ?? 443
         let isIP = Net.parseIPv4(host) != nil || Net.parseIPv6(host) != nil
         func label(_ network: String) -> RouteLabel {
-            let c = Connection(domain: isIP ? nil : host, ip: isIP ? host : nil, network: network)
+            let c = Connection(domain: isIP ? nil : host, ip: isIP ? host : nil, port: port, network: network)
             guard let verdict = try? explain(config, c) else { return .blocked }
             switch verdict {
             case .route(let outbound, _):

@@ -328,6 +328,51 @@ pub const CLOUD_VIDEO_DOMAINS: [&str; 21] = [
 /// stay on `Tono-Exit`. `no-resolve` keeps the match on the packet address.
 pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
 
+/// Google WebRTC STUN UDP ports rejected across mobile routing modes so raw-IP
+/// STUN probes (e.g. 74.125.250.129:19302) cannot leak the physical egress IP,
+/// without blanket-blocking RFC 5389 port 3478 used by domestic P2P/IoT in China.
+pub const STUN_UDP_PORTS: [u16; 8] = [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309];
+
+/// Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP
+/// traffic is rejected in mobile Three-Tier mode while domestic UDP stays DIRECT.
+pub const OVERSEAS_UDP_REJECT_IPV4_CIDRS: [&str; 29] = [
+    // Google STUN / WebRTC / YouTube / Public DNS (AS15169)
+    "74.125.0.0/16",
+    "142.250.0.0/15",
+    "172.217.0.0/16",
+    "172.253.0.0/16",
+    "216.58.192.0/19",
+    "64.233.160.0/19",
+    "108.177.0.0/17",
+    "209.85.128.0/17",
+    "8.8.8.0/24",
+    "8.8.4.0/24",
+    // Cloudflare DNS / Anycast / STUN / QUIC (AS13335)
+    "1.1.1.0/24",
+    "1.0.0.0/24",
+    "104.16.0.0/12",
+    "172.64.0.0/13",
+    "162.159.0.0/16",
+    // Anthropic (AS399358)
+    "160.79.104.0/21",
+    // Fastly CDN (AS54113)
+    "151.101.0.0/16",
+    "199.232.0.0/16",
+    // Telegram Messenger (AS62041 / AS62014 / AS44907 / AS59930)
+    "91.108.4.0/22",
+    "91.108.8.0/22",
+    "91.108.12.0/22",
+    "91.108.16.0/22",
+    "91.108.56.0/22",
+    "149.154.160.0/20",
+    // Meta / WhatsApp / Instagram / Facebook (AS32934)
+    "31.13.24.0/21",
+    "31.13.64.0/18",
+    "157.240.0.0/16",
+    "179.60.192.0/22",
+    "185.60.216.0/22",
+];
+
 /// Claude's first-party, login/challenge, telemetry and update hosts must never
 /// be moved to the physical interface, even by an otherwise trusted policy.
 /// Keep this in parity with the control-plane and macOS protected lists.

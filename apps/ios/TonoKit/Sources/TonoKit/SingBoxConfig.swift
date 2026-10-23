@@ -146,6 +146,10 @@ public enum SingBoxConfig {
         // A fake address without a live mapping (e.g. cached across a restart) never leaves the phone.
         rules.append(reject([("ip_cidr", .strings([fakeIPInet4, fakeIPInet6]))]))
         rules.append(route([("ip_is_private", true)], directTag))
+        // Overseas UDP and raw-IP STUN probes (e.g. 74.125.250.129:19302) are rejected in every mode
+        // while domestic UDP (WeChat voice/video, Douyin QUIC, LAN cast) stays direct in Three-Tier.
+        rules.append(reject([("network", udpIcmp), ("port", .ints(DesktopRoutingContract.stunUDPPorts))]))
+        rules.append(reject([("network", udpIcmp), ("ip_cidr", .strings(DesktopRoutingContract.overseasUDPRejectIPv4CIDRs))]))
         if !threeTier { rules.append(reject([("network", udpIcmp)])) }
 
         let fakeIPSuffixes = video + homeSuffixes + protected
