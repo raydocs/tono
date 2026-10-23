@@ -107,7 +107,6 @@
 "settings_account" = "账号";
 "settings_sign_out" = "退出登录";
 "settings_signed_in_as" = "已登录：%1$@";
-"settings_about" = "关于";
 "about_version" = "Tono %1$@ · 测试版，非 App Store 版本";
 "about_core" = "内核：sing-box %1$@（GPL-3.0-or-later，源码：github.com/SagerNet/sing-box）";
 "about_core_no_version" = "内核：sing-box（GPL-3.0-or-later，源码：github.com/SagerNet/sing-box）";
@@ -115,9 +114,7 @@
 "ipv6_on" = "当前网络 IPv6：有";
 "ipv6_off" = "当前网络 IPv6：无（直连域名只返回 IPv4）";
 "system_include_all" = "包含所有网络";
-"system_include_all_desc" = "开启（推荐）：iOS 把所有流量交给 Tono，隧道重启期间先拦住，而不是直接放行。下次连接时生效。";
 "system_include_all_short" = "推荐：Tono 重启时流量等待，不直接放行。";
-"system_how_title" = "工作方式";
 "system_on_demand" = "连接时会开启 iOS“按需连接”，Tono 崩溃、更新或手机重启后由 iOS 自动恢复；断开时关闭。";
 "system_limit" = "Tono 关闭时 iOS 不拦截；部分 Apple 服务可绕过任何 VPN。";
 "sentence_connected_stable_no_home" = "公网流量全部走云 · 局域网仍走本地";
@@ -214,8 +211,16 @@
 "check_unconfirmed" = "无法确认当前使用的路由，暂不作答。";
 "line_unconfirmed" = "未确认";
 "lane_unconfirmed" = "未确认";
-"settings_mode_unconfirmed" = "无法确认当前是哪个模式，详见「详情」。";
 "state_unconfirmed" = "未确认";
 "status_unconfirmed" = "正在向隧道确认当前路由…";
 "short_UNCONFIRMED" = "隧道尚未确认当前路由";
 "mode_unconfirmed_line" = "隧道尚未确认正在使用哪个模式。";
+
+/* 设置即表单：首屏只放控件，规则说明在下一级。 */
+"settings_routing_group" = "路由";
+"settings_routing_rules" = "路由规则";
+"settings_rules_platform" = "在 iPhone 上";
+"settings_mode_in_use" = "当前使用";
+"settings_signed_in" = "已登录";
+"settings_licences" = "许可与源码";
+"about_source_link" = "在 GitHub 查看源码";
