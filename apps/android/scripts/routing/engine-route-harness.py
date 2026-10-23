@@ -28,12 +28,12 @@ import urllib.request
 
 CLOUD_PORT, HOME_PORT, MIXED_PORT, DIRECT_PORT = 21080, 21081, 21090, 21095
 HOME_USER, HOME_PASS = "home-user", "home-pass"
-# Reviewed exact first-party X services; do not substitute provider/CDN suffixes.
+# First-party X domain suffixes routed through the Cloud exit (after grok.x.com -> Home).
 X_HOSTS = (
-    "x.com", "www.x.com", "mobile.x.com", "api.x.com",
+    "x.com", "www.x.com", "mobile.x.com", "api.x.com", "upload.x.com", "sso.x.com", "api-stream.x.com",
     "twitter.com", "www.twitter.com", "mobile.twitter.com", "api.twitter.com",
-    "upload.twitter.com", "abs.twimg.com", "pbs.twimg.com", "video.twimg.com",
-    "ton.twimg.com", "cdn.syndication.twimg.com", "t.co",
+    "upload.twitter.com", "abs.twimg.com", "abs-0.twimg.com", "pbs.twimg.com", "video.twimg.com",
+    "ton.twimg.com", "cdn.syndication.twimg.com", "t.co", "prod.pscp.tv", "periscope.tv",
 )
 
 
@@ -214,11 +214,15 @@ def main():
     expect("www.cloudflare.com", "cloud")
     expect("example.com", ordinary)
     expect("grok.x.com", ai)
+    expect("api.grok.x.com", ai)
     expect("grok.com", ai)
+    expect("x.ai", ai)
+    for host in ("fpjs.io", "sift.com", "recaptcha.net", "appleid.apple.com", "segment.io", "launchdarkly.com", "stytch.com", "auth0.com", "authkit.app", "funcaptcha.com", "prodregistryv2.org"):
+        expect(host, ai)
     for host in X_HOSTS:
         expect(host, "cloud")
-    # Exact means exact, including the media namespace and unrelated shared CDN users.
-    for host in ("unreviewed.x.com", "unreviewed.twitter.com", "unreviewed.twimg.com", "unrelated.akamaized.net"):
+    # Shared CDN and unrelated lookalike suffixes stay on the ordinary path in Three-Tier.
+    for host in ("x.com.example.net", "unrelated.akamaized.net"):
         expect(host, ordinary)
     print(f"   home saw via cloud relay: {home.seen[:3]} … cloud saw: {[s for s in cloud.seen if '21081' in s][:1]}")
     print("== Home stand-in down")

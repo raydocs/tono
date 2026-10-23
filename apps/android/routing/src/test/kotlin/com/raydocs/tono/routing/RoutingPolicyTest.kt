@@ -40,7 +40,8 @@ class RoutingPolicyTest {
         assertEquals(listOf(19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309), DesktopRoutingContract.STUN_UDP_PORTS)
         assertEquals(listOf(853), DesktopRoutingContract.ENCRYPTED_DNS_PORTS)
         assertEquals(listOf("stun.cloudflare.com", "turn.cloudflare.com", "global.stun.twilio.com", "stun.services.mozilla.com", "stunprotocol.org"), DesktopRoutingContract.PUBLIC_STUN_SUFFIXES)
-        assertEquals(listOf("intercom.io", "intercomcdn.com", "arkoselabs.com", "workos.com", "featureassets.org"), DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES)
+        assertEquals(44, DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES.size)
+        assertEquals(listOf("x.com", "twitter.com", "twimg.com", "t.co", "pscp.tv", "periscope.tv", "twtrdns.net", "cms-twdigitalassets.com", "vine.co", "twitpic.com"), DesktopRoutingContract.X_CLOUD_SUFFIXES)
         assertEquals(33, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS.size)
         assertEquals(21, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV6_CIDRS.size)
 
@@ -67,11 +68,25 @@ class RoutingPolicyTest {
             }
         }
 
-        // Claude auxiliary auth, SSO, and anti-bot challenge domains route to Home on TCP, reject UDP, and use FakeIP DNS.
-        for (host in listOf("intercom.io", "widget.intercom.io", "js.intercomcdn.com", "arkoselabs.com", "client-api.arkoselabs.com", "workos.com", "auth.workos.com", "statsig.com", "featureassets.org")) {
+        // Claude auxiliary auth, fingerprinting, captcha, Apple Sign-In, telemetry, and SSO domains route to Home on TCP, reject UDP, and use FakeIP DNS.
+        for (host in listOf(
+            "intercom.io", "widget.intercom.io", "js.intercomcdn.com", "intercomassets.com", "intercom-mail.com",
+            "arkoselabs.com", "client-api.arkoselabs.com", "funcaptcha.com", "funcaptcha.co",
+            "workos.com", "auth.workos.com", "authkit.app", "workos.imgix.net",
+            "statsig.com", "featureassets.org", "prodregistryv2.org", "beyondwickedmapping.org",
+            "fpjs.io", "api.fpjs.io", "fpnpmcdn.net", "openfpcdn.io", "fingerprint.com",
+            "sift.com", "siftscience.com", "sardine.ai", "castle.io",
+            "recaptcha.net", "www.recaptcha.net",
+            "appleid.apple.com", "idmsa.apple.com", "appleid.cdn-apple.com", "gsa.apple.com",
+            "segment.io", "api.segment.io", "segment.com", "launchdarkly.com", "app.launchdarkly.com",
+            "posthog.com", "amplitude.com", "logrocket.com", "lr-ingest.com", "lr-in.com", "lr-in-prod.com", "honeybadger.io",
+            "stytch.com", "stytch.io", "auth0.com", "tenant.auth0.com", "okta.com",
+            "modelcontextprotocol.io", "anthropicstatus.com", "claudecode.com", "claude.codes",
+        )) {
             assertEquals(home, outbound(threeTier, Connection(domain = host, port = 443, network = "tcp")))
             assertEquals("reject", outbound(threeTier, Connection(domain = host, port = 443, network = "udp")))
             assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, host, "A"))
+            assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, host, "AAAA"))
             assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "HTTPS"))
             assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "SVCB"))
         }
@@ -111,47 +126,40 @@ class RoutingPolicyTest {
 
     @Test
     fun xWebApiAndMediaUseCloudWithoutWideningGrokOrProviderTrees() {
-        // Exact first-party services, not x.com/twitter.com/twimg.com suffixes or shared CDNs.
-        assertEquals(exit, outbound(threeTier, Connection(domain = "x.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "www.x.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "mobile.x.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "api.x.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "twitter.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "www.twitter.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "mobile.twitter.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "api.twitter.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "upload.twitter.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "abs.twimg.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "pbs.twimg.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "video.twimg.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "ton.twimg.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "cdn.syndication.twimg.com")))
-        assertEquals(exit, outbound(threeTier, Connection(domain = "t.co")))
+        // Full X domain suffixes route to Cloud (Tono-Exit) while grok.x.com / grok.com / x.ai precede x.com and stay on Home.
+        for (host in listOf(
+            "x.com", "www.x.com", "mobile.x.com", "api.x.com", "upload.x.com", "sso.x.com", "api-stream.x.com",
+            "twitter.com", "www.twitter.com", "mobile.twitter.com", "api.twitter.com", "upload.twitter.com",
+            "twimg.com", "abs.twimg.com", "abs-0.twimg.com", "pbs.twimg.com", "video.twimg.com", "ton.twimg.com", "cdn.syndication.twimg.com",
+            "t.co", "pscp.tv", "prod.pscp.tv", "periscope.tv", "twtrdns.net", "cms-twdigitalassets.com", "vine.co", "twitpic.com",
+        )) {
+            assertEquals(exit, outbound(threeTier, Connection(domain = host)))
+            assertEquals("reject", outbound(threeTier, Connection(domain = host, network = "udp")))
+            assertEquals("reject", outbound(threeTier, Connection(domain = host, network = "icmp")))
+            assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, host, "A"))
+            assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, host, "AAAA"))
+            assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "HTTPS"))
+            assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "SVCB"))
+        }
         assertEquals(exit, outbound(threeTier, Connection(domain = "api.x.com", packageName = "com.twitter.android")))
-        assertEquals("reject", outbound(threeTier, Connection(domain = "x.com", network = "udp")))
-        assertEquals("reject", outbound(threeTier, Connection(domain = "pbs.twimg.com", network = "udp")))
-        assertEquals("reject", outbound(threeTier, Connection(domain = "t.co", network = "icmp")))
-        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "x.com", "A"))
-        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "api.twitter.com", "AAAA"))
-        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "pbs.twimg.com", "A"))
-        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "t.co", "AAAA"))
         assertEquals("fakeip", RouteExplainer.dnsServer(Fixtures.config(ipv6 = false), "api.x.com", "AAAA"))
         assertEquals(home, outbound(threeTier, Connection(domain = "grok.x.com")))
         assertEquals(home, outbound(threeTier, Connection(domain = "api.grok.x.com")))
         assertEquals(home, outbound(threeTier, Connection(domain = "grok.com")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "x.ai")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "grokipedia.com")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "grok.x.com", packageName = "com.twitter.android")))
         assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "grok.x.com", "A"))
+        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "grok.x.com", "HTTPS"))
         assertEquals("reject", outbound(threeTier, Connection(domain = "grok.x.com", network = "udp")))
         assertEquals(exit, outbound(threeTier, Connection(domain = "youtubei.googleapis.com", packageName = "ai.x.grok")))
         assertEquals(home, outbound(threeTier, Connection(domain = "api.x.com", packageName = "ai.x.grok")))
-        assertEquals(direct, outbound(threeTier, Connection(domain = "unreviewed.x.com")))
-        assertEquals(direct, outbound(threeTier, Connection(domain = "unreviewed.twitter.com")))
-        assertEquals(direct, outbound(threeTier, Connection(domain = "unreviewed.twimg.com")))
-        assertEquals(direct, outbound(threeTier, Connection(domain = "twimg.com")))
         assertEquals(direct, outbound(threeTier, Connection(domain = "x.com.example.net")))
         assertEquals(direct, outbound(threeTier, Connection(domain = "unrelated.akamaized.net")))
-        assertEquals("local", RouteExplainer.dnsServer(threeTier, "unreviewed.x.com", "A"))
-        // No process-wide X pin: a raw-IP dial without a recovered name retains the mode boundary.
-        assertEquals(direct, outbound(threeTier, Connection(ip = "203.0.114.9", packageName = "com.twitter.android")))
+        assertEquals("local", RouteExplainer.dnsServer(threeTier, "x.com.example.net", "A"))
+        // Un-sniffed raw-IP dial from the X Android app routes through Tono-Exit on TCP and rejects UDP/ICMP.
+        assertEquals(exit, outbound(threeTier, Connection(ip = "203.0.114.9", packageName = "com.twitter.android")))
+        assertEquals("reject", outbound(threeTier, Connection(ip = "203.0.114.9", packageName = "com.twitter.android", network = "udp")))
         assertEquals(exit, outbound(stable, Connection(domain = "x.com")))
         assertEquals(exit, outbound(stable, Connection(domain = "api.twitter.com")))
         assertEquals(exit, outbound(stable, Connection(domain = "pbs.twimg.com")))
@@ -183,7 +191,7 @@ class RoutingPolicyTest {
     fun everyProtectedSuffixFailsClosedInEveryMode() {
         val lists = DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES +
             DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES + DesktopRoutingContract.PROTECTED_DIRECT_SUFFIXES +
-            DesktopRoutingContract.PUBLIC_STUN_SUFFIXES
+            DesktopRoutingContract.PUBLIC_STUN_SUFFIXES + DesktopRoutingContract.X_CLOUD_SUFFIXES
         for (config in listOf(threeTier, stable, Fixtures.config(routing = null))) {
             for (suffix in lists) for (host in listOf(suffix, "a.b.$suffix")) {
                 assertTrue("$host tcp", outbound(config, Connection(domain = host)) !in setOf(direct, "reject"))

@@ -347,14 +347,77 @@ pub const PUBLIC_STUN_SUFFIXES: [&str; 5] = [
     "stunprotocol.org",
 ];
 
-/// Claude / AI auxiliary support, SSO, and anti-bot challenge suffixes routed
-/// through the Home tier on mobile TCP with UDP/ICMP rejected and FakeIP DNS.
-pub const MOBILE_HOME_AUX_SUFFIXES: [&str; 5] = [
+/// Claude / AI auxiliary support, device fingerprinting, anti-fraud, captcha,
+/// Apple Sign-In OAuth, telemetry, and SSO suffixes routed through the Home tier
+/// on mobile TCP with UDP/ICMP rejected and FakeIP DNS.
+pub const MOBILE_HOME_AUX_SUFFIXES: [&str; 44] = [
+    // WorkOS / Arkose / Intercom / Statsig feature-flag alias suffixes
+    "workos.com",
+    "authkit.app",
+    "workos.imgix.net",
+    "arkoselabs.com",
+    "funcaptcha.com",
+    "funcaptcha.co",
     "intercom.io",
     "intercomcdn.com",
-    "arkoselabs.com",
-    "workos.com",
+    "intercomassets.com",
+    "intercom-mail.com",
     "featureassets.org",
+    "prodregistryv2.org",
+    "beyondwickedmapping.org",
+    // Device fingerprinting & anti-fraud SDKs
+    "fpjs.io",
+    "fpnpmcdn.net",
+    "openfpcdn.io",
+    "fingerprint.com",
+    "sift.com",
+    "siftscience.com",
+    "sardine.ai",
+    "castle.io",
+    // reCAPTCHA & bot challenges
+    "recaptcha.net",
+    // Apple Sign-In OAuth (Continue with Apple)
+    "appleid.apple.com",
+    "idmsa.apple.com",
+    "appleid.cdn-apple.com",
+    "gsa.apple.com",
+    // Telemetry, feature flags & session replay
+    "segment.io",
+    "segment.com",
+    "launchdarkly.com",
+    "posthog.com",
+    "amplitude.com",
+    "logrocket.com",
+    "lr-ingest.com",
+    "lr-in.com",
+    "lr-in-prod.com",
+    "honeybadger.io",
+    // SSO / passwordless auth & MCP ecosystem
+    "stytch.com",
+    "stytch.io",
+    "auth0.com",
+    "okta.com",
+    "modelcontextprotocol.io",
+    "anthropicstatus.com",
+    "claudecode.com",
+    "claude.codes",
+];
+
+/// X (Twitter) full domain suffixes routed through the Cloud exit (`Tono-Exit`)
+/// on mobile TCP with UDP/ICMP rejected and FakeIP DNS. Evaluated after
+/// `CLAUDE_HOME_DOMAINS` so `grok.x.com` stays on Home while all other `*.x.com`
+/// and X media/API/streaming subdomains route through Cloud.
+pub const X_CLOUD_SUFFIXES: [&str; 10] = [
+    "x.com",
+    "twitter.com",
+    "twimg.com",
+    "t.co",
+    "pscp.tv",
+    "periscope.tv",
+    "twtrdns.net",
+    "cms-twdigitalassets.com",
+    "vine.co",
+    "twitpic.com",
 ];
 
 /// Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP
@@ -513,8 +576,11 @@ mod tests {
         assert_eq!(STUN_UDP_PORTS, [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309]);
         assert_eq!(ENCRYPTED_DNS_PORTS, [853]);
         assert_eq!(PUBLIC_STUN_SUFFIXES.len(), 5);
-        assert_eq!(MOBILE_HOME_AUX_SUFFIXES.len(), 5);
+        assert_eq!(MOBILE_HOME_AUX_SUFFIXES.len(), 44);
+        assert_eq!(X_CLOUD_SUFFIXES.len(), 10);
         assert!(CLAUDE_HOME_DOMAINS.contains(&"statsig.com"));
+        assert!(CLAUDE_HOME_DOMAINS.contains(&"grok.x.com"));
+        assert!(X_CLOUD_SUFFIXES.contains(&"x.com"));
         assert_eq!(OVERSEAS_UDP_REJECT_IPV4_CIDRS.len(), 33);
         assert_eq!(OVERSEAS_UDP_REJECT_IPV6_CIDRS.len(), 21);
         for cidr in OVERSEAS_UDP_REJECT_IPV4_CIDRS {

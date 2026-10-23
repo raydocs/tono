@@ -54,6 +54,13 @@ object SingBoxConfig {
      */
     val AI_APP_PACKAGES = listOf("com.anthropic.claude", "com.openai.chatgpt", "ai.x.grok")
 
+    /**
+     * Android packages routed through the cloud exit (TCP -> Tono-Exit, UDP/ICMP -> reject)
+     * even when a connection dials a raw IP without a sniffed domain. Evaluated after Home
+     * domain rules so Grok (grok.x.com / grok.com / x.ai) inside the X app still routes to Home.
+     */
+    val CLOUD_APP_PACKAGES = listOf("com.twitter.android")
+
     /** Local names that must keep resolving on the phone's own network. */
     private val LOCAL_DNS_SUFFIXES = listOf("local", "lan", "home.arpa", "in-addr.arpa", "ip6.arpa", "localhost")
 
@@ -82,7 +89,7 @@ object SingBoxConfig {
         val home = homeTargetTag(catalog)
         val video = DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES
         val homeSuffixes = DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES
-        val protected = protectedRemainder + DesktopRoutingContract.PUBLIC_STUN_SUFFIXES
+        val protected = protectedRemainder + DesktopRoutingContract.PUBLIC_STUN_SUFFIXES + DesktopRoutingContract.X_CLOUD_SUFFIXES
         val threeTier = input.mode == RoutingMode.THREE_TIER
         val cloudOnlyExact = if (threeTier) DesktopRoutingContract.OVERSEAS_EXACT else emptyList()
 
@@ -134,6 +141,8 @@ object SingBoxConfig {
             rules += route(linkedMapOf("network" to listOf("tcp"), "domain" to cloudOnlyExact), EXIT_TAG)
             rules += reject(linkedMapOf("network" to udpIcmp, "domain" to cloudOnlyExact))
         }
+        rules += route(linkedMapOf("network" to listOf("tcp"), "package_name" to CLOUD_APP_PACKAGES), EXIT_TAG)
+        rules += reject(linkedMapOf("network" to udpIcmp, "package_name" to CLOUD_APP_PACKAGES))
         // A fake address without a live mapping (e.g. cached across a restart) never leaves the phone.
         rules += reject(linkedMapOf("ip_cidr" to listOf(FAKEIP_INET4, FAKEIP_INET6)))
         rules += route(linkedMapOf("ip_is_private" to true), DIRECT_TAG)

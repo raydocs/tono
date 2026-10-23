@@ -9,7 +9,8 @@ final class RoutingTests: XCTestCase {
     func testContractCountsMatchTheDesktopLists() {
         XCTAssertEqual(DesktopRoutingContract.cloudVideoSuffixes.count, 21)
         XCTAssertEqual(DesktopRoutingContract.homeSuffixes.count, 194)
-        XCTAssertEqual(DesktopRoutingContract.mobileHomeAuxSuffixes, ["intercom.io", "intercomcdn.com", "arkoselabs.com", "workos.com", "featureassets.org"])
+        XCTAssertEqual(DesktopRoutingContract.mobileHomeAuxSuffixes.count, 44)
+        XCTAssertEqual(DesktopRoutingContract.xCloudSuffixes, ["x.com", "twitter.com", "twimg.com", "t.co", "pscp.tv", "periscope.tv", "twtrdns.net", "cms-twdigitalassets.com", "vine.co", "twitpic.com"])
         XCTAssertEqual(DesktopRoutingContract.homeIPv4CIDRs, ["160.79.104.0/21"])
         XCTAssertEqual(DesktopRoutingContract.stunUDPPorts, [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309])
         XCTAssertEqual(DesktopRoutingContract.encryptedDNSPorts, [853])
@@ -125,13 +126,53 @@ final class RoutingTests: XCTestCase {
             }
         }
 
-        // Claude auxiliary auth, SSO, and anti-bot challenge domains route to Home on TCP, reject UDP, and use FakeIP DNS.
-        for host in ["intercom.io", "widget.intercom.io", "js.intercomcdn.com", "arkoselabs.com", "client-api.arkoselabs.com", "workos.com", "auth.workos.com", "statsig.com", "featureassets.org"] {
+        // Claude auxiliary auth, fingerprinting, captcha, Apple Sign-In, telemetry, and SSO domains route to Home on TCP, reject UDP, and use FakeIP DNS.
+        for host in [
+            "intercom.io", "widget.intercom.io", "js.intercomcdn.com", "intercomassets.com", "intercom-mail.com",
+            "arkoselabs.com", "client-api.arkoselabs.com", "funcaptcha.com", "funcaptcha.co",
+            "workos.com", "auth.workos.com", "authkit.app", "workos.imgix.net",
+            "statsig.com", "featureassets.org", "prodregistryv2.org", "beyondwickedmapping.org",
+            "fpjs.io", "api.fpjs.io", "fpnpmcdn.net", "openfpcdn.io", "fingerprint.com",
+            "sift.com", "siftscience.com", "sardine.ai", "castle.io",
+            "recaptcha.net", "www.recaptcha.net",
+            "appleid.apple.com", "idmsa.apple.com", "appleid.cdn-apple.com", "gsa.apple.com",
+            "segment.io", "api.segment.io", "segment.com", "launchdarkly.com", "app.launchdarkly.com",
+            "posthog.com", "amplitude.com", "logrocket.com", "lr-ingest.com", "lr-in.com", "lr-in-prod.com", "honeybadger.io",
+            "stytch.com", "stytch.io", "auth0.com", "tenant.auth0.com", "okta.com",
+            "modelcontextprotocol.io", "anthropicstatus.com", "claudecode.com", "claude.codes",
+        ] {
             XCTAssertEqual(try verdict(threeTier, domain: host, port: 443, network: "tcp").outbound, SingBoxConfig.homeSocksTag)
             if case .reject = try verdict(threeTier, domain: host, port: 443, network: "udp") {} else {
                 XCTFail("Claude aux domain \(host) UDP must be rejected")
             }
             XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "A"), SingBoxConfig.dnsFakeIP)
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "AAAA"), SingBoxConfig.dnsFakeIP)
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "HTTPS"), "predefined")
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "SVCB"), "predefined")
+        }
+
+        // X (Twitter) full domain suffixes route to Cloud (Tono-Exit) while grok.x.com / grok.com / x.ai precede x.com and stay on Home.
+        for host in ["grok.x.com", "api.grok.x.com", "grok.com", "x.ai", "grokipedia.com"] {
+            XCTAssertEqual(try verdict(threeTier, domain: host, port: 443, network: "tcp").outbound, SingBoxConfig.homeSocksTag)
+            if case .reject = try verdict(threeTier, domain: host, port: 443, network: "udp") {} else {
+                XCTFail("Grok domain \(host) UDP must be rejected")
+            }
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "A"), SingBoxConfig.dnsFakeIP)
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "HTTPS"), "predefined")
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "SVCB"), "predefined")
+        }
+        for host in [
+            "x.com", "www.x.com", "mobile.x.com", "api.x.com", "upload.x.com", "sso.x.com", "api-stream.x.com",
+            "twitter.com", "www.twitter.com", "api.twitter.com", "upload.twitter.com",
+            "twimg.com", "abs.twimg.com", "abs-0.twimg.com", "pbs.twimg.com", "video.twimg.com", "ton.twimg.com",
+            "t.co", "pscp.tv", "prod.pscp.tv", "periscope.tv", "twtrdns.net", "cms-twdigitalassets.com", "vine.co", "twitpic.com",
+        ] {
+            XCTAssertEqual(try verdict(threeTier, domain: host, port: 443, network: "tcp").outbound, SingBoxConfig.exitTag)
+            if case .reject = try verdict(threeTier, domain: host, port: 443, network: "udp") {} else {
+                XCTFail("X domain \(host) UDP must be rejected")
+            }
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "A"), SingBoxConfig.dnsFakeIP)
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "AAAA"), SingBoxConfig.dnsFakeIP)
             XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "HTTPS"), "predefined")
             XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "SVCB"), "predefined")
         }

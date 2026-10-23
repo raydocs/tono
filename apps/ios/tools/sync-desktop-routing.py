@@ -70,12 +70,13 @@ def generate() -> str:
     encrypted_dns_ports = rust_int_array(rust_text, "ENCRYPTED_DNS_PORTS")
     public_stun_suffixes = rust_array(rust_text, "PUBLIC_STUN_SUFFIXES")
     mobile_home_aux = rust_array(rust_text, "MOBILE_HOME_AUX_SUFFIXES")
+    x_cloud_suffixes = rust_array(rust_text, "X_CLOUD_SUFFIXES")
     overseas_udp_cidrs = rust_array(rust_text, "OVERSEAS_UDP_REJECT_IPV4_CIDRS")
     overseas_udp_v6_cidrs = rust_array(rust_text, "OVERSEAS_UDP_REJECT_IPV6_CIDRS")
     protected = rust_array(rust_text, "PROTECTED_DIRECT_SUFFIXES")
     assert len(home) == 194 and len(video) == 21, (len(home), len(video))
     assert len(stun_ports) == 8 and len(encrypted_dns_ports) == 1, (len(stun_ports), len(encrypted_dns_ports))
-    assert len(public_stun_suffixes) == 5 and len(mobile_home_aux) == 5, (len(public_stun_suffixes), len(mobile_home_aux))
+    assert len(public_stun_suffixes) == 5 and len(mobile_home_aux) == 44 and len(x_cloud_suffixes) == 10, (len(public_stun_suffixes), len(mobile_home_aux), len(x_cloud_suffixes))
     assert len(overseas_udp_cidrs) == 33 and len(overseas_udp_v6_cidrs) == 21, (len(overseas_udp_cidrs), len(overseas_udp_v6_cidrs))
     assert template["version"] == 2
     digest = hashlib.sha256((rust_text + "\0" + template_text).encode()).hexdigest()
@@ -89,7 +90,8 @@ def generate() -> str:
         f'    public static let sourceDigest = "{digest}"\n\n'
         + swift_list("cloudVideoSuffixes", "Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).", video) + "\n"
         + swift_list("homeSuffixes", "Owner-approved AI / named Home suffixes, routed to the assigned residential exit.", home) + "\n"
-        + swift_list("mobileHomeAuxSuffixes", "Claude / AI auxiliary support, SSO, and anti-bot challenge suffixes routed through the Home tier on mobile.", mobile_home_aux) + "\n"
+        + swift_list("mobileHomeAuxSuffixes", "Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, and SSO suffixes routed through the Home tier on mobile.", mobile_home_aux) + "\n"
+        + swift_list("xCloudSuffixes", "X (Twitter) full domain suffixes routed through the Cloud exit on mobile after Home rules (so grok.x.com stays on Home).", x_cloud_suffixes) + "\n"
         + swift_list("homeIPv4CIDRs", "Anthropic's own IPv4 range for raw-IP dials.", cidrs) + "\n"
         + swift_int_list("stunUDPPorts", "Google WebRTC STUN UDP ports rejected across routing modes so raw-IP STUN probes cannot leak the physical egress IP.", stun_ports) + "\n"
         + swift_int_list("encryptedDNSPorts", "Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP.", encrypted_dns_ports) + "\n"

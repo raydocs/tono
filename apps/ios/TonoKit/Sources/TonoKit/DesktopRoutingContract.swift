@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "5aaccfefe5155539f444f59c44d8cf60f82590bbf587b8c06cc9653d954e803a"
+    public static let sourceDigest = "b122249dc41f722ad5034fd80c35c8c5005ff2289b0ff8f4801475ec56e197c3"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -230,13 +230,66 @@ public enum DesktopRoutingContract {
         "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com",
     ]
 
-    /// Claude / AI auxiliary support, SSO, and anti-bot challenge suffixes routed through the Home tier on mobile.
+    /// Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, and SSO suffixes routed through the Home tier on mobile.
     public static let mobileHomeAuxSuffixes: [String] = [
+        "workos.com",
+        "authkit.app",
+        "workos.imgix.net",
+        "arkoselabs.com",
+        "funcaptcha.com",
+        "funcaptcha.co",
         "intercom.io",
         "intercomcdn.com",
-        "arkoselabs.com",
-        "workos.com",
+        "intercomassets.com",
+        "intercom-mail.com",
         "featureassets.org",
+        "prodregistryv2.org",
+        "beyondwickedmapping.org",
+        "fpjs.io",
+        "fpnpmcdn.net",
+        "openfpcdn.io",
+        "fingerprint.com",
+        "sift.com",
+        "siftscience.com",
+        "sardine.ai",
+        "castle.io",
+        "recaptcha.net",
+        "appleid.apple.com",
+        "idmsa.apple.com",
+        "appleid.cdn-apple.com",
+        "gsa.apple.com",
+        "segment.io",
+        "segment.com",
+        "launchdarkly.com",
+        "posthog.com",
+        "amplitude.com",
+        "logrocket.com",
+        "lr-ingest.com",
+        "lr-in.com",
+        "lr-in-prod.com",
+        "honeybadger.io",
+        "stytch.com",
+        "stytch.io",
+        "auth0.com",
+        "okta.com",
+        "modelcontextprotocol.io",
+        "anthropicstatus.com",
+        "claudecode.com",
+        "claude.codes",
+    ]
+
+    /// X (Twitter) full domain suffixes routed through the Cloud exit on mobile after Home rules (so grok.x.com stays on Home).
+    public static let xCloudSuffixes: [String] = [
+        "x.com",
+        "twitter.com",
+        "twimg.com",
+        "t.co",
+        "pscp.tv",
+        "periscope.tv",
+        "twtrdns.net",
+        "cms-twdigitalassets.com",
+        "vine.co",
+        "twitpic.com",
     ]
 
     /// Anthropic's own IPv4 range for raw-IP dials.

@@ -95,7 +95,7 @@ public enum SingBoxConfig {
         let home = homeTargetTag(catalog)
         let video = DesktopRoutingContract.cloudVideoSuffixes
         let homeSuffixes = DesktopRoutingContract.homeSuffixes + DesktopRoutingContract.mobileHomeAuxSuffixes
-        let protected = protectedRemainder + DesktopRoutingContract.publicStunSuffixes
+        let protected = protectedRemainder + DesktopRoutingContract.publicStunSuffixes + DesktopRoutingContract.xCloudSuffixes
         let threeTier = input.mode == .threeTier
         let cloudOnlyExact = threeTier ? DesktopRoutingContract.overseasExact : []
 
