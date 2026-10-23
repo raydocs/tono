@@ -9,3 +9,7 @@
 - 剩余限制：真机 VoiceOver 朗读、触感与 120 Hz 未验；NavigationLink 行尾为系统 chevron，不随 Dynamic Type 放大；Android 设置页另一交付。
 
 2026-10-22 验证续记：云端 Devin macOS（Xcode 26.6 / iOS 26.5 / iPhone 17 Pro，session `2788a48db37b40d681d32db595fc8c97`）。RED：仅把 `SettingsUITests.swift` 放入 main `a8d3c80c5` 的 worktree，3/3 断言失败（`:54 en: protection switch missing` 等），非编译失败。四轮迭代：`448afe747` 首次即编译通过、5 个既有用例通过，3 个新用例因测试查询失败；`5c6f04e66`/`1291508f9` 证实 iOS 26 的 `confirmationDialog` 只画居中面板与破坏性按钮、丢弃显式 Cancel（元素树只有 `Sign out`），遂改为 `.alert`（退出登录 + 取消 + 已登录账号）；行底色由半透明改为不透明烟色加 4% 白，分组可辨。GREEN 于 `0837a9fd5`：SettingsUITests 3/3、sheets/largest-text 审计 2/2、对比扫描（settings 22 元素 0 低于 4.5:1 或 44pt）、Settings 可达与下滑关闭通过；en/zh × 默认/AX5 首屏、规则页、退出确认截图已存档（所有者本机 `~/.local/state/devin-cloud/runs/`）。读图自评：AX5 中英首屏第一组即保护开关（y≈0.48–0.61）且在视口内；太阳色只在开关开态、红色只在退出登录；默认尺寸首屏最后一行「退出登录」压在 Home 指示条上（列表内容高于一屏，滚动后正常），规则页与 AX5 脚注在底边被裁为滚动内容，属原生列表行为。原始日志与 Not run 见 PR 验证评论。本续记为 docs-only 提交，验证的源码 SHA 为 `0837a9fd5`。
+
+### 2026-10-22 · Final visual contrast correction
+- Direct pixel review approved layout/navigation/cancel; Increase Contrast sign-out row measured 3.8548:1 (#E27068 on #383540). This minor is corrected once using lighter coral only in Increase Contrast; standard appearance, system alert and behavior unchanged.
+- Prior exact-source navigation/capture provenance remains recorded at 3882034/0837; not attributed to this new palette. New-source targeted cloud build, contrast pixels and Settings regression are pending; no new pass claim, no merge/publish.

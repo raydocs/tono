@@ -2,8 +2,7 @@ import SwiftUI
 import TonoKit
 import UIKit
 
-/// Sign out's red, muted to the night surfaces (5.8:1 on Smoke, 6.2:1 on Night) instead of the
-/// system alert red, which was the one saturated colour on the screen.
+/// Muted sign-out red for standard contrast; Increase Contrast uses a lighter coral on the lifted row.
 private let signOutRed = Color(hex: 0xE27068)
 /// The switch's "on": the deeper end of the primary button's sun gradient, one accent with Home,
 /// warm enough to part from the white knob without the coral of the sun's edge. The only place
@@ -94,7 +93,8 @@ struct SettingsView: View {
                 // gap, and it asks before acting.
                 Section {
                     Button { confirmSignOut = true } label: {
-                        Text(L.t("settings_sign_out")).tonoFont(17, relativeTo: .body).foregroundStyle(signOutRed)
+                        Text(L.t("settings_sign_out")).tonoFont(17, relativeTo: .body)
+                            .foregroundStyle(contrast == .increased ? Color(hex: 0xFF9F97) : signOutRed)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, minHeight: 44)
