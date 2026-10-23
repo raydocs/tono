@@ -25,11 +25,15 @@ class ApiException(val status: Int, val code: String, message: String) : IOExcep
  * which forward unterminated TLS. Every path verifies the real API certificate for the API hostname;
  * a relay only carries bytes.
  */
-class ControlPlane(
+class ControlPlane internal constructor(
     baseUrl: String,
     private val clientVersion: String,
-    private val relays: List<Pair<String, Int>> = API_RELAYS,
+    private val relays: List<Pair<String, Int>>,
+    private val socketConnector: ((kind: String, dialHost: String, port: Int) -> Socket)?,
 ) {
+    constructor(baseUrl: String, clientVersion: String, relays: List<Pair<String, Int>> = API_RELAYS) :
+        this(baseUrl, clientVersion, relays, null)
+
     private val base = URI(baseUrl)
     private val host = base.host
     private val basePath = base.path.trimEnd('/')
@@ -74,6 +78,12 @@ class ControlPlane(
     }
 
     private fun exchange(kind: String, dialHost: String, port: Int, method: String, path: String, body: String?, bearer: String?): Response {
+        // Internal IO seam supplies a connected (and, for HTTPS, verified) socket, not an HTTP exchange.
+        socketConnector?.let { connect ->
+            connect(kind, dialHost, port).use {
+                return send(it, method, path, body, bearer, if (kind == "local") "$host:$port" else host, kind)
+            }
+        }
         val raw = Socket()
         raw.connect(InetSocketAddress(dialHost, port), CONNECT_TIMEOUT_MS)
         raw.soTimeout = READ_TIMEOUT_MS
