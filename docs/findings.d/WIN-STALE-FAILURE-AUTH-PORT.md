@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-STALE-FAILURE-AUTH-PORT | Windows 过期连接失败在 adapter 读取返回后清空后继连接的认证隧道 fallback 端口 | open | 待开 | 中·推导 | 工作分支已有源码修复；尚未合 main；初次 hosted 两侧均编译后 fixture 超时，非行为 RED/GREEN；R1 测试 oracle 已修源码，重跑待补；无实机证据 |
+| WIN-STALE-FAILURE-AUTH-PORT | Windows 过期连接失败在 adapter 读取返回后清空后继连接的认证隧道 fallback 端口 | in-PR | [#1725](https://github.com/raydocs/tono/pull/1725) | 中·已确认（受控回归） | 工作分支已有源码修复；尚未合 main；初次 hosted 两侧均编译后 fixture 超时，非行为 RED/GREEN；R1 测试 oracle 已修源码，重跑待补；无实机证据 |
 
 2026-10-23 Windows audit F2（原报告标识 `AUDIT-WIN-STALE-FAILURE-AUTH-PORT`）。
 基线 `4fbf1e6a4b387c80498e14975595791591839ee6`，其中 Windows 源码等于冻结 main
@@ -30,3 +30,11 @@
 - 本次已做：`git diff --check`、rustfmt 解析（不改写源码、不是编译）、隔离临时 index 补丁适用性检查。
   未做：修正测试的编译、native cargo/test/check/clippy/Tauri、hosted RED/GREEN 重跑、R1 后复审、
   Win10/11 真实设备资格。状态仍为 `open`，不是已验证或已发布修复。
+
+最终运行证据（优先于上文实现阶段待验证说明）：修正 RED `08c9854de` 的
+[run39922890390](https://github.com/raydocs/tono/actions/runs/39922890390) 确实失败于
+`stale A cleared B's authenticated tunnel fallback port`，不是 fixture 超时。
+修复 `96125d828` 的 [ci-gate39922905155](https://github.com/raydocs/tono/actions/runs/39922905155)
+成功；原生 Tauri 库 772 passed，新增回归与原 ownership/caller-abort 同伴均通过。父任务读取原始日志。
+独立 Sol/xhigh R2 覆盖 `96125d828d00c58a746c19059327f09c9a4d27a3`，R1 oracle 缺口已修，无新 finding。
+后续仅追加本证据文档，产品树不变；仍非 Win10/11 实机、真实 Service/TLS 或签名安装包资格。

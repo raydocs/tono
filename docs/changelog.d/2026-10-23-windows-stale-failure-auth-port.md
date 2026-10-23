@@ -29,3 +29,7 @@
 - 已做：`git diff --check`、rustfmt 只解析，以及临时 index 对 RED `662a79248` / fixed `50b86bc81`
   应用同一测试补丁的检查；两侧生产代码各自不变、测试源码相同。未做修正测试的编译、任何 native Cargo、
   hosted 重跑或实机验证。父任务仍须取得预期行为 RED 和 fixed GREEN；本次不推送、不建 PR、不合并或发布。
+
+- 最终父任务验收：修正 RED run39922890390 在旧行为的端口保留断言失败；修复96125d828
+  ci-gate39922905155成功，Tauri772passed，新回归/ownership同伴通过。Sol/xhigh R2覆盖该精确范围，
+  R1测试oracle已修且无新finding。新增的本提交仅文档，不改已验产品树；仍未合并/发布或完成真机资格。
