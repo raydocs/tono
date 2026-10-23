@@ -2856,7 +2856,7 @@ final class AccountSessionRequestTests: XCTestCase {
         try assertHeld()
         helperStatus = .confirmed(requiresProtectionRecovery: false)
         selectiveHeld = true
-        app.aiRecoveryPending = false // the default/cache cannot prove an absent hold
+        app.selectiveAIRecoveryPending = false // the default/cache cannot prove an absent hold
         await signIn()
         try assertHeld()
         selectiveHeld = false
