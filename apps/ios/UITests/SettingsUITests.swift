@@ -58,10 +58,15 @@ final class SettingsUITests: XCTestCase {
             XCTAssertLessThan(header.frame.minY, toggle.frame.minY, "\(lang): header \(header.frame) is not above the switch \(toggle.frame)")
             XCTAssertLessThanOrEqual(toggle.frame.maxY, window.maxY, "\(lang): switch \(toggle.frame) runs past the screen \(window)")
             XCTAssertTrue(toggle.isHittable, "\(lang): switch not reachable without scrolling")
+            // The List is lazy: at AX5 the rules row may not exist until scrolled. If it is laid
+            // out, it comes after the switch; either way the switch is the first control.
             let rules = element(app, "settingsRoutingRules")
-            XCTAssertTrue(rules.exists, "\(lang): routing rules row missing")
-            XCTAssertGreaterThan(rules.frame.minY, toggle.frame.minY, "\(lang): rules row \(rules.frame) above the switch \(toggle.frame)")
+            if rules.exists {
+                XCTAssertGreaterThan(rules.frame.minY, toggle.frame.minY, "\(lang): rules row \(rules.frame) above the switch \(toggle.frame)")
+            }
             save("settings-\(lang)-ax5-first-screen")
+            app.swipeUp()
+            XCTAssertTrue(rules.waitForExistence(timeout: 4), "\(lang): routing rules row missing after a scroll")
             app.terminate()
         }
     }
@@ -109,7 +114,8 @@ final class SettingsUITests: XCTestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 6), "Sign out acted without asking")
         XCTAssertTrue(sheet.buttons["Sign out"].exists)
         save("settings-en-sign-out-confirm")
-        sheet.buttons["Cancel"].tap()
+        // The action sheet's Cancel is its own element under the sheet, not inside it.
+        app.buttons["Cancel"].tap()
         XCTAssertTrue(app.buttons["settingsClose"].waitForExistence(timeout: 4), "Cancel closed Settings")
         XCTAssertFalse(sheet.exists)
     }
@@ -136,7 +142,7 @@ final class SettingsUITests: XCTestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 6), "Sign out acted without asking")
         XCTAssertTrue(sheet.buttons["退出登录"].exists)
         save("settings-zh-sign-out-confirm")
-        sheet.buttons["取消"].tap()
+        app.buttons["取消"].tap()
         XCTAssertTrue(app.buttons["settingsClose"].waitForExistence(timeout: 4))
     }
 }
