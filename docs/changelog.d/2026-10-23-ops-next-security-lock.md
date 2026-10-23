@@ -1,0 +1,12 @@
+## 2026-10-23 · Ops 间接 Next 依赖安全补丁
+- 归属：`docs/ops/plan-2026-09-11.md` §2.6 工程验证与依赖维护；五模型产品审计的依赖项，不推进客户端发布门。
+- 来源：基线 `ca40f3baadd28dd792c12c6d2bc5b647cfec20a0` → 本 PR head；分支 `fix/ops-next-security-20261023`，交付时尚未合 main，精确 SHA 与 CI 回执见 PR 验证评论。
+- 缺陷修复：移除依赖图中 Next 16.4.0 对应的三条已公开告警（GHSA-673q-mjm6-r5xr、GHSA-2464-fhr4-w9xw、GHSA-p3m5-59mp-jv5r）。Ops 是 Vite 应用，Next 仅来自 `geist@1.7.2` 的 peer；没有证据表明线上运行 Next 服务或已可利用。
+- 新增/优化：无。保留 Geist、字体、UI 源码、直接依赖声明和全部产品行为。
+- 工程与测试：npm 正常生成 lock，仅十个既有 Next 家族包从 16.4.0 升到 16.4.2；带入发布元数据中的 Linux libc 标识和 Next 的 sharp 范围变化，实际已锁定的 `sharp@0.35.5` 不变。未添加常量版本断言类测试。
+- 验证（本机 Node 24.22.1 / npm 11.19.1）：更新前 `npm audit --json` exit 1，`critical:1,total:1`；更新后 exit 0，所有等级与 total 均为 0。这是依赖图反例/修复证据，不是漏洞利用复现。
+- 验证：`npm ci --ignore-scripts --no-audit --no-fund` → `added 328 packages in 6s`；两份已使用的 Geist 字体 SHA-256 前后相同。`npm test -- --reporter=verbose` → `64 passed (64)`、`442 passed (442)`；`npm run typecheck` → `unchecked indexed access errors 198 (baseline 219)`；`npm run lint` exit 0。
+- 验证：Vite 构建到临时外部目录成功（避免清除仓库已有 ignored 产物）；同一 `measureBudgets` 检查该产物：initial JS 216.8 KB/400 KB、total JS 344.8 KB/600 KB、无超长源码、无预算失败。根线程检查精确 lock 差异和 `git diff --check`；原始本机回执在 `/tmp/tono-product-audit-20261023/ops-next/`，关键输出同步 PR。
+- 未执行：本轮 browser/Playwright、生产环境验证、客户端原生/设备验证；PR exact-head `ci-gate` 在开 PR 后单独记录，不用本机检查代替。
+- 候选/发布：仅依赖锁源码，无新候选，无生产部署，无客户发布。
+- 剩余限制：`npm audit` 是检查当时的依赖告警快照，不证明不存在未知漏洞；Pillow/glib 告警不在本 PR 范围。
