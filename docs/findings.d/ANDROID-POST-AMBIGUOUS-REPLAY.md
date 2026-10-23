@@ -15,4 +15,12 @@
   仅在连接后 socket IO 边界注入内存 fixture，记录尝试与实际写入。包含写前/GET 对照、
   部分首次写入、模拟读写超时、EOF、截断响应、无结构化 5xx 与结构化错误；无睡眠、生产请求或整次 exchange mock。
 - RED-source `d82e81cd99b0376663f3d9d62922a24e0be8c607` 仅增加 seam 与测试，重试循环与基线逐字节相同；
-  本机未运行 Gradle/JUnit，不把源码检查称作失败或通过的运行证据。
+  本机交付实现时未运行 Gradle/JUnit，不把源码检查称作失败或通过的运行证据。
+
+父任务运行证据：同一 [Devin 会话](https://app.devin.ai/sessions/e8291010a8af4c30937075dd4faca3eb)，
+RED `d82e81cd99b0376663f3d9d62922a24e0be8c607` 的一个真实 JUnit 回归失败于
+`possibly-delivered POST must not succeed via a second path: expected ApiException ... but nothing was thrown`；
+GREEN `b97d55c28ca34534961bc6437fb75e8f898a5033` 相同测试源码执行 1 次、0 failures/errors/skips。
+routing 18 passed，mobile 103 passed / 25 默认 opt-in skipped，lint 通过；父任务读取原始 XML/日志。
+Sol/xhigh 独立审查覆盖 GREEN SHA，无 finding；本次仅文档追加，不改已验证产品树。
+这证明内存 socket-stream 故障下的生产 framing/parser/retry 逻辑，不证明真实 TLS/公网故障或设备资格。

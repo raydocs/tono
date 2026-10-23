@@ -12,3 +12,8 @@
   未执行 RED/GREEN JUnit、Gradle 编译/lint、Android 模拟器/真机或独立高风险审查；由父任务在 Devin 同 VM 执行准确 refs。
 - 候选/发布：仅源码，无新候选，无部署/发布。
 - 剩余限制：未声称运行时 RED/GREEN 或设备验收；修复及测试均待云端编译与执行，父任务独立审查后才决定后续。
+
+- 父任务集成与运行：独立分支 `fix/android-post-replay-safety-20261023`，产品与 worker FIX 字节相同。
+  云端 RED `d82e81cd9` 一个回归断言失败；GREEN `b97d55c28` 同一回归 1 passed，routing18passed、
+  mobile103passed/25默认skipped、lint通过。Sol/xhigh 精确 diff 审查无 finding；只追加本证据文档。
+  所有测试在 Devin，未运行本地 native 构建；未部署/发布，实际 TLS/手机资格未完成。
