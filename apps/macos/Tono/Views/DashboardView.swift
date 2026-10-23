@@ -460,7 +460,14 @@ struct DashboardView: View {
         if appState.isProtectionBlocked { return "Protected offline" }
         if appState.isProtectionUnconfirmed { return "Protection unknown" }
         if isDegradedWhileConnected { return "Protected — exit degraded" }
-        return appState.isConnected ? "Protected" : "Standby"
+        guard appState.isConnected else { return "Standby" }
+        return isListedAIScope ? "AI protected" : "Protected"
+    }
+
+    /// The verified session protects listed AI only (decision 130). Read
+    /// from the captured session, not the saved Settings choice.
+    private var isListedAIScope: Bool {
+        appState.sessionProtectionScope == .listedAI
     }
 
     private var statusBadgeColor: Color {
@@ -489,9 +496,10 @@ struct DashboardView: View {
         if appState.isProtectionBlocked { return String(localized: "Offline") }
         if appState.isProtectionUnconfirmed { return String(localized: "Unknown") }
         if isDegradedWhileConnected { return String(localized: "Degraded") }
-        return appState.isConnected
-            ? String(localized: "Protected")
-            : String(localized: "Standby")
+        guard appState.isConnected else { return String(localized: "Standby") }
+        return isListedAIScope
+            ? String(localized: "AI protected")
+            : String(localized: "Protected")
     }
 
     private var protectionDetail: String {
@@ -507,7 +515,11 @@ struct DashboardView: View {
         if isDegradedWhileConnected {
             return String(localized: "Exit not responding — checking")
         }
-        if appState.isConnected { return String(localized: "Traffic is routed") }
+        if appState.isConnected {
+            return isListedAIScope
+                ? String(localized: "Listed AI protected · other traffic direct")
+                : String(localized: "Traffic is routed")
+        }
         return String(localized: "Ready to connect")
     }
 

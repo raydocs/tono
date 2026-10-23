@@ -243,11 +243,11 @@ struct WelcomeIntroView: View {
     private static let points: [Point] = [
         Point(
             headline: "Connected means protected.",
-            body: "Open Tono, click once, and all your traffic takes the protected route."
+            body: "Open Tono, click once, and the traffic your routing mode covers takes the protected route."
         ),
         Point(
             headline: "Offline, never exposed.",
-            body: "If the route fails, Tono cuts off first so nothing leaks out."
+            body: "If the route fails, Tono cuts covered traffic off first rather than let it leak out."
         ),
         Point(
             headline: "Routes are Tono's job.",
@@ -280,8 +280,8 @@ enum SeaIntroStep: Int, CaseIterable {
 
     var detail: LocalizedStringKey {
         switch self {
-        case .connected: "When you connect, Tono carries your traffic on a protected route."
-        case .offline: "If that route fails, Tono blocks direct traffic first."
+        case .connected: "When you connect, Tono carries the traffic your routing mode covers on a protected route."
+        case .offline: "If that route fails, Tono blocks covered traffic first; it never falls back to direct."
         case .routes: "Choose a region when you want to. Tono handles the route."
         }
     }
