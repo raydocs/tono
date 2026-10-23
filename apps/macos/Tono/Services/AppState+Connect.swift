@@ -2524,8 +2524,10 @@ extension AppState {
     /// accepted first by the activation reconcile: while nothing has followed
     /// it, the answer agrees and is returned, so the caller's resume intent
     /// retires with it instead of re-arming PF (INT610-F2).
-    func acceptConfirmedProtectionReleaseBeforeSignIn() async
-        -> KillSwitchService.StatusObservation {
+    func acceptConfirmedProtectionReleaseBeforeSignIn(
+        retireOrphanAIHome: Bool = false,
+        authenticationIsCurrent: @MainActor () -> Bool = { true }
+    ) async -> KillSwitchService.StatusObservation {
         guard !isConnected, !isConnecting, !isDisconnecting else { return .unavailable }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
         let networkProtection = self.networkProtection

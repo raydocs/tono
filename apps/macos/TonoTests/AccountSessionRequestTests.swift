@@ -2720,6 +2720,280 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(KillSwitchService.isArmed, "an armed intent alone must still meet a confirmed release")
     }
 
+    func testFreshAuthenticationRetiresOnlyAProvenOrphanAIHomeMode() async throws {
+        let defaults = AppProfile.defaults
+        let savedSession = defaults.object(forKey: SettingsKey.routingSession)
+        let savedPreference = defaults.object(forKey: SettingsKey.desktopRoutingMode)
+        let savedStrict = defaults.object(forKey: "strictRoutingSessionIntent")
+        let savedArmed = KillSwitchService.isArmed
+        let savedReassert = KillSwitchService.needsSessionExceptionReassert
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedLaunchConsumer = RuntimeCleanup.launchProtectionConsumer
+        let savedTeardownObserver = ManagedExitCatalogOwnership.accountTeardownObserver
+        defer {
+            defaults.set(savedSession, forKey: SettingsKey.routingSession)
+            defaults.set(savedPreference, forKey: SettingsKey.desktopRoutingMode)
+            defaults.set(savedStrict, forKey: "strictRoutingSessionIntent")
+            KillSwitchService.isArmed = savedArmed
+            KillSwitchService.needsSessionExceptionReassert = savedReassert
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.launchProtectionConsumer = savedLaunchConsumer
+            ManagedExitCatalogOwnership.accountTeardownObserver = savedTeardownObserver
+        }
+        // Seed before construction: clearing disk alone must not leave the
+        // coordinator's already-loaded AI Home admission behind.
+        defaults.set("ai-home", forKey: SettingsKey.routingSession)
+        defaults.removeObject(forKey: SettingsKey.desktopRoutingMode)
+        defaults.removeObject(forKey: "strictRoutingSessionIntent")
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdatePending = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        let app = AppState()
+        var catalog: TonoExitCatalogResponse?
+        var admitted: String?
+        var memoryAtAdmission: String?
+        var diskAtAdmission: String?
+        var runtimeAdmissions = 0
+        let (account, transport, host, _) = fixture(
+            catalogConsumer: { catalog = $0 },
+            cloudFallbackConsumer: { _ in
+                guard let catalog else { throw TonoAPIClient.APIError.invalidResponse }
+                memoryAtAdmission = app.connectionCoordinator.capturedRoutingMode
+                diskAtAdmission = defaults.string(forKey: SettingsKey.routingSession)
+                admitted = try DesktopRoutingModeAdmission.admit(
+                    held: memoryAtAdmission,
+                    saved: defaults.object(forKey: SettingsKey.desktopRoutingMode),
+                    homeAvailable: catalog.routing?.homeSocks5 != nil
+                )
+                runtimeAdmissions += 1
+            }
+        )
+        defer {
+            account.catalogSyncTask?.cancel()
+            account.deviceRefreshTask?.cancel()
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            account.clearAccount()
+        }
+        account.systemSleeping = true // no periodic background reads in this fixture
+        HeldAccountProtocol.install(host) { request in
+            switch request.request.url?.path {
+            case "/api/v1/me":
+                request.respond(status: 200, body: #"{"user":{"id":"original","email":"old@example.test"}}"#)
+            case "/api/v1/exit-catalog":
+                request.respond(status: 200, body: #"{"revision":1,"yaml":"fixture","sha256":"fixture"}"#)
+            case "/api/v1/devices":
+                request.respond(status: 200, body: #"{"devices":[]}"#)
+            default:
+                XCTFail("unexpected request: \(request.request.url?.path ?? "nil")")
+                request.respond(status: 500, body: "{}")
+            }
+        }
+        let user = try JSONDecoder().decode(TonoUser.self, from: Data(Self.originalUser.utf8))
+        let response = TonoAuthResponse(
+            accessToken: "orphan-access", refreshToken: "orphan-refresh",
+            user: user, device: nil, enrollment: nil
+        )
+        var helperStatus = KillSwitchService.StatusObservation.unavailable
+        var selectiveHeld = false
+        var selectiveError = false
+        var selectiveReads = 0
+        var releaseCalls: [String] = []
+        var protection = NetworkProtectionOperations()
+        protection.refreshKillSwitchStatus = { helperStatus }
+        protection.selectiveAIRecoveryPending = {
+            selectiveReads += 1
+            if selectiveError { throw URLError(.cannotConnectToHost) }
+            return selectiveHeld
+        }
+        protection.disarm = { releaseCalls.append("disarm") }
+        protection.releaseAfterFailure = { releaseCalls.append("automatic-release") }
+        protection.restoreDNS = { releaseCalls.append("dns"); return true }
+        protection.repairForRelease = { releaseCalls.append("repair") }
+        app.networkProtection = protection
+        account.protectionReleaseConsumer = {
+            await app.acceptConfirmedProtectionReleaseBeforeSignIn()
+        }
+        var freshCalls = 0
+        account.freshAuthenticationProtectionReleaseConsumer = { isCurrent in
+            freshCalls += 1
+            return await app.acceptConfirmedProtectionReleaseBeforeSignIn(
+                retireOrphanAIHome: true, authenticationIsCurrent: isCurrent
+            )
+        }
+        func signIn(resume: Bool = true) async {
+            await account.deviceRefreshTask?.value
+            account.clearAccount()
+            account.state = .signedOut
+            account.shouldResumeProtection = resume
+            catalog = nil
+            admitted = nil
+            await account.authenticate { response }
+            await account.deviceRefreshTask?.value
+        }
+        func assertHeld(file: StaticString = #filePath, line: UInt = #line) throws {
+            XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "ai-home", file: file, line: line)
+            XCTAssertEqual(defaults.string(forKey: SettingsKey.routingSession), "ai-home", file: file, line: line)
+            XCTAssertEqual(try DesktopRoutingModeAdmission.admit(
+                held: app.connectionCoordinator.capturedRoutingMode, saved: nil, homeAvailable: false
+            ), "ai-home", file: file, line: line)
+        }
+        func seedOrphan() {
+            defaults.set("ai-home", forKey: SettingsKey.routingSession)
+            app.connectionCoordinator.capturedRoutingMode = "ai-home"
+        }
+
+        await signIn() // unavailable is not proof of release
+        try assertHeld()
+        helperStatus = .rejected
+        await signIn()
+        try assertHeld()
+        helperStatus = .confirmed(requiresProtectionRecovery: true)
+        await signIn()
+        try assertHeld()
+        helperStatus = .confirmed(requiresProtectionRecovery: false)
+        selectiveHeld = true
+        app.aiRecoveryPending = false // the default/cache cannot prove an absent hold
+        await signIn()
+        try assertHeld()
+        selectiveHeld = false
+        selectiveError = true
+        await signIn()
+        try assertHeld()
+        selectiveError = false
+
+        app.isConnecting = true
+        await signIn()
+        try assertHeld()
+        app.isConnecting = false
+        app.isDisconnecting = true
+        await signIn()
+        try assertHeld()
+        app.isDisconnecting = false
+        app.nativeUpdatePending = true
+        await signIn()
+        try assertHeld()
+        app.nativeUpdatePending = false
+        defaults.set(true, forKey: "strictRoutingSessionIntent")
+        await signIn()
+        try assertHeld()
+        XCTAssertTrue(defaults.bool(forKey: "strictRoutingSessionIntent"))
+        defaults.removeObject(forKey: "strictRoutingSessionIntent")
+
+        let broadEntered = AccountResponseGate()
+        let broadReturn = AccountResponseGate()
+        app.networkProtection.refreshKillSwitchStatus = {
+            broadEntered.open()
+            await broadReturn.wait()
+            return .confirmed(requiresProtectionRecovery: false)
+        }
+        let overtaken = Task { await signIn() }
+        await broadEntered.wait()
+        app.connectionCoordinator.bumpGeneration()
+        broadReturn.open()
+        await overtaken.value
+        try assertHeld()
+        app.networkProtection = protection
+
+        // Check again belongs to the existing account, not a new admission.
+        account.state = .suspended
+        account.blockedWhileReady = true
+        account.shouldResumeProtection = true
+        let callsBeforeRecheck = freshCalls
+        await account.refreshAccount()
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertFalse(account.shouldResumeProtection)
+        XCTAssertEqual(freshCalls, callsBeforeRecheck)
+        try assertHeld()
+        await account.authenticate { response } // same-account reauthentication too
+        try assertHeld()
+
+        // The old implementation skips a record-only sign-in entirely. RED
+        // must reach this actual no-Home admission assertion, not a missing API.
+        KillSwitchService.isArmed = false
+        let readsBeforeSuccess = selectiveReads
+        await signIn(resume: false)
+        XCTAssertEqual(admitted, "stable", "a fresh no-Home account must not inherit a proven orphan AI Home session")
+        guard admitted == "stable" else { return }
+        XCTAssertNil(memoryAtAdmission)
+        XCTAssertNil(diskAtAdmission)
+        XCTAssertEqual(selectiveReads, readsBeforeSuccess + 1)
+        XCTAssertNil(defaults.object(forKey: SettingsKey.desktopRoutingMode))
+        XCTAssertFalse(defaults.bool(forKey: "strictRoutingSessionIntent"))
+
+        // Activation may have accepted exactly this release while sign-in's
+        // broad read was held. The selective proof still has to be fresh.
+        seedOrphan()
+        let sameReleaseEntered = AccountResponseGate()
+        let sameReleaseReturn = AccountResponseGate()
+        app.networkProtection.refreshKillSwitchStatus = {
+            sameReleaseEntered.open()
+            await sameReleaseReturn.wait()
+            return .confirmed(requiresProtectionRecovery: false)
+        }
+        var selectiveGeneration: UInt64?
+        app.networkProtection.selectiveAIRecoveryPending = {
+            selectiveGeneration = app.connectionCoordinator.protectionOperationGeneration
+            return false
+        }
+        let sameRelease = Task { await signIn(resume: false) }
+        await sameReleaseEntered.wait()
+        app.acceptConfirmedExternalProtectionRelease()
+        let acceptedGeneration = app.connectionCoordinator.protectionOperationGeneration
+        sameReleaseReturn.open()
+        await sameRelease.value
+        XCTAssertEqual(admitted, "stable")
+        XCTAssertEqual(selectiveGeneration, acceptedGeneration)
+        XCTAssertNil(app.connectionCoordinator.capturedRoutingMode)
+        XCTAssertNil(defaults.string(forKey: SettingsKey.routingSession))
+
+        seedOrphan()
+        app.networkProtection = protection
+        let selectiveEntered = AccountResponseGate()
+        let selectiveReturn = AccountResponseGate()
+        app.networkProtection.selectiveAIRecoveryPending = {
+            selectiveEntered.open()
+            await selectiveReturn.wait()
+            return false
+        }
+        let changedDuringSelective = Task { await signIn() }
+        await selectiveEntered.wait()
+        app.connectionCoordinator.bumpGeneration()
+        selectiveReturn.open()
+        await changedDuringSelective.value
+        try assertHeld()
+
+        app.networkProtection = protection
+        app.networkProtection.selectiveAIRecoveryPending = {
+            account.invalidateAccountReads()
+            return false
+        }
+        let admissionsBeforeRetirement = runtimeAdmissions
+        await signIn()
+        try assertHeld()
+        XCTAssertEqual(runtimeAdmissions, admissionsBeforeRetirement, "obsolete authentication cannot start a runtime")
+
+        app.networkProtection = protection
+        let cancelledEntered = AccountResponseGate()
+        let cancelledReturn = AccountResponseGate()
+        app.networkProtection.selectiveAIRecoveryPending = {
+            cancelledEntered.open()
+            await cancelledReturn.wait()
+            return false
+        }
+        let cancelled = Task { await signIn() }
+        await cancelledEntered.wait()
+        cancelled.cancel()
+        cancelledReturn.open()
+        await cancelled.value
+        try assertHeld()
+        XCTAssertEqual(runtimeAdmissions, admissionsBeforeRetirement)
+        XCTAssertTrue(releaseCalls.isEmpty, "authentication observes protection; it never disarms, restores DNS or repairs")
+    }
+
     private func adoptReplacementCredentials(_ account: AccountSession) async throws {
         let replacement = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"replacement","email":"new@example.test"}"#.utf8))
         try await account.api.adopt(TonoAuthResponse(
