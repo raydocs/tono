@@ -20,8 +20,8 @@ Tono 已有路由、特权保护、账户隔离和恢复机制；当前最需要
 |---|---|---|---|
 | Android 10/11 启动权限 | `NetworkMonitor.requestNetwork` 缺正常 `CHANGE_NETWORK_STATE` 权限；仅补声明及真实 instrumentation 回归，不改 consent/路由 | [#1726](https://github.com/raydocs/tono/pull/1726)：API29/30 旧 APK 各 1 次真实 `SecurityException`；修复 `8a3ba2cc7` 在 API29/30/34 各 `OK (1 test)`；独立审查通过 | PR CI、真机及完整平台资格；未合 main/发布 |
 | macOS 保护范围文案 | AI Home 默认并非全主机保护；按实时会话而非下次连接设置显示 AI 范围，限定规则外 DIRECT，防止详情在连接尾段过早报保护 | [#1724](https://github.com/raydocs/tono/pull/1724)：原回归 RED 为 `Protected != AI protected`；过渡态回归在旧实现报过早保护而失败；最终 `f32fcf93b` ci-gate GREEN、两轮独立审查完成 | 视觉验收；末轮剩余 retry 徽章/指标不同步 minor 已单列，不能称全状态一致 |
-| Windows 迟到失败清理竞争 | 旧 A 的 adapter 读取结束后可能清掉已成功 B 的认证 fallback port；清零移至持同一 state mutex 的 generation-owned 提交 | [#1725](https://github.com/raydocs/tono/pull/1725)：生产锁归属已审查；真实 transport 回归及当前代次对照；修正 fixture 后 `96125d828` 再验 | 原两次测试均 fixture 超时，不是有效 RED/GREEN；修正后 hosted 结果及 Win10/11 真机；最终独立审查已通过 |
-| Android POST 歧义重放 | 验证码/refresh 请求可能已送达但丢响应，旧客户端仍换路径重放；首次 HTTP write **之前**标记歧义，保留 GET 和写前回退 | 独立分支 `fix/android-post-replay-safety-20261023`，`b97d55c28`；确定性 socket-stream 回归，Sol/xhigh 审查通过 | 同 VM 的 RED/GREEN 与全模块检查；不是实际公网 TLS 故障注入，也未改 iOS 同类代码 |
+| Windows 迟到失败清理竞争 | 旧 A 的 adapter 读取结束后可能清掉已成功 B 的认证 fallback port；清零移至持同一 state mutex 的 generation-owned 提交 | [#1725](https://github.com/raydocs/tono/pull/1725)：原/修复代码使用同一主动 EOF fixture；旧版在真实端口断言失败；`96125d828` ci-gate GREEN、772 项通过；最终独立审查通过 | 文档收尾后的交付 head CI 与 Win10/11 真机；原两次 fixture 超时未被计作 RED/GREEN |
+| Android POST 歧义重放 | 验证码/refresh 请求可能已送达但丢响应，旧客户端仍换路径重放；首次 HTTP write **之前**标记歧义，保留 GET 和写前回退 | [#1728](https://github.com/raydocs/tono/pull/1728)：`b97d55c28` 同一回归 RED/GREEN；routing18、mobile103 passed / 25 skipped，lint 通过；独立审查通过 | 交付 head CI、实际公网 TLS 故障/设备验证；未改 iOS 同类代码 |
 
 Android 权限验证使用[同一 Devin Linux KVM 会话](https://app.devin.ai/sessions/e8291010a8af4c30937075dd4faca3eb)：
 同一个 instrumentation APK（SHA256 `b0753ac75140a4e36c7c8c9e8957bff25914ea282c042dae00afaca8e36d00fe`）
@@ -36,7 +36,11 @@ macOS 原 RED [39919244126](https://github.com/raydocs/tono/actions/runs/3991924
 [39919786180](https://github.com/raydocs/tono/actions/runs/39919786180)；过渡态 RED 源码 `96f4ecb9f`
 的 [39921409612](https://github.com/raydocs/tono/actions/runs/39921409612) 已在四个文案断言失败；最终 GREEN
 [39921670825](https://github.com/raydocs/tono/actions/runs/39921670825) 已通过（精确 head `f32fcf93b`）。
-Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydocs/tono/actions/runs/39922890390)。
+Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydocs/tono/actions/runs/39922890390)
+实际失败于端口保留断言；GREEN [39922905155](https://github.com/raydocs/tono/actions/runs/39922905155)
+执行 Tauri 772 项全部通过，包含新回归和 ownership/caller-abort 同伴。
+最后文档收尾后的 macOS `8462be883`、Windows `9e7f7940d`、Android POST `23e59122f` 与
+各自被测试/独立审查的产品树相同；新交付 head CI 仍单独检查，未借用旧 head 的绿灯。
 准确最新状态以对应 PR 的 verification comment 为准，不将本文待运行项自动视为通过。
 
 ## 剩余问题：先修可靠性，再扩功能
@@ -114,7 +118,8 @@ Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydoc
 
 ## 下一阶段验收顺序
 
-1. 收齐首批四项的相同回归 RED/GREEN、精确 head CI 与独立 diff 结论；修复测试夹具失败不能冒充缺陷复现。
+1. 首批四项相同回归的 RED/GREEN 与独立 diff 结论已收齐；完成最终交付 head CI 与 PR 交接。
+   原夹具失败未被算作缺陷复现；macOS 保留已记录 minor 和人工视觉验收。
 2. 对 Windows WMI/resume、Android handoff/后台通知、macOS 跨账户会话各开一个有界行为修复，先确认契约再改高风险代码。
 3. 通用 Android 按 API29/30（旧 requestNetwork）、31/32（新 callback）、33（通知权限）、34（FGS）、35/36（target 行为）
    分层验证；**本轮权限回归只覆盖 29/30/34**。云端之外至少补一台普通 Android 真机的 Wi-Fi/蜂窝、Doze、重启、always-on/lockdown。
