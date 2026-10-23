@@ -16,11 +16,6 @@ final class TrafficMonitorTests: XCTestCase {
             h.drain()
         }
 
-        // First load/relaunch inherits a running NE session without an in-process explicit start.
-        notify(.connected, since: date)
-        XCTAssertEqual(h.clients.count, 1)
-        notify(.disconnected)
-
         // App Connect reached NE, but local status is still invalid when Cancel is tapped.
         _ = try await lifecycle.start(system)
         notify(.invalid)
@@ -88,6 +83,16 @@ final class TrafficMonitorTests: XCTestCase {
         XCTAssertEqual(h.clients.count, signedOut)
         h.monitor.stop()
         h.drain()
+
+        // A fresh process has no in-memory stop intent: initial load inherits an existing tunnel.
+        let inherited = Harness()
+        let relaunched = TunnelStartCoordinator()
+        inherited.monitor.updateTunnel(.connected, session: date, eligible: true,
+                                       startEpoch: relaunched.statisticsStartEpoch)
+        inherited.drain()
+        XCTAssertEqual(inherited.clients.count, 1)
+        inherited.monitor.stop()
+        inherited.drain()
     }
 
     @MainActor
