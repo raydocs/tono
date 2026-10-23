@@ -1,0 +1,11 @@
+## 2026-10-23 · macOS 新登录只清理已证实无保护的孤儿 AI Home 会话
+- 归属：SHIP_PLAN G1 连接准入；五模型审计 F2，决定 130/131 的保护与默认回退边界。
+- 来源：基线 `ca40f3baadd28dd792c12c6d2bc5b647cfec20a0`；分支 `fix/macos-orphan-routing-20261023`，本 PR，未合 main。精确 FIX head 与 review/CI 结果在 PR 回执单列。
+- 缺陷修复：`MAC-ORPHAN-AIHOME-ADMISSION`。过去 record-only 状态跳过 helper 对账，AppState 内存仍保留 AI Home，新的无家宽账户因此无法进入 Stable。新登录在 durable auth 后、runtime admission 前，对当前空闲会话完成两项新鲜 helper 观察；只有 accepted broad false 与 selective false 同时成立，才同时清内存和磁盘。
+- 新增/优化：新认证用途与同账户恢复分开；身份呈现、取消、保护代次、连接/断开、Core 与原生更新状态守卫。activation 已先接受同一 release 的分支也核对 selective 状态，不因提前返回遗留孤儿记录。
+- 保留行为：仍 held、未知、拒绝、读取失败、被新操作超越时保留原会话；Check again 与同账户重新认证不清捕获模式；saved preference、strict intent、静态启动清理、路由/PF/helper 均不变。此修复不授权新账号替换仍 held 的 AI 保护。
+- 工程与测试：一条 `AccountSessionRequestTests.testFreshAuthenticationRetiresOnlyAProvenOrphanAIHomeMode`，使用真实 auth lifecycle、durable credential adopt、AppState/coordinator 与 admission；仅替代 auth/catalog/helper I/O。种盘在 AppState 构造前；无墙钟竞态/表驱动；覆盖保留、代次/账户/取消竞争、同账户恢复、record-only 新账户及同 release 已先接受路径。
+- RED 说明：`905628b4294fca2a023c3dc3644b2ce9973cc698` 保留旧认证/清理行为，仅增加未使用的 callback/签名以使同一测试编译；已派发 `macos-ci` run `39939707619`。预期旧行为在实际 admission 的 `ai-home != stable` 断言失败，尚未读到运行结果，不能称已 RED。
+- 验证：本机只执行精确差异、测试 blob 一致性和记录格式静态检查；XCTest/build 由 hosted macOS CI 执行，未在 MacBook 运行原生构建。FIX GREEN、独立高风险审查尚待 PR 回执，不以静态检查替代。
+- 候选/发布：仅源码，无新候选、签名包、生产部署或客户更新源推进。
+- 剩余限制：安装机的新登录/重启/真正 AI hold 与无 Home 账户组合未验；两次 helper 读取不是新的跨进程原子 epoch，不声称防住任意外部 root 修改；macOS 自动换城仍关闭。

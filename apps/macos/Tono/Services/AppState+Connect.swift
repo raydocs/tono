@@ -2528,23 +2528,52 @@ extension AppState {
         retireOrphanAIHome: Bool = false,
         authenticationIsCurrent: @MainActor () -> Bool = { true }
     ) async -> KillSwitchService.StatusObservation {
-        guard !isConnected, !isConnecting, !isDisconnecting else { return .unavailable }
+        func canAccept() -> Bool {
+            !Task.isCancelled && !isConnected && !isConnecting && !isDisconnecting
+                && (!retireOrphanAIHome || (
+                    authenticationIsCurrent() && !coreRuntime.isRunning
+                        && !nativeUpdatePending && !RuntimeCleanup.nativeUpdatePending
+                        && !RuntimeCleanup.nativeUpdateBlocksConnect
+                ))
+        }
+        guard canAccept() else { return .unavailable }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
+        let capturedMode = self.connectionCoordinator.capturedRoutingMode
         let networkProtection = self.networkProtection
         let observation = await networkProtection.refreshKillSwitchStatus()
-        guard !Task.isCancelled, !isConnected, !isConnecting, !isDisconnecting
-        else { return .unavailable }
+        guard canAccept() else { return .unavailable }
         let generation = self.connectionCoordinator.protectionOperationGeneration
-        guard generation == observedGeneration else {
-            if case .confirmed(requiresProtectionRecovery: false) = observation,
-               confirmedReleaseGeneration == generation,
-               !KillSwitchService.isArmed, !isProtectionBlocked {
-                return observation
-            }
-            return .unavailable
+        let alreadyAccepted = generation != observedGeneration
+        if alreadyAccepted {
+            guard case .confirmed(requiresProtectionRecovery: false) = observation,
+                  confirmedReleaseGeneration == generation,
+                  !KillSwitchService.isArmed, !isProtectionBlocked else { return .unavailable }
         }
-        if case .confirmed(requiresProtectionRecovery: false) = observation {
-            acceptConfirmedExternalProtectionRelease()
+        guard case .confirmed(requiresProtectionRecovery: false) = observation else {
+            return observation
+        }
+        var orphanProven = false
+        if retireOrphanAIHome, capturedMode == "ai-home",
+           self.connectionCoordinator.capturedRoutingMode == capturedMode,
+           !AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") {
+            // Broad status says only !(armed || wanted), not that the retained
+            // selective AI hold ended. A failed read is never absence proof.
+            do {
+                let selectiveHeld = try await networkProtection.selectiveAIRecoveryPending()
+                orphanProven = !selectiveHeld
+            } catch {
+                orphanProven = false
+            }
+            guard canAccept(),
+                  self.connectionCoordinator.protectionOperationGeneration == generation
+            else { return .unavailable }
+        }
+        if !alreadyAccepted { acceptConfirmedExternalProtectionRelease() }
+        // No suspension between accepting this release and retiring its
+        // orphan. Ordinary reconciliation/Check again never gets this purpose.
+        if orphanProven, self.connectionCoordinator.capturedRoutingMode == capturedMode,
+           !AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") {
+            self.connectionCoordinator.retireCapturedRoutingMode()
         }
         return observation
     }

@@ -69,6 +69,11 @@ struct TonoApp: App {
             protectionReleaseConsumer: {
                 await appState.acceptConfirmedProtectionReleaseBeforeSignIn()
             },
+            freshAuthenticationProtectionReleaseConsumer: { isCurrent in
+                await appState.acceptConfirmedProtectionReleaseBeforeSignIn(
+                    retireOrphanAIHome: true, authenticationIsCurrent: isCurrent
+                )
+            },
             diagnosticSnapshotConsumer: {
                 CrashReporter.shared.annotatedRemoteDiagnosticSnapshot(
                     appState.compactRemoteDiagnosticSnapshot()
