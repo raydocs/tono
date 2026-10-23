@@ -572,6 +572,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
       'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
       'mail-pa.clients6.google.com', 'gmail.googleapis.com',
+      'gstatic.com', 'googleusercontent.com', 'whatsapp.com', 'whatsapp.net', 'livekit.cloud',
+      'telegram.org', 'discord.com', 'signal.org', 'wikipedia.org', 'netflix.com',
+      'spotify.com', 'huggingface.co', 'pypi.org', 'docker.io',
     ];
     // Test exact suffixes, their children and parents with real signatures:
     // the signer may extend reviewed direct routing, never residential routes.

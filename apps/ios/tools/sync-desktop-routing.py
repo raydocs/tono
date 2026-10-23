@@ -38,9 +38,25 @@ def rust_array(source: str, name: str) -> list[str]:
     return values
 
 
+def rust_int_array(source: str, name: str) -> list[int]:
+    match = re.search(rf"pub const {name}: \[u16; (\d+)\] = \[(.*?)\];", source, re.S)
+    if not match:
+        sys.exit(f"missing {name}")
+    body = re.sub(r"//[^\n]*", "", match.group(2))
+    values = [int(v) for v in re.findall(r"\b(\d+)\b", body)]
+    if int(match.group(1)) != len(values):
+        sys.exit(f"{name}: declared {match.group(1)} entries, parsed {len(values)}")
+    return values
+
+
 def swift_list(name: str, doc: str, values: list[str]) -> str:
     rows = "\n".join(f'        "{v}",' for v in values)
     return f"    /// {doc}\n    public static let {name}: [String] = [\n{rows}\n    ]\n"
+
+
+def swift_int_list(name: str, doc: str, values: list[int]) -> str:
+    rows = "\n".join(f"        {v}," for v in values)
+    return f"    /// {doc}\n    public static let {name}: [Int] = [\n{rows}\n    ]\n"
 
 
 def generate() -> str:
@@ -50,8 +66,22 @@ def generate() -> str:
     home = rust_array(rust_text, "CLAUDE_HOME_DOMAINS")
     video = rust_array(rust_text, "CLOUD_VIDEO_DOMAINS")
     cidrs = rust_array(rust_text, "CLAUDE_HOME_IPV4_CIDRS")
+    stun_ports = rust_int_array(rust_text, "STUN_UDP_PORTS")
+    encrypted_dns_ports = rust_int_array(rust_text, "ENCRYPTED_DNS_PORTS")
+    public_stun_suffixes = rust_array(rust_text, "PUBLIC_STUN_SUFFIXES")
+    mobile_home_aux = rust_array(rust_text, "MOBILE_HOME_AUX_SUFFIXES")
+    x_cloud_suffixes = rust_array(rust_text, "X_CLOUD_SUFFIXES")
+    overseas_cloud_suffixes = rust_array(rust_text, "OVERSEAS_CLOUD_SUFFIXES")
+    cloud_ipv4_cidrs = rust_array(rust_text, "CLOUD_IPV4_CIDRS")
+    cloud_ipv6_cidrs = rust_array(rust_text, "CLOUD_IPV6_CIDRS")
+    overseas_udp_cidrs = rust_array(rust_text, "OVERSEAS_UDP_REJECT_IPV4_CIDRS")
+    overseas_udp_v6_cidrs = rust_array(rust_text, "OVERSEAS_UDP_REJECT_IPV6_CIDRS")
     protected = rust_array(rust_text, "PROTECTED_DIRECT_SUFFIXES")
     assert len(home) == 194 and len(video) == 21, (len(home), len(video))
+    assert len(stun_ports) == 8 and len(encrypted_dns_ports) == 1, (len(stun_ports), len(encrypted_dns_ports))
+    assert len(public_stun_suffixes) == 5 and len(mobile_home_aux) == 60 and len(x_cloud_suffixes) == 10 and len(overseas_cloud_suffixes) == 52, (len(public_stun_suffixes), len(mobile_home_aux), len(x_cloud_suffixes), len(overseas_cloud_suffixes))
+    assert len(cloud_ipv4_cidrs) == 6 and len(cloud_ipv6_cidrs) == 3, (len(cloud_ipv4_cidrs), len(cloud_ipv6_cidrs))
+    assert len(overseas_udp_cidrs) == 33 and len(overseas_udp_v6_cidrs) == 21, (len(overseas_udp_cidrs), len(overseas_udp_v6_cidrs))
     assert template["version"] == 2
     digest = hashlib.sha256((rust_text + "\0" + template_text).encode()).hexdigest()
     return (
@@ -64,7 +94,17 @@ def generate() -> str:
         f'    public static let sourceDigest = "{digest}"\n\n'
         + swift_list("cloudVideoSuffixes", "Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).", video) + "\n"
         + swift_list("homeSuffixes", "Owner-approved AI / named Home suffixes, routed to the assigned residential exit.", home) + "\n"
+        + swift_list("mobileHomeAuxSuffixes", "Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, SSO, Google static/auth/regional assets, WhatsApp, and LiveKit suffixes routed through the Home tier on mobile.", mobile_home_aux) + "\n"
+        + swift_list("xCloudSuffixes", "X (Twitter) full domain suffixes routed through the Cloud exit on mobile after Home rules (so grok.x.com stays on Home).", x_cloud_suffixes) + "\n"
+        + swift_list("overseasCloudSuffixes", "Overseas messaging, knowledge, community, streaming, and developer ecosystem suffixes routed through the Cloud exit on mobile after Home rules.", overseas_cloud_suffixes) + "\n"
+        + swift_list("cloudIPv4CIDRs", "Telegram Messenger Data Center (DC1–DC5) IPv4 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected.", cloud_ipv4_cidrs) + "\n"
+        + swift_list("cloudIPv6CIDRs", "Telegram Messenger Data Center (DC1–DC5) IPv6 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected.", cloud_ipv6_cidrs) + "\n"
         + swift_list("homeIPv4CIDRs", "Anthropic's own IPv4 range for raw-IP dials.", cidrs) + "\n"
+        + swift_int_list("stunUDPPorts", "Google WebRTC STUN UDP ports rejected across routing modes so raw-IP STUN probes cannot leak the physical egress IP.", stun_ports) + "\n"
+        + swift_int_list("encryptedDNSPorts", "Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP.", encrypted_dns_ports) + "\n"
+        + swift_list("publicStunSuffixes", "Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across routing modes and whose TCP/DNS stays off DIRECT.", public_stun_suffixes) + "\n"
+        + swift_list("overseasUDPRejectIPv4CIDRs", "Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP is rejected while domestic UDP stays direct.", overseas_udp_cidrs) + "\n"
+        + swift_list("overseasUDPRejectIPv6CIDRs", "Overseas STUN, public DNS, CDN, AI and messaging IPv6 ranges whose UDP/ICMP is rejected on dual-stack networks while domestic IPv6 stays direct.", overseas_udp_v6_cidrs) + "\n"
         + swift_list("protectedDirectSuffixes", "Hosts that no rule may ever send DIRECT.", protected) + "\n"
         + swift_list("domesticExact", "Three-tier explicit domestic exact hosts (DIRECT).", template["domestic_full"]) + "\n"
         + swift_list("overseasExact", "Three-tier explicit overseas exact hosts (cloud exit).", template["overseas_full"])

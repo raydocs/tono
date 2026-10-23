@@ -697,11 +697,13 @@ class TonoVpnService : VpnService() {
             val c = catalog ?: return Json.write(linkedMapOf("error" to "NO_CATALOG"))
             val s = store.settings()
             val config = SingBoxConfig.build(ConfigInput(c, s.selectedNode, s.mode, monitor.current?.globalIpv6 == true, null))
-            val clean = host.trim().lowercase().removePrefix("https://").removePrefix("http://").substringBefore('/').substringBefore(':')
+            val authority = host.trim().lowercase().removePrefix("https://").removePrefix("http://").substringBefore('/').substringBefore('?').substringBefore('#')
+            val clean = authority.substringBefore(':')
+            val port = authority.substringAfter(':', "").toIntOrNull()?.takeIf { it in 1..65535 } ?: 443
             if (clean.isEmpty() || clean.length > 253) return Json.write(linkedMapOf("error" to "BAD_HOST"))
             val isIp = clean.all { it.isDigit() || it == '.' }
-            val tcp = RouteExplainer.explain(config, RouteExplainer.Connection(domain = clean.takeUnless { isIp }, ip = clean.takeIf { isIp }))
-            val udp = RouteExplainer.explain(config, RouteExplainer.Connection(domain = clean.takeUnless { isIp }, ip = clean.takeIf { isIp }, network = "udp"))
+            val tcp = RouteExplainer.explain(config, RouteExplainer.Connection(domain = clean.takeUnless { isIp }, ip = clean.takeIf { isIp }, port = port))
+            val udp = RouteExplainer.explain(config, RouteExplainer.Connection(domain = clean.takeUnless { isIp }, ip = clean.takeIf { isIp }, port = port, network = "udp"))
             fun label(v: RouteExplainer.Verdict) = when (v) {
                 is RouteExplainer.Verdict.Route -> when (v.outbound) {
                     SingBoxConfig.DIRECT_TAG -> "DIRECT"

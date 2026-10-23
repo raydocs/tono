@@ -68,7 +68,7 @@ public enum SingBoxConfig {
 
     /// Protected hosts not already covered by the Home or video lists (those rules come first).
     public static var protectedRemainder: [String] {
-        let covered = DesktopRoutingContract.homeSuffixes + DesktopRoutingContract.cloudVideoSuffixes
+        let covered = DesktopRoutingContract.homeSuffixes + DesktopRoutingContract.mobileHomeAuxSuffixes + DesktopRoutingContract.cloudVideoSuffixes
         return DesktopRoutingContract.protectedDirectSuffixes.filter { suffix in
             !covered.contains { suffix == $0 || suffix.hasSuffix(".\($0)") }
         }
@@ -94,8 +94,8 @@ public enum SingBoxConfig {
         let selected = selectedNode(input)
         let home = homeTargetTag(catalog)
         let video = DesktopRoutingContract.cloudVideoSuffixes
-        let homeSuffixes = DesktopRoutingContract.homeSuffixes
-        let protected = protectedRemainder
+        let homeSuffixes = DesktopRoutingContract.homeSuffixes + DesktopRoutingContract.mobileHomeAuxSuffixes
+        let protected = protectedRemainder + DesktopRoutingContract.publicStunSuffixes + DesktopRoutingContract.xCloudSuffixes + DesktopRoutingContract.overseasCloudSuffixes
         let threeTier = input.mode == .threeTier
         let cloudOnlyExact = threeTier ? DesktopRoutingContract.overseasExact : []
 
@@ -128,6 +128,7 @@ public enum SingBoxConfig {
         rules.append(.obj(("inbound", .strings([tunTag])), ("action", "sniff")))
         rules.append(.obj(("protocol", ["dns"]), ("action", "hijack-dns")))
         rules.append(.obj(("port", [53]), ("action", "hijack-dns")))
+        rules.append(reject([("port", .ints(DesktopRoutingContract.encryptedDNSPorts))]))
         // Cloud video wins over the broad Home parents (youtubei.googleapis.com vs googleapis.com).
         rules.append(route([("network", ["tcp"]), ("domain_suffix", .strings(video))], exitTag))
         rules.append(reject([("network", udpIcmp), ("domain_suffix", .strings(video))]))
@@ -139,6 +140,9 @@ public enum SingBoxConfig {
             rules.append(route([("network", ["tcp"]), ("domain_suffix", .strings(protected))], exitTag))
             rules.append(reject([("network", udpIcmp), ("domain_suffix", .strings(protected))]))
         }
+        let cloudCIDRs = DesktopRoutingContract.cloudIPv4CIDRs + DesktopRoutingContract.cloudIPv6CIDRs
+        rules.append(route([("network", ["tcp"]), ("ip_cidr", .strings(cloudCIDRs))], exitTag))
+        rules.append(reject([("network", udpIcmp), ("ip_cidr", .strings(cloudCIDRs))]))
         if !cloudOnlyExact.isEmpty {
             rules.append(route([("network", ["tcp"]), ("domain", .strings(cloudOnlyExact))], exitTag))
             rules.append(reject([("network", udpIcmp), ("domain", .strings(cloudOnlyExact))]))
@@ -146,6 +150,11 @@ public enum SingBoxConfig {
         // A fake address without a live mapping (e.g. cached across a restart) never leaves the phone.
         rules.append(reject([("ip_cidr", .strings([fakeIPInet4, fakeIPInet6]))]))
         rules.append(route([("ip_is_private", true)], directTag))
+        // Overseas UDP and raw-IP STUN probes (e.g. 74.125.250.129:19302) are rejected in every mode
+        // while domestic UDP (WeChat voice/video, Douyin QUIC, LAN cast) stays direct in Three-Tier.
+        let overseasUDPCIDRs = DesktopRoutingContract.overseasUDPRejectIPv4CIDRs + DesktopRoutingContract.overseasUDPRejectIPv6CIDRs
+        rules.append(reject([("network", udpIcmp), ("port", .ints(DesktopRoutingContract.stunUDPPorts))]))
+        rules.append(reject([("network", udpIcmp), ("ip_cidr", .strings(overseasUDPCIDRs))]))
         if !threeTier { rules.append(reject([("network", udpIcmp)])) }
 
         let fakeIPSuffixes = video + homeSuffixes + protected
@@ -155,15 +164,24 @@ public enum SingBoxConfig {
             ("query_type", ["A", "AAAA"]), ("domain_suffix", .strings(fakeIPSuffixes)),
             ("action", "route"), ("server", .string(dnsFakeIP))
         ))
+        dnsRules.append(.obj(
+            ("domain_suffix", .strings(fakeIPSuffixes)),
+            ("action", "predefined"), ("rcode", "NOERROR")
+        ))
         if !cloudOnlyExact.isEmpty {
             dnsRules.append(.obj(
                 ("query_type", ["A", "AAAA"]), ("domain", .strings(cloudOnlyExact)),
                 ("action", "route"), ("server", .string(dnsFakeIP))
             ))
+            dnsRules.append(.obj(
+                ("domain", .strings(cloudOnlyExact)),
+                ("action", "predefined"), ("rcode", "NOERROR")
+            ))
         }
         if !threeTier {
             // Stable: every public name leaves through the cloud, so the phone's resolver never sees it.
             dnsRules.append(.obj(("query_type", ["A", "AAAA"]), ("action", "route"), ("server", .string(dnsFakeIP))))
+            dnsRules.append(.obj(("action", "predefined"), ("rcode", "NOERROR")))
         }
         if !input.underlyingIPv6 {
             // No global IPv6 on the phone's network: DIRECT names answer IPv4 only, so apps do not stall on v6.

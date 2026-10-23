@@ -255,8 +255,43 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
     'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
     'mail-pa.clients6.google.com', 'gmail.googleapis.com',
+    // MOBILE_HOME_AUX_SUFFIXES: Claude/AI auth, fingerprinting, captcha, Apple OAuth,
+    // telemetry, SSO, Google static/auth/regional assets, WhatsApp, and LiveKit.
+    'workos.com', 'authkit.app', 'workos.imgix.net',
+    'arkoselabs.com', 'funcaptcha.com', 'funcaptcha.co',
+    'intercom.io', 'intercomcdn.com', 'intercomassets.com', 'intercom-mail.com',
+    'featureassets.org', 'prodregistryv2.org', 'beyondwickedmapping.org',
+    'fpjs.io', 'fpnpmcdn.net', 'openfpcdn.io', 'fingerprint.com',
+    'sift.com', 'siftscience.com', 'sardine.ai', 'castle.io',
+    'recaptcha.net',
+    'appleid.apple.com', 'idmsa.apple.com', 'appleid.cdn-apple.com', 'gsa.apple.com',
+    'segment.io', 'segment.com', 'launchdarkly.com', 'posthog.com', 'amplitude.com',
+    'logrocket.com', 'lr-ingest.com', 'lr-in.com', 'lr-in-prod.com', 'honeybadger.io',
+    'stytch.com', 'stytch.io', 'auth0.com', 'okta.com',
+    'modelcontextprotocol.io', 'anthropicstatus.com', 'claudecode.com', 'claude.codes',
+    'gstatic.com', 'googleusercontent.com', '1e100.net', 'gvt1.com', 'gvt2.com',
+    'google.com.hk', 'google.co.jp', 'google.com.sg', 'google.co.uk',
+    'android.com', 'g.co', 'goo.gl',
+    'whatsapp.com', 'whatsapp.net', 'wa.me',
+    'livekit.cloud',
   ];
-  const directGuardSuffixes = [...protectedSuffixes, ...assistantHomeSuffixes];
+  const overseasCloudGuardSuffixes = [
+    // X_CLOUD_SUFFIXES
+    'x.com', 'twitter.com', 'twimg.com', 't.co', 'pscp.tv', 'periscope.tv',
+    'twtrdns.net', 'cms-twdigitalassets.com', 'vine.co', 'twitpic.com',
+    // OVERSEAS_CLOUD_SUFFIXES
+    'telegram.org', 't.me', 'tdesktop.com', 'telegra.ph', 'telegram.me', 'telesco.pe', 'cdn-telegram.org',
+    'discord.com', 'discordapp.com', 'discordapp.net', 'discord.gg', 'discord.media',
+    'signal.org', 'whispersystems.org', 'line.me', 'line-scdn.net',
+    'wikipedia.org', 'wikimedia.org', 'wikidata.org', 'wiktionary.org', 'mediawiki.org',
+    'archive.org', 'medium.com', 'substack.com', 'v2ex.com', 'nodeseek.com', 'linux.do',
+    'netflix.com', 'nflxvideo.net', 'nflximg.net', 'nflxext.com', 'nflxso.net',
+    'spotify.com', 'scdn.co', 'twitch.tv', 'ttvnw.net', 'pixiv.net', 'pximg.net',
+    'huggingface.co', 'hf.co', 'npmjs.com', 'npmjs.org', 'pypi.org', 'pythonhosted.org',
+    'ghcr.io', 'github.io', 'githubstatus.com', 'vercel.app', 'vercel.com',
+    'cloudflare.com', 'docker.com', 'docker.io',
+  ];
+  const directGuardSuffixes = [...protectedSuffixes, ...assistantHomeSuffixes, ...overseasCloudGuardSuffixes];
   const seenHosts = new Set<string>();
   const canonicalDomains = (
     values: unknown[],

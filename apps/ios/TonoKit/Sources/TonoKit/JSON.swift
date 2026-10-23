@@ -64,6 +64,7 @@ extension JSON: ExpressibleByStringLiteral, ExpressibleByIntegerLiteral, Express
     public init(nilLiteral: ()) { self = .null }
 
     public static func strings(_ values: [String]) -> JSON { .array(values.map(JSON.string)) }
+    public static func ints(_ values: [Int]) -> JSON { .array(values.map(JSON.int)) }
     public static func int(_ value: Int) -> JSON { .number(Double(value)) }
     public static func obj(_ pairs: (String, JSON)...) -> JSON { .object(JSONObject(pairs)) }
 }

@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "ae825bb68d0db0fca74d2fd4cf3e367ed5a7a1a19e6798a4a826958384203e0e"
+    public static let sourceDigest = "3a768d3cdf1d50f362db3f7c972b70cd3e057cd47950bd0b876a4acf30275c78"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -230,9 +230,248 @@ public enum DesktopRoutingContract {
         "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com",
     ]
 
+    /// Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, SSO, Google static/auth/regional assets, WhatsApp, and LiveKit suffixes routed through the Home tier on mobile.
+    public static let mobileHomeAuxSuffixes: [String] = [
+        "workos.com",
+        "authkit.app",
+        "workos.imgix.net",
+        "arkoselabs.com",
+        "funcaptcha.com",
+        "funcaptcha.co",
+        "intercom.io",
+        "intercomcdn.com",
+        "intercomassets.com",
+        "intercom-mail.com",
+        "featureassets.org",
+        "prodregistryv2.org",
+        "beyondwickedmapping.org",
+        "fpjs.io",
+        "fpnpmcdn.net",
+        "openfpcdn.io",
+        "fingerprint.com",
+        "sift.com",
+        "siftscience.com",
+        "sardine.ai",
+        "castle.io",
+        "recaptcha.net",
+        "appleid.apple.com",
+        "idmsa.apple.com",
+        "appleid.cdn-apple.com",
+        "gsa.apple.com",
+        "segment.io",
+        "segment.com",
+        "launchdarkly.com",
+        "posthog.com",
+        "amplitude.com",
+        "logrocket.com",
+        "lr-ingest.com",
+        "lr-in.com",
+        "lr-in-prod.com",
+        "honeybadger.io",
+        "stytch.com",
+        "stytch.io",
+        "auth0.com",
+        "okta.com",
+        "modelcontextprotocol.io",
+        "anthropicstatus.com",
+        "claudecode.com",
+        "claude.codes",
+        "gstatic.com",
+        "googleusercontent.com",
+        "1e100.net",
+        "gvt1.com",
+        "gvt2.com",
+        "google.com.hk",
+        "google.co.jp",
+        "google.com.sg",
+        "google.co.uk",
+        "android.com",
+        "g.co",
+        "goo.gl",
+        "whatsapp.com",
+        "whatsapp.net",
+        "wa.me",
+        "livekit.cloud",
+    ]
+
+    /// X (Twitter) full domain suffixes routed through the Cloud exit on mobile after Home rules (so grok.x.com stays on Home).
+    public static let xCloudSuffixes: [String] = [
+        "x.com",
+        "twitter.com",
+        "twimg.com",
+        "t.co",
+        "pscp.tv",
+        "periscope.tv",
+        "twtrdns.net",
+        "cms-twdigitalassets.com",
+        "vine.co",
+        "twitpic.com",
+    ]
+
+    /// Overseas messaging, knowledge, community, streaming, and developer ecosystem suffixes routed through the Cloud exit on mobile after Home rules.
+    public static let overseasCloudSuffixes: [String] = [
+        "telegram.org",
+        "t.me",
+        "tdesktop.com",
+        "telegra.ph",
+        "telegram.me",
+        "telesco.pe",
+        "cdn-telegram.org",
+        "discord.com",
+        "discordapp.com",
+        "discordapp.net",
+        "discord.gg",
+        "discord.media",
+        "signal.org",
+        "whispersystems.org",
+        "line.me",
+        "line-scdn.net",
+        "wikipedia.org",
+        "wikimedia.org",
+        "wikidata.org",
+        "wiktionary.org",
+        "mediawiki.org",
+        "archive.org",
+        "medium.com",
+        "substack.com",
+        "v2ex.com",
+        "nodeseek.com",
+        "linux.do",
+        "netflix.com",
+        "nflxvideo.net",
+        "nflximg.net",
+        "nflxext.com",
+        "nflxso.net",
+        "spotify.com",
+        "scdn.co",
+        "twitch.tv",
+        "ttvnw.net",
+        "pixiv.net",
+        "pximg.net",
+        "huggingface.co",
+        "hf.co",
+        "npmjs.com",
+        "npmjs.org",
+        "pypi.org",
+        "pythonhosted.org",
+        "ghcr.io",
+        "github.io",
+        "githubstatus.com",
+        "vercel.app",
+        "vercel.com",
+        "cloudflare.com",
+        "docker.com",
+        "docker.io",
+    ]
+
+    /// Telegram Messenger Data Center (DC1–DC5) IPv4 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected.
+    public static let cloudIPv4CIDRs: [String] = [
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.12.0/22",
+        "91.108.16.0/22",
+        "91.108.56.0/22",
+        "149.154.160.0/20",
+    ]
+
+    /// Telegram Messenger Data Center (DC1–DC5) IPv6 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected.
+    public static let cloudIPv6CIDRs: [String] = [
+        "2001:67c:4e8::/48",
+        "2001:b28:f23d::/48",
+        "2001:b28:f23f::/48",
+    ]
+
     /// Anthropic's own IPv4 range for raw-IP dials.
     public static let homeIPv4CIDRs: [String] = [
         "160.79.104.0/21",
+    ]
+
+    /// Google WebRTC STUN UDP ports rejected across routing modes so raw-IP STUN probes cannot leak the physical egress IP.
+    public static let stunUDPPorts: [Int] = [
+        19302,
+        19303,
+        19304,
+        19305,
+        19306,
+        19307,
+        19308,
+        19309,
+    ]
+
+    /// Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP.
+    public static let encryptedDNSPorts: [Int] = [
+        853,
+    ]
+
+    /// Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across routing modes and whose TCP/DNS stays off DIRECT.
+    public static let publicStunSuffixes: [String] = [
+        "stun.cloudflare.com",
+        "turn.cloudflare.com",
+        "global.stun.twilio.com",
+        "stun.services.mozilla.com",
+        "stunprotocol.org",
+    ]
+
+    /// Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP is rejected while domestic UDP stays direct.
+    public static let overseasUDPRejectIPv4CIDRs: [String] = [
+        "74.125.0.0/16",
+        "142.250.0.0/15",
+        "172.217.0.0/16",
+        "172.253.0.0/16",
+        "216.58.192.0/19",
+        "64.233.160.0/19",
+        "108.177.0.0/17",
+        "209.85.128.0/17",
+        "8.8.8.0/24",
+        "8.8.4.0/24",
+        "1.1.1.0/24",
+        "1.0.0.0/24",
+        "104.16.0.0/12",
+        "172.64.0.0/13",
+        "162.159.0.0/16",
+        "9.9.9.9/32",
+        "149.112.112.112/32",
+        "208.67.222.222/32",
+        "208.67.220.220/32",
+        "160.79.104.0/21",
+        "151.101.0.0/16",
+        "199.232.0.0/16",
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.12.0/22",
+        "91.108.16.0/22",
+        "91.108.56.0/22",
+        "149.154.160.0/20",
+        "31.13.24.0/21",
+        "31.13.64.0/18",
+        "157.240.0.0/16",
+        "179.60.192.0/22",
+        "185.60.216.0/22",
+    ]
+
+    /// Overseas STUN, public DNS, CDN, AI and messaging IPv6 ranges whose UDP/ICMP is rejected on dual-stack networks while domestic IPv6 stays direct.
+    public static let overseasUDPRejectIPv6CIDRs: [String] = [
+        "2001:4860::/32",
+        "2404:6800::/32",
+        "2607:f8b0::/32",
+        "2800:3f0::/32",
+        "2a00:1450::/32",
+        "2c0f:fb50::/32",
+        "2606:4700::/32",
+        "2803:f800::/32",
+        "2405:b500::/32",
+        "2405:8100::/32",
+        "2a06:98c0::/29",
+        "2c0f:f248::/32",
+        "2620:fe::/48",
+        "2620:119:35::/48",
+        "2620:119:53::/48",
+        "2607:6bc0::/48",
+        "2a04:4e40::/32",
+        "2a03:2880::/32",
+        "2001:67c:4e8::/48",
+        "2001:b28:f23d::/48",
+        "2001:b28:f23f::/48",
     ]
 
     /// Hosts that no rule may ever send DIRECT.

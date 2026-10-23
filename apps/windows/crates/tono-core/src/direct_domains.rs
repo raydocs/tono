@@ -328,6 +328,283 @@ pub const CLOUD_VIDEO_DOMAINS: [&str; 21] = [
 /// stay on `Tono-Exit`. `no-resolve` keeps the match on the packet address.
 pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
 
+/// Google WebRTC STUN UDP ports rejected across mobile routing modes so raw-IP
+/// STUN probes (e.g. 74.125.250.129:19302) cannot leak the physical egress IP,
+/// without blanket-blocking RFC 5389 port 3478 used by domestic P2P/IoT in China.
+pub const STUN_UDP_PORTS: [u16; 8] = [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309];
+
+/// Encrypted DNS (DoT/DoQ) port rejected in mobile TUN so apps and OS private DNS
+/// fall back to standard port-53 DNS where sing-box hijacks and serves FakeIP.
+pub const ENCRYPTED_DNS_PORTS: [u16; 1] = [853];
+
+/// Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across mobile
+/// routing modes and whose TCP/DNS is kept off the physical interface.
+pub const PUBLIC_STUN_SUFFIXES: [&str; 5] = [
+    "stun.cloudflare.com",
+    "turn.cloudflare.com",
+    "global.stun.twilio.com",
+    "stun.services.mozilla.com",
+    "stunprotocol.org",
+];
+
+/// Claude / AI auxiliary support, device fingerprinting, anti-fraud, captcha,
+/// Apple Sign-In OAuth, telemetry, SSO, Google static/auth/regional assets,
+/// WhatsApp (Meta family), and OpenAI LiveKit voice signaling suffixes routed
+/// through the Home tier on mobile TCP with UDP/ICMP rejected and FakeIP DNS.
+pub const MOBILE_HOME_AUX_SUFFIXES: [&str; 60] = [
+    // WorkOS / Arkose / Intercom / Statsig feature-flag alias suffixes
+    "workos.com",
+    "authkit.app",
+    "workos.imgix.net",
+    "arkoselabs.com",
+    "funcaptcha.com",
+    "funcaptcha.co",
+    "intercom.io",
+    "intercomcdn.com",
+    "intercomassets.com",
+    "intercom-mail.com",
+    "featureassets.org",
+    "prodregistryv2.org",
+    "beyondwickedmapping.org",
+    // Device fingerprinting & anti-fraud SDKs
+    "fpjs.io",
+    "fpnpmcdn.net",
+    "openfpcdn.io",
+    "fingerprint.com",
+    "sift.com",
+    "siftscience.com",
+    "sardine.ai",
+    "castle.io",
+    // reCAPTCHA & bot challenges
+    "recaptcha.net",
+    // Apple Sign-In OAuth (Continue with Apple)
+    "appleid.apple.com",
+    "idmsa.apple.com",
+    "appleid.cdn-apple.com",
+    "gsa.apple.com",
+    // Telemetry, feature flags & session replay
+    "segment.io",
+    "segment.com",
+    "launchdarkly.com",
+    "posthog.com",
+    "amplitude.com",
+    "logrocket.com",
+    "lr-ingest.com",
+    "lr-in.com",
+    "lr-in-prod.com",
+    "honeybadger.io",
+    // SSO / passwordless auth & MCP ecosystem
+    "stytch.com",
+    "stytch.io",
+    "auth0.com",
+    "okta.com",
+    "modelcontextprotocol.io",
+    "anthropicstatus.com",
+    "claudecode.com",
+    "claude.codes",
+    // Google static/user-content/auth assets & regional Google domains
+    "gstatic.com",
+    "googleusercontent.com",
+    "1e100.net",
+    "gvt1.com",
+    "gvt2.com",
+    "google.com.hk",
+    "google.co.jp",
+    "google.com.sg",
+    "google.co.uk",
+    "android.com",
+    "g.co",
+    "goo.gl",
+    // WhatsApp (Meta family alongside Facebook / Instagram / Threads / Messenger)
+    "whatsapp.com",
+    "whatsapp.net",
+    "wa.me",
+    // OpenAI / ChatGPT real-time voice signaling (LiveKit)
+    "livekit.cloud",
+];
+
+/// X (Twitter) full domain suffixes routed through the Cloud exit (`Tono-Exit`)
+/// on mobile TCP with UDP/ICMP rejected and FakeIP DNS. Evaluated after
+/// `CLAUDE_HOME_DOMAINS` so `grok.x.com` stays on Home while all other `*.x.com`
+/// and X media/API/streaming subdomains route through Cloud.
+pub const X_CLOUD_SUFFIXES: [&str; 10] = [
+    "x.com",
+    "twitter.com",
+    "twimg.com",
+    "t.co",
+    "pscp.tv",
+    "periscope.tv",
+    "twtrdns.net",
+    "cms-twdigitalassets.com",
+    "vine.co",
+    "twitpic.com",
+];
+
+/// Overseas messaging, knowledge, community, streaming, and developer ecosystem
+/// suffixes routed through the Cloud exit (`Tono-Exit`) on mobile TCP with
+/// UDP/ICMP rejected and FakeIP DNS. Evaluated after `CLAUDE_HOME_DOMAINS` so
+/// `gateway.ai.cloudflare.com` stays on Home while general `*.cloudflare.com`
+/// and overseas platforms route through Cloud.
+pub const OVERSEAS_CLOUD_SUFFIXES: [&str; 52] = [
+    // Telegram (7)
+    "telegram.org",
+    "t.me",
+    "tdesktop.com",
+    "telegra.ph",
+    "telegram.me",
+    "telesco.pe",
+    "cdn-telegram.org",
+    // Discord / Signal / Line (9)
+    "discord.com",
+    "discordapp.com",
+    "discordapp.net",
+    "discord.gg",
+    "discord.media",
+    "signal.org",
+    "whispersystems.org",
+    "line.me",
+    "line-scdn.net",
+    // Wikipedia / Wikimedia & Overseas Knowledge / News / Communities (11)
+    "wikipedia.org",
+    "wikimedia.org",
+    "wikidata.org",
+    "wiktionary.org",
+    "mediawiki.org",
+    "archive.org",
+    "medium.com",
+    "substack.com",
+    "v2ex.com",
+    "nodeseek.com",
+    "linux.do",
+    // Overseas Streaming & Creative (11)
+    "netflix.com",
+    "nflxvideo.net",
+    "nflximg.net",
+    "nflxext.com",
+    "nflxso.net",
+    "spotify.com",
+    "scdn.co",
+    "twitch.tv",
+    "ttvnw.net",
+    "pixiv.net",
+    "pximg.net",
+    // Developer & AI Model Hosting Ecosystems (14)
+    "huggingface.co",
+    "hf.co",
+    "npmjs.com",
+    "npmjs.org",
+    "pypi.org",
+    "pythonhosted.org",
+    "ghcr.io",
+    "github.io",
+    "githubstatus.com",
+    "vercel.app",
+    "vercel.com",
+    "cloudflare.com",
+    "docker.com",
+    "docker.io",
+];
+
+/// Telegram Messenger Data Center (DC1–DC5) IPv4 ranges (AS62041 / AS62014 /
+/// AS44907 / AS59930). Telegram mobile/desktop clients dial these raw IPv4
+/// endpoints directly over TCP 443/80 without DNS, so mobile routes TCP to
+/// `Tono-Exit` and rejects UDP/ICMP.
+pub const CLOUD_IPV4_CIDRS: [&str; 6] = [
+    "91.108.4.0/22",
+    "91.108.8.0/22",
+    "91.108.12.0/22",
+    "91.108.16.0/22",
+    "91.108.56.0/22",
+    "149.154.160.0/20",
+];
+
+/// Telegram Messenger Data Center (DC1–DC5) IPv6 ranges (AS62041 / AS62014).
+/// Mobile routes raw-IP TCP to `Tono-Exit` and rejects UDP/ICMP.
+pub const CLOUD_IPV6_CIDRS: [&str; 3] = [
+    "2001:67c:4e8::/48",
+    "2001:b28:f23d::/48",
+    "2001:b28:f23f::/48",
+];
+
+/// Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP
+/// traffic is rejected in mobile Three-Tier mode while domestic UDP stays DIRECT.
+pub const OVERSEAS_UDP_REJECT_IPV4_CIDRS: [&str; 33] = [
+    // Google STUN / WebRTC / YouTube / Public DNS (AS15169)
+    "74.125.0.0/16",
+    "142.250.0.0/15",
+    "172.217.0.0/16",
+    "172.253.0.0/16",
+    "216.58.192.0/19",
+    "64.233.160.0/19",
+    "108.177.0.0/17",
+    "209.85.128.0/17",
+    "8.8.8.0/24",
+    "8.8.4.0/24",
+    // Cloudflare DNS / Anycast / STUN / QUIC (AS13335)
+    "1.1.1.0/24",
+    "1.0.0.0/24",
+    "104.16.0.0/12",
+    "172.64.0.0/13",
+    "162.159.0.0/16",
+    // Quad9 & OpenDNS Public DNS (AS19281 / AS36692)
+    "9.9.9.9/32",
+    "149.112.112.112/32",
+    "208.67.222.222/32",
+    "208.67.220.220/32",
+    // Anthropic (AS399358)
+    "160.79.104.0/21",
+    // Fastly CDN (AS54113)
+    "151.101.0.0/16",
+    "199.232.0.0/16",
+    // Telegram Messenger (AS62041 / AS62014 / AS44907 / AS59930)
+    "91.108.4.0/22",
+    "91.108.8.0/22",
+    "91.108.12.0/22",
+    "91.108.16.0/22",
+    "91.108.56.0/22",
+    "149.154.160.0/20",
+    // Meta / WhatsApp / Instagram / Facebook (AS32934)
+    "31.13.24.0/21",
+    "31.13.64.0/18",
+    "157.240.0.0/16",
+    "179.60.192.0/22",
+    "185.60.216.0/22",
+];
+
+/// Overseas STUN, public DNS, CDN, AI and messaging IPv6 ranges whose UDP/ICMP
+/// traffic is rejected on dual-stack 5G/Wi-Fi in mobile Three-Tier mode while
+/// domestic carrier IPv6 (2408::/2409::/240e::) and ULA/link-local stay DIRECT.
+pub const OVERSEAS_UDP_REJECT_IPV6_CIDRS: [&str; 21] = [
+    // Google / YouTube / Google STUN / Google Public DNS IPv6 (AS15169)
+    "2001:4860::/32",
+    "2404:6800::/32",
+    "2607:f8b0::/32",
+    "2800:3f0::/32",
+    "2a00:1450::/32",
+    "2c0f:fb50::/32",
+    // Cloudflare DNS / Anycast / STUN / QUIC IPv6 (AS13335)
+    "2606:4700::/32",
+    "2803:f800::/32",
+    "2405:b500::/32",
+    "2405:8100::/32",
+    "2a06:98c0::/29",
+    "2c0f:f248::/32",
+    // Quad9 & OpenDNS Public DNS IPv6 (AS19281 / AS36692)
+    "2620:fe::/48",
+    "2620:119:35::/48",
+    "2620:119:53::/48",
+    // Anthropic (AS399358)
+    "2607:6bc0::/48",
+    // Fastly CDN (AS54113)
+    "2a04:4e40::/32",
+    // Meta / WhatsApp / Instagram / Facebook (AS32934)
+    "2a03:2880::/32",
+    // Telegram Messenger (AS62041 / AS62014)
+    "2001:67c:4e8::/48",
+    "2001:b28:f23d::/48",
+    "2001:b28:f23f::/48",
+];
+
 /// Claude's first-party, login/challenge, telemetry and update hosts must never
 /// be moved to the physical interface, even by an otherwise trusted policy.
 /// Keep this in parity with the control-plane and macOS protected lists.
@@ -394,4 +671,46 @@ pub fn direct_suffix_overlaps_protected(host: &str) -> bool {
                 && !(host == "aliyuncs.com"
                     && DEDICATED_MODEL_API_SUFFIXES.contains(protected))
             })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mobile_anti_leak_lists_are_well_formed() {
+        assert_eq!(STUN_UDP_PORTS, [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309]);
+        assert_eq!(ENCRYPTED_DNS_PORTS, [853]);
+        assert_eq!(PUBLIC_STUN_SUFFIXES.len(), 5);
+        assert_eq!(MOBILE_HOME_AUX_SUFFIXES.len(), 60);
+        assert_eq!(X_CLOUD_SUFFIXES.len(), 10);
+        assert_eq!(OVERSEAS_CLOUD_SUFFIXES.len(), 52);
+        assert_eq!(CLOUD_IPV4_CIDRS.len(), 6);
+        assert_eq!(CLOUD_IPV6_CIDRS.len(), 3);
+        assert!(CLAUDE_HOME_DOMAINS.contains(&"statsig.com"));
+        assert!(CLAUDE_HOME_DOMAINS.contains(&"grok.x.com"));
+        assert!(MOBILE_HOME_AUX_SUFFIXES.contains(&"gstatic.com"));
+        assert!(MOBILE_HOME_AUX_SUFFIXES.contains(&"whatsapp.com"));
+        assert!(MOBILE_HOME_AUX_SUFFIXES.contains(&"livekit.cloud"));
+        assert!(X_CLOUD_SUFFIXES.contains(&"x.com"));
+        assert!(OVERSEAS_CLOUD_SUFFIXES.contains(&"telegram.org"));
+        assert!(OVERSEAS_CLOUD_SUFFIXES.contains(&"discord.com"));
+        assert!(OVERSEAS_CLOUD_SUFFIXES.contains(&"wikipedia.org"));
+        assert!(OVERSEAS_CLOUD_SUFFIXES.contains(&"netflix.com"));
+        assert!(OVERSEAS_CLOUD_SUFFIXES.contains(&"huggingface.co"));
+        assert_eq!(OVERSEAS_UDP_REJECT_IPV4_CIDRS.len(), 33);
+        assert_eq!(OVERSEAS_UDP_REJECT_IPV6_CIDRS.len(), 21);
+        for cidr in OVERSEAS_UDP_REJECT_IPV4_CIDRS {
+            assert!(cidr.contains('/') && !cidr.contains(':'), "invalid IPv4 CIDR: {cidr}");
+        }
+        for cidr in OVERSEAS_UDP_REJECT_IPV6_CIDRS {
+            assert!(cidr.contains('/') && cidr.contains(':'), "invalid IPv6 CIDR: {cidr}");
+        }
+        for cidr in CLOUD_IPV4_CIDRS {
+            assert!(cidr.contains('/') && !cidr.contains(':'), "invalid Cloud IPv4 CIDR: {cidr}");
+        }
+        for cidr in CLOUD_IPV6_CIDRS {
+            assert!(cidr.contains('/') && cidr.contains(':'), "invalid Cloud IPv6 CIDR: {cidr}");
+        }
+    }
 }
