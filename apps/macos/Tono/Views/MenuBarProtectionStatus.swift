@@ -56,7 +56,7 @@ struct MenuBarProtectionStatus {
             color = TonoStatus.blocked
         } else if appState.isConnected {
             kind = .connected
-            // AI Home protects listed AI only; ordinary traffic goes DIRECT
+            // AI Home protects listed AI only; unmatched traffic goes DIRECT
             // (decision 130), so the whole-host word is not available to it.
             title = appState.sessionProtectionScope == .listedAI ? "AI protected" : "Protected"
             color = TonoStatus.connected

@@ -4566,12 +4566,12 @@
         }
       }
     },
-    "Listed AI protected · other traffic direct": {
+    "Listed AI protected · unmatched traffic direct": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "名单内 AI 已保护 · 其他流量直连"
+            "value": "名单内 AI 已保护 · 规则外流量直连"
           }
         }
       }

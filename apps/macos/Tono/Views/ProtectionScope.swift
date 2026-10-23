@@ -7,7 +7,7 @@ import Foundation
 enum ProtectionScope: Equatable {
     /// Stable and Three-tier: PF fails closed for the whole host.
     case wholeHost
-    /// AI Home: listed AI stays on the Home line and fails closed; ordinary
+    /// AI Home: listed AI stays on the Home line and fails closed; unmatched
     /// traffic goes DIRECT and is never locked (decision 130).
     case listedAI
 

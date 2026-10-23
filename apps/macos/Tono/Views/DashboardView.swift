@@ -508,6 +508,9 @@ struct DashboardView: View {
 
     @MainActor
     static func protectionDetail(for appState: AppState) -> String {
+        if appState.isDisconnecting { return String(localized: "Finishing") }
+        if appState.isConnecting { return String(localized: "Connecting") }
+        if appState.isProtectedReconnectScheduled { return String(localized: "Waiting to retry…") }
         if appState.isProtectionBlockUnreadable {
             return String(localized: "Direct traffic may be blocked")
         }
@@ -522,7 +525,7 @@ struct DashboardView: View {
         }
         if appState.isConnected {
             return appState.sessionProtectionScope == .listedAI
-                ? String(localized: "Listed AI protected · other traffic direct")
+                ? String(localized: "Listed AI protected · unmatched traffic direct")
                 : String(localized: "Traffic is routed")
         }
         return String(localized: "Ready to connect")
