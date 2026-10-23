@@ -1053,6 +1053,8 @@ export interface TranslationResources {
         directOn: string
         directSkipped: string
         disconnecting: string
+        dnsDiagnostics: string
+        dnsPolicyWarning: string
         encryptedDnsHint: string
         errorRetry: string
         errors: {
@@ -1134,6 +1136,7 @@ export interface TranslationResources {
           standby: string
         }
         subtitle: string
+        systemDnsUnverified: string
         taglineConnected: string
         taglineConnecting: string
         taglineIdle: string

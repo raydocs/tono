@@ -65,11 +65,14 @@ const encryptedDnsQueryKey = ['tono', 'encrypted-dns'] as const
 const EncryptedDnsHint = ({
   dark,
   message,
+  diagnostics = false,
 }: {
   dark: boolean
   message: string
+  diagnostics?: boolean
 }) => {
   const text = tonoText(dark)
+  const { t } = useTranslation()
   return (
     <GlassCard
       radius="var(--tono-radius-card)"
@@ -87,7 +90,11 @@ const EncryptedDnsHint = ({
       >
         {message}
       </p>
-      <OpenDnsSettingsButton accent />
+      {diagnostics ? (
+        <Link to="/support" className="tono-button">
+          {t('tono.dashboard.dnsDiagnostics')}
+        </Link>
+      ) : <OpenDnsSettingsButton accent />}
     </GlassCard>
   )
 }
@@ -895,7 +902,7 @@ const DashboardPage = () => {
       onChooseRoute={() => navigate('/servers')}
     />
   )
-  const dnsNotice = encryptedDnsOverrides === true &&
+  const encryptedDnsNotice = encryptedDnsOverrides === true &&
     (connected || (uiState === 'notConnected' && actionError == null)) && (
       <EncryptedDnsHint
         dark={dark}
@@ -906,6 +913,19 @@ const DashboardPage = () => {
         )}
       />
     )
+  const resolverPolicyNotice = connected && status?.resolverPolicyWarning && (
+    <EncryptedDnsHint
+      dark={dark}
+      diagnostics
+      message={t(status.resolverPolicyWarning.includes('TONO_DNS_SYSTEM_UNVERIFIED')
+        ? 'tono.dashboard.systemDnsUnverified'
+        : 'tono.dashboard.dnsPolicyWarning')}
+    />
+  )
+  const dnsNotice = (resolverPolicyNotice || encryptedDnsNotice) && <>
+    {resolverPolicyNotice}
+    {encryptedDnsNotice}
+  </>
   const routeNotice = connected && routeUnstable && (
     <UnstableRouteHint
       dark={dark}

@@ -1063,6 +1063,86 @@ async fn an_interrupted_protected_apply_never_leaves_the_tunnel_key_shape() -> R
 
 #[tokio::test]
 #[serial_test::serial]
+async fn repeated_system_dns_failure_warns_without_releasing_protection() -> Result<()> {
+    use super::super::test_io::{self, Fixture};
+    use crate::core::dns as facade;
+
+    let adapter = effective(&entry(1), [9, 9, 9, 9], true);
+    let guid = adapter.guid.clone();
+    let _fixture = Fixture::new(vec![adapter])?;
+    let connected = facade::enable().await?;
+    assert!(connected.enabled && connected.last_error.is_none());
+    test_io::with(|io| {
+        // Leave the fixture's healthy Tono catch-all in force: query failure is not conflict.
+        io.system_lookup = Err("DnsQuery_W returned 1460".to_owned());
+    }).unwrap();
+    facade::refresh_resolver_policy_observation().await;
+    let first = facade::observe_for_update().await?;
+    facade::refresh_resolver_policy_observation().await;
+    let repeated = facade::observe_for_update().await?;
+    assert!(
+        repeated.resolver_policy_warning.as_deref()
+            .is_some_and(|warning| warning.contains("TONO_DNS_SYSTEM_UNVERIFIED")),
+        "repeated system query failure must remain visible: {repeated:?}"
+    );
+    assert_eq!(first.resolver_policy_warning, repeated.resolver_policy_warning);
+    assert!(!repeated.resolver_policy_warning.as_deref().unwrap().contains("TONO_DNS_POLICY_CONFLICT"));
+    assert!(repeated.enabled && repeated.last_error.is_none(), "{repeated:?}");
+    assert!(facade::PROTECTION_WANTED.load(std::sync::atomic::Ordering::Acquire));
+    // A cached status/configuration read is not a new system-DNS success.
+    assert_eq!(facade::observe_for_update().await?.resolver_policy_warning, repeated.resolver_policy_warning);
+    test_io::with(|io| io.system_lookup = Ok(vec![std::net::Ipv4Addr::new(198, 18, 1, 2)])).unwrap();
+    facade::refresh_resolver_policy_observation().await;
+    let recovered = facade::observe_for_update().await?;
+    assert!(recovered.resolver_policy_warning.is_none());
+    assert!(recovered.enabled && recovered.last_error.is_none());
+
+    // Complete an old observer after a new Core publication (including PID reuse). Only OS
+    // reads are injected: the real async observer parks at the production DNS_OPERATION fence.
+    use crate::core::manager::set_running_core_identity_for_kill_switch_tests as set_core;
+    set_core(Some((4242, 1))).await;
+    test_io::with(|io| io.system_lookup = Err("previous system lookup still in flight".into())).unwrap();
+    facade::refresh_resolver_policy_observation().await;
+    assert!(facade::observe_for_update().await?.resolver_policy_warning.is_some());
+    let held = facade::test_hooks::hold_dns_operation().await;
+    let late = facade::refresh_resolver_policy_observation();
+    tokio::pin!(late);
+    tokio::select! {
+        biased;
+        _ = &mut late => panic!("observer must wait for DNS_OPERATION before publication"),
+        _ = std::future::ready(()) => {}
+    }
+    set_core(Some((4242, 2))).await;
+    drop(held);
+    late.await;
+    let next = facade::observe_for_update().await;
+    set_core(None).await;
+    let next = next?;
+    assert!(next.resolver_policy_warning.is_none(), "old observer crossed Core generation: {next:?}");
+    assert!(next.enabled && next.last_error.is_none());
+
+    facade::refresh_resolver_policy_observation().await;
+    assert!(facade::observe_for_update().await?.resolver_policy_warning.is_some());
+    // This existing fixture deliberately refuses live restore/DHCP. As in the native restore
+    // regressions below, unplug the adapter: production restore still restores its registry
+    // and retires the snapshot without requesting unsupported live OS effects.
+    test_io::with(|io| { io.absent.insert(guid.clone()); }).unwrap();
+    let disconnected = facade::restore_protected().await?;
+    assert!(!disconnected.enabled && !disconnected.snapshot_present);
+    assert!(disconnected.resolver_policy_warning.is_none());
+    test_io::with(|io| {
+        io.absent.remove(&guid);
+        // Returning adapter: the effective resolver now reflects the completed restore.
+        io.adapters = vec![effective(&entry(1), [9, 9, 9, 9], true)];
+    }).unwrap();
+    let new_session = facade::enable().await?;
+    assert!(new_session.resolver_policy_warning.is_none());
+    assert!(new_session.enabled && new_session.last_error.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn effective_resolver_policy_drift_cannot_read_as_healthy() -> Result<()> {
     use super::super::test_io::{self, Fixture};
     use crate::core::dns as facade;

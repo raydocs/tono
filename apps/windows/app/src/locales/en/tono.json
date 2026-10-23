@@ -330,6 +330,9 @@
     "statusReality": "Cloud route"
   },
   "dashboard": {
+    "systemDnsUnverified": "System DNS unverified. Some sites may not open.",
+    "dnsPolicyWarning": "Windows DNS policy needs attention. Some sites may not open.",
+    "dnsDiagnostics": "Check DNS / diagnostics",
     "title": "Dashboard",
     "subtitle": "Cloud protection",
     "connect": "Connect",

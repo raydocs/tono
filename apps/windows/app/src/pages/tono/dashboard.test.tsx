@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/hooks/use-tono', () => ({
+  tonoConnectProgressQueryKey: ['tono', 'connect-progress'],
   useTonoStatus: () => ({
     status: mocks.status,
     mutateTonoStatus: mocks.mutateTonoStatus,
@@ -67,6 +68,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
 
 vi.mock('./connect-progress', () => ({ ConnectProgressCard: () => null }))
 vi.mock('@/tono-ui/AiTrafficCard', () => ({ AiTrafficCard: () => null }))
+vi.mock('@/tono-ui/SeaScene', () => ({ SeaScene: () => null }))
 
 import DashboardPage from './dashboard'
 
@@ -127,6 +129,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup()
+  vi.unstubAllGlobals()
   await removeCacheData(['tono', 'encrypted-dns'])
   await removeCacheData(['tono', 'catalog-status'])
 })
@@ -666,6 +669,37 @@ describe('dashboard claude residential route badge', () => {
       screen.getByRole('button', { name: 'Open Windows DNS settings' }),
     ).toBeDefined()
     expect(screen.queryByText('First connect')).toBeNull()
+  })
+
+  it('shows the system-DNS advisory on Home without changing Connected or protection', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    setNewAppearance(true)
+    const protectedSession = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'Tokyo · Sakura',
+      protectionBlocked: true,
+      killSwitch: {
+        wanted: true, live: true, mode: 'armed',
+        endpoints: [], last_error: null,
+      },
+    })
+    mocks.status = {
+      ...protectedSession,
+      resolverPolicyWarning: 'TONO_DNS_SYSTEM_UNVERIFIED: system query did not answer',
+    }
+    const view = renderDashboard()
+    expect(await screen.findByText('System DNS unverified. Some sites may not open.')).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Check DNS / diagnostics' }).getAttribute('href')).toBe('/support')
+    expect(screen.getByRole('heading', { name: 'Connected' })).toBeDefined()
+    expect(screen.queryByText('Protection not verified')).toBeNull()
+    expect(view.container.querySelector('.tono-home__dot')?.getAttribute('data-lit')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeDefined()
+    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
+    mocks.status = { ...protectedSession, resolverPolicyWarning: null }
+    view.rerender(<MemoryRouter><DashboardPage /></MemoryRouter>)
+    expect(screen.queryByText('System DNS unverified. Some sites may not open.')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Connected' })).toBeDefined()
   })
 
   it('offers another route when the connected route keeps dropping', () => {
