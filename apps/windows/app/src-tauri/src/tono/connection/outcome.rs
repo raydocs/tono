@@ -40,10 +40,6 @@ where
         let adapters = adapters.await;
         tono_core::other_vpn::annotate(&tono_core::hy2_idle::annotate(&err), &adapters).into_owned()
     };
-    {
-        let inner = state.lock().await;
-        inner.client.transport().set_auth_tunnel_port(0);
-    }
     match cleanup::reconcile_failure(
         Arc::clone(state), generation, status,
         move |observed, guard| cleanup(err, observed, guard),
@@ -134,6 +130,9 @@ pub(super) async fn record_connect_failure(
         if inner.connect_generation != generation {
             return None;
         }
+        // Adapter attribution can finish after a successor publishes its mixed port. Retire
+        // this fallback only in the same generation-owned commit as the failure status.
+        inner.client.transport().set_auth_tunnel_port(0);
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
         }
