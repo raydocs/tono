@@ -13,3 +13,9 @@
   与 POSTb97d55c28 云端 GREEN；四项均有真实旧行为 RED，详情/原始运行链接见报告。
   精确高风险差异范围审查：macOS R1→R2、Windows R1→R2、两项 Android R1；前三项无遗留重大问题，
   macOS末轮retry呈现minor仍open。最后证据文档提交无产品delta，交付head CI仍需单独核实。
+
+### 2026-10-23 · 源码交付状态对账
+- 复核 main `e93dc5ba6` 的 ancestry 和 GitHub PR 状态：#1725→`3e8fa876a`、#1726→`f8b673518`、#1728→`ca40f3baa`、#1729→`acafd91c5`、#1730→`91d9b9bed`、#1731→`e93dc5ba6` 已合入。更新四项产品 finding 的状态和链接，不再留下与已合源码冲突的 open/待开摘要。
+- 运行回执复核：#1725 最终 gate39924831373、#1726 gate39923389377/android39923389271、#1728 gate39924688931/android39924688829 均为各自精确交付 head 的 completed/success。#1730 最终 gate39942446548 与原始新测试日志通过，758 tests/1 skipped/0 failures；#1731 gate39943798978 成功，但跳过的平台工作流不冒充已执行的隔离 Pillow13 检查。
+- 后续优化：记录 #1730 的保护归属边界与两项依赖更新；#1724 仍 draft/待人工视觉；Android handoff 仅源码审查、无运行通过，Devin 额度不足时不再开付费任务；Windows WMI 仍在实现，不称完成。
+- 本次只改记录和路线图，未改产品代码、测试期望、权限、路由、owner 勾选或客户源；docs 检查不增加任何真机/签名/发布资格。历史失败与 skipped 仍保留。
