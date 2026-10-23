@@ -46,7 +46,7 @@ export default defineConfig({
           RATE_LIMIT_OIDC_VERIFY_IP: '30',
           RATE_LIMIT_OIDC_VERIFY_CHALLENGE: '3',
         },
-        d1Databases: { DB: 'test-db' },
+        d1Databases: { DB: 'test-db', CLIENT_IDENTITY_MIGRATION_DB: 'client-identity-migration-test-db' },
         // Local in-memory R2 for the raw-log pipeline and release downloads,
         // so upload and download verification are exercised against a real bucket API.
         r2Buckets: ['DIAGNOSTICS_LOGS', 'RELEASES'],
