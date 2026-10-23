@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| ANDROID-LEGACY-NETWORK-PERMISSION | Android 10/11 网络监控缺少正常权限，旧系统创建 VPN service 时抛异常 | open | 待开 | 高·已确认（API29/30） | API29/30 云端 RED 已复现；修复在 API29/30/34 GREEN，独立审查通过；未合 main/发布，真机未测 |
+| ANDROID-LEGACY-NETWORK-PERMISSION | Android 10/11 网络监控缺少正常权限，旧系统创建 VPN service 时抛异常 | fixed(f8b673518) | [#1726](https://github.com/raydocs/tono/pull/1726) | 高·已确认（API29/30） | API29/30 云端行为 RED；修复 API29/30/34 GREEN，独立审查及交付 head 的 ci-gate/android-ci 通过；待真机、其他 API 层与发布资格 |
 
 2026-10-23，通用 Android 审计 F1。冻结产品基线 `0465af814`，仅增加回归的
 `4fbf1e6a4b387c80498e14975595791591839ee6` 在
@@ -29,3 +29,5 @@ instrumentation APK 与 RED 字节相同。routing JVM：18 passed；mobile：10
 0 failures/errors；lint 通过。API30 首次云端网络预检有一次环境重试，所有固定 APK 回归均一次通过。
 独立 Sol/xhigh 审查覆盖上述 SHA，无 finding；原始附件 `api{29,30,34}-green-instrumentation.log`、
 `api30-red-instrumentation.log`、`routing-unit.log`、`mobile-unit.log`、`mobile-lint.log` 已由父任务读取。
+
+2026-10-23 合入状态复核：#1726 已合 main，合并提交 `f8b673518`；GitHub PR 状态、精确交付 head CI 及 main ancestry 已核对。此状态只确认源码合入；上文初次实现/夹具的待验证说明保留为历史，不替代后续运行证据，也不代表实机或客户发布通过。

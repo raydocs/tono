@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| ANDROID-POST-AMBIGUOUS-REPLAY | Android 控制面在 POST 可能已送达后仍自动换路径重发，可能重复消耗验证码或轮转 refresh token | open | 待开 | 中·推导（源码） | 本分支已修源码；RED/GREEN 待 Devin 在同 VM 执行准确提交，独立审查、真机、合 main 与发布均未完成 |
+| ANDROID-POST-AMBIGUOUS-REPLAY | Android 控制面在 POST 可能已送达后仍自动换路径重发，可能重复消耗验证码或轮转 refresh token | fixed(ca40f3baa) | [#1728](https://github.com/raydocs/tono/pull/1728) | 中·推导（源码） | 同一回归的云端 RED/GREEN、独立审查及交付 head 的 ci-gate/android-ci 通过；仍待真实 TLS/公网故障、真机与发布资格，iOS 未改 |
 
 - 归属：SHIP_PLAN §2 item 10；Android 产品审计，基线 `8a3ba2cc7db6a305aa96a3ef65646c951a7b474c`。
 - 原路径链对任意 `IOException` 和无结构化 API error 的 5xx 都回退；读取响应失败不能证明
@@ -24,3 +24,5 @@ GREEN `b97d55c28ca34534961bc6437fb75e8f898a5033` 相同测试源码执行 1 次�
 routing 18 passed，mobile 103 passed / 25 默认 opt-in skipped，lint 通过；父任务读取原始 XML/日志。
 Sol/xhigh 独立审查覆盖 GREEN SHA，无 finding；本次仅文档追加，不改已验证产品树。
 这证明内存 socket-stream 故障下的生产 framing/parser/retry 逻辑，不证明真实 TLS/公网故障或设备资格。
+
+2026-10-23 合入状态复核：#1728 已合 main，合并提交 `ca40f3baa`；GitHub PR 状态、精确交付 head CI 及 main ancestry 已核对。此状态只确认源码合入；上文初次实现/夹具的待验证说明保留为历史，不替代后续运行证据，也不代表实机或客户发布通过。
