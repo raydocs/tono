@@ -43,8 +43,13 @@ Wi-Fi plus cellular networks on the emulator. It uses the shipped service/core/T
 consent, then checks public VPN transport/metered capabilities through handoff, loss and recovery.
 A TUN replacement or unavailable second network is a fixture/environment failure, not the expected
 old-behavior RED. Preserve the `underlying-*-connectivity.txt` dumps and one executed test result;
-network preflight alone is not VPN evidence. The test restores its radio/animation settings and
-local-only account, and does not qualify physical radios, OEM behavior or real Tono services.
+network preflight alone is not VPN evidence. Consent starts for result from the resumed app activity;
+an absent consent dialog is a fixture failure, not RED. Preserve `underlying-failure-window.xml` when it fails.
+The test restores its radio/animation settings and local-only account, and does not qualify physical
+radios, OEM behavior or real Tono services. The separate JVM `UnderlyingNetworkSyncTest` covers Binder
+exception isolation, the two-retry budget and stop cancellation; run it with
+`:mobile:testDebugUnitTest --tests com.raydocs.tono.mobile.engine.UnderlyingNetworkSyncTest` on the cloud host.
+Neither that test nor a source review replaces the same-TUN device regression.
 
 ## Execution lanes
 

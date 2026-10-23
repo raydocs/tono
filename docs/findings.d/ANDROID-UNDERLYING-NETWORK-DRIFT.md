@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| ANDROID-UNDERLYING-NETWORK-DRIFT | Android VPN 建立后仍声明初始上行，且未按源码意图继承当前网络的计费属性 | open | 待开 | 中·推导（P2） | 新回归尚未执行；旧云 VM 两次模拟器 SIGSEGV 不是复现；真机及不同 API 待验 |
+| ANDROID-UNDERLYING-NETWORK-DRIFT | Android VPN 建立后仍声明初始上行，且未按源码意图继承当前网络的计费属性 | open | 待开 | 中·推导（P2） | 云端额度阻塞；首次测试停在授权，非行为 RED；修正后 RED/GREEN、真机及不同 API 待验 |
 
 来源：2026-10-23 Sonnet 基线审计 F3，根线程核对当前 `ca40f3baa`。
 `BoxPlatform.openTun` 原先仅在 Builder 写一次上行；`TonoVpnService.onUnderlyingChanged`
@@ -15,8 +15,16 @@ AOSP 的 [VpnService 契约](https://developer.android.com/reference/android/net
 候选修复：TUN 建立、每次底层变化后按 monitor 的最新值同步；无上行用空数组；
 open/update/close 在同一平台锁内，旧排队回调不携带旧 Network 写入新 TUN，关闭后不更新。
 Builder 显式 setMetered(false)，使 meteredness 由当前上行决定；不改变 VPN consent、路由或 TLS。
+R1 发现 live metadata 的 Binder 异常可能截断换网对账；候选修正将异常隔离，
+通过原有流量 tick 至多重试两次，每次仍读取最新上行，stopCore 清空重试；
+不为元数据失败释放 TUN，也不改变 openTun 的失败关闭路径。
 
 验收：新增一个独立 instrumentation 方法，真实 service + libbox + TUN + 本地替身，
 Wi-Fi → 蜂窝 → Wi-Fi → 无上行 → 恢复 → 断开，断言同一 VPN/TUN 身份、公共 transport/metered 属性。
 不调用被隐藏/脱敏的 NetworkCapabilities.getUnderlyingNetworks；原始 dumpsys 留给实际声明核对。
 只观察到普通网络 101→100→102 可切换，尚未取得同 TUN 的旧行为 RED 或修复 GREEN。
+旧云 VM 两次模拟器 SIGSEGV、首次 `normal Android VPN consent` 断言失败均不算行为 RED。
+授权夹具改为从已 resumed 的 app Activity `startActivityForResult`，与既有系统授权回归一致，
+没有 appops 授权绕过。追加一个纯 JVM 回归检查异常返回、有界重试与停止后清除；尚未运行。
+2026-10-23 两个云会话均 suspended/out_of_quota；最新摘要称 RED APK 已编译，
+但下载附件仍是早先缺 env 的失败日志，故未接纳为当前编译通过证据；FIX/JVM/lint 与设备验证继续待验。

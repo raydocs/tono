@@ -18,10 +18,10 @@ Tono 已有路由、特权保护、账户隔离和恢复机制；当前最需要
 
 | 修复 | 原问题与最小改动 | 已有证据 | 尚未完成 |
 |---|---|---|---|
-| Android 10/11 启动权限 | `NetworkMonitor.requestNetwork` 缺正常 `CHANGE_NETWORK_STATE` 权限；仅补声明及真实 instrumentation 回归，不改 consent/路由 | [#1726](https://github.com/raydocs/tono/pull/1726)：API29/30 旧 APK 各 1 次真实 `SecurityException`；修复 `8a3ba2cc7` 在 API29/30/34 各 `OK (1 test)`；独立审查通过 | PR CI、真机及完整平台资格；未合 main/发布 |
+| Android 10/11 启动权限 | `NetworkMonitor.requestNetwork` 缺正常 `CHANGE_NETWORK_STATE` 权限；仅补声明及真实 instrumentation 回归，不改 consent/路由 | [#1726](https://github.com/raydocs/tono/pull/1726)：API29/30 旧 APK 各 1 次真实 `SecurityException`；修复 `8a3ba2cc7` 在 API29/30/34 各 `OK (1 test)`；独立审查通过 | 已合 main（`f8b673518`）；真机、完整平台资格及发布未完成 |
 | macOS 保护范围文案 | AI Home 默认并非全主机保护；按实时会话而非下次连接设置显示 AI 范围，限定规则外 DIRECT，防止详情在连接尾段过早报保护 | [#1724](https://github.com/raydocs/tono/pull/1724)：原回归 RED 为 `Protected != AI protected`；过渡态回归在旧实现报过早保护而失败；最终 `f32fcf93b` ci-gate GREEN、两轮独立审查完成 | 视觉验收；末轮剩余 retry 徽章/指标不同步 minor 已单列，不能称全状态一致 |
-| Windows 迟到失败清理竞争 | 旧 A 的 adapter 读取结束后可能清掉已成功 B 的认证 fallback port；清零移至持同一 state mutex 的 generation-owned 提交 | [#1725](https://github.com/raydocs/tono/pull/1725)：原/修复代码使用同一主动 EOF fixture；旧版在真实端口断言失败；`96125d828` ci-gate GREEN、772 项通过；最终独立审查通过 | 文档收尾后的交付 head CI 与 Win10/11 真机；原两次 fixture 超时未被计作 RED/GREEN |
-| Android POST 歧义重放 | 验证码/refresh 请求可能已送达但丢响应，旧客户端仍换路径重放；首次 HTTP write **之前**标记歧义，保留 GET 和写前回退 | [#1728](https://github.com/raydocs/tono/pull/1728)：`b97d55c28` 同一回归 RED/GREEN；routing18、mobile103 passed / 25 skipped，lint 通过；独立审查通过 | 交付 head CI、实际公网 TLS 故障/设备验证；未改 iOS 同类代码 |
+| Windows 迟到失败清理竞争 | 旧 A 的 adapter 读取结束后可能清掉已成功 B 的认证 fallback port；清零移至持同一 state mutex 的 generation-owned 提交 | [#1725](https://github.com/raydocs/tono/pull/1725)：原/修复代码使用同一主动 EOF fixture；旧版在真实端口断言失败；`96125d828` ci-gate GREEN、772 项通过；最终独立审查通过 | 已合 main（`3e8fa876a`）；Win10/11 真机仍待验；原两次 fixture 超时未被计作 RED/GREEN |
+| Android POST 歧义重放 | 验证码/refresh 请求可能已送达但丢响应，旧客户端仍换路径重放；首次 HTTP write **之前**标记歧义，保留 GET 和写前回退 | [#1728](https://github.com/raydocs/tono/pull/1728)：`b97d55c28` 同一回归 RED/GREEN；routing18、mobile103 passed / 25 skipped，lint 通过；独立审查通过 | 已合 main（`ca40f3baa`）；公网 TLS 故障/设备验证仍待验；未改 iOS 同类代码 |
 
 Android 权限验证使用[同一 Devin Linux KVM 会话](https://app.devin.ai/sessions/e8291010a8af4c30937075dd4faca3eb)：
 同一个 instrumentation APK（SHA256 `b0753ac75140a4e36c7c8c9e8957bff25914ea282c042dae00afaca8e36d00fe`）
@@ -40,8 +40,9 @@ Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydoc
 实际失败于端口保留断言；GREEN [39922905155](https://github.com/raydocs/tono/actions/runs/39922905155)
 执行 Tauri 772 项全部通过，包含新回归和 ownership/caller-abort 同伴。
 最后文档收尾后的 macOS `8462be883`、Windows `9e7f7940d`、Android POST `23e59122f` 与
-各自被测试/独立审查的产品树相同；新交付 head CI 仍单独检查，未借用旧 head 的绿灯。
-准确最新状态以对应 PR 的 verification comment 为准，不将本文待运行项自动视为通过。
+各自被测试/独立审查的产品树相同；各交付 head CI 已分别完成，没有借用旧 head 的绿灯。
+2026-10-23 GitHub 回读：Windows/Android 三项修复和审计记录已合 main；macOS #1724 仍 draft/open，未合并。
+准确状态及验证范围见各 PR 的 verification comment，不将未覆盖项自动视为通过。
 
 ## 剩余问题：先修可靠性，再扩功能
 
@@ -84,7 +85,9 @@ Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydoc
    后续 `NetworkMonitor` 变化是否同步到 VPN 的 transport/metered 属性需用 `dumpsys connectivity` 验证。
    修复要与 TUN 所属代次和销毁绑定，不能把旧回调写入新 VPN。
    续核：target Q+ 的 VPN 默认始终 metered，原“自动跟随”注释不成立；不能据静态上行声明推断已发生蜂窝计费泄漏。
-   当前修复/运行证据状态见 `ANDROID-UNDERLYING-NETWORK-DRIFT` 分片。
+   当前修复/运行证据状态见 `ANDROID-UNDERLYING-NETWORK-DRIFT` 分片。R1 的 Binder 异常隔离问题已做候选修正；
+   云端首次测试停在授权夹具，尚无行为 RED/GREEN。两个现存 Devin 会话均因额度耗尽暂停；不启动新付费任务，
+   不把摘要中没有原始附件的新编译声明、旧日志或其他提交的绿灯当作当前验收。
 3. **P2/P3 候选，无上行与失败意图**：cached catalog + 离线不应无限停在 Connecting；Core 启动失败后
    `wantConnected` 的保留/清除需按自动恢复意图定义，避免之后意外重连。验收包括取消、服务重建和无网络预算届满。
 4. **P2，跨端首连契约**：`503 EXIT_IDENTITY_PROPAGATING` 在移动端按失败结束，桌面有有界等待。
@@ -120,8 +123,8 @@ Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydoc
 
 ## 下一阶段验收顺序
 
-1. 首批四项相同回归的 RED/GREEN 与独立 diff 结论已收齐；完成最终交付 head CI 与 PR 交接。
-   原夹具失败未被算作缺陷复现；macOS 保留已记录 minor 和人工视觉验收。
+1. 首批四项相同回归的 RED/GREEN、独立 diff 与最终交付 head CI 已收齐；三项非 UI 修复已合 main，
+   macOS 保留 draft、已记录 minor 和人工视觉验收。后续 handoff 是独立待验证项，不继承这些结果。
 2. 对 Windows WMI/resume、Android handoff/后台通知、macOS 跨账户会话各开一个有界行为修复，先确认契约再改高风险代码。
 3. 通用 Android 按 API29/30（旧 requestNetwork）、31/32（新 callback）、33（通知权限）、34（FGS）、35/36（target 行为）
    分层验证；**本轮权限回归只覆盖 29/30/34**。云端之外至少补一台普通 Android 真机的 Wi-Fi/蜂窝、Doze、重启、always-on/lockdown。

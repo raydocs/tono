@@ -87,6 +87,10 @@ class TonoVpnService : VpnService() {
     /** The phone's own network the exits were last checked over (engine thread only). */
     private var lastUnderlying: Network? = null
     private val probeRequests = ProbeEpoch<Network>()
+    private val underlyingNetworkSync = UnderlyingNetworkSync(
+        update = { platform.updateUnderlyingNetworks() },
+        onFailure = { Log.w(TAG, "underlying network metadata update failed") },
+    )
     private lateinit var apiBase: String
     private var localTestServer = false
 
@@ -518,6 +522,7 @@ class TonoVpnService : VpnService() {
 
     private fun stopCore() {
         probeRequests.invalidate()
+        underlyingNetworkSync.cancelRetries()
         trafficTask?.cancel(false)
         trafficTask = null
         runCatching { commandServer?.closeService() }
@@ -526,7 +531,7 @@ class TonoVpnService : VpnService() {
     }
 
     private fun onUnderlyingChanged(u: NetworkMonitor.Underlying?) {
-        platform.updateUnderlyingNetworks()
+        underlyingNetworkSync.onNetworkChanged()
         val v6 = u?.globalIpv6 == true
         val before = snapshot.get()
         val changed = u?.network != lastUnderlying
@@ -556,6 +561,7 @@ class TonoVpnService : VpnService() {
         var lastRx = TrafficStats.getUidRxBytes(uid)
         var lastTx = TrafficStats.getUidTxBytes(uid)
         trafficTask = engine.scheduleWithFixedDelay({
+            underlyingNetworkSync.retryIfNeeded()
             val rx = TrafficStats.getUidRxBytes(uid)
             val tx = TrafficStats.getUidTxBytes(uid)
             val s = snapshot.get()
