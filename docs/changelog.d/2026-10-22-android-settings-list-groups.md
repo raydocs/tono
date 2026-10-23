@@ -14,4 +14,5 @@
   - `LargeTextDeviceTest#l1` 新增：详情面板滚动到模式控件与路由检查可见（`fixture-14b`），设置页滚到底 Sign out 位于导航栏之上、路由规则页与确认框 200% 无截断（`fixture-15b/15c/15d`）；新增 `l4` 中文 200% 同一组（`fixture-33/33b/34/34b/34c/34d`），已加入 `android-ci.yml` ui 分片。`HorizonUiDeviceTest#u7` 中文增加路由规则与确认框（`fixture-24b/24c`）。JVM：`SettingsFlowTest` 4 条（首屏无选择器 / 规则页一次 / 退出先确认 / 详情选模式与检查）。
 - 验证：Mac 不跑 Gradle/模拟器；Devin Cloud linux 复验结果（CI 构建命令、JVM 渲染、仪器测试计数、截图哈希）见 PR 验证评论。首轮 FAIL 原始记录保留：C1 编译失败、b4 断言失败、C4 17 张仅 8 张存在。
 - 候选/发布：仅源码，无新候选、合并、auto-merge、部署或 PR 监控。
+- 2026-10-22 复验续记（Devin 同 session，源码 `6781167`）：C1 `BUILD SUCCESSFUL`，mobile XML 138 testcase：106 pass / 32 skip（opt-in 渲染套件）/ 0 fail，routing 18/0/0；`SettingsFlowTest` 4/4、`AccessibilityContractTest` 3/3；C2 ScreenshotRender 17、UiRevisionRender 13 executed；C3 28 个方法全部 OK（含 b4、l1、l4、u7）；fixture-31b 标记像素 (140,99,88) 落在 45% 检测范围。唯一未过：`fixture-15b/34b` 末行版权文字被底部渐隐遮住一截，原因是测试用 `performScrollTo` 只滚到该行刚露出，未滚到底；改为按 `settingsScroll` 容器 ScrollBy 滚到底并断言末行底边高于渐隐带，产品布局不变（列表底部留白 32 dp + 导航栏）。
 - 剩余限制：模拟器截图不是实机证据；TalkBack、触感、OEM 皮肤、始终开启/锁定行为待实机。详情面板 200% 首帧仍需滚动才见模式控件（设计上允许，滚动证据见 `fixture-14b`）。

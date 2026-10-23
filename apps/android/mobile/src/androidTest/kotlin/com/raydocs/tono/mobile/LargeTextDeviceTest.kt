@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -12,6 +13,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -167,12 +170,16 @@ class LargeTextDeviceTest {
         shot("fixture-${n}d-font-2.0-routing-rules")
         device.pressBack()
         compose.waitForIdle()
-        compose.onNodeWithText(strings.getString(R.string.about_core, com.raydocs.tono.mobile.BuildConfig.SING_BOX_VERSION).replace("/", "/\u2060")).performScrollTo().assertIsDisplayed()
+        // To the very end of the list, not just until the colophon peeks in: the last line must then sit
+        // above the 24 dp fade and the navigation bar, as the list's own bottom padding promises.
+        compose.onNodeWithTag("settingsScroll").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        compose.waitForIdle()
+        val colophon = compose.onNodeWithText(strings.getString(R.string.about_core, com.raydocs.tono.mobile.BuildConfig.SING_BOX_VERSION).replace("/", "/\u2060")).assertIsDisplayed()
         compose.onNodeWithText(strings.getString(R.string.settings_sign_out)).assertIsDisplayed()
-        val signOutBottom = compose.onNodeWithText(strings.getString(R.string.settings_sign_out)).fetchSemanticsNode().boundsInWindow.bottom
+        val colophonBottom = colophon.fetchSemanticsNode().boundsInWindow.bottom
         val navBar = androidx.core.view.ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0
-        val navBarTop = device.displayHeight - navBar
-        assertTrue("Sign out ends at $signOutBottom px, above the navigation bar at $navBarTop px", signOutBottom <= navBarTop)
+        val fadeTop = device.displayHeight - navBar - with(compose.density) { 24.dp.toPx() }
+        assertTrue("colophon ends at $colophonBottom px, above the scroll-edge fade at $fadeTop px", colophonBottom <= fadeTop)
         shot("fixture-${n}b-font-2.0-settings-end")
         compose.onNodeWithText(strings.getString(R.string.settings_sign_out)).performClick()
         compose.waitForIdle()

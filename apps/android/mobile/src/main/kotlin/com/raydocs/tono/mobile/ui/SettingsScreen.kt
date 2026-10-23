@@ -113,7 +113,7 @@ fun SettingsScreen(
     val band = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
     Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(horizontal = 20.dp).padding(top = band, bottom = 32.dp),
+            Modifier.fillMaxSize().verticalScroll(scroll).testTag("settingsScroll").navigationBarsPadding().padding(horizontal = 20.dp).padding(top = band, bottom = 32.dp),
         ) {
             // The title opens the page on the content's own edge and scrolls away with it.
             Text(
