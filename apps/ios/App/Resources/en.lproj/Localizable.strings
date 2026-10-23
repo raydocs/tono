@@ -107,7 +107,6 @@
 "settings_account" = "Account";
 "settings_sign_out" = "Sign out";
 "settings_signed_in_as" = "Signed in as %1$@";
-"settings_about" = "About";
 "about_version" = "Tono %1$@ · test build, not from the App Store";
 "about_core" = "Core: sing-box %1$@ (GPL-3.0-or-later; source: github.com/SagerNet/sing-box)";
 "about_core_no_version" = "Core: sing-box (GPL-3.0-or-later; source: github.com/SagerNet/sing-box)";
@@ -115,9 +114,7 @@
 "ipv6_on" = "IPv6 on this network: yes";
 "ipv6_off" = "IPv6 on this network: no (direct names answer IPv4 only)";
 "system_include_all" = "Include all networks";
-"system_include_all_desc" = "On (recommended): iOS sends all traffic to Tono and holds it while the tunnel restarts instead of letting it out directly. Takes effect the next time Tono connects.";
 "system_include_all_short" = "Recommended: traffic waits while Tono restarts.";
-"system_how_title" = "How this works";
 "system_on_demand" = "Connecting turns on iOS Connect On Demand, so iOS brings Tono back after a crash, an update or a restart; disconnecting turns it off.";
 "system_limit" = "While Tono is off, iOS blocks nothing; some Apple services bypass any VPN.";
 "sentence_connected_stable_no_home" = "All public traffic via cloud · LAN stays local";
@@ -214,8 +211,16 @@
 "check_unconfirmed" = "Tono couldn't confirm which routes are in use, so there's no answer yet.";
 "line_unconfirmed" = "Unconfirmed";
 "lane_unconfirmed" = "Not confirmed";
-"settings_mode_unconfirmed" = "Tono couldn't confirm which mode is on. See Details.";
 "state_unconfirmed" = "Not confirmed";
 "status_unconfirmed" = "Asking the tunnel what it runs…";
 "short_UNCONFIRMED" = "The tunnel hasn't confirmed its routes";
 "mode_unconfirmed_line" = "The tunnel hasn't confirmed which mode it runs.";
+
+/* Settings as a form: the first screen holds the controls, the rules one screen down. */
+"settings_routing_group" = "Routing";
+"settings_routing_rules" = "Routing rules";
+"settings_rules_platform" = "On iPhone";
+"settings_mode_in_use" = "In use";
+"settings_signed_in" = "Signed in as";
+"settings_licences" = "Licences and source";
+"about_source_link" = "Source on GitHub";

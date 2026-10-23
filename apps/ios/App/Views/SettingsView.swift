@@ -6,126 +6,122 @@ import UIKit
 /// system alert red, which was the one saturated colour on the screen.
 private let signOutRed = Color(hex: 0xE27068)
 /// The switch's "on": the deeper end of the primary button's sun gradient, one accent with Home,
-/// warm enough to part from the white knob without the coral of the sun's edge.
+/// warm enough to part from the white knob without the coral of the sun's edge. The only place
+/// the sun appears on this screen.
 private let switchOn = Color(hex: 0xFF9E6B)
 
+/// Settings is what you set and who you are: the first screen holds the controls (the protection
+/// switch, the routing rules entry with the mode in effect, Live Activity, the account), and the
+/// explanation lives one level down. A native inset-grouped form on the Tono sheet surface, so the
+/// group structure survives the largest text size without relying on gaps. The mode picker and
+/// the route check stay in Details, next to the lanes they change; nothing is repeated here.
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOut = false
-    @State private var showScope = false
-    @State private var showSystemHow = false
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         // A navigation bar, not a hand-made header: on iOS 26 the close button is system glass and
         // the content blurs under the bar as it scrolls (scroll edge effect).
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    #if DEBUG
-                    // In the content, under the navigation bar, so it never covers the sheet's edge.
-                    if PreviewBadge.shown { PreviewBadge().padding(.top, 4) }
-                    #endif
-                    // The mode is chosen in one place, Details (one tap from Home, next to where traffic
-                    // goes); Settings states it as a row like any other: the name, what it does in one
-                    // sentence, where to change it. The full descriptions stay in the disclosure below.
-                    // Editorial layout: no cards or dividers, groups set apart by space alone.
-                    SettingsLabel(text: L.t("settings_routing"), first: true)
-                    Group {
-                        if model.routesUnconfirmed {
-                            meta(L.t("settings_mode_unconfirmed"))
-                        } else {
-                            VStack(alignment: .leading, spacing: 4) {
-                                title(ModeText.name(model.mode))
-                                meta(ModeText.line(model.mode) + (L.isChinese ? "" : " ") + L.t("settings_mode_where"))
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 10)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("settingsModeWhere")
+            List {
+                #if DEBUG
+                // In the content, under the navigation bar, so it never covers the sheet's edge.
+                if PreviewBadge.shown {
+                    Section { PreviewBadge() }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                }
+                #endif
 
-                    // The routing boundaries stay one tap away instead of a wall of text on open.
-                    DisclosureGroup(isExpanded: $showScope) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            // The full mode descriptions live here; the picker is in Details.
-                            meta(L.t("mode_three_tier") + (L.isChinese ? "：" : ": ") + L.t("mode_three_tier_desc"))
-                            meta(L.t("mode_stable") + (L.isChinese ? "：" : ": ") + L.t("mode_stable_desc"))
-                            meta(L.t("routing_scope"))
-                            meta(L.t("routing_platform"))
-                            fine(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off"))
-                            fine(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
-                        }
-                        .padding(.top, 4).padding(.bottom, 10)
-                    } label: {
-                        act(L.t("routing_scope_title"))
-                    }
-                    .disclosureGroupStyle(CaretDisclosure())
-                    .accessibilityIdentifier("scopeDisclosure")
-
-                    // "Where does a site go?" lives in Details, next to where traffic goes.
-
-                    SettingsLabel(text: L.t("settings_system"))
+                // 1. Protection: the one switch that decides what happens while Tono restarts.
+                // The safety boundary (Connect On Demand, what iOS does while Tono is off) is the
+                // group's footer, always visible, said once.
+                Section {
                     Toggle(isOn: Binding(get: { model.includeAllNetworks }, set: { on in Task { await model.setIncludeAllNetworks(on) } })) {
-                        title(L.t("system_include_all"))
+                        rowTitle(L.t("system_include_all"))
                     }
-                    .toggleStyle(RowToggleStyle(meta: L.t("system_include_all_short")))
-                    if model.includeAllPending {
-                        // The running tunnel keeps the previous setting until it next starts.
-                        Text(L.t("system_include_all_pending")).tonoFont(15, relativeTo: .subheadline)
-                            .foregroundStyle(TonoColor.warning)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("includeAllPending")
-                    }
-                    // The mechanics (restart hold, Connect On Demand) one tap away, as the routing scope.
-                    DisclosureGroup(isExpanded: $showSystemHow) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            meta(L.t("system_include_all_desc"))
-                            meta(L.t("system_on_demand"))
-                            Text(L.t("system_limit")).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.warning)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.top, 4).padding(.bottom, 10)
+                    .toggleStyle(RowToggleStyle(meta: L.t("system_include_all_short"),
+                                                // The running tunnel keeps the previous setting until it next starts.
+                                                note: model.includeAllPending ? L.t("system_include_all_pending") : nil,
+                                                identifier: "includeAllToggle"))
+                } header: {
+                    SettingsHeader(L.t("settings_system")).accessibilityIdentifier("settingsProtectionHeader")
+                } footer: {
+                    SettingsFooter(L.t("system_on_demand") + (L.isChinese ? "" : " ") + L.t("system_limit"))
+                }
+                .settingsRows()
+
+                // 2. Routing: the rules are a value here (the mode in effect) and one screen down in
+                // full. The picker itself is in Details, one tap from Home, next to where traffic goes.
+                Section {
+                    NavigationLink {
+                        RoutingRulesView()
                     } label: {
-                        act(L.t("system_how_title"))
+                        valueRow(L.t("settings_routing_rules"),
+                                 value: model.routesUnconfirmed ? L.t("lane_unconfirmed") : ModeText.name(model.mode))
                     }
-                    .disclosureGroupStyle(CaretDisclosure())
+                    .accessibilityIdentifier("settingsRoutingRules")
+                } header: {
+                    SettingsHeader(L.t("settings_routing_group"))
+                }
+                .settingsRows()
 
-                    SettingsLabel(text: L.t("settings_lock_screen"))
+                // 3. Lock Screen and widgets.
+                Section {
                     Toggle(isOn: Binding(get: { model.liveActivityEnabled }, set: { model.setLiveActivity($0) })) {
-                        title(L.t("settings_live_activity"))
+                        rowTitle(L.t("settings_live_activity"))
                     }
-                    .toggleStyle(RowToggleStyle(meta: L.t("settings_live_activity_desc")))
-                    .accessibilityIdentifier("liveActivityToggle")
+                    .toggleStyle(RowToggleStyle(meta: L.t("settings_live_activity_desc"), identifier: "liveActivityToggle"))
+                } header: {
+                    SettingsHeader(L.t("settings_lock_screen"))
+                }
+                .settingsRows()
 
-                    SettingsLabel(text: L.t("settings_account"))
-                    // The address is the value under the label, as every other row; VoiceOver still
-                    // gets the sentence (Apple's audit flagged the bare address as not human-readable).
-                    title(Self.breakable(model.email ?? ""))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 10)
+                // 4. Account: the address is a value, not a headline. VoiceOver still gets the
+                // sentence (Apple's audit flagged the bare address as not human-readable).
+                Section {
+                    valueRow(L.t("settings_signed_in"), value: Self.breakable(model.email ?? ""))
+                        .accessibilityElement(children: .ignore)
                         .accessibilityLabel(L.t("settings_signed_in_as", model.email ?? ""))
-                    // A text action, not a capsule, in the one weight of the screen: its red alone marks
-                    // it, muted to the sheet rather than the system alert red.
+                } header: {
+                    SettingsHeader(L.t("settings_account"))
+                }
+                .settingsRows()
+
+                // Sign out in a group of its own: the one red on the screen, set apart by the group
+                // gap, and it asks before acting.
+                Section {
                     Button { confirmSignOut = true } label: {
-                        act(L.t("settings_sign_out"), color: signOutRed).contentShape(Rectangle())
+                        Text(L.t("settings_sign_out")).tonoFont(17, relativeTo: .body).foregroundStyle(signOutRed)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(PressScale())
-
-                    // About as a colophon in small print, set apart by the same space as any group;
-                    // no rule, the one line the screen had.
-                    SettingsLabel(text: L.t("settings_about"))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(Self.breakable(L.t("about_version", AppModel.appVersion))).tonoFont(13, relativeTo: .footnote)
-                            .foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
-                        fine(Self.breakable(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion)))
-                    }
-                    .padding(.top, 10)
+                    .accessibilityIdentifier("settingsSignOut")
                 }
-                .padding(.horizontal, 20).padding(.bottom, 32)
+                .settingsRows()
+
+                // Colophon in small print under the licences row; no "About" label, no update or
+                // download row (distribution is chosen but not live, so nothing may claim "latest").
+                Section {
+                    NavigationLink {
+                        LicencesView()
+                    } label: {
+                        rowTitle(L.t("settings_licences"))
+                    }
+                    .accessibilityIdentifier("settingsLicences")
+                } footer: {
+                    SettingsFooter(Self.breakable(L.t("about_version", AppModel.appVersion)) + "\n"
+                                   + Self.breakable(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion)))
+                }
+                .settingsRows()
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .modifier(SheetSurface())
             .navigationTitle(L.t("settings_title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -160,29 +156,6 @@ struct SettingsView: View {
         .accessibilityIdentifier("settingsClose")
     }
 
-    /// Row title for what *is* (a value, a state): the large size; hierarchy comes from size and tone, not weight.
-    private func title(_ text: String) -> some View {
-        Text(text).tonoFont(20, relativeTo: .title3).foregroundStyle(TonoColor.textPrimary).fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// A row that *acts* (reveals, opens, signs out): body size, so reading and acting are two sizes,
-    /// not one style told apart by a chevron. Same 10 pt rhythm as every row; at least 44 pt tall.
-    private func act(_ text: String, color: Color = TonoColor.textPrimary) -> some View {
-        Text(text).tonoFont(17, relativeTo: .body).foregroundStyle(color)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-    }
-
-    private func meta(_ text: String) -> some View {
-        Text(text).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func fine(_ text: String) -> some View {
-        Text(text).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textTertiary).fixedSize(horizontal: false, vertical: true)
-    }
-
     /// Identifiers (an address, a source URL) may break only after "@", "/" and a "." that starts
     /// the next part of a name: a zero-width break opportunity there, so the line breaker never has
     /// to hyphenate inside a word (AX5 showed "preview@ex-ample.com" and "Sager-Net"). Silent for
@@ -200,54 +173,183 @@ struct SettingsView: View {
     }
 }
 
-/// Both in-place disclosures: the row is the button, a caret on the right edge turns over when the
-/// group opens (never the navigation chevron, which means "another screen"). The caret follows the
-/// text size up to 1.5x. VoiceOver hears the state as a value.
-private struct CaretDisclosure: DisclosureGroupStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        CaretDisclosureBody(configuration: configuration)
-    }
+// MARK: - Row grammar (three roles: title, value or control, footer)
+
+/// A row title: body size, primary ink, the one weight of the screen.
+func rowTitle(_ text: String) -> some View {
+    Text(text).tonoFont(17, relativeTo: .body).foregroundStyle(TonoColor.textPrimary)
+        .fixedSize(horizontal: false, vertical: true)
 }
 
-private struct CaretDisclosureBody: View {
-    let configuration: DisclosureGroupStyleConfiguration
-    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
+/// A row that shows a value: the title leading, the value trailing in the secondary tone. At
+/// accessibility sizes the value goes under the title, so neither breaks inside a word.
+func valueRow(_ title: String, value: String) -> some View {
+    ValueRow(title: title, value: value)
+}
+
+private struct ValueRow: View {
+    let title: String
+    let value: String
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(TonoMotion.state) { configuration.isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 12) {
-                    configuration.label.frame(maxWidth: .infinity, alignment: .leading)
-                    GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 18 * min(scale, 1.5))
-                        .rotationEffect(.degrees(configuration.isExpanded ? 180 : 0))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(L.t(configuration.isExpanded ? "a11y_expanded" : "a11y_collapsed"))
-            if configuration.isExpanded { configuration.content }
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        layout {
+            rowTitle(title).frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil, alignment: .leading)
+            if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+            Text(value).tonoFont(17, relativeTo: .body).foregroundStyle(TonoColor.textSecondary)
+                .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(minHeight: 28)
     }
 }
 
-/// A Settings group heading: sentence case, small and in the quietest tone, set apart by space
-/// above it rather than a card around the group. A clear step under the 20 pt row title (footnote
-/// against title3, 44 against 55 pt at AX5), so label and title never read as one size.
-private struct SettingsLabel: View {
+/// A group heading: sentence case, small and in the quietest tone. A clear step under the 17 pt
+/// row title, so label and title never read as one size.
+struct SettingsHeader: View {
     let text: String
-    var first = false
+    init(_ text: String) { self.text = text }
     var body: some View {
         Text(text)
             .tonoFont(13, relativeTo: .footnote)
             .foregroundStyle(TonoColor.textTertiary)
+            .textCase(nil)
             .fixedSize(horizontal: false, vertical: true)
-            // Rows carry 10 pt above and below: 30 here makes the group gap 40 and the label-to-row gap 10.
-            .padding(.top, first ? 16 : 30)
             .accessibilityAddTraits(.isHeader)
     }
 }
+
+/// A group footer: the explanation for the group above, small and secondary, always visible.
+struct SettingsFooter: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text)
+            .tonoFont(13, relativeTo: .footnote).lineSpacing(2)
+            .foregroundStyle(TonoColor.textSecondary)
+            .textCase(nil)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The row fill inside the sheet: the content card's smoke, opaque when transparency is reduced
+/// or contrast increased (a stroke is not available on a list row, so the fill alone separates).
+private struct SettingsRowFill: View {
+    @Environment(\.tonoReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    var body: some View {
+        TonoColor.smokeHigh.opacity(reduceTransparency || contrast == .increased ? 1 : 0.5)
+    }
+}
+
+extension View {
+    /// Tono's row surface and hairline on a form section.
+    func settingsRows() -> some View {
+        listRowBackground(SettingsRowFill())
+            .listRowSeparatorTint(TonoColor.hairline)
+    }
+}
+
+// MARK: - Routing rules (the only second-level screen)
+
+/// Everything the first screen used to explain, once: the two modes with their descriptions and
+/// where to change them, what Tono recognises, and what enters the tunnel on iPhone.
+struct RoutingRulesView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        List {
+            Section {
+                modeRow(.threeTier, name: L.t("mode_three_tier"), desc: L.t("mode_three_tier_desc"))
+                modeRow(.stable, name: L.t("mode_stable"), desc: L.t("mode_stable_desc"))
+            } header: {
+                SettingsHeader(L.t("settings_routing"))
+            } footer: {
+                // The picker is in Details; this screen only tells.
+                SettingsFooter(L.t("settings_mode_where")).accessibilityIdentifier("settingsModeWhere")
+            }
+            .settingsRows()
+
+            Section {
+                explanation(L.t("routing_scope")).accessibilityIdentifier("routingScope")
+            } header: {
+                SettingsHeader(L.t("routing_scope_title"))
+            }
+            .settingsRows()
+
+            Section {
+                explanation(L.t("routing_platform"))
+            } header: {
+                SettingsHeader(L.t("settings_rules_platform"))
+            } footer: {
+                SettingsFooter(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off") + "\n"
+                               + L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
+            }
+            .settingsRows()
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .modifier(SheetSurface())
+        .navigationTitle(L.t("settings_routing_rules"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The mode's name with "In use" as its trailing value when it is the one in effect (never
+    /// while the tunnel has not confirmed which runs), and its description under it.
+    private func modeRow(_ mode: RoutingMode, name: String, desc: String) -> some View {
+        let inUse = model.mode == mode && !model.routesUnconfirmed
+        return VStack(alignment: .leading, spacing: 4) {
+            valueRow(name, value: inUse ? L.t("settings_mode_in_use") : "")
+            Text(desc).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("rulesMode_\(mode.rawValue)")
+    }
+
+    private func explanation(_ text: String) -> some View {
+        Text(text).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Licences and source
+
+/// The colophon in full: the build, the core and its licence, and the source as a link.
+struct LicencesView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        List {
+            Section {
+                rowTitle(SettingsView.breakable(L.t("about_version", AppModel.appVersion)))
+            }
+            .settingsRows()
+
+            Section {
+                rowTitle(SettingsView.breakable(model.coreVersion.isEmpty ? L.t("about_core_no_version") : L.t("about_core", model.coreVersion)))
+                Link(destination: URL(string: "https://github.com/SagerNet/sing-box")!) {
+                    valueRow(L.t("about_source_link"), value: "github.com")
+                }
+                .accessibilityIdentifier("aboutSourceLink")
+            } header: {
+                SettingsHeader("sing-box")
+            }
+            .settingsRows()
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .modifier(SheetSurface())
+        .navigationTitle(L.t("settings_licences"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Route check (shown in Details)
 
 /// "Where does this site go?" against the same graph the tunnel runs (shown in Details). The answer
 /// is worked out from the routing rules for the current mode, not a live test. Submitting closes the
@@ -355,20 +457,28 @@ struct RouteCheck: View {
     }
 }
 
+// MARK: - Row switch
+
 /// A settings switch whose whole row is the tap target (at least 44 pt tall), not only the
-/// 63 x 28 pt switch; VoiceOver gets one switch with its label and description.
+/// 63 x 28 pt switch; VoiceOver gets one switch with its label, description and note.
 struct RowToggleStyle: ToggleStyle {
     /// The description under the title: drawn full width below the title row, spoken with the label.
     var meta: String? = nil
+    /// A state line under the description (pending), in the warning tone.
+    var note: String? = nil
+    /// The switch's identifier for UI tests, set on the element VoiceOver and XCUITest see.
+    var identifier: String? = nil
 
     func makeBody(configuration: Configuration) -> some View {
-        RowToggle(configuration: configuration, meta: meta)
+        RowToggle(configuration: configuration, meta: meta, note: note, identifier: identifier)
     }
 }
 
 private struct RowToggle: View {
     let configuration: ToggleStyleConfiguration
     let meta: String?
+    let note: String?
+    let identifier: String?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -384,29 +494,30 @@ private struct RowToggle: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     // Drawn only; the row's button takes the tap.
                     Toggle("", isOn: configuration.$isOn).labelsHidden().tint(switchOn).allowsHitTesting(false)
-                        .padding(.trailing, 4)
                 }
                 if let meta {
-                    Text(meta).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary)
+                    Text(meta).tonoFont(13, relativeTo: .footnote).lineSpacing(2).foregroundStyle(TonoColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let note {
+                    Text(note).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 4)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityRepresentation {
             Toggle(isOn: configuration.$isOn) {
-                if let meta {
-                    VStack(alignment: .leading) {
-                        configuration.label
-                        Text(meta)
-                    }
-                } else {
+                VStack(alignment: .leading) {
                     configuration.label
+                    if let meta { Text(meta) }
+                    if let note { Text(note) }
                 }
             }
+            .accessibilityIdentifier(identifier ?? "")
         }
     }
 }
