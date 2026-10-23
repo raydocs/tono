@@ -1,8 +1,8 @@
 #!/bin/sh
-# Raise the three TCP limits that measurably bind a Tono exit, and nothing else.
+# Apply the high-BDP TCP profile verified on the Tono fleet, and nothing else.
 # Runs on the exit, as root. No restart, no dropped sessions.
 #
-# Why these three and not the thirty-two a tuning script would set:
+# Why these and not the thirty-two a tuning script would set:
 #
 #   tcp_wmem[2] 4 MiB -> 16 MiB
 #     The send ceiling, which is the direction an exit actually pushes. A
@@ -21,10 +21,18 @@
 #     is long-lived connections used in bursts, which is exactly the shape that
 #     pays for this repeatedly.
 #
-# Deliberately NOT set: any qdisc or congestion control (already bbr+fq), any
-# HTB/rate limiting (an exit should not cap itself at a number measured once),
-# and initcwnd (these paths already retransmit 1.6-8.3%, and a larger initial
-# burst on a lossy path makes that worse, not better).
+#   tcp_congestion_control bbr, default_qdisc fq
+#     Already on every node, but nothing in the repo held them, so a re-provision
+#     on a stock image silently fell back to cubic/fq_codel. Codified so the high-BDP
+#     profile verified in production on 2026-10-23 cannot regress.
+#
+#   tcp_mtu_probing 1, tcp_fastopen 3
+#     Black-hole PMTU paths through carrier NAT stall Reality handshakes without
+#     probing; fastopen 3 enables TFO for both client and server sockets.
+#
+# Deliberately NOT set: any HTB/rate limiting (an exit should not cap itself at
+# a number measured once), and initcwnd (these paths already retransmit
+# 1.6-8.3%, and a larger initial burst on a lossy path makes that worse).
 #
 # Idempotent: a host already carrying this exact drop-in is left alone.
 
@@ -38,7 +46,7 @@ fail() { echo "tune-tono-tcp: $1" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail "must run as root"
 command -v sysctl >/dev/null 2>&1 || fail "sysctl is required"
 
-KEYS="net.ipv4.tcp_rmem net.ipv4.tcp_wmem net.core.rmem_max net.core.wmem_max net.ipv4.tcp_slow_start_after_idle"
+KEYS="net.core.default_qdisc net.ipv4.tcp_congestion_control net.ipv4.tcp_rmem net.ipv4.tcp_wmem net.core.rmem_max net.core.wmem_max net.ipv4.tcp_slow_start_after_idle net.ipv4.tcp_mtu_probing net.ipv4.tcp_fastopen"
 
 if [ "${1:-}" = "--revert" ]; then
   [ -f "$PREV" ] || fail "no recorded previous values at $PREV"
@@ -54,11 +62,15 @@ if [ "${1:-}" = "--revert" ]; then
   exit 0
 fi
 
-DESIRED="net.ipv4.tcp_rmem = 4096 131072 16777216
+DESIRED="net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_rmem = 4096 131072 16777216
 net.ipv4.tcp_wmem = 4096 16384 16777216
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
-net.ipv4.tcp_slow_start_after_idle = 0"
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_fastopen = 3"
 
 echo "before:"
 for k in $KEYS; do printf '  %-38s %s\n' "$k" "$(sysctl -n "$k" | tr '\t' ' ')"; done
@@ -85,6 +97,9 @@ if [ ! -f "$PREV" ]; then
   umask 077
   for k in $KEYS; do printf '%s=%s\n' "$k" "$(sysctl -n "$k" | tr '\t' ' ')"; done > "$PREV"
 fi
+
+# bbr must be loadable before sysctl -p, or the congestion-control line is refused.
+command -v modprobe >/dev/null 2>&1 && modprobe tcp_bbr 2>/dev/null || true
 
 umask 022
 printf '%s\n' "$DESIRED" > "$DROPIN.new"

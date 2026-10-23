@@ -42,6 +42,19 @@ class Contracts(unittest.TestCase):
    node["realityTarget"]=P.REALITY_FRONTS["default"]
    p.write_text(json.dumps({"nodes":{"n":node}}))
    self.assertEqual(P.REALITY_FRONTS["default"],P.read_inventory(p,"n")["realityTarget"])
+ def test_inventory_refuses_moving_a_pinned_node_off_its_verified_front(self):
+  node={"host":"162.4.194.103","user":"u","port":22,"identityFile":"x","mode":"fresh","servicePort":443,"realityTarget":P.REALITY_FRONTS["default"],"configPath":"/etc/xray/config.json","serviceName":"xray.service","catalogName":"Tokyo · Sakura","publicServer":"162.4.194.103"}
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d)/"i"; p.write_text(json.dumps({"nodes":{"n":node}}))
+   with self.assertRaisesRegex(P.ProvisionError,"www.uniqlo.com"): P.read_inventory(p,"n")
+   node["realityTarget"]="WWW.UNIQLO.COM"
+   p.write_text(json.dumps({"nodes":{"n":node}}))
+   self.assertEqual("WWW.UNIQLO.COM",P.read_inventory(p,"n")["realityTarget"])
+ def test_pinned_fronts_cover_the_four_reality_nodes(self):
+  for keys,front in ((("Tokyo · Sakura","162.4.194.103"),"www.uniqlo.com"),(("Tokyo · Fuji","45.8.173.206"),"d1.awsstatic.com"),(("JP-VLESS-Reality","199.30.91.172"),"www.sony.co.jp"),(("Buffalo · Erie","198.46.140.254"),"s.yimg.com")):
+   for k in keys: self.assertEqual(front,P.pinned_reality_target(k))
+   self.assertIn(front,P.REALITY_FRONTS["usable"])
+  self.assertIsNone(P.pinned_reality_target("unpinned","203.0.113.10"))
  def test_framing_decoder(self):
   req={"op":"x","value":"quote' newline\n"}; framed=P.framed_helper(req,b"echo source\n")
   line=framed.splitlines()[0].decode(); enc=line.split("'",2)[1]

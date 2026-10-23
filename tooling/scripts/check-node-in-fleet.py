@@ -38,6 +38,19 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "reality-fron
 METER_API = "127.0.0.1:10085"
 METER_STATE = "/var/lib/tono-exit-agent/state.json"
 METER_STATE_MAX_AGE = 3600
+# The high-BDP profile tune-tono-tcp.sh installs, read back key by key: a node
+# reprovisioned on a stock image keeps answering while quietly back on cubic and
+# 208 KiB buffers, and only wmem_max used to be compared.
+TCP_PROFILE = (
+    ("net.core.default_qdisc", "fq"),
+    ("net.ipv4.tcp_congestion_control", "bbr"),
+    ("net.ipv4.tcp_slow_start_after_idle", "0"),
+    ("net.ipv4.tcp_mtu_probing", "1"),
+    ("net.ipv4.tcp_fastopen", "3"),
+    ("net.core.rmem_max", "16777216"),
+    ("net.core.wmem_max", "16777216"),
+)
+EXIT_AGENT_CADENCE = "OnUnitInactiveUSec=1min"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -211,6 +224,32 @@ def front_verdict(host: str) -> tuple[bool | None, str]:
     return None, f"{host} has not been measured from inside the market"
 
 
+def pinned_front(name: str, host: str) -> str | None:
+    """The Reality front this node was verified on in production, if pinned.
+
+    A re-provision falls back to the shared default unless something remembers
+    the per-node front, and the default may be exactly the front that node was
+    moved off because it failed from inside the market.
+    """
+    targets = REALITY_FRONTS.get("nodeTargets") or {}
+    return targets.get(name) or targets.get(host)
+
+
+def tcp_profile_rows(values: dict[str, str]) -> list[tuple[str, bool | None, str]]:
+    """One row for the whole profile, naming every key that drifted."""
+    drift = [f"{key}={values.get(key, '?')} (want {want})"
+             for key, want in TCP_PROFILE
+             if " ".join(str(values.get(key, "")).split()) != want]
+    return [("tcp tuning applied (bbr/fq, 16 MiB, no idle slow start, mtu probing, tfo)",
+             not drift, "; ".join(drift) if drift else "matches the fleet profile")]
+
+
+def cadence_row(timers: str) -> tuple[str, bool | None, str]:
+    ok = EXIT_AGENT_CADENCE in timers
+    return ("exit-agent timer OnUnitInactiveSec=60s", ok,
+            "matches" if ok else (timers.strip() or "unreadable"))
+
+
 def metering_rows(host: str) -> list[tuple[str, bool | None, str]]:
     """Whether this node can bill anybody, and whether it is billing.
 
@@ -325,6 +364,12 @@ def main() -> int:
             if cat_entry.get("servername"):
                 results.append(("  └ reality front usable from inside the market",
                                 *front_verdict(cat_entry["servername"])))
+                pinned = pinned_front(name, host)
+                if pinned:
+                    got = cat_entry["servername"].strip().lower()
+                    results.append(("  └ reality front is the production-verified target",
+                                    got == pinned,
+                                    pinned if got == pinned else f"catalog={got} pinned={pinned}"))
     except Exception as exc:
         results.append(("catalog (customers can select it)", None, f"could not read: {type(exc).__name__}"))
 
@@ -432,20 +477,26 @@ def main() -> int:
             results.append(("  └ catalog credentials match the box", None,
                             live if live == HOST_KEY_UNPINNED else why))
 
+    sysctl_keys = " ".join(key for key, _ in TCP_PROFILE)
     ok, out = node(host,
-                   "printf '%s %s %s %s' "
+                   "printf '%s %s %s %s\\n' "
                    "\"$(systemctl is-active tono-xray 2>/dev/null)\" "
                    "\"$(systemctl is-active komari-agent 2>/dev/null)\" "
                    "\"$(sysctl -n net.core.wmem_max 2>/dev/null)\" "
                    "\"$(python3 -c \"import json;c=json.load(open('/opt/tono-xray/current/config.json'));"
                    "print(sum(1 for i in c['inbounds'] if i.get('tag')=='tono-vless' "
-                   "for cl in i['settings']['clients'] if str(cl.get('email','')).startswith('u:')))\" 2>/dev/null)\"")
+                   "for cl in i['settings']['clients'] if str(cl.get('email','')).startswith('u:')))\" 2>/dev/null)\"; "
+                   f"for k in {sysctl_keys}; do printf '%s=%s\\n' \"$k\" \"$(sysctl -n \"$k\" 2>/dev/null | tr '\\t' ' ')\"; done; "
+                   "printf 'timer=%s\\n' \"$(systemctl show tono-exit-agent.timer -p TimersMonotonic --value 2>/dev/null | tr '\\n' ' ')\"")
     if ok and out and "__" not in out:
-        parts = out.split()
+        lines = out.splitlines()
+        parts = lines[0].split() if lines else []
         xray, agent, wmem, ids = (parts + ["?"] * 4)[:4]
+        extra = dict(line.split("=", 1) for line in lines[1:] if "=" in line)
         results.append(("xray service", xray == "active", xray))
         results.append(("komari agent running", agent == "active", agent))
-        results.append(("tcp tuning applied", wmem == "16777216", f"wmem_max={wmem}"))
+        results.extend(tcp_profile_rows(extra))
+        results.append(cadence_row(extra.get("timer", "")))
         results.append(("account identities installed", ids.isdigit() and int(ids) > 0, f"{ids} u:<userId> clients"))
         results.extend(metering_rows(host))
     else:

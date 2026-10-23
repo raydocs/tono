@@ -166,6 +166,15 @@ changing boot scheduling, follow the [timer evidence diagnosis](TIMER_BOOT_DIAGN
 It records the missing deployment contract and read-only checks; it is not an
 installation recipe or proof of cold-boot recovery.
 
+Only the run cadence is versioned: [`systemd/10-tono-cadence.conf`](systemd/10-tono-cadence.conf)
+is a drop-in for `tono-exit-agent.timer` setting `OnUnitInactiveSec=60s` (the
+value verified across the fleet on 2026-10-23). `tooling/scripts/remote/ensure-exit-agent-cadence.sh`
+installs it as root and reads the live `TimersMonotonic` back;
+`tooling/scripts/check-node-in-fleet.py` reports a node whose timer drifted. The
+drop-in leaves the deployed unit fragments (user, ExecStart, sandbox, boot
+triggers) untouched, so it neither defines the missing contract nor changes the
+open `EXIT-AGENT-TIMER-BOOT` finding.
+
 ## hy2 roster ownership (G2)
 
 An installed `/opt/tono-hy2/` opts the node into roster enforcement for hy2.
