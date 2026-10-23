@@ -16,3 +16,16 @@
 
 - 父任务静态复核：集成后的 Windows 源码与 worker fix 无差异（`git diff --exit-code` 为 0）；
   RED hosted run [39920445903](https://github.com/raydocs/tono/actions/runs/39920445903) 已启动，结果待定。
+
+### 2026-10-23 · hosted fixture 失败与纯测试续修
+- 初次 RED run `39920445903` / fixed run `39920571463` 均已编译，随后在同一真实 send 的
+  10 秒 timeout unwrap 得到 `Elapsed(())`（771 passed / 1 failed）；不是预期的端口保留断言失败，
+  不能作为行为 RED，也没有 GREEN。上面的「未编译/待定」是初始交付状态，不是当前结论。
+- 测试修正提交 `a376644ade1f1a067284fa745b94d4de15ad13d7` 只改 `outcome.rs` 的测试区：
+  用实际监听并读完 GET 后主动关闭的 loopback 端点替代非监听 socket；保留真实 HttpTransport fallback、
+  B 的实际 mixed port、请求头/响应断言与当前代次清零对照。不改生产代码，不调大超时，无新测试或 sleep。
+- R1 的 minor oracle 修正：旧 attempt await 后检查独立 atomic Service/cleanup 进入标记，
+  不再用会被内层 spawn 转成 false 的 panic 独自证明未进入。不是新增产品缺陷或审查通过声明。
+- 已做：`git diff --check`、rustfmt 只解析，以及临时 index 对 RED `662a79248` / fixed `50b86bc81`
+  应用同一测试补丁的检查；两侧生产代码各自不变、测试源码相同。未做修正测试的编译、任何 native Cargo、
+  hosted 重跑或实机验证。父任务仍须取得预期行为 RED 和 fixed GREEN；本次不推送、不建 PR、不合并或发布。
