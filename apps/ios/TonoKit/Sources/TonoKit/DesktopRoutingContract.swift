@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "dff9c8e6d387e05b4aefd2610fd4faa78cdf6024a2f99f7f473146034f7b9e73"
+    public static let sourceDigest = "5aaccfefe5155539f444f59c44d8cf60f82590bbf587b8c06cc9653d954e803a"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -230,6 +230,15 @@ public enum DesktopRoutingContract {
         "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com",
     ]
 
+    /// Claude / AI auxiliary support, SSO, and anti-bot challenge suffixes routed through the Home tier on mobile.
+    public static let mobileHomeAuxSuffixes: [String] = [
+        "intercom.io",
+        "intercomcdn.com",
+        "arkoselabs.com",
+        "workos.com",
+        "featureassets.org",
+    ]
+
     /// Anthropic's own IPv4 range for raw-IP dials.
     public static let homeIPv4CIDRs: [String] = [
         "160.79.104.0/21",
@@ -245,6 +254,20 @@ public enum DesktopRoutingContract {
         19307,
         19308,
         19309,
+    ]
+
+    /// Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP.
+    public static let encryptedDNSPorts: [Int] = [
+        853,
+    ]
+
+    /// Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across routing modes and whose TCP/DNS stays off DIRECT.
+    public static let publicStunSuffixes: [String] = [
+        "stun.cloudflare.com",
+        "turn.cloudflare.com",
+        "global.stun.twilio.com",
+        "stun.services.mozilla.com",
+        "stunprotocol.org",
     ]
 
     /// Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP is rejected while domestic UDP stays direct.
@@ -264,6 +287,10 @@ public enum DesktopRoutingContract {
         "104.16.0.0/12",
         "172.64.0.0/13",
         "162.159.0.0/16",
+        "9.9.9.9/32",
+        "149.112.112.112/32",
+        "208.67.222.222/32",
+        "208.67.220.220/32",
         "160.79.104.0/21",
         "151.101.0.0/16",
         "199.232.0.0/16",
@@ -278,6 +305,31 @@ public enum DesktopRoutingContract {
         "157.240.0.0/16",
         "179.60.192.0/22",
         "185.60.216.0/22",
+    ]
+
+    /// Overseas STUN, public DNS, CDN, AI and messaging IPv6 ranges whose UDP/ICMP is rejected on dual-stack networks while domestic IPv6 stays direct.
+    public static let overseasUDPRejectIPv6CIDRs: [String] = [
+        "2001:4860::/32",
+        "2404:6800::/32",
+        "2607:f8b0::/32",
+        "2800:3f0::/32",
+        "2a00:1450::/32",
+        "2c0f:fb50::/32",
+        "2606:4700::/32",
+        "2803:f800::/32",
+        "2405:b500::/32",
+        "2405:8100::/32",
+        "2a06:98c0::/29",
+        "2c0f:f248::/32",
+        "2620:fe::/48",
+        "2620:119:35::/48",
+        "2620:119:53::/48",
+        "2607:6bc0::/48",
+        "2a04:4e40::/32",
+        "2a03:2880::/32",
+        "2001:67c:4e8::/48",
+        "2001:b28:f23d::/48",
+        "2001:b28:f23f::/48",
     ]
 
     /// Hosts that no rule may ever send DIRECT.

@@ -59,7 +59,7 @@ object SingBoxConfig {
 
     val protectedRemainder: List<String>
         get() = DesktopRoutingContract.PROTECTED_DIRECT_SUFFIXES.filterNot { suffix ->
-            (DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES)
+            (DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES + DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES)
                 .any { suffix == it || suffix.endsWith(".$it") }
         }
 
@@ -81,8 +81,8 @@ object SingBoxConfig {
         val selected = selectedNode(input)
         val home = homeTargetTag(catalog)
         val video = DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES
-        val homeSuffixes = DesktopRoutingContract.HOME_SUFFIXES
-        val protected = protectedRemainder
+        val homeSuffixes = DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES
+        val protected = protectedRemainder + DesktopRoutingContract.PUBLIC_STUN_SUFFIXES
         val threeTier = input.mode == RoutingMode.THREE_TIER
         val cloudOnlyExact = if (threeTier) DesktopRoutingContract.OVERSEAS_EXACT else emptyList()
 
@@ -116,6 +116,7 @@ object SingBoxConfig {
         rules += linkedMapOf("inbound" to listOf(TUN_TAG), "action" to "sniff")
         rules += linkedMapOf("protocol" to listOf("dns"), "action" to "hijack-dns")
         rules += linkedMapOf("port" to listOf(53), "action" to "hijack-dns")
+        rules += reject(linkedMapOf("port" to DesktopRoutingContract.ENCRYPTED_DNS_PORTS))
         // Cloud video wins over the broad Home parents (youtubei.googleapis.com vs googleapis.com).
         rules += route(linkedMapOf("network" to listOf("tcp"), "domain_suffix" to video), EXIT_TAG)
         rules += reject(linkedMapOf("network" to udpIcmp, "domain_suffix" to video))
@@ -138,8 +139,9 @@ object SingBoxConfig {
         rules += route(linkedMapOf("ip_is_private" to true), DIRECT_TAG)
         // Overseas UDP and raw-IP STUN probes (e.g. 74.125.250.129:19302) are rejected in every mode
         // while domestic UDP (WeChat voice/video, Douyin QUIC, LAN cast) stays direct in Three-Tier.
+        val overseasUdpCidrs = DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS + DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV6_CIDRS
         rules += reject(linkedMapOf("network" to udpIcmp, "port" to DesktopRoutingContract.STUN_UDP_PORTS))
-        rules += reject(linkedMapOf("network" to udpIcmp, "ip_cidr" to DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS))
+        rules += reject(linkedMapOf("network" to udpIcmp, "ip_cidr" to overseasUdpCidrs))
         if (!threeTier) rules += reject(linkedMapOf("network" to udpIcmp))
 
         val fakeipSuffixes = video + homeSuffixes + protected
@@ -149,12 +151,18 @@ object SingBoxConfig {
             "query_type" to listOf("A", "AAAA"), "domain_suffix" to fakeipSuffixes,
             "action" to "route", "server" to DNS_FAKEIP,
         )
+        dnsRules += linkedMapOf(
+            "query_type" to listOf("HTTPS", "SVCB"), "domain_suffix" to fakeipSuffixes,
+            "action" to "predefined", "rcode" to "NOERROR",
+        )
         if (cloudOnlyExact.isNotEmpty()) {
             dnsRules += linkedMapOf("query_type" to listOf("A", "AAAA"), "domain" to cloudOnlyExact, "action" to "route", "server" to DNS_FAKEIP)
+            dnsRules += linkedMapOf("query_type" to listOf("HTTPS", "SVCB"), "domain" to cloudOnlyExact, "action" to "predefined", "rcode" to "NOERROR")
         }
         if (!threeTier) {
             // Stable: every public name leaves through the cloud, so the phone's resolver never sees it.
             dnsRules += linkedMapOf("query_type" to listOf("A", "AAAA"), "action" to "route", "server" to DNS_FAKEIP)
+            dnsRules += linkedMapOf("query_type" to listOf("HTTPS", "SVCB"), "action" to "predefined", "rcode" to "NOERROR")
         }
         if (!input.underlyingIpv6) {
             // No global IPv6 on the phone's network: DIRECT names answer IPv4 only, so apps do not stall on v6.

@@ -38,21 +38,45 @@ class RoutingPolicyTest {
     @Test
     fun overseasUdpAndStunAreRejectedWhileDomesticUdpStaysDirectInThreeTier() {
         assertEquals(listOf(19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309), DesktopRoutingContract.STUN_UDP_PORTS)
-        assertEquals(29, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS.size)
+        assertEquals(listOf(853), DesktopRoutingContract.ENCRYPTED_DNS_PORTS)
+        assertEquals(listOf("stun.cloudflare.com", "turn.cloudflare.com", "global.stun.twilio.com", "stun.services.mozilla.com", "stunprotocol.org"), DesktopRoutingContract.PUBLIC_STUN_SUFFIXES)
+        assertEquals(listOf("intercom.io", "intercomcdn.com", "arkoselabs.com", "workos.com", "featureassets.org"), DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES)
+        assertEquals(33, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS.size)
+        assertEquals(21, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV6_CIDRS.size)
 
         for (config in listOf(threeTier, stable)) {
             for (port in DesktopRoutingContract.STUN_UDP_PORTS) {
                 assertEquals("reject", outbound(config, Connection(ip = "74.125.250.129", port = port, network = "udp")))
                 assertEquals("reject", outbound(config, Connection(domain = "stun1.l.google.com", port = port, network = "udp")))
             }
-            for (ip in listOf("74.125.250.129", "142.250.80.46", "172.217.160.142", "8.8.8.8", "1.1.1.1", "104.16.132.229", "160.79.104.10", "151.101.1.69", "149.154.167.91", "157.240.22.35")) {
-                for (port in listOf(443, 3478, 5349)) {
-                    assertEquals("reject", outbound(config, Connection(ip = ip, port = port, network = "udp")))
+            for (ip in listOf("74.125.250.129", "142.250.80.46", "172.217.160.142", "8.8.8.8", "1.1.1.1", "9.9.9.9", "149.112.112.112", "208.67.222.222", "208.67.220.220", "104.16.132.229", "160.79.104.10", "151.101.1.69", "149.154.167.91", "157.240.22.35", "2001:4860:4864:5:8000::1", "2001:4860:4860::8888", "2606:4700:4700::1111", "2620:fe::fe", "2620:119:35::35", "2607:6bc0::10", "2a04:4e40::1", "2a03:2880:f100:83:face:b00c:0:25de", "2001:67c:4e8:f002::a")) {
+                for (port in listOf(53, 443, 3478, 5349)) {
+                    val expected = if (port == 53) "dns" else "reject"
+                    assertEquals(expected, outbound(config, Connection(ip = ip, port = port, network = "udp")))
                 }
+            }
+            for (stunHost in DesktopRoutingContract.PUBLIC_STUN_SUFFIXES) {
+                assertEquals("reject", outbound(config, Connection(domain = stunHost, port = 3478, network = "udp")))
+                assertEquals(exit, outbound(config, Connection(domain = stunHost, port = 443, network = "tcp")))
+                assertEquals("fakeip", RouteExplainer.dnsServer(config, stunHost, "A"))
+                assertEquals("predefined", RouteExplainer.dnsServer(config, stunHost, "HTTPS"))
+            }
+            for (net in listOf("tcp", "udp")) {
+                assertEquals("reject", outbound(config, Connection(ip = "8.8.8.8", port = 853, network = net)))
+                assertEquals("reject", outbound(config, Connection(domain = "dns.google", port = 853, network = net)))
             }
         }
 
-        // Domestic UDP (Douyin QUIC, WeChat voice/video, smart home P2P, NTP, LAN cast) stays direct in Three-Tier.
+        // Claude auxiliary auth, SSO, and anti-bot challenge domains route to Home on TCP, reject UDP, and use FakeIP DNS.
+        for (host in listOf("intercom.io", "widget.intercom.io", "js.intercomcdn.com", "arkoselabs.com", "client-api.arkoselabs.com", "workos.com", "auth.workos.com", "statsig.com", "featureassets.org")) {
+            assertEquals(home, outbound(threeTier, Connection(domain = host, port = 443, network = "tcp")))
+            assertEquals("reject", outbound(threeTier, Connection(domain = host, port = 443, network = "udp")))
+            assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, host, "A"))
+            assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "HTTPS"))
+            assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "SVCB"))
+        }
+
+        // Domestic UDP (Douyin QUIC, WeChat voice/video, smart home P2P, NTP, LAN cast, 5G IPv6) stays direct in Three-Tier.
         assertEquals(direct, outbound(threeTier, Connection(domain = "quic.example.cn", port = 443, network = "udp")))
         assertEquals(direct, outbound(threeTier, Connection(domain = "weixin.qq.com", port = 8000, network = "udp")))
         assertEquals(direct, outbound(threeTier, Connection(ip = "101.1.2.6", port = 8000, network = "udp")))
@@ -60,6 +84,9 @@ class RoutingPolicyTest {
         assertEquals(direct, outbound(threeTier, Connection(ip = "223.5.5.5", port = 3478, network = "udp")))
         assertEquals(direct, outbound(threeTier, Connection(ip = "114.114.114.114", port = 123, network = "udp")))
         assertEquals(direct, outbound(threeTier, Connection(ip = "192.168.1.20", port = 5353, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "2408:8207:1800::1", port = 443, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "2409:8080:1000::1", port = 8000, network = "udp")))
+        assertEquals(direct, outbound(threeTier, Connection(ip = "fe80::1", port = 5353, network = "udp")))
     }
 
     @Test
@@ -154,8 +181,9 @@ class RoutingPolicyTest {
 
     @Test
     fun everyProtectedSuffixFailsClosedInEveryMode() {
-        val lists = DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES +
-            DesktopRoutingContract.PROTECTED_DIRECT_SUFFIXES
+        val lists = DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES +
+            DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES + DesktopRoutingContract.PROTECTED_DIRECT_SUFFIXES +
+            DesktopRoutingContract.PUBLIC_STUN_SUFFIXES
         for (config in listOf(threeTier, stable, Fixtures.config(routing = null))) {
             for (suffix in lists) for (host in listOf(suffix, "a.b.$suffix")) {
                 assertTrue("$host tcp", outbound(config, Connection(domain = host)) !in setOf(direct, "reject"))
@@ -168,10 +196,19 @@ class RoutingPolicyTest {
     fun dnsAnswersFakeForMatchedNamesAndLocalOtherwise() {
         assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "claude.ai", "A"))
         assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "i.ytimg.com", "AAAA"))
+        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "claude.ai", "HTTPS"))
+        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "claude.ai", "SVCB"))
+        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "i.ytimg.com", "HTTPS"))
+        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "x.com", "HTTPS"))
+        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "api.twitter.com", "SVCB"))
         assertEquals("local", RouteExplainer.dnsServer(threeTier, "www.baidu.com", "A"))
         assertEquals("local", RouteExplainer.dnsServer(threeTier, "www.baidu.com", "AAAA"))
+        assertEquals("local", RouteExplainer.dnsServer(threeTier, "www.baidu.com", "HTTPS"))
         assertEquals("local", RouteExplainer.dnsServer(stable, "printer.local", "A"))
+        assertEquals("local", RouteExplainer.dnsServer(stable, "printer.local", "HTTPS"))
         assertEquals("fakeip", RouteExplainer.dnsServer(stable, "www.baidu.com", "A"))
+        assertEquals("predefined", RouteExplainer.dnsServer(stable, "www.baidu.com", "HTTPS"))
+        assertEquals("predefined", RouteExplainer.dnsServer(stable, "www.baidu.com", "SVCB"))
         val noV6 = Fixtures.config(ipv6 = false)
         assertEquals("predefined", RouteExplainer.dnsServer(noV6, "www.baidu.com", "AAAA"))
         assertEquals("fakeip", RouteExplainer.dnsServer(noV6, "claude.ai", "AAAA"))

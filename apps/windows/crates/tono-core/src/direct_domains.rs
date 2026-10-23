@@ -333,9 +333,33 @@ pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
 /// without blanket-blocking RFC 5389 port 3478 used by domestic P2P/IoT in China.
 pub const STUN_UDP_PORTS: [u16; 8] = [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309];
 
+/// Encrypted DNS (DoT/DoQ) port rejected in mobile TUN so apps and OS private DNS
+/// fall back to standard port-53 DNS where sing-box hijacks and serves FakeIP.
+pub const ENCRYPTED_DNS_PORTS: [u16; 1] = [853];
+
+/// Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across mobile
+/// routing modes and whose TCP/DNS is kept off the physical interface.
+pub const PUBLIC_STUN_SUFFIXES: [&str; 5] = [
+    "stun.cloudflare.com",
+    "turn.cloudflare.com",
+    "global.stun.twilio.com",
+    "stun.services.mozilla.com",
+    "stunprotocol.org",
+];
+
+/// Claude / AI auxiliary support, SSO, and anti-bot challenge suffixes routed
+/// through the Home tier on mobile TCP with UDP/ICMP rejected and FakeIP DNS.
+pub const MOBILE_HOME_AUX_SUFFIXES: [&str; 5] = [
+    "intercom.io",
+    "intercomcdn.com",
+    "arkoselabs.com",
+    "workos.com",
+    "featureassets.org",
+];
+
 /// Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP
 /// traffic is rejected in mobile Three-Tier mode while domestic UDP stays DIRECT.
-pub const OVERSEAS_UDP_REJECT_IPV4_CIDRS: [&str; 29] = [
+pub const OVERSEAS_UDP_REJECT_IPV4_CIDRS: [&str; 33] = [
     // Google STUN / WebRTC / YouTube / Public DNS (AS15169)
     "74.125.0.0/16",
     "142.250.0.0/15",
@@ -353,6 +377,11 @@ pub const OVERSEAS_UDP_REJECT_IPV4_CIDRS: [&str; 29] = [
     "104.16.0.0/12",
     "172.64.0.0/13",
     "162.159.0.0/16",
+    // Quad9 & OpenDNS Public DNS (AS19281 / AS36692)
+    "9.9.9.9/32",
+    "149.112.112.112/32",
+    "208.67.222.222/32",
+    "208.67.220.220/32",
     // Anthropic (AS399358)
     "160.79.104.0/21",
     // Fastly CDN (AS54113)
@@ -371,6 +400,40 @@ pub const OVERSEAS_UDP_REJECT_IPV4_CIDRS: [&str; 29] = [
     "157.240.0.0/16",
     "179.60.192.0/22",
     "185.60.216.0/22",
+];
+
+/// Overseas STUN, public DNS, CDN, AI and messaging IPv6 ranges whose UDP/ICMP
+/// traffic is rejected on dual-stack 5G/Wi-Fi in mobile Three-Tier mode while
+/// domestic carrier IPv6 (2408::/2409::/240e::) and ULA/link-local stay DIRECT.
+pub const OVERSEAS_UDP_REJECT_IPV6_CIDRS: [&str; 21] = [
+    // Google / YouTube / Google STUN / Google Public DNS IPv6 (AS15169)
+    "2001:4860::/32",
+    "2404:6800::/32",
+    "2607:f8b0::/32",
+    "2800:3f0::/32",
+    "2a00:1450::/32",
+    "2c0f:fb50::/32",
+    // Cloudflare DNS / Anycast / STUN / QUIC IPv6 (AS13335)
+    "2606:4700::/32",
+    "2803:f800::/32",
+    "2405:b500::/32",
+    "2405:8100::/32",
+    "2a06:98c0::/29",
+    "2c0f:f248::/32",
+    // Quad9 & OpenDNS Public DNS IPv6 (AS19281 / AS36692)
+    "2620:fe::/48",
+    "2620:119:35::/48",
+    "2620:119:53::/48",
+    // Anthropic (AS399358)
+    "2607:6bc0::/48",
+    // Fastly CDN (AS54113)
+    "2a04:4e40::/32",
+    // Meta / WhatsApp / Instagram / Facebook (AS32934)
+    "2a03:2880::/32",
+    // Telegram Messenger (AS62041 / AS62014)
+    "2001:67c:4e8::/48",
+    "2001:b28:f23d::/48",
+    "2001:b28:f23f::/48",
 ];
 
 /// Claude's first-party, login/challenge, telemetry and update hosts must never
@@ -439,4 +502,26 @@ pub fn direct_suffix_overlaps_protected(host: &str) -> bool {
                 && !(host == "aliyuncs.com"
                     && DEDICATED_MODEL_API_SUFFIXES.contains(protected))
             })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mobile_anti_leak_lists_are_well_formed() {
+        assert_eq!(STUN_UDP_PORTS, [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309]);
+        assert_eq!(ENCRYPTED_DNS_PORTS, [853]);
+        assert_eq!(PUBLIC_STUN_SUFFIXES.len(), 5);
+        assert_eq!(MOBILE_HOME_AUX_SUFFIXES.len(), 5);
+        assert!(CLAUDE_HOME_DOMAINS.contains(&"statsig.com"));
+        assert_eq!(OVERSEAS_UDP_REJECT_IPV4_CIDRS.len(), 33);
+        assert_eq!(OVERSEAS_UDP_REJECT_IPV6_CIDRS.len(), 21);
+        for cidr in OVERSEAS_UDP_REJECT_IPV4_CIDRS {
+            assert!(cidr.contains('/') && !cidr.contains(':'), "invalid IPv4 CIDR: {cidr}");
+        }
+        for cidr in OVERSEAS_UDP_REJECT_IPV6_CIDRS {
+            assert!(cidr.contains('/') && cidr.contains(':'), "invalid IPv6 CIDR: {cidr}");
+        }
+    }
 }

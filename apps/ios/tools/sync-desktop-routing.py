@@ -67,10 +67,16 @@ def generate() -> str:
     video = rust_array(rust_text, "CLOUD_VIDEO_DOMAINS")
     cidrs = rust_array(rust_text, "CLAUDE_HOME_IPV4_CIDRS")
     stun_ports = rust_int_array(rust_text, "STUN_UDP_PORTS")
+    encrypted_dns_ports = rust_int_array(rust_text, "ENCRYPTED_DNS_PORTS")
+    public_stun_suffixes = rust_array(rust_text, "PUBLIC_STUN_SUFFIXES")
+    mobile_home_aux = rust_array(rust_text, "MOBILE_HOME_AUX_SUFFIXES")
     overseas_udp_cidrs = rust_array(rust_text, "OVERSEAS_UDP_REJECT_IPV4_CIDRS")
+    overseas_udp_v6_cidrs = rust_array(rust_text, "OVERSEAS_UDP_REJECT_IPV6_CIDRS")
     protected = rust_array(rust_text, "PROTECTED_DIRECT_SUFFIXES")
     assert len(home) == 194 and len(video) == 21, (len(home), len(video))
-    assert len(stun_ports) == 8 and len(overseas_udp_cidrs) == 29, (len(stun_ports), len(overseas_udp_cidrs))
+    assert len(stun_ports) == 8 and len(encrypted_dns_ports) == 1, (len(stun_ports), len(encrypted_dns_ports))
+    assert len(public_stun_suffixes) == 5 and len(mobile_home_aux) == 5, (len(public_stun_suffixes), len(mobile_home_aux))
+    assert len(overseas_udp_cidrs) == 33 and len(overseas_udp_v6_cidrs) == 21, (len(overseas_udp_cidrs), len(overseas_udp_v6_cidrs))
     assert template["version"] == 2
     digest = hashlib.sha256((rust_text + "\0" + template_text).encode()).hexdigest()
     return (
@@ -83,9 +89,13 @@ def generate() -> str:
         f'    public static let sourceDigest = "{digest}"\n\n'
         + swift_list("cloudVideoSuffixes", "Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).", video) + "\n"
         + swift_list("homeSuffixes", "Owner-approved AI / named Home suffixes, routed to the assigned residential exit.", home) + "\n"
+        + swift_list("mobileHomeAuxSuffixes", "Claude / AI auxiliary support, SSO, and anti-bot challenge suffixes routed through the Home tier on mobile.", mobile_home_aux) + "\n"
         + swift_list("homeIPv4CIDRs", "Anthropic's own IPv4 range for raw-IP dials.", cidrs) + "\n"
         + swift_int_list("stunUDPPorts", "Google WebRTC STUN UDP ports rejected across routing modes so raw-IP STUN probes cannot leak the physical egress IP.", stun_ports) + "\n"
+        + swift_int_list("encryptedDNSPorts", "Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP.", encrypted_dns_ports) + "\n"
+        + swift_list("publicStunSuffixes", "Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across routing modes and whose TCP/DNS stays off DIRECT.", public_stun_suffixes) + "\n"
         + swift_list("overseasUDPRejectIPv4CIDRs", "Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP is rejected while domestic UDP stays direct.", overseas_udp_cidrs) + "\n"
+        + swift_list("overseasUDPRejectIPv6CIDRs", "Overseas STUN, public DNS, CDN, AI and messaging IPv6 ranges whose UDP/ICMP is rejected on dual-stack networks while domestic IPv6 stays direct.", overseas_udp_v6_cidrs) + "\n"
         + swift_list("protectedDirectSuffixes", "Hosts that no rule may ever send DIRECT.", protected) + "\n"
         + swift_list("domesticExact", "Three-tier explicit domestic exact hosts (DIRECT).", template["domestic_full"]) + "\n"
         + swift_list("overseasExact", "Three-tier explicit overseas exact hosts (cloud exit).", template["overseas_full"])
