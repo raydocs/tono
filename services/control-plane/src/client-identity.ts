@@ -10,19 +10,20 @@ import { API_PATH_KINDS } from './ops/contract/api-paths';
 
 export const CLIENT_HEADER = 'X-Tono-Client';
 
-const PLATFORMS = new Set(['macos', 'windows']);
+// Mobile builds send the same header; migration 0103 widens the column CHECK to match.
+export const CLIENT_PLATFORMS: ReadonlySet<string> = new Set(['macos', 'windows', 'android', 'ios']);
 const VERSION = /^[0-9][0-9A-Za-z.+-]{0,39}$/;
 
 export type ClientIdentity = { platform: string; version: string };
 
-/** `X-Tono-Client: <macos|windows>/<version>`; anything else reads as absent. */
+/** `X-Tono-Client: <macos|windows|android|ios>/<version>`; anything else reads as absent. */
 export function clientIdentity(req: Request): ClientIdentity | null {
   const raw = req.headers.get(CLIENT_HEADER)?.trim() ?? '';
   const slash = raw.indexOf('/');
   if (raw.length > 64 || slash <= 0) return null;
   const platform = raw.slice(0, slash).toLowerCase();
   const version = raw.slice(slash + 1);
-  if (!PLATFORMS.has(platform) || !VERSION.test(version)) return null;
+  if (!CLIENT_PLATFORMS.has(platform) || !VERSION.test(version)) return null;
   return { platform, version };
 }
 
