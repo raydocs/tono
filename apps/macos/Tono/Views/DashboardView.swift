@@ -503,6 +503,11 @@ struct DashboardView: View {
     }
 
     private var protectionDetail: String {
+        Self.protectionDetail(for: appState)
+    }
+
+    @MainActor
+    static func protectionDetail(for appState: AppState) -> String {
         if appState.isProtectionBlockUnreadable {
             return String(localized: "Direct traffic may be blocked")
         }
@@ -512,11 +517,11 @@ struct DashboardView: View {
         if appState.isProtectionUnconfirmed {
             return String(localized: "Direct traffic may be blocked")
         }
-        if isDegradedWhileConnected {
+        if appState.isConnected && appState.isProxyDegraded && !appState.isConnecting && !appState.isDisconnecting {
             return String(localized: "Exit not responding — checking")
         }
         if appState.isConnected {
-            return isListedAIScope
+            return appState.sessionProtectionScope == .listedAI
                 ? String(localized: "Listed AI protected · other traffic direct")
                 : String(localized: "Traffic is routed")
         }

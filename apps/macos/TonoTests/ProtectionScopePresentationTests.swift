@@ -63,6 +63,31 @@ final class ProtectionScopePresentationTests: XCTestCase {
         XCTAssertEqual(key(of: stable.title), "Protected")
     }
 
+    func testDashboardDetailDoesNotClaimAIProtectionDuringAnUnsettledConnection() throws {
+        let app = AppState()
+        try app.coreRuntime.captureRoutingMode("ai-home", physicalInterface: "en0")
+        app.isConnected = true
+        // The connect tail can publish Connected/degraded before its final awaited work ends.
+        app.isConnecting = true
+        app.isProxyDegraded = true
+        XCTAssertEqual(DashboardView.protectionDetail(for: app), String(localized: "Connecting"),
+                       "a degraded connect tail must not claim AI protection")
+        app.isProxyDegraded = false
+        XCTAssertEqual(DashboardView.protectionDetail(for: app), String(localized: "Connecting"))
+        app.isConnecting = false
+        app.isDisconnecting = true
+        XCTAssertEqual(DashboardView.protectionDetail(for: app), String(localized: "Finishing"))
+        app.isDisconnecting = false
+        app.isProxyDegraded = true
+        XCTAssertEqual(DashboardView.protectionDetail(for: app), String(localized: "Exit not responding — checking"))
+        app.isProxyDegraded = false
+        app.isProtectionUnconfirmed = true
+        XCTAssertEqual(DashboardView.protectionDetail(for: app), String(localized: "Direct traffic may be blocked"))
+        app.isProtectionUnconfirmed = false
+        XCTAssertEqual(DashboardView.protectionDetail(for: app),
+                       String(localized: "Listed AI protected · unmatched traffic direct"))
+    }
+
     /// The catalog key behind a `LocalizedStringKey`, read by reflection so
     /// the assertion names the exact string the UI asks the catalog for.
     private func key(of title: LocalizedStringKey) -> String? {
