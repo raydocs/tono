@@ -13,3 +13,8 @@
 ### 2026-10-22 · Final visual contrast correction
 - Direct pixel review approved layout/navigation/cancel; Increase Contrast sign-out row measured 3.8548:1 (#E27068 on #383540). This minor is corrected once using lighter coral only in Increase Contrast; standard appearance, system alert and behavior unchanged.
 - Prior exact-source navigation/capture provenance remains recorded at 3882034/0837; not attributed to this new palette. New-source targeted cloud build, contrast pixels and Settings regression are pending; no new pass claim, no merge/publish.
+
+### 2026-10-22 · Targeted contrast result and residual stop rule
+- Exact product b0e88ffa965344827a970838746c972120d74886: fresh Debug build/build-for-testing, three Settings and two accessibility tests passed. Actual sign-out row contrast: standard 4.643147:1; Increase Contrast 6.085404:1. Original targeted row defect corrected; no claim of universal accessibility certification.
+- Overall cloud verdict remains FAIL: standard-mode native alert destructive label measured 3.824619:1. System alert source unchanged; recorded open minor IOS-NATIVE-SIGNOUT-ALERT-CONTRAST after one bounded correction, no further styling loop or guard weakening. Cancel and account-retention actions passed.
+- Evidence: Devin session2788a48db37b40d681d32db595fc8c97, run20261022-230353-wait-2788a48db, raw tests, actual pixel measurements and manifest; no MP4 delivered. Exact XCTest isHittable manual property NotRun; physical VoiceOver/haptics/120Hz/NE/signing NotRun.
