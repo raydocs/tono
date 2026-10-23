@@ -16,6 +16,8 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
@@ -142,7 +144,18 @@ class UnderlyingNetworkDeviceTest {
                 snapshot()?.takeIf { it.optString("phase") == "IDLE" && (it.optJSONArray("nodes")?.length() ?: 0) > 0 }
             }
             VpnService.prepare(context)?.let { consent ->
-                context.startActivity(consent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                // The system consent activity needs a caller: launch for result from the foreground
+                // app, not the application context. Avoid onActivity's wait-for-idle under animation.
+                var launched = false
+                instrumentation.runOnMainSync {
+                    ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                        .filterIsInstance<MainActivity>().singleOrNull()?.let {
+                            @Suppress("DEPRECATION")
+                            it.startActivityForResult(consent, 1)
+                            launched = true
+                        }
+                }
+                assertTrue("VPN consent launched from the resumed app activity", launched)
                 val button = device.wait(Until.findObject(By.pkg("com.android.vpndialogs").res("android:id/button1")), 15_000)
                 assertNotNull("normal Android VPN consent", button)
                 button!!.click()
@@ -210,6 +223,8 @@ class UnderlyingNetworkDeviceTest {
         } catch (t: Throwable) {
             failure = t
             runCatching { capture("failure", monitor) }.exceptionOrNull()?.let(t::addSuppressed)
+            runCatching { device.dumpWindowHierarchy(File(evidence, "underlying-failure-window.xml")) }
+                .exceptionOrNull()?.let(t::addSuppressed)
             throw t
         } finally {
             val cleanupErrors = mutableListOf<Throwable>()
