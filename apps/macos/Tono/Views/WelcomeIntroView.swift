@@ -242,11 +242,11 @@ struct WelcomeIntroView: View {
 
     private static let points: [Point] = [
         Point(
-            headline: "Connected means protected.",
+            headline: "Protection follows your mode.",
             body: "Open Tono, click once, and the traffic your routing mode covers takes the protected route."
         ),
         Point(
-            headline: "Offline, never exposed.",
+            headline: "No silent fallback.",
             body: "If the route fails, Tono cuts covered traffic off first rather than let it leak out."
         ),
         Point(
@@ -272,8 +272,8 @@ enum SeaIntroStep: Int, CaseIterable {
 
     var title: LocalizedStringKey {
         switch self {
-        case .connected: "Connected means protected."
-        case .offline: "Offline, never exposed."
+        case .connected: "Protection follows your mode."
+        case .offline: "No silent fallback."
         case .routes: "Routes are Tono's job."
         }
     }

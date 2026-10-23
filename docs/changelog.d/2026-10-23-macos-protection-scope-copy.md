@@ -7,3 +7,5 @@
 - 验证：本 Mac 不跑 xcodebuild/Swift（禁止）。已跑 `git diff --check`（0）、`python3 -I` 解析 `Localizable.xcstrings`（JSON 合法，1031 键，新旧键核对）、源码 grep 无旧句残留、`TonoTests` 与 `Tono` 为 pbxproj 同步目录（新文件无需注册）。未执行：hosted macOS XCTest RED/GREEN、`LocalizationCoverageTests`、渲染/截图测试、实机截图验收。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：海洋外观菜单栏头部（`MenuBarView.swift`，不在本次允许路径）已连接时仍只显示 “Connected”，无范围行；UI PR 需人工视觉验收；Windows 三层分流下的同句引导文案未改；决策 131 的验收清单未加入文案项（决策文件不在本次范围）。
+
+- 集成补全：两套引导标题也改为「按模式保护流量 / 不悄悄改走直连」，不再仅靠正文限定「断网也不裸奔」的无范围承诺；对应中英渲染标签断言同步，非放宽断言。

@@ -134,12 +134,12 @@ final class MacUsabilityRenderTests: XCTestCase {
                     .environment(\.seaAppearanceOverride, true).environment(\.locale, locale).environment(app)
             }
         }
-        try await renderFirstRun("fresh-zh", introLabels: ["连上，就受保护。", "下一步"],
+        try await renderFirstRun("fresh-zh", introLabels: ["按模式保护流量。", "下一步"],
                                  loginLabels: ["登录 Tono"])
         defaults.set("English", forKey: SettingsKey.interfaceLanguage)
         XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "English")
         XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "English")
-        try await renderFirstRun("saved-en", introLabels: ["Connected means protected.", "Next"],
+        try await renderFirstRun("saved-en", introLabels: ["Protection follows your mode.", "Next"],
                                  loginLabels: ["Sign in to Tono", "Send a sign-in code"])
         defaults.set("Auto", forKey: SettingsKey.interfaceLanguage)
         XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "Auto")
@@ -564,7 +564,7 @@ final class MacUsabilityRenderTests: XCTestCase {
                 .environment(\.seaAppearanceOverride, true).environment(app)
         }
         try await capture("intro-sea-first", width: 760, height: 680, annotate: false, darkAppearance: true,
-                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Connected means protected.", "Illustration only · not your current connection status", "Next"]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Protection follows your mode.", "Illustration only · not your current connection status", "Next"]) {
             WelcomeIntroView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
         }
         app.isConnected = false

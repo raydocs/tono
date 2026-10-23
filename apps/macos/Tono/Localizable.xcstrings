@@ -1082,12 +1082,12 @@
         }
       }
     },
-    "Connected means protected.": {
+    "Protection follows your mode.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "连上，就受保护。"
+            "value": "按模式保护流量。"
           }
         }
       }
@@ -1102,12 +1102,12 @@
         }
       }
     },
-    "Offline, never exposed.": {
+    "No silent fallback.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "断网，也不裸奔。"
+            "value": "不悄悄改走直连。"
           }
         }
       }
