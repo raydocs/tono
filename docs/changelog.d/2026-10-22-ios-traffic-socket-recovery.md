@@ -15,3 +15,9 @@
 - 处理：依任务兜底保留 P3 为 open residual，只续记现有 changelog/finding/PR body；未改 AppModel、生产接缝、harness、wantOn、NE 或保护语义。安全修复需另行界定跨入口的可观测显式启动/停止意图与会话关联，超出本轮统计局部修正，不猜测解锁。
 - 验证：本轮仅文档；`git diff --check`。沿用原 Devin 会话 `bd5233898e6b48a6a5f8a87afd30ff48` 的旧重试 RED 与 `cf5c919867d55237edec8ab692e2b1a2d683ea12` 1/1、9/9 GREEN、真实 pinned Libbox unsigned iphoneos Release `BUILD SUCCEEDED`；已重新读取原始日志关键断言/计数/构建结果。不将这些证据记作本 P3 的 RED/GREEN 或新 head 的重跑。
 - 未跑/剩余风险：未新增目标时序回归（没有可安全接入的生产意图接缝）、未运行新的云端/本地原生检查、未做签名真机 NE/socket 验证；P3 未关闭。无新包、无委派、无合并/部署/监控；由父线程作最终风险处置，本文不构成最终审批。
+
+### 2026-10-22 · PR #1715 P3 扩围续修（统计意图接缝）
+- 用户明确继续修复，允许必要的跨入口统计意图关联；先前 open residual 记录为当时范围决策，不作当前修复通过证据。
+- 最小接缝：coordinator 只读 `statisticsStartEpoch`（初次 load/进程重启为继承 0；最新显式 start 为该 generation；stop/remove/cancelPendingStart 为 nil）。不改 coordinator 切换步骤、队列、wantOn 或 NE/保护行为。
+- 生产 `TrafficMonitor.updateTunnel` 从 AppModel 抽出原统计准入；一个窄时序回归编译真实生产 seam、coordinator 和 worker，OS 操作及统计连接/时钟注入。先保留旧准入运行 RED，再修复；本条证据待云端原始日志，不将原 9 测试当作 P3 证明。
+- 未跑：新 P3 RED/GREEN、真实 Libbox 编译、签名真机 NE/socket 时序；不合并/部署/监控，新增 delta 待父线程独立审查。

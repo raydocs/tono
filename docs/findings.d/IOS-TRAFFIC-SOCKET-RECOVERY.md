@@ -30,3 +30,6 @@ coordinator generation 解锁无法区分 start 与 stop/remove/cancelPendingSta
 没有新增目标回归或新的行为 RED/GREEN；既有 9 个生产 TrafficMonitor 测试不覆盖这个 AppModel
 入口缺口。只沿用原重试缺陷的云端日志和 `cf5c919867d55237edec8ab692e2b1a2d683ea12`
 真实 Libbox 编译证据，不冒充本 P3 通过。父线程最终风险处置仍待完成，不新增重复 finding。
+
+### 2026-10-22 · 用户授权的 P3 统计意图续修
+先前兜底之后，用户明确授权最小跨入口接缝：只读区分共享 lifecycle 的启动 epoch、显式停止及初始继承，不用任意 generation 变化解锁，也不把 stop/remove 当 start。统计入口移到生产 TrafficMonitor 接缝，准备在云端执行一个真实旧准入 RED／修复 GREEN；证据未出前 P3 仍未关闭。隧道所有权/FSM、NE、保护语义和凭证完全不变，新增 delta 由父线程审查。

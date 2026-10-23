@@ -1,8 +1,95 @@
 import Foundation
 import XCTest
+import TonoKit
 @testable import TrafficMonitor
 
 final class TrafficMonitorTests: XCTestCase {
+    @MainActor
+    func testExplicitStopFencesLateConnectedUntilNewStartAndKeepsOnDemand() async throws {
+        let h = Harness()
+        let lifecycle = TunnelStartCoordinator()
+        let system = StatisticsConfiguration()
+        let date = Date(timeIntervalSince1970: 100)
+        func notify(_ status: TunnelStatus, since: Date? = nil, signedIn: Bool = true) {
+            h.monitor.updateTunnel(status, session: since, eligible: signedIn,
+                                   startEpoch: lifecycle.statisticsStartEpoch)
+            h.drain()
+        }
+
+        // First load/relaunch inherits a running NE session without an in-process explicit start.
+        notify(.connected, since: date)
+        XCTAssertEqual(h.clients.count, 1)
+        notify(.disconnected)
+
+        // App Connect reached NE, but local status is still invalid when Cancel is tapped.
+        _ = try await lifecycle.start(system)
+        notify(.invalid)
+        h.monitor.stop() // The synchronous AppModel disconnect boundary, before the system await.
+        await lifecycle.stop(system)
+        let invalidCancel = h.clients.count
+        notify(.connected, since: date)
+        XCTAssertEqual(h.clients.count, invalidCancel, "Cancel at local invalid must reject the first late NE connected, even without an old connectedDate")
+        notify(.disconnected)
+
+        // The same early Cancel from local disconnected, including duplicate stop generations.
+        _ = try await lifecycle.start(system)
+        notify(.disconnected)
+        h.monitor.stop()
+        await lifecycle.stop(system)
+        await lifecycle.stop(system)
+        let disconnectedCancel = h.clients.count
+        notify(.connected) // NE may not provide a date; no guessed session date may unlock it.
+        XCTAssertEqual(h.clients.count, disconnectedCancel, "Cancel at local disconnected must not reopen statistics")
+        notify(.disconnected)
+
+        // SetTunnelIntent -> TunnelCommand enters this same lifecycle, bypassing AppModel.connect.
+        let beforeExternal = h.clients.count
+        _ = try await lifecycle.start(system)
+        notify(.connected, since: date)
+        XCTAssertEqual(h.clients.count, beforeExternal + 1, "A new external explicit On must release the statistics stop intent")
+        let old = try XCTUnwrap(h.clients.last)
+        old.receive(.rate(999, 888))
+        h.flushWorker() // Keep an obsolete main-actor sample queued across a new start epoch.
+        let beforeNewAppStart = h.clients.count
+        _ = try await lifecycle.start(system)
+        notify(.connected, since: date) // Same NE date, different explicit start generation.
+        XCTAssertEqual(h.clients.count, beforeNewAppStart + 1, "A fresh App start epoch replaces statistics even if NE's date is unchanged")
+        XCTAssertEqual(old.disconnects, 1)
+        XCTAssertFalse(h.rates.contains { $0.0 == 999 })
+
+        // Legitimate OnDemand recovery has NO new explicit start or generation change.
+        let epoch = lifecycle.generation
+        notify(.reasserting, since: date)
+        let beforeRecovery = h.clients.count
+        notify(.connected, since: date.addingTimeInterval(1))
+        XCTAssertEqual(lifecycle.generation, epoch)
+        XCTAssertEqual(h.clients.count, beforeRecovery + 1)
+        notify(.connected, since: date.addingTimeInterval(1))
+        XCTAssertEqual(h.clients.count, beforeRecovery + 1, "Duplicate NE connected must not replace a live statistics run")
+
+        // External Off also records stop; a subsequent disconnected/load cannot clear that intent.
+        await lifecycle.stop(system)
+        notify(.disconnected)
+        let externalOff = h.clients.count
+        notify(.connected, since: date.addingTimeInterval(2))
+        XCTAssertEqual(h.clients.count, externalOff)
+        notify(.disconnected)
+        _ = try await lifecycle.start(system)
+        notify(.connected, since: date.addingTimeInterval(3))
+        XCTAssertEqual(h.clients.count, externalOff + 1)
+
+        // SignOut invalidates before its account await. Removal is another stop, NOT a start.
+        lifecycle.cancelPendingStart()
+        h.monitor.stop()
+        notify(.connected, since: date, signedIn: false)
+        await lifecycle.remove(system)
+        let signedOut = h.clients.count
+        notify(.connected, since: date, signedIn: true) // Signing in alone does not authorize old NE.
+        XCTAssertEqual(h.clients.count, signedOut)
+        h.monitor.stop()
+        h.drain()
+    }
+
     @MainActor
     func testConnectFailureRetriesWithoutAnotherTunnelStatus() async throws {
         let h = Harness()
@@ -259,4 +346,17 @@ private final class Harness: @unchecked Sendable {
         deliveries = []
         ready.forEach { $0() }
     }
+}
+
+/// Only the OS operations are fake; intent/generation, the statistics gate and worker are production.
+@MainActor
+private final class StatisticsConfiguration: TunnelLifecycleSteps {
+    var onDemandEnabled = false
+    func refresh() async -> Bool { true }
+    func saveForStart() async throws { onDemandEnabled = true }
+    func reloadForStart() async throws {}
+    func startTunnel() throws {}
+    func disarmOnDemand() async { onDemandEnabled = false }
+    func stopTunnel() async {}
+    func removeConfiguration() async { onDemandEnabled = false }
 }

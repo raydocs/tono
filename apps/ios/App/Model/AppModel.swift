@@ -794,11 +794,11 @@ final class AppModel: ObservableObject {
         }
         tunnelStatus = status
         connectedSince = status.isUp ? since : nil
+        traffic.updateTunnel(status, session: since, eligible: signedIn && !signingOut && !userStopping,
+                             startEpoch: TunnelController.lifecycle.statisticsStartEpoch)
         switch status {
         case .connected:
             userStarting = false
-            if signedIn, !signingOut, !userStopping { traffic.start(session: since) }
-            else { traffic.stop() }
             // The exit checks start once the tunnel confirms a graph (`recompute`).
             Task { await readStatus() }
         case .disconnected, .invalid:
@@ -806,7 +806,6 @@ final class AppModel: ObservableObject {
             if case .failed = routeChange { routeChange = nil }
             // Stopped before it answered: the file holds the request, so the next start builds it.
             if case .unconfirmed(let requested) = routeChange { setInEffect(requested); routeChange = nil }
-            traffic.stop()
             probeTask?.cancel()
             checks = ExitChecks()
             switch TunnelStop.classify(before: before, userStarting: userStarting, userStopping: userStopping,
@@ -822,7 +821,7 @@ final class AppModel: ObservableObject {
             userStarting = false
             userStopping = false
         default:
-            traffic.stop()
+            break
         }
         recompute()
     }

@@ -1,5 +1,6 @@
 import Foundation
 import Libbox
+import TonoKit
 
 protocol TrafficClient: AnyObject {
     func connect() throws
@@ -30,6 +31,13 @@ final class TrafficMonitor {
          deliver: @escaping TrafficDelivery = { work in Task { @MainActor in work() } }) {
         worker = TrafficWorker(queue: queue, makeClient: makeClient, schedule: schedule)
         self.deliver = deliver
+    }
+
+    /// AppModel's statistics boundary, separate from tunnel/protection state. Kept here so tests
+    /// exercise the production path from NE status and shared lifecycle intent to the real worker.
+    func updateTunnel(_ status: TunnelStatus, session: Date?, eligible: Bool, startEpoch: UInt64?) {
+        if status == .connected, eligible { start(session: session) }
+        else { stop() }
     }
 
     /// Repeated NE connected notifications do not bypass backoff. A new connected date belongs
