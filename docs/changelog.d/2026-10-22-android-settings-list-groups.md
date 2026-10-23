@@ -1,0 +1,17 @@
+## 2026-10-22 · Android 设置页改为列表分组；模式选择与路由检查移入「详情」
+- 归属：SHIP_PLAN G3（Android 客户端 UI，0.0.76）；平台 Android `apps/android/mobile`。
+- 来源：基线 origin/main `a8d3c80c5`；候选 `6f69e6b28`（`wip/android-settings-groups`，首轮 Devin 复验 FAIL，session `8a091519290e43c1aea227b0991a4f62`）→ 本 PR 修正源码见 PR 头 SHA；分支 `t3/fix-android-settings-layout`，draft PR 见 PR 链接；尚未合 main。
+- 缺陷修复：
+  - 设置首屏原为模式单选 + 170 字说明 + 路由检查占 0.13–0.48，真正可改的项从 0.53 开始；改为 Material 列表分组（Android VPN 保护 / 路由 / 账号 / 版权行），模式与排除应用数作为行尾值；模式选择（分段控件）与路由检查移入「详情」车道下方，路由说明只在二级页「路由规则」出现一次。
+  - 退出登录原直接 `signOut` 无确认；现为确认对话框（取消 / 退出登录，确认按钮带 `a11y_confirm_sign_out` 描述、`signOutConfirm` 标签）。
+  - 200% 字号下设置页首屏账号卡片延伸到手势导航栏之下：底部加 24 dp 夜色渐隐 + 导航栏实色带（Settings 与路由规则页），内容仍可滚动到底并留出导航栏。
+  - 退出确认对话框原按 Android 默认 60% 变暗；改为与「详情」底部面板相同的 45%，背后内容仍可读，视觉与面板一致。
+- 新增/优化：`Screen.ROUTING_RULES` 二级页；`settings_apps_footer`、`sign_out_title/body`、`settings_signed_in_as`、`mode_selected` 等中英文案；删除重复的 `about_test`。保留首屏结构（保护 / 路由 / 平台 / 账号）、模式与检查在「详情」、退出确认；不删任何模式或检查功能。
+- 工程与测试：
+  - 候选的 `SettingsFlowTest.kt:13` 多了一行 `import androidx.compose.ui.test.onAllNodes`（成员函数，无顶层导入）→ JVM 测试编译失败，C1/C2 全部未执行；删去该行。
+  - 候选的 `DeviceEvidenceTest#b4` 在确认对话框截图上失败：`fixture-31b-settings-sign-out-confirm shows the FIXTURE mark`（对话框 60% 变暗把标记色压到检测范围外，实测像素 (102,72,64)）；修正为产品侧 45% 变暗，不放宽 `fixtureMarked`。
+  - 首轮 brief 写的 `ScreenSizeDeviceTest` 类不存在（文件名）；真实类为 `SmallScreenDeviceTest#l2`、`LandscapeDeviceTest#l3`，两者首轮已 PASS。
+  - `LargeTextDeviceTest#l1` 新增：详情面板滚动到模式控件与路由检查可见（`fixture-14b`），设置页滚到底 Sign out 位于导航栏之上、路由规则页与确认框 200% 无截断（`fixture-15b/15c/15d`）；新增 `l4` 中文 200% 同一组（`fixture-33/33b/34/34b/34c/34d`），已加入 `android-ci.yml` ui 分片。`HorizonUiDeviceTest#u7` 中文增加路由规则与确认框（`fixture-24b/24c`）。JVM：`SettingsFlowTest` 4 条（首屏无选择器 / 规则页一次 / 退出先确认 / 详情选模式与检查）。
+- 验证：Mac 不跑 Gradle/模拟器；Devin Cloud linux 复验结果（CI 构建命令、JVM 渲染、仪器测试计数、截图哈希）见 PR 验证评论。首轮 FAIL 原始记录保留：C1 编译失败、b4 断言失败、C4 17 张仅 8 张存在。
+- 候选/发布：仅源码，无新候选、合并、auto-merge、部署或 PR 监控。
+- 剩余限制：模拟器截图不是实机证据；TalkBack、触感、OEM 皮肤、始终开启/锁定行为待实机。详情面板 200% 首帧仍需滚动才见模式控件（设计上允许，滚动证据见 `fixture-14b`）。

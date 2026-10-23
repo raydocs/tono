@@ -16,12 +16,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -66,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.window.DialogWindowProvider
 import com.raydocs.tono.mobile.BuildConfig
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
@@ -167,6 +171,7 @@ fun SettingsScreen(
             Box(Modifier.fillMaxWidth().height(band).background(TonoColors.Night).statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) { BackCircle(onBack) }
             Box(Modifier.fillMaxWidth().height(24.dp).background(Brush.verticalGradient(listOf(TonoColors.Night, TonoColors.Night.copy(alpha = 0f)))))
         }
+        BottomScrollFade(Modifier.align(Alignment.BottomCenter))
     }
     if (confirmSignOut) SignOutDialog(onConfirm = { confirmSignOut = false; onSignOut() }, onDismiss = { confirmSignOut = false })
 }
@@ -178,25 +183,42 @@ fun SettingsScreen(
  */
 @Composable
 fun RoutingRulesScreen(s: EngineSnapshot, onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().background(TonoColors.Night)) {
-        ScreenHeader(stringResource(R.string.settings_routing_rules), onBack)
-        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
-            SettingsGroup(stringResource(R.string.settings_routing), footer = stringResource(R.string.settings_mode_where), top = 8.dp) {
-                ModeLine(stringResource(R.string.mode_three_tier), stringResource(R.string.mode_three_tier_desc), s.mode == RoutingMode.THREE_TIER)
-                GroupDivider()
-                ModeLine(stringResource(R.string.mode_stable), stringResource(R.string.mode_stable_desc), s.mode == RoutingMode.STABLE)
-            }
-            Text(
-                stringResource(R.string.routing_scope_title), style = TonoType.Label, color = TonoColors.TextTertiary,
-                modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp).semantics { heading() },
-            )
-            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ArrowText(stringResource(R.string.routing_scope), TonoType.Meta, TonoColors.TextSecondary)
-                Text(stringResource(R.string.routing_platform), style = TonoType.Meta, color = TonoColors.TextSecondary)
-                Text(stringResource(if (s.underlyingIpv6) R.string.ipv6_on else R.string.ipv6_off), style = TonoType.Fine, color = TonoColors.TextTertiary)
-                Text(stringResource(R.string.about_contract, DesktopRoutingContract.SOURCE_COMMIT.take(9)), style = TonoType.Fine, color = TonoColors.TextTertiary)
+    Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader(stringResource(R.string.settings_routing_rules), onBack)
+            Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+                SettingsGroup(stringResource(R.string.settings_routing), footer = stringResource(R.string.settings_mode_where), top = 8.dp) {
+                    ModeLine(stringResource(R.string.mode_three_tier), stringResource(R.string.mode_three_tier_desc), s.mode == RoutingMode.THREE_TIER)
+                    GroupDivider()
+                    ModeLine(stringResource(R.string.mode_stable), stringResource(R.string.mode_stable_desc), s.mode == RoutingMode.STABLE)
+                }
+                Text(
+                    stringResource(R.string.routing_scope_title), style = TonoType.Label, color = TonoColors.TextTertiary,
+                    modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp).semantics { heading() },
+                )
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ArrowText(stringResource(R.string.routing_scope), TonoType.Meta, TonoColors.TextSecondary)
+                    Text(stringResource(R.string.routing_platform), style = TonoType.Meta, color = TonoColors.TextSecondary)
+                    Text(stringResource(if (s.underlyingIpv6) R.string.ipv6_on else R.string.ipv6_off), style = TonoType.Fine, color = TonoColors.TextTertiary)
+                    Text(stringResource(R.string.about_contract, DesktopRoutingContract.SOURCE_COMMIT.take(9)), style = TonoType.Fine, color = TonoColors.TextTertiary)
+                }
             }
         }
+        BottomScrollFade(Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/**
+ * The scroll edge at the bottom: content fades into night over 24 dp and the navigation-bar band
+ * itself is solid, so a row that has not been scrolled up yet never sits half under the gesture
+ * handle (at 200 % text the account card ended there). The scrolled content still clears the bar at
+ * its end, and the band takes no touches.
+ */
+@Composable
+private fun BottomScrollFade(modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(24.dp).background(Brush.verticalGradient(listOf(TonoColors.Night.copy(alpha = 0f), TonoColors.Night))))
+        Box(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(TonoColors.Night))
     }
 }
 
@@ -290,7 +312,7 @@ private fun SignOutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         containerColor = TonoColors.SmokeHigh,
         titleContentColor = TonoColors.TextPrimary,
         textContentColor = TonoColors.TextSecondary,
-        title = { Text(stringResource(R.string.sign_out_title)) },
+        title = { DimLikeASheet(); Text(stringResource(R.string.sign_out_title)) },
         text = { Text(stringResource(R.string.sign_out_body)) },
         confirmButton = {
             TextButton(
@@ -305,6 +327,17 @@ private fun SignOutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/**
+ * The dialog's window dims what is behind it at Android's 60 %; Tono's sheets scrim at 45 %, so the
+ * confirmation sits on the same night as Details does and the screen behind stays readable. Set on
+ * the dialog's own window, from inside it.
+ */
+@Composable
+private fun DimLikeASheet() {
+    val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+    SideEffect { window?.setDimAmount(0.45f) }
 }
 
 /**
