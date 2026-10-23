@@ -137,6 +137,8 @@ struct SettingsView: View {
                 Task { await model.signOut() }
                 dismiss()
             }
+            // Explicit, so the way out is always a visible button, not only a tap outside.
+            Button(L.t("action_cancel"), role: .cancel) {}
         }
     }
 
@@ -234,13 +236,17 @@ struct SettingsFooter: View {
     }
 }
 
-/// The row fill inside the sheet: the content card's smoke, opaque when transparency is reduced
-/// or contrast increased (a stroke is not available on a list row, so the fill alone separates).
+/// The row fill inside the sheet: the content card's smoke, opaque, with a thin white wash so the
+/// group reads as a step up from the sheet (a stroke is not available on a list row, so the fill
+/// alone separates; at half opacity the first captures showed the groups barely parting from the
+/// sheet). The wash deepens with Increase Contrast.
 private struct SettingsRowFill: View {
-    @Environment(\.tonoReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
-        TonoColor.smokeHigh.opacity(reduceTransparency || contrast == .increased ? 1 : 0.5)
+        ZStack {
+            TonoColor.smokeHigh
+            Color.white.opacity(contrast == .increased ? 0.10 : 0.04)
+        }
     }
 }
 
