@@ -10,6 +10,7 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 | [FINDINGS_LEDGER.md](FINDINGS_LEDGER.md) + [findings.d/](findings.d/README.md) | The single ledger of known findings (open / in-PR / fixed / refuted / accepted-design); new findings are one fragment file each; read before a review or bug fix (`node tooling/scripts/records.mjs findings`), update in the same PR |
 | [reports/REVIEW_ROUNDS_2026-09-23.md](reports/REVIEW_ROUNDS_2026-09-23.md) | Review → verify → fix → diff-review → merge method, coverage and gaps of the 2026-09-22/23 rounds, reusable review constraints |
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
+| [reports/PRODUCT_AUDIT_2026-10-23.md](reports/PRODUCT_AUDIT_2026-10-23.md) | Windows/macOS/generic Android five-model audit, first fixes, remaining qualification gaps and prioritized acceptance roadmap; not release approval |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
 | [../AGENTS.md](../AGENTS.md) | Agent rules: merge/deploy/publish conditions, invariants, verification hosts |
 | [DECISIONS.md](DECISIONS.md) | Index of owner and provisional product decisions. One file each under [decisions/](decisions/README.md); add a file, do not append to the index |
