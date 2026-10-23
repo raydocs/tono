@@ -56,20 +56,23 @@ class ControlPlane internal constructor(
         val paths = if (local) listOf("local" to (host to base.port))
         else listOf<Pair<String, Pair<String, Int>>>("system_dns" to (host to 443)) + relays.map { "relay" to it }
         for ((kind, target) in paths) {
+            var requestMayHaveBeenSent = false
             val response = try {
-                exchange(kind, target.first, target.second, method, path, body, bearer)
+                exchange(kind, target.first, target.second, method, path, body, bearer) { requestMayHaveBeenSent = true }
             } catch (e: ApiException) {
                 throw e
             } catch (e: IOException) {
                 lastNetwork = e
+                if (method == "POST" && requestMayHaveBeenSent) break
                 continue
             }
             if (response.status in 200..299) return response.body ?: emptyMap()
             val error = response.body?.get("error") as? Map<*, *>
             val code = error?.get("code") as? String ?: "HTTP_${response.status}"
-            // A 5xx from the edge on one path is treated like an unreachable path; API errors are final.
+            // GET may try another path for an unstructured 5xx; a delivered POST must not be replayed.
             if (response.status >= 500 && error == null) {
                 lastNetwork = IOException("HTTP ${response.status} via $kind")
+                if (method == "POST") break
                 continue
             }
             throw ApiException(response.status, code, error?.get("message") as? String ?: "request failed")
@@ -77,32 +80,33 @@ class ControlPlane internal constructor(
         throw ApiException(0, "NETWORK", lastNetwork?.message ?: "Tono servers are unreachable")
     }
 
-    private fun exchange(kind: String, dialHost: String, port: Int, method: String, path: String, body: String?, bearer: String?): Response {
+    private fun exchange(kind: String, dialHost: String, port: Int, method: String, path: String, body: String?, bearer: String?, beforeWrite: () -> Unit): Response {
         // Internal IO seam supplies a connected (and, for HTTPS, verified) socket, not an HTTP exchange.
         socketConnector?.let { connect ->
             connect(kind, dialHost, port).use {
-                return send(it, method, path, body, bearer, if (kind == "local") "$host:$port" else host, kind)
+                return send(it, method, path, body, bearer, if (kind == "local") "$host:$port" else host, kind, beforeWrite)
             }
         }
-        val raw = Socket()
-        raw.connect(InetSocketAddress(dialHost, port), CONNECT_TIMEOUT_MS)
-        raw.soTimeout = READ_TIMEOUT_MS
-        if (kind == "local") raw.use { return send(it, method, path, body, bearer, "$host:$port", kind) }
-        val socket = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, host, port, true) as SSLSocket
-        socket.use { tls ->
-            tls.sslParameters = tls.sslParameters.apply {
-                serverNames = listOf(SNIHostName(host))
-                endpointIdentificationAlgorithm = "HTTPS"
+        Socket().use { raw ->
+            raw.connect(InetSocketAddress(dialHost, port), CONNECT_TIMEOUT_MS)
+            raw.soTimeout = READ_TIMEOUT_MS
+            if (kind == "local") return send(raw, method, path, body, bearer, "$host:$port", kind, beforeWrite)
+            val socket = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, host, port, true) as SSLSocket
+            socket.use { tls ->
+                tls.sslParameters = tls.sslParameters.apply {
+                    serverNames = listOf(SNIHostName(host))
+                    endpointIdentificationAlgorithm = "HTTPS"
+                }
+                tls.startHandshake()
+                if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, tls.session)) {
+                    throw IOException("certificate does not match $host")
+                }
+                return send(tls, method, path, body, bearer, host, kind, beforeWrite)
             }
-            tls.startHandshake()
-            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, tls.session)) {
-                throw IOException("certificate does not match $host")
-            }
-            return send(tls, method, path, body, bearer, host, kind)
         }
     }
 
-    private fun send(socket: Socket, method: String, path: String, body: String?, bearer: String?, hostHeader: String, kind: String): Response {
+    private fun send(socket: Socket, method: String, path: String, body: String?, bearer: String?, hostHeader: String, kind: String, beforeWrite: () -> Unit): Response {
         val payload = body?.toByteArray(Charsets.UTF_8)
         val request = buildString {
             append("$method $basePath/$path HTTP/1.1\r\n")
@@ -119,8 +123,11 @@ class ControlPlane internal constructor(
             }
             append("\r\n")
         }
+        val requestBytes = request.toByteArray(Charsets.US_ASCII)
         val out = socket.getOutputStream()
-        out.write(request.toByteArray(Charsets.US_ASCII))
+        // Even a throwing first write may have sent a prefix; only failures before this point are safe.
+        beforeWrite()
+        out.write(requestBytes)
         payload?.let(out::write)
         out.flush()
         return readResponse(BufferedInputStream(socket.getInputStream()))
