@@ -29,11 +29,12 @@ it('upgrades existing client metadata without losing device dependants or weaken
   });
   const before = await snapshot();
   const schemaBefore = (await db.prepare('PRAGMA table_info(devices)').all()).results;
-  // Exercise D1 transaction rollback after every pending migration statement.
+  // A valid statement fails at execution (duplicate primary key), after the migration writes.
   await expect(db.batch([
     ...pending.flatMap((m) => m.queries.map((query) => db.prepare(query))),
-    db.prepare('INSERT INTO test_missing_identity_rollback_table VALUES (1)'),
-  ])).rejects.toThrow();
+    db.prepare(`INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+      VALUES('identity-desktop', 'rollback-collision@example.com', 'test', 'test', 1, 1)`),
+  ])).rejects.toThrow(/UNIQUE constraint failed: users.id/);
   expect(await snapshot()).toEqual(before);
   expect((await db.prepare('PRAGMA table_info(devices)').all()).results).toEqual(schemaBefore);
 
