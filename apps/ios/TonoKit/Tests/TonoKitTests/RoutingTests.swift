@@ -9,8 +9,11 @@ final class RoutingTests: XCTestCase {
     func testContractCountsMatchTheDesktopLists() {
         XCTAssertEqual(DesktopRoutingContract.cloudVideoSuffixes.count, 21)
         XCTAssertEqual(DesktopRoutingContract.homeSuffixes.count, 194)
-        XCTAssertEqual(DesktopRoutingContract.mobileHomeAuxSuffixes.count, 44)
+        XCTAssertEqual(DesktopRoutingContract.mobileHomeAuxSuffixes.count, 60)
         XCTAssertEqual(DesktopRoutingContract.xCloudSuffixes, ["x.com", "twitter.com", "twimg.com", "t.co", "pscp.tv", "periscope.tv", "twtrdns.net", "cms-twdigitalassets.com", "vine.co", "twitpic.com"])
+        XCTAssertEqual(DesktopRoutingContract.overseasCloudSuffixes.count, 52)
+        XCTAssertEqual(DesktopRoutingContract.cloudIPv4CIDRs.count, 6)
+        XCTAssertEqual(DesktopRoutingContract.cloudIPv6CIDRs.count, 3)
         XCTAssertEqual(DesktopRoutingContract.homeIPv4CIDRs, ["160.79.104.0/21"])
         XCTAssertEqual(DesktopRoutingContract.stunUDPPorts, [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309])
         XCTAssertEqual(DesktopRoutingContract.encryptedDNSPorts, [853])
@@ -140,6 +143,11 @@ final class RoutingTests: XCTestCase {
             "posthog.com", "amplitude.com", "logrocket.com", "lr-ingest.com", "lr-in.com", "lr-in-prod.com", "honeybadger.io",
             "stytch.com", "stytch.io", "auth0.com", "tenant.auth0.com", "okta.com",
             "modelcontextprotocol.io", "anthropicstatus.com", "claudecode.com", "claude.codes",
+            "gstatic.com", "fonts.gstatic.com", "www.gstatic.com",
+            "googleusercontent.com", "lh3.googleusercontent.com", "1e100.net", "gvt1.com", "gvt2.com",
+            "google.com.hk", "google.co.jp", "google.com.sg", "google.co.uk", "android.com", "g.co", "goo.gl",
+            "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "g.whatsapp.net", "wa.me",
+            "livekit.cloud", "chatgpt.livekit.cloud",
         ] {
             XCTAssertEqual(try verdict(threeTier, domain: host, port: 443, network: "tcp").outbound, SingBoxConfig.homeSocksTag)
             if case .reject = try verdict(threeTier, domain: host, port: 443, network: "udp") {} else {
@@ -177,13 +185,55 @@ final class RoutingTests: XCTestCase {
             XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "SVCB"), "predefined")
         }
 
-        // HTTPS (Type 65) and SVCB (Type 64) DNS queries never leak to local DNS for FakeIP/overseas domains.
-        for host in ["claude.ai", "www.youtube.com", "x.com", "api.twitter.com"] {
+        // YouTube avatar exceptions (yt3.googleusercontent.com, ggpht.com) still precede googleusercontent.com and route to Cloud.
+        XCTAssertEqual(try verdict(threeTier, domain: "yt3.googleusercontent.com", port: 443, network: "tcp").outbound, SingBoxConfig.exitTag)
+        XCTAssertEqual(try verdict(threeTier, domain: "yt3.ggpht.com", port: 443, network: "tcp").outbound, SingBoxConfig.exitTag)
+        // Home Cloudflare / npm subdomains still precede broad overseasCloudSuffixes parents (cloudflare.com, npmjs.org) and stay on Home.
+        XCTAssertEqual(try verdict(threeTier, domain: "gateway.ai.cloudflare.com", port: 443, network: "tcp").outbound, SingBoxConfig.homeSocksTag)
+        XCTAssertEqual(try verdict(threeTier, domain: "challenges.cloudflare.com", port: 443, network: "tcp").outbound, SingBoxConfig.homeSocksTag)
+        XCTAssertEqual(try verdict(threeTier, domain: "registry.npmjs.org", port: 443, network: "tcp").outbound, SingBoxConfig.homeSocksTag)
+
+        // Overseas messaging, knowledge, community, streaming, and developer ecosystems route to Cloud (Tono-Exit), reject UDP, and use FakeIP DNS.
+        for host in [
+            "telegram.org", "core.telegram.org", "t.me", "tdesktop.com", "telegra.ph", "telegram.me", "telesco.pe", "cdn-telegram.org",
+            "discord.com", "gateway.discord.gg", "discordapp.com", "cdn.discordapp.com", "discordapp.net", "discord.media",
+            "signal.org", "chat.signal.org", "whispersystems.org", "line.me", "line-scdn.net",
+            "wikipedia.org", "en.wikipedia.org", "zh.wikipedia.org", "wikimedia.org", "upload.wikimedia.org", "wikidata.org", "wiktionary.org", "mediawiki.org",
+            "archive.org", "web.archive.org", "medium.com", "substack.com", "v2ex.com", "www.v2ex.com", "nodeseek.com", "www.nodeseek.com", "linux.do",
+            "netflix.com", "www.netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net",
+            "spotify.com", "open.spotify.com", "scdn.co", "twitch.tv", "www.twitch.tv", "ttvnw.net", "pixiv.net", "www.pixiv.net", "pximg.net", "i.pximg.net",
+            "huggingface.co", "cdn-lfs.huggingface.co", "hf.co", "npmjs.com", "www.npmjs.com", "npmjs.org",
+            "pypi.org", "files.pythonhosted.org", "ghcr.io", "github.io", "githubstatus.com",
+            "vercel.app", "vercel.com", "cloudflare.com", "dash.cloudflare.com", "docker.com", "hub.docker.com", "docker.io", "registry-1.docker.io",
+        ] {
+            XCTAssertEqual(try verdict(threeTier, domain: host, port: 443, network: "tcp").outbound, SingBoxConfig.exitTag)
+            if case .reject = try verdict(threeTier, domain: host, port: 443, network: "udp") {} else {
+                XCTFail("Overseas cloud domain \(host) UDP must be rejected")
+            }
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "A"), SingBoxConfig.dnsFakeIP)
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "AAAA"), SingBoxConfig.dnsFakeIP)
             XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "HTTPS"), "predefined")
-            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "SVCB"), "predefined")
+            XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: "TXT"), "predefined")
+        }
+
+        // Telegram Data Center (DC1–DC5) raw-IP TCP routes to Cloud (Tono-Exit) while UDP is rejected.
+        for tgIP in ["91.108.4.10", "91.108.8.20", "91.108.12.30", "91.108.16.40", "91.108.56.130", "149.154.167.50", "2001:67c:4e8:f002::a", "2001:b28:f23d:f001::a", "2001:b28:f23f:f005::a"] {
+            XCTAssertEqual(try verdict(threeTier, ip: tgIP, port: 443, network: "tcp").outbound, SingBoxConfig.exitTag)
+            if case .reject = try verdict(threeTier, ip: tgIP, port: 443, network: "udp") {} else {
+                XCTFail("Telegram DC raw IP \(tgIP) UDP must be rejected")
+            }
+        }
+
+        // Non-A/AAAA DNS queries (HTTPS, SVCB, TXT, SRV, CAA, CNAME, PTR) never leak to local DNS for FakeIP/overseas domains.
+        for host in ["claude.ai", "www.youtube.com", "x.com", "api.twitter.com", "telegram.org", "whatsapp.com", "www.google.com"] {
+            for qtype in ["HTTPS", "SVCB", "TXT", "SRV", "CAA", "CNAME", "PTR"] {
+                XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: host, queryType: qtype), "predefined")
+            }
         }
         XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: "www.baidu.com", queryType: "HTTPS"), SingBoxConfig.dnsLocal)
+        XCTAssertEqual(try RouteExplainer.dnsServer(threeTier, domain: "www.baidu.com", queryType: "TXT"), SingBoxConfig.dnsLocal)
         XCTAssertEqual(try RouteExplainer.dnsServer(stable, domain: "www.baidu.com", queryType: "HTTPS"), "predefined")
+        XCTAssertEqual(try RouteExplainer.dnsServer(stable, domain: "www.baidu.com", queryType: "TXT"), "predefined")
 
         // Domestic UDP (Douyin QUIC, WeChat voice/video, smart home P2P, NTP, LAN cast, 5G IPv6) stays direct in Three-Tier.
         XCTAssertEqual(try verdict(threeTier, domain: "quic.example.cn", port: 443, network: "udp").outbound, SingBoxConfig.directTag)

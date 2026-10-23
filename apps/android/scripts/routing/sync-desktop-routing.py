@@ -71,12 +71,16 @@ def generate(desktop: pathlib.Path) -> str:
     public_stun_suffixes = rust_array(rust, "PUBLIC_STUN_SUFFIXES")
     mobile_home_aux = rust_array(rust, "MOBILE_HOME_AUX_SUFFIXES")
     x_cloud_suffixes = rust_array(rust, "X_CLOUD_SUFFIXES")
+    overseas_cloud_suffixes = rust_array(rust, "OVERSEAS_CLOUD_SUFFIXES")
+    cloud_ipv4_cidrs = rust_array(rust, "CLOUD_IPV4_CIDRS")
+    cloud_ipv6_cidrs = rust_array(rust, "CLOUD_IPV6_CIDRS")
     overseas_udp_cidrs = rust_array(rust, "OVERSEAS_UDP_REJECT_IPV4_CIDRS")
     overseas_udp_v6_cidrs = rust_array(rust, "OVERSEAS_UDP_REJECT_IPV6_CIDRS")
     protected = rust_array(rust, "PROTECTED_DIRECT_SUFFIXES")
     assert len(home) == 194 and len(video) == 21, (len(home), len(video))
     assert len(stun_ports) == 8 and len(encrypted_dns_ports) == 1, (len(stun_ports), len(encrypted_dns_ports))
-    assert len(public_stun_suffixes) == 5 and len(mobile_home_aux) == 44 and len(x_cloud_suffixes) == 10, (len(public_stun_suffixes), len(mobile_home_aux), len(x_cloud_suffixes))
+    assert len(public_stun_suffixes) == 5 and len(mobile_home_aux) == 60 and len(x_cloud_suffixes) == 10 and len(overseas_cloud_suffixes) == 52, (len(public_stun_suffixes), len(mobile_home_aux), len(x_cloud_suffixes), len(overseas_cloud_suffixes))
+    assert len(cloud_ipv4_cidrs) == 6 and len(cloud_ipv6_cidrs) == 3, (len(cloud_ipv4_cidrs), len(cloud_ipv6_cidrs))
     assert len(overseas_udp_cidrs) == 33 and len(overseas_udp_v6_cidrs) == 21, (len(overseas_udp_cidrs), len(overseas_udp_v6_cidrs))
     assert template["version"] == 2
     return (
@@ -91,10 +95,16 @@ def generate(desktop: pathlib.Path) -> str:
         + kotlin_list("CLOUD_VIDEO_SUFFIXES", video) + "\n"
         "    /** Owner-approved AI / named Home suffixes, routed to the assigned residential exit. */\n"
         + kotlin_list("HOME_SUFFIXES", home) + "\n"
-        "    /** Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, and SSO suffixes routed through the Home tier on mobile. */\n"
+        "    /** Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, SSO, Google static/auth/regional assets, WhatsApp, and LiveKit suffixes routed through the Home tier on mobile. */\n"
         + kotlin_list("MOBILE_HOME_AUX_SUFFIXES", mobile_home_aux) + "\n"
         "    /** X (Twitter) full domain suffixes routed through the Cloud exit on mobile after Home rules (so grok.x.com stays on Home). */\n"
         + kotlin_list("X_CLOUD_SUFFIXES", x_cloud_suffixes) + "\n"
+        "    /** Overseas messaging, knowledge, community, streaming, and developer ecosystem suffixes routed through the Cloud exit on mobile after Home rules. */\n"
+        + kotlin_list("OVERSEAS_CLOUD_SUFFIXES", overseas_cloud_suffixes) + "\n"
+        "    /** Telegram Messenger Data Center (DC1–DC5) IPv4 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected. */\n"
+        + kotlin_list("CLOUD_IPV4_CIDRS", cloud_ipv4_cidrs) + "\n"
+        "    /** Telegram Messenger Data Center (DC1–DC5) IPv6 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected. */\n"
+        + kotlin_list("CLOUD_IPV6_CIDRS", cloud_ipv6_cidrs) + "\n"
         "    /** Anthropic's own IPv4 range for raw-IP dials. */\n"
         + kotlin_list("HOME_IPV4_CIDRS", cidrs) + "\n"
         "    /** Google WebRTC STUN UDP ports rejected across routing modes so raw-IP STUN probes cannot leak the physical egress IP. */\n"

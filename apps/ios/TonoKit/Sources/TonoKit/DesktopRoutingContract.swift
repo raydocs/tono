@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "b122249dc41f722ad5034fd80c35c8c5005ff2289b0ff8f4801475ec56e197c3"
+    public static let sourceDigest = "3a768d3cdf1d50f362db3f7c972b70cd3e057cd47950bd0b876a4acf30275c78"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -230,7 +230,7 @@ public enum DesktopRoutingContract {
         "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com",
     ]
 
-    /// Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, and SSO suffixes routed through the Home tier on mobile.
+    /// Claude / AI auxiliary support, fingerprinting, anti-fraud, captcha, Apple OAuth, telemetry, SSO, Google static/auth/regional assets, WhatsApp, and LiveKit suffixes routed through the Home tier on mobile.
     public static let mobileHomeAuxSuffixes: [String] = [
         "workos.com",
         "authkit.app",
@@ -276,6 +276,22 @@ public enum DesktopRoutingContract {
         "anthropicstatus.com",
         "claudecode.com",
         "claude.codes",
+        "gstatic.com",
+        "googleusercontent.com",
+        "1e100.net",
+        "gvt1.com",
+        "gvt2.com",
+        "google.com.hk",
+        "google.co.jp",
+        "google.com.sg",
+        "google.co.uk",
+        "android.com",
+        "g.co",
+        "goo.gl",
+        "whatsapp.com",
+        "whatsapp.net",
+        "wa.me",
+        "livekit.cloud",
     ]
 
     /// X (Twitter) full domain suffixes routed through the Cloud exit on mobile after Home rules (so grok.x.com stays on Home).
@@ -290,6 +306,79 @@ public enum DesktopRoutingContract {
         "cms-twdigitalassets.com",
         "vine.co",
         "twitpic.com",
+    ]
+
+    /// Overseas messaging, knowledge, community, streaming, and developer ecosystem suffixes routed through the Cloud exit on mobile after Home rules.
+    public static let overseasCloudSuffixes: [String] = [
+        "telegram.org",
+        "t.me",
+        "tdesktop.com",
+        "telegra.ph",
+        "telegram.me",
+        "telesco.pe",
+        "cdn-telegram.org",
+        "discord.com",
+        "discordapp.com",
+        "discordapp.net",
+        "discord.gg",
+        "discord.media",
+        "signal.org",
+        "whispersystems.org",
+        "line.me",
+        "line-scdn.net",
+        "wikipedia.org",
+        "wikimedia.org",
+        "wikidata.org",
+        "wiktionary.org",
+        "mediawiki.org",
+        "archive.org",
+        "medium.com",
+        "substack.com",
+        "v2ex.com",
+        "nodeseek.com",
+        "linux.do",
+        "netflix.com",
+        "nflxvideo.net",
+        "nflximg.net",
+        "nflxext.com",
+        "nflxso.net",
+        "spotify.com",
+        "scdn.co",
+        "twitch.tv",
+        "ttvnw.net",
+        "pixiv.net",
+        "pximg.net",
+        "huggingface.co",
+        "hf.co",
+        "npmjs.com",
+        "npmjs.org",
+        "pypi.org",
+        "pythonhosted.org",
+        "ghcr.io",
+        "github.io",
+        "githubstatus.com",
+        "vercel.app",
+        "vercel.com",
+        "cloudflare.com",
+        "docker.com",
+        "docker.io",
+    ]
+
+    /// Telegram Messenger Data Center (DC1–DC5) IPv4 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected.
+    public static let cloudIPv4CIDRs: [String] = [
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.12.0/22",
+        "91.108.16.0/22",
+        "91.108.56.0/22",
+        "149.154.160.0/20",
+    ]
+
+    /// Telegram Messenger Data Center (DC1–DC5) IPv6 ranges routed to the Cloud exit on mobile TCP with UDP/ICMP rejected.
+    public static let cloudIPv6CIDRs: [String] = [
+        "2001:67c:4e8::/48",
+        "2001:b28:f23d::/48",
+        "2001:b28:f23f::/48",
     ]
 
     /// Anthropic's own IPv4 range for raw-IP dials.

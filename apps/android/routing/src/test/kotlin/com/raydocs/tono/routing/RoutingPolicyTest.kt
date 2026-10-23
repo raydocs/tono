@@ -40,8 +40,11 @@ class RoutingPolicyTest {
         assertEquals(listOf(19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309), DesktopRoutingContract.STUN_UDP_PORTS)
         assertEquals(listOf(853), DesktopRoutingContract.ENCRYPTED_DNS_PORTS)
         assertEquals(listOf("stun.cloudflare.com", "turn.cloudflare.com", "global.stun.twilio.com", "stun.services.mozilla.com", "stunprotocol.org"), DesktopRoutingContract.PUBLIC_STUN_SUFFIXES)
-        assertEquals(44, DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES.size)
+        assertEquals(60, DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES.size)
         assertEquals(listOf("x.com", "twitter.com", "twimg.com", "t.co", "pscp.tv", "periscope.tv", "twtrdns.net", "cms-twdigitalassets.com", "vine.co", "twitpic.com"), DesktopRoutingContract.X_CLOUD_SUFFIXES)
+        assertEquals(52, DesktopRoutingContract.OVERSEAS_CLOUD_SUFFIXES.size)
+        assertEquals(6, DesktopRoutingContract.CLOUD_IPV4_CIDRS.size)
+        assertEquals(3, DesktopRoutingContract.CLOUD_IPV6_CIDRS.size)
         assertEquals(33, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV4_CIDRS.size)
         assertEquals(21, DesktopRoutingContract.OVERSEAS_UDP_REJECT_IPV6_CIDRS.size)
 
@@ -82,6 +85,11 @@ class RoutingPolicyTest {
             "posthog.com", "amplitude.com", "logrocket.com", "lr-ingest.com", "lr-in.com", "lr-in-prod.com", "honeybadger.io",
             "stytch.com", "stytch.io", "auth0.com", "tenant.auth0.com", "okta.com",
             "modelcontextprotocol.io", "anthropicstatus.com", "claudecode.com", "claude.codes",
+            "gstatic.com", "fonts.gstatic.com", "www.gstatic.com",
+            "googleusercontent.com", "lh3.googleusercontent.com", "1e100.net", "gvt1.com", "gvt2.com",
+            "google.com.hk", "google.co.jp", "google.com.sg", "google.co.uk", "android.com", "g.co", "goo.gl",
+            "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "g.whatsapp.net", "wa.me",
+            "livekit.cloud", "chatgpt.livekit.cloud",
         )) {
             assertEquals(home, outbound(threeTier, Connection(domain = host, port = 443, network = "tcp")))
             assertEquals("reject", outbound(threeTier, Connection(domain = host, port = 443, network = "udp")))
@@ -109,8 +117,13 @@ class RoutingPolicyTest {
         assertEquals(home, outbound(threeTier, Connection(ip = "160.79.104.10")))
         assertEquals(direct, outbound(threeTier, Connection(ip = "160.79.112.1")))
         assertEquals(home, outbound(threeTier, Connection(ip = "34.1.2.3", packageName = "com.anthropic.claude")))
-        // Video still wins inside an AI app.
+        assertEquals(home, outbound(threeTier, Connection(ip = "34.1.2.3", packageName = "ai.perplexity.app.android")))
+        assertEquals(home, outbound(threeTier, Connection(ip = "34.1.2.3", packageName = "com.google.android.apps.bard")))
+        assertEquals("reject", outbound(threeTier, Connection(ip = "34.1.2.3", packageName = "ai.perplexity.app.android", network = "udp")))
+        // Video still wins inside an AI app, and youtubei.googleapis.com / yt3.googleusercontent.com still beat googleusercontent.com.
         assertEquals(exit, outbound(threeTier, Connection(domain = "www.youtube.com", packageName = "com.anthropic.claude")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "yt3.googleusercontent.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "yt3.ggpht.com")))
     }
 
     @Test
@@ -157,9 +170,43 @@ class RoutingPolicyTest {
         assertEquals(direct, outbound(threeTier, Connection(domain = "x.com.example.net")))
         assertEquals(direct, outbound(threeTier, Connection(domain = "unrelated.akamaized.net")))
         assertEquals("local", RouteExplainer.dnsServer(threeTier, "x.com.example.net", "A"))
-        // Un-sniffed raw-IP dial from the X Android app routes through Tono-Exit on TCP and rejects UDP/ICMP.
-        assertEquals(exit, outbound(threeTier, Connection(ip = "203.0.114.9", packageName = "com.twitter.android")))
-        assertEquals("reject", outbound(threeTier, Connection(ip = "203.0.114.9", packageName = "com.twitter.android", network = "udp")))
+        // Un-sniffed raw-IP dial from Cloud Android apps routes through Tono-Exit on TCP and rejects UDP/ICMP,
+        // while domain-sniffed WhatsApp traffic still matches Home rules first.
+        for (pkg in listOf("com.twitter.android", "org.telegram.messenger", "org.telegram.messenger.web", "org.thoughtcrime.securesms", "com.whatsapp", "com.discord", "com.google.android.youtube", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill")) {
+            assertEquals(exit, outbound(threeTier, Connection(ip = "203.0.114.9", packageName = pkg)))
+            assertEquals("reject", outbound(threeTier, Connection(ip = "203.0.114.9", packageName = pkg, network = "udp")))
+        }
+        assertEquals(home, outbound(threeTier, Connection(domain = "web.whatsapp.com", packageName = "com.whatsapp")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "g.whatsapp.net", packageName = "com.whatsapp")))
+        // Home Cloudflare / npm subdomains still precede broad OVERSEAS_CLOUD_SUFFIXES parents.
+        assertEquals(home, outbound(threeTier, Connection(domain = "gateway.ai.cloudflare.com")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "challenges.cloudflare.com")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "registry.npmjs.org")))
+        // Overseas messaging, knowledge, community, streaming, and developer ecosystems route to Cloud (Tono-Exit).
+        for (host in listOf(
+            "telegram.org", "core.telegram.org", "t.me", "tdesktop.com", "telegra.ph", "telegram.me", "telesco.pe", "cdn-telegram.org",
+            "discord.com", "gateway.discord.gg", "discordapp.com", "cdn.discordapp.com", "discordapp.net", "discord.media",
+            "signal.org", "chat.signal.org", "whispersystems.org", "line.me", "line-scdn.net",
+            "wikipedia.org", "en.wikipedia.org", "zh.wikipedia.org", "wikimedia.org", "upload.wikimedia.org", "wikidata.org", "wiktionary.org", "mediawiki.org",
+            "archive.org", "web.archive.org", "medium.com", "substack.com", "v2ex.com", "www.v2ex.com", "nodeseek.com", "www.nodeseek.com", "linux.do",
+            "netflix.com", "www.netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net",
+            "spotify.com", "open.spotify.com", "scdn.co", "twitch.tv", "www.twitch.tv", "ttvnw.net", "pixiv.net", "www.pixiv.net", "pximg.net", "i.pximg.net",
+            "huggingface.co", "cdn-lfs.huggingface.co", "hf.co", "npmjs.com", "www.npmjs.com", "npmjs.org",
+            "pypi.org", "files.pythonhosted.org", "ghcr.io", "github.io", "githubstatus.com",
+            "vercel.app", "vercel.com", "cloudflare.com", "dash.cloudflare.com", "docker.com", "hub.docker.com", "docker.io", "registry-1.docker.io",
+        )) {
+            assertEquals(exit, outbound(threeTier, Connection(domain = host)))
+            assertEquals("reject", outbound(threeTier, Connection(domain = host, network = "udp")))
+            assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, host, "A"))
+            assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, host, "AAAA"))
+            assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "HTTPS"))
+            assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, "TXT"))
+        }
+        // Telegram Data Center (DC1–DC5) raw-IP TCP routes to Cloud (Tono-Exit) while UDP is rejected.
+        for (tgIp in listOf("91.108.4.10", "91.108.8.20", "91.108.12.30", "91.108.16.40", "91.108.56.130", "149.154.167.50", "2001:67c:4e8:f002::a", "2001:b28:f23d:f001::a", "2001:b28:f23f:f005::a")) {
+            assertEquals(exit, outbound(threeTier, Connection(ip = tgIp, port = 443, network = "tcp")))
+            assertEquals("reject", outbound(threeTier, Connection(ip = tgIp, port = 443, network = "udp")))
+        }
         assertEquals(exit, outbound(stable, Connection(domain = "x.com")))
         assertEquals(exit, outbound(stable, Connection(domain = "api.twitter.com")))
         assertEquals(exit, outbound(stable, Connection(domain = "pbs.twimg.com")))
@@ -191,7 +238,8 @@ class RoutingPolicyTest {
     fun everyProtectedSuffixFailsClosedInEveryMode() {
         val lists = DesktopRoutingContract.HOME_SUFFIXES + DesktopRoutingContract.MOBILE_HOME_AUX_SUFFIXES +
             DesktopRoutingContract.CLOUD_VIDEO_SUFFIXES + DesktopRoutingContract.PROTECTED_DIRECT_SUFFIXES +
-            DesktopRoutingContract.PUBLIC_STUN_SUFFIXES + DesktopRoutingContract.X_CLOUD_SUFFIXES
+            DesktopRoutingContract.PUBLIC_STUN_SUFFIXES + DesktopRoutingContract.X_CLOUD_SUFFIXES +
+            DesktopRoutingContract.OVERSEAS_CLOUD_SUFFIXES
         for (config in listOf(threeTier, stable, Fixtures.config(routing = null))) {
             for (suffix in lists) for (host in listOf(suffix, "a.b.$suffix")) {
                 assertTrue("$host tcp", outbound(config, Connection(domain = host)) !in setOf(direct, "reject"))
@@ -207,11 +255,15 @@ class RoutingPolicyTest {
         assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "claude.ai", "HTTPS"))
         assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "claude.ai", "SVCB"))
         assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "i.ytimg.com", "HTTPS"))
-        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "x.com", "HTTPS"))
-        assertEquals("predefined", RouteExplainer.dnsServer(threeTier, "api.twitter.com", "SVCB"))
+        for (host in listOf("claude.ai", "i.ytimg.com", "x.com", "api.twitter.com", "telegram.org", "whatsapp.com", "www.google.com")) {
+            for (qtype in listOf("HTTPS", "SVCB", "TXT", "SRV", "CAA", "CNAME", "PTR")) {
+                assertEquals("predefined", RouteExplainer.dnsServer(threeTier, host, qtype))
+            }
+        }
         assertEquals("local", RouteExplainer.dnsServer(threeTier, "www.baidu.com", "A"))
         assertEquals("local", RouteExplainer.dnsServer(threeTier, "www.baidu.com", "AAAA"))
         assertEquals("local", RouteExplainer.dnsServer(threeTier, "www.baidu.com", "HTTPS"))
+        assertEquals("local", RouteExplainer.dnsServer(threeTier, "www.baidu.com", "TXT"))
         assertEquals("local", RouteExplainer.dnsServer(stable, "printer.local", "A"))
         assertEquals("local", RouteExplainer.dnsServer(stable, "printer.local", "HTTPS"))
         assertEquals("fakeip", RouteExplainer.dnsServer(stable, "www.baidu.com", "A"))
