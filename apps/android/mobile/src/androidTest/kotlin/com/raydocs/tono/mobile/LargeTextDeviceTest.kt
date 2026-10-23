@@ -10,8 +10,12 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.geometry.Offset
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -97,6 +101,8 @@ class LargeTextDeviceTest {
         shot("fixture-15-font-2.0-settings")
         // The colophon's last line, so the capture shows the end of the list clear of the navigation bar.
         compose.onNode(hasText("GPL-3.0-or-later", substring = true)).performScrollTo()
+        // One slow drag past the end, so the capture is the list's true end with its own padding.
+        compose.onRoot().performTouchInput { swipe(Offset(center.x, height * 0.75f), Offset(center.x, height * 0.25f), 600) }
         compose.waitForIdle()
         shot("fixture-15b-font-2.0-settings-bottom")
         compose.onNodeWithText(context.getString(R.string.settings_routing_rules)).performScrollTo().performClick()
