@@ -19,6 +19,23 @@ This decision supersedes the earlier same-day proposal to register both home
 machines directly to private Tono. Do not follow that obsolete onboarding
 proposal or machine addresses in an [archived handoff](archive/README.md).
 
+## Generic Android verification
+
+`apps/android` is an internal test client (minSdk 29, targetSdk 36), not a signed customer release.
+Its separate [`android-ci`](../.github/workflows/android-ci.yml) runs routing/mobile JVM tests, lint,
+debug APK builds and API 34 device shards. It is not called by `ci-gate`; a green `ci-gate` alone
+does **not** verify Android. This documents the existing gate, not a change to release policy.
+
+For platform-permission and lifecycle changes, push an exact SHA on a `wip/` ref and use the
+`devin-cloud` workflow on Linux KVM. Do not install an Android SDK/emulator on the editing Mac.
+Run the affected instrumentation method on API 29 and 30 (the legacy `requestNetwork` path)
+and API 34 (the modern callback control), keeping the APK hashes, merged manifest, device API,
+test count and raw result. `NetworkMonitorDeviceTest#registersAndObservesThePhysicalUplink`
+must report one executed test; an `adb` exit code of zero alone is not a pass.
+These targeted cloud checks do not expand the permanent API 34 CI matrix or qualify API 31–33/35–36.
+Real phone handoffs, always-on/lockdown, background restrictions and signed updates need their own
+evidence; see [Android's verification limits](../apps/android/README.md).
+
 ## Execution lanes
 
 | Lane | Host | Boundary |
