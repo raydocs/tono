@@ -38,6 +38,14 @@ public final class TunnelStartCoordinator {
 
     /// Advanced at the entry of every start, stop and removal.
     public private(set) var generation: UInt64 = 0
+    /// Statistics-only intent receipt. Zero inherits an existing NE session on initial load/process
+    /// restart; a start exposes its generation, while stop/remove/cancel expose nil, never a start.
+    /// On Demand does not issue another switch: it keeps the last start's epoch. This is read-only
+    /// observation, not permission to start/stop the tunnel or evidence of protection.
+    public var statisticsStartEpoch: UInt64? {
+        generation == 0 || latestIsStart ? generation : nil
+    }
+
     /// Switches and serialized operations waiting for their turn (the running one not counted).
     public var waiting: Int { queue.count }
 
