@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reason_EXIT_IDENTITY_PROPAGATING">设备身份仍在向线路同步，Tono 会自动重试，最多等待 5 分钟。</string>
+    <string name="short_EXIT_IDENTITY_PROPAGATING">正在同步线路 · 最多等待 5 分钟</string>
+    <string name="reason_EXIT_IDENTITY_PREPARATION_TIMEOUT">设备身份尚未在线路上就绪，请稍后重新连接。</string>
+    <string name="short_EXIT_IDENTITY_PREPARATION_TIMEOUT">线路准备超时 · 请重试</string>
+</resources>

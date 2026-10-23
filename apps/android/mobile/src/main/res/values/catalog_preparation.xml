@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reason_EXIT_IDENTITY_PROPAGATING">Your device is still syncing with the lines. Tono will retry for up to 5 minutes.</string>
+    <string name="short_EXIT_IDENTITY_PROPAGATING">Syncing lines · up to 5 min</string>
+    <string name="reason_EXIT_IDENTITY_PREPARATION_TIMEOUT">Your device is not ready on the lines yet. Try connecting again shortly.</string>
+    <string name="short_EXIT_IDENTITY_PREPARATION_TIMEOUT">Line setup took too long · try again</string>
+</resources>

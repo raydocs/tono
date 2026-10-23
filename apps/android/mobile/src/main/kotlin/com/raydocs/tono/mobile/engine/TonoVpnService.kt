@@ -89,6 +89,7 @@ class TonoVpnService : VpnService() {
     private val probeRequests = ProbeEpoch<Network>()
     private lateinit var apiBase: String
     private var localTestServer = false
+    private var catalogPreparation: CatalogPreparation<LoadedCatalog>? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -323,10 +324,7 @@ class TonoVpnService : VpnService() {
             return access!!
         }
         return try {
-            val body = try { api.get("exit-catalog", bearer()) } catch (e: ApiException) {
-                if (e.status != 401 || e.code == "INVALID_REFRESH_TOKEN") throw e
-                api.get("exit-catalog", bearer(force = true))
-            }
+            val body = readExitCatalog(api) { force -> bearer(force) }
             val admitted = CatalogAdmission.admit(body)
             if (admitted.revision < input.settings.catalogRevision) throw CatalogRejected("CATALOG_ROLLBACK", "catalog revision went backwards")
             LoadedCatalog(admitted, false, Json.write(body), System.currentTimeMillis())
@@ -338,15 +336,18 @@ class TonoVpnService : VpnService() {
         }
     }
 
-    private fun requestCatalog(commit: (Result<LoadedCatalog>) -> Unit) {
+    private fun requestCatalog(mayRead: () -> Boolean, commit: (Result<LoadedCatalog>) -> Unit) {
         // Serialized within the account, including refresh rotation. Invalidation happens before
         // clearing/replacing credentials. The queue checks ownership BEFORE any persistent write.
-        accountWork.submit(prepare = {
+        accountWork.submit<CatalogResponse?>(prepare = {
+            // A cancelled preparation may have waited behind a credential rotation. Do not start
+            // its HTTP work, but let already-started work persist its current-account tokens.
+            if (!mayRead()) return@submit { null }
             val input = CatalogInput(accessToken ?: store.accessToken(), store.refreshToken(), store.settings(), store.cachedCatalogBody())
             val work: () -> CatalogResponse = { CatalogResponse(input, runCatching { loadCatalog(input) }) }
             work
         }, commit = { response ->
-            val outcome = response.getOrElse { commit(Result.failure(it)); return@submit }
+            val outcome = response.getOrElse { commit(Result.failure(it)); return@submit } ?: return@submit
             val input = outcome.input
             val access = input.access
             val refresh = input.refresh
@@ -365,20 +366,52 @@ class TonoVpnService : VpnService() {
         })
     }
 
+    private fun prepareCatalog(gen: Long, commit: (Result<LoadedCatalog>) -> Unit) {
+        catalogPreparation?.cancel()
+        val preparation = CatalogPreparation<LoadedCatalog>(
+            nowMs = SystemClock::elapsedRealtime,
+            schedule = { delay, task ->
+                val future = engine.schedule({ task() }, delay, TimeUnit.MILLISECONDS)
+                CatalogPreparation.Cancel { future.cancel(false) }
+            },
+            request = ::requestCatalog,
+            current = { !retired && ledger.isCurrent(gen) },
+            waiting = {
+                if (snapshot.get().phase in setOf(Phase.IDLE, Phase.PREPARING)) {
+                    update { it.copy(reasonCode = CatalogPreparation.PENDING_CODE) }
+                }
+            },
+            complete = { result ->
+                catalogPreparation = null
+                commit(result)
+            },
+        )
+        catalogPreparation = preparation
+        preparation.start()
+    }
+
     private fun refreshCatalogQuietly() {
+        // A refresh button must not replace the catalog read that owns an active Connect.
+        if (snapshot.get().phase == Phase.PREPARING) return
         val gen = ledger.attempt
-        requestCatalog { result ->
-            if (!ledger.isCurrent(gen)) return@requestCatalog
+        prepareCatalog(gen) { result ->
+            if (!ledger.isCurrent(gen)) return@prepareCatalog
             result.onSuccess { loaded ->
                 val c = loaded.catalog
                 val restart = c != catalog && snapshot.get().let { it.tunnelUp || it.phase == Phase.CONNECTING }
                 catalog = c
                 update {
-                    val refreshed = it.withCatalog(c).copy(usingCachedCatalog = loaded.cached)
+                    val reason = it.reasonCode.takeUnless { code -> code == CatalogPreparation.PENDING_CODE || code == CatalogPreparation.TIMEOUT_CODE }
+                    val refreshed = it.withCatalog(c).copy(usingCachedCatalog = loaded.cached, reasonCode = reason)
                     if (restart) ledger.begin(refreshed, Phase.CONNECTING) else refreshed
                 }
                 if (restart) startCore(ledger.attempt)
-            }.onFailure { e -> if (isSessionEnded(e)) endSession() }
+            }.onFailure { e ->
+                if (isSessionEnded(e)) endSession()
+                else if (snapshot.get().reasonCode == CatalogPreparation.PENDING_CODE) {
+                    update { it.copy(reasonCode = errorCode(e)) }
+                }
+            }
         }
     }
 
@@ -401,11 +434,11 @@ class TonoVpnService : VpnService() {
         store.update { it.copy(wantConnected = true) }
         update { ledger.begin(it, Phase.PREPARING) }
         val gen = ledger.attempt
-        requestCatalog { loaded ->
-            if (!ledger.isCurrent(gen)) return@requestCatalog
+        prepareCatalog(gen) { loaded ->
+            if (!ledger.isCurrent(gen)) return@prepareCatalog
             loaded.onSuccess { result ->
                 catalog = result.catalog
-                update { it.withCatalog(result.catalog).copy(usingCachedCatalog = result.cached) }
+                update { it.withCatalog(result.catalog).copy(usingCachedCatalog = result.cached, reasonCode = null) }
                 startCore(gen)
             }.onFailure { e -> fail(e, userInitiated) }
         }
@@ -517,6 +550,8 @@ class TonoVpnService : VpnService() {
     }
 
     private fun stopCore() {
+        catalogPreparation?.cancel()
+        catalogPreparation = null
         probeRequests.invalidate()
         trafficTask?.cancel(false)
         trafficTask = null
@@ -760,6 +795,8 @@ class TonoVpnService : VpnService() {
         private const val CACHE_MAX_AGE_MS = 7L * 24 * 3600 * 1000
 
         fun errorCode(e: Throwable): String = when (e) {
+            is CatalogIdentityPending -> CatalogPreparation.PENDING_CODE
+            is CatalogIdentityTimeout -> CatalogPreparation.TIMEOUT_CODE
             is ApiException -> when {
                 e.status == 429 -> "RATE_LIMITED"
                 else -> e.code
