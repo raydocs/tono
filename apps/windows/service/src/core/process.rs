@@ -808,9 +808,10 @@ pub(super) fn image_candidates_strict(image_file_names: &[&str]) -> Result<Stric
     let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
     // SAFETY: live snapshot and correctly sized out buffer through the entire enumeration.
     let mut more = unsafe { Process32FirstW(snapshot.as_raw_handle() as HANDLE, &mut entry) } != 0;
+    let mut scan_error = if more { None } else { Some(std::io::Error::last_os_error()) };
     loop {
         if !more {
-            let error = std::io::Error::last_os_error();
+            let error = scan_error.take().expect("failed Toolhelp step captured its error");
             if error.raw_os_error() != Some(ERROR_NO_MORE_FILES as i32) {
                 receipt.complete = false;
                 receipt.notes.push(format!("strict writer enumeration incomplete: {error}"));
@@ -843,7 +844,14 @@ pub(super) fn image_candidates_strict(image_file_names: &[&str]) -> Result<Stric
                 }
             };
             match inspected {
-                Ok(Some(identity)) => receipt.candidates.push((pid, identity)),
+                Ok(Some(identity)) => {
+                    // PID reuse between Toolhelp and OpenProcess may now name a different
+                    // image. Never let the stale prefilter authorize a new kill target.
+                    let still_candidate = std::path::Path::new(&identity.executable).file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| image_file_names.iter().any(|candidate| name.eq_ignore_ascii_case(candidate)));
+                    if still_candidate { receipt.candidates.push((pid, identity)); }
+                }
                 Ok(None) => {}, // Native exit evidence, not access-denied guessing.
                 Err(error) => {
                     receipt.complete = false;
@@ -852,6 +860,8 @@ pub(super) fn image_candidates_strict(image_file_names: &[&str]) -> Result<Stric
             }
         }
         more = unsafe { Process32NextW(snapshot.as_raw_handle() as HANDLE, &mut entry) } != 0;
+        // Capture before String/handle drops can overwrite the thread-local Win32 error.
+        scan_error = if more { None } else { Some(std::io::Error::last_os_error()) };
     }
     Ok(receipt)
 }

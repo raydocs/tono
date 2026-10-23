@@ -14,7 +14,9 @@ const LOCK: &str = "wmi-dispatch.lock";
 const LOCK_BUDGET: Duration = Duration::from_millis(250);
 const POLL: Duration = Duration::from_millis(10);
 
-struct HeldD(File);
+struct HeldD {
+    _file: File,
+}
 
 fn fence_path(directory: &Path, target: Incarnation) -> PathBuf {
     directory.join(format!(
@@ -32,6 +34,7 @@ fn exists(path: &Path) -> Result<bool> {
 }
 
 fn lock(directory: &Path, budget: Duration) -> Result<HeldD> {
+    let deadline = Instant::now() + budget.min(LOCK_BUDGET);
     std::fs::create_dir_all(directory)?;
     let path = directory.join(LOCK);
     let file = std::fs::OpenOptions::new()
@@ -42,10 +45,9 @@ fn lock(directory: &Path, budget: Duration) -> Result<HeldD> {
         .open(&path)?;
     #[cfg(all(windows, not(feature = "test")))]
     crate::core::windows_security::secure_private_service_file_if_exists(&path)?;
-    let deadline = Instant::now() + budget.min(LOCK_BUDGET);
     loop {
         if try_lock(&file)? {
-            return Ok(HeldD(file));
+            return Ok(HeldD { _file: file });
         }
         ensure!(Instant::now() < deadline, "WMI dispatch lock is busy");
         std::thread::sleep(POLL.min(deadline.saturating_duration_since(Instant::now())));
@@ -103,7 +105,17 @@ fn try_lock(file: &File) -> Result<bool> {
 }
 
 pub(super) fn admit(directory: &Path, own: Incarnation, boot: &BootStamp) -> Result<InFlight> {
-    // RED scaffolding: preserve the old unfenced admission until the fix commit.
+    ensure!(
+        own.pid != 0 && own.started_at != 0,
+        "unknown WMI caller incarnation"
+    );
+    let _held = lock(directory, LOCK_BUDGET)?;
+    ensure!(
+        !exists(&fence_path(directory, own))?,
+        "WMI caller incarnation is dispatch-fenced"
+    );
+    // No C/lifecycle/DNS/WFP lock, identity query, spawn, wait or kill under D.
+    // The durable record is the admission point, including callers not yet spawned.
     super::record_admission(directory, own, boot)
 }
 
@@ -153,7 +165,7 @@ fn fence(
 #[derive(Clone)]
 pub(crate) struct Target {
     pub(crate) incarnation: Incarnation,
-    pub(crate) identity: crate::core::process::ProcessIdentity,
+    pub(in crate::core) identity: crate::core::process::ProcessIdentity,
 }
 
 pub(crate) struct Scan {
@@ -187,20 +199,201 @@ pub(crate) async fn fence_drain_then_terminate(
     generation: u64,
     boundary: &mut impl Boundary,
 ) -> Outcome {
-    // RED scaffolding: the original direct-kill order, with the real production boundary.
-    let _ = (directory, boot, worker, generation);
-    let scan = boundary.scan();
+    let deadline = boundary.now() + NORMAL_BATCH_BUDGET;
     let mut outcome = Outcome {
         stuck: Vec::new(),
-        complete: scan.complete,
-        notes: scan.notes,
+        complete: true,
+        notes: Vec::new(),
     };
-    for target in scan.targets {
-        if !boundary.terminate(&target).await {
-            outcome.stuck.push(target.incarnation);
+    let mut attempted = Vec::new();
+    // Initial scan, one normal rescan, then one conservative churn pass. No un-gated
+    // broad writer kill follows this boundary. All passes share the first deadline.
+    for pass in 0..3 {
+        let scan = boundary.scan();
+        outcome.complete &= scan.complete;
+        outcome.notes.extend(scan.notes);
+        let targets: Vec<_> = scan
+            .targets
+            .into_iter()
+            .filter(|target| !attempted.contains(&target.incarnation))
+            .collect();
+        if targets.is_empty() {
+            break;
+        }
+        if pass == 2 {
+            outcome.complete = false;
+            outcome.notes.push("writer incarnations changed during bounded rescans; final pass has no drain coverage".into());
+        }
+        let remaining = deadline.saturating_duration_since(boundary.now());
+        let snapshot = fence_and_snapshot(directory, boot, worker, generation, &targets, remaining);
+        let mut waiting = Vec::new();
+        match snapshot {
+            Ok(snapshot) => {
+                outcome.notes.extend(snapshot.notes);
+                for target in &targets {
+                    let own = target.incarnation;
+                    if !snapshot.fenced.contains(&own) {
+                        outcome.notes.push(format!(
+                            "writer {own:?} could not be fenced; no drain coverage"
+                        ));
+                        continue;
+                    }
+                    let mut eligible = 0;
+                    for (path, entry) in &snapshot.records {
+                        let Some(entry) = entry else {
+                            // The corrupt record cannot be assigned to any particular caller.
+                            continue;
+                        };
+                        if entry.batch.pid != own.pid {
+                            continue;
+                        }
+                        if entry
+                            .started_at
+                            .is_some_and(|birth| birth != own.started_at)
+                        {
+                            continue;
+                        }
+                        if normal(entry, own, boot) && boundary.alive(own) == Some(true) {
+                            eligible += 1;
+                            waiting.push((path.clone(), own));
+                        } else {
+                            outcome.notes.push(format!("writer {own:?} has a legacy, abandoned, unknown or non-live batch; no drain coverage"));
+                        }
+                    }
+                    if eligible == 0 {
+                        // Empty is not a version handshake. It grants no safe-drain claim;
+                        // only verified termination + the unchanged final ledger checks count.
+                        tracing::info!(
+                            "release: writer {own:?} has no provable normal batch to drain"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                outcome.notes.push(format!(
+                    "writer fence/snapshot unavailable; no drain coverage: {error:#}"
+                ));
+            }
+        }
+        if pass < 2 {
+            drain(&mut waiting, boot, deadline, boundary, &mut outcome.notes).await;
+        } else if !waiting.is_empty() {
+            outcome.notes.push(
+                "bounded writer churn: retained admitted batches without additional grace".into(),
+            );
+        }
+        // D is gone before every time/liveness/runner/termination boundary.
+        for target in targets {
+            attempted.push(target.incarnation);
+            if !boundary.terminate(&target).await && !outcome.stuck.contains(&target.incarnation) {
+                outcome.stuck.push(target.incarnation);
+            }
         }
     }
     outcome
+}
+
+struct Snapshot {
+    fenced: Vec<Incarnation>,
+    records: Vec<(PathBuf, Option<RecordedEntry>)>,
+    notes: Vec<String>,
+}
+
+/// The only critical section used by the worker: close all known exact targets, THEN
+/// snapshot admitted calls while D is still held. No OS process or clock callbacks here.
+fn fence_and_snapshot(
+    directory: &Path,
+    boot: &BootStamp,
+    worker: Incarnation,
+    generation: u64,
+    targets: &[Target],
+    remaining: Duration,
+) -> Result<Snapshot> {
+    let _held = lock(directory, remaining)?;
+    let mut snapshot = Snapshot {
+        fenced: Vec::new(),
+        records: Vec::new(),
+        notes: Vec::new(),
+    };
+    for target in targets {
+        match fence(directory, target.incarnation, boot, worker, generation) {
+            Ok(()) => snapshot.fenced.push(target.incarnation),
+            Err(error) => snapshot.notes.push(format!(
+                "writer {:?} fence not proven: {error:#}",
+                target.incarnation
+            )),
+        }
+    }
+    for item in std::fs::read_dir(directory)? {
+        let item = item?;
+        let name = item.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(super::PREFIX) || name == super::GENESIS {
+            continue;
+        }
+        let path = item.path();
+        let record = match read_record(&path) {
+            Ok(Some(record)) => Some(record),
+            Ok(None) => continue, // Own marker already removed this unique path.
+            Err(error) => {
+                snapshot.notes.push(format!(
+                    "unknown WMI batch {path:?}; no drain coverage: {error:#}"
+                ));
+                None
+            }
+        };
+        snapshot.records.push((path, record));
+    }
+    Ok(snapshot)
+}
+
+fn read_record(path: &Path) -> Result<Option<RecordedEntry>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !exists(path)? => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("cannot read {path:?}")),
+    }
+}
+
+fn normal(entry: &RecordedEntry, own: Incarnation, boot: &BootStamp) -> bool {
+    entry.dispatch_protocol == 1
+        && entry.started_at == Some(own.started_at)
+        && entry.batch.pid == own.pid
+        && !entry.batch.legacy
+        && !entry.batch.abandoned
+        && entry.batch.boot.relation_to(boot) == BootRelation::Same
+}
+
+async fn drain(
+    waiting: &mut Vec<(PathBuf, Incarnation)>,
+    boot: &BootStamp,
+    deadline: Instant,
+    boundary: &mut impl Boundary,
+    notes: &mut Vec<String>,
+) {
+    loop {
+        waiting.retain(|(path, own)| {
+            match read_record(path) {
+                Ok(None) => false, // Only observe; never retire a record for its caller.
+                Ok(Some(entry)) if normal(&entry, *own, boot) && boundary.alive(*own) == Some(true) => true,
+                other => {
+                    notes.push(format!("WMI batch {path:?} no longer provably normal/live; retained, no drain coverage: {other:?}"));
+                    false
+                }
+            }
+        });
+        if waiting.is_empty() {
+            return;
+        }
+        let remaining = deadline.saturating_duration_since(boundary.now());
+        if remaining.is_zero() {
+            notes.push(format!(
+                "WMI grace deadline reached with {} admitted batch(es); records retained",
+                waiting.len()
+            ));
+            return;
+        }
+        boundary.pause(POLL.min(remaining)).await;
+    }
 }
 
 #[cfg(test)]
