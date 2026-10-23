@@ -10,7 +10,8 @@ final class ConnectionCoordinator {
     var connectWatchdogTask: Task<Void, Never>?
     var connectAttemptID: UUID?
     /// Session intent survives automatic teardown/recovery, including failures
-    /// before the runtime is built. Only an explicit release ends this choice.
+    /// before the runtime is built. Only explicit release, or fresh account
+    /// admission proving both protection scopes unheld, ends this choice.
     var capturedRoutingMode: String? = DesktopRoutingModeAdmission.persistedSession()
     var protectionOperationGeneration: UInt64 = 0
     private(set) var disconnectSequence: Task<Void, Never>?
@@ -65,7 +66,7 @@ final class ConnectionCoordinator {
     /// is refused by the helper instead of touching the next one.
     private(set) var helperSession = HelperSessionGeneration()
 
-    /// An explicit release ends the session's mode. Its record goes with it:
+    /// An explicit release or proven orphan ends the session's mode. Its record goes with it:
     /// a later arm is a new connect's, which captures again. Strict intent
     /// stays until Restore internet is confirmed.
     func retireCapturedRoutingMode() {

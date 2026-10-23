@@ -213,6 +213,11 @@ final class AccountSession {
     /// is ever retired.
     @ObservationIgnored var protectionReleaseConsumer:
         @MainActor () async -> KillSwitchService.StatusObservation
+    /// Fresh account admission alone may retire a proven orphaned AI Home
+    /// capture. The consumer rechecks this account's presentation around its
+    /// helper reads; Check again keeps the non-retiring consumer above.
+    @ObservationIgnored var freshAuthenticationProtectionReleaseConsumer:
+        @MainActor (@MainActor () -> Bool) async -> KillSwitchService.StatusObservation
 
     var deviceLimit: Int { user?.deviceLimit ?? TonoAccountRules.maximumDevices }
     var isAtDeviceLimit: Bool { devices.count >= deviceLimit }
@@ -312,6 +317,8 @@ final class AccountSession {
          killSwitchDisarmConsumer: @escaping @MainActor () async -> Void,
          protectionReleaseConsumer: @escaping @MainActor ()
             async -> KillSwitchService.StatusObservation = { .unavailable },
+         freshAuthenticationProtectionReleaseConsumer: @escaping @MainActor
+            (@MainActor () -> Bool) async -> KillSwitchService.StatusObservation = { _ in .unavailable },
          diagnosticSnapshotConsumer: @escaping @MainActor () -> TonoDiagnosticSnapshot = {
              TonoDiagnosticSnapshot(
                  appVersion: "unknown", build: "unknown", connected: false,
@@ -389,6 +396,7 @@ final class AccountSession {
         self.cloudFallbackConsumer = cloudFallbackConsumer
         self.killSwitchDisarmConsumer = killSwitchDisarmConsumer
         self.protectionReleaseConsumer = protectionReleaseConsumer
+        self.freshAuthenticationProtectionReleaseConsumer = freshAuthenticationProtectionReleaseConsumer
         self.diagnosticSnapshotConsumer = diagnosticSnapshotConsumer
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer

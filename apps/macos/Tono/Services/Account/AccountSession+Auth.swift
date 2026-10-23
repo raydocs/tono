@@ -885,6 +885,7 @@ extension AccountSession {
     }
 
     private func performAuthentication(_ operation: @MainActor () async throws -> TonoAuthResponse) async {
+        let isFreshAuthentication = user == nil
         await abandonDiagnosticsLogUploader()
         state = .authenticating
         signInError = nil
@@ -916,15 +917,33 @@ extension AccountSession {
             // the previous account is reachable by this one.
             ManagedExitCatalogOwnership.adopt(response.user.id)
             adoptEnrollment(response.enrollment)
+            let authenticatedRevision = accountReadRevision
+            func authenticationIsCurrent() -> Bool {
+                !Task.isCancelled && state == .authenticating
+                    && accountReadRevision == authenticatedRevision && user?.id == response.user.id
+            }
             // Cloud-only sign-in already has the authenticated user and this
             // device in the verify response. Inventory is device-management
             // data, not an admission gate; a separate read may be unavailable.
             if AppProfile.homeExitEnabled { try await reloadDevices() }
+            guard authenticationIsCurrent() else { return }
             if response.user.suspended == true {
                 enterEntitlementBlock(detail: nil)
                 return
             }
-            await retireResumeIntentIfProtectionReleased()
+            if isFreshAuthentication {
+                // A record-only orphan has neither armed nor resume intent.
+                // Only AppState can prove that both broad and selective holds
+                // ended and retire its in-memory capture before admission.
+                let answer = await freshAuthenticationProtectionReleaseConsumer(authenticationIsCurrent)
+                guard authenticationIsCurrent() else { return }
+                if case .confirmed(requiresProtectionRecovery: false) = answer {
+                    shouldResumeProtection = false
+                }
+            } else {
+                await retireResumeIntentIfProtectionReleased()
+            }
+            guard authenticationIsCurrent() else { return }
             if !AppProfile.homeExitEnabled {
                 // Managed Reality exits authenticate directly with the Tono
                 // control plane. They never consume or wait for a Tailscale
