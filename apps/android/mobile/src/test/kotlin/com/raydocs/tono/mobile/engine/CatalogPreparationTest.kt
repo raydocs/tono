@@ -84,6 +84,21 @@ class CatalogPreparationTest {
         assertTrue(clockJump.results.single().exceptionOrNull() is CatalogIdentityTimeout)
         assertEquals(0, clockJump.clock.pending)
 
+        val asleep = Harness(error(503, PENDING), http(200, """{"late":true}"""))
+        asleep.start()
+        asleep.finishRead()
+        asleep.clock.advanceBy(15_000) // A second read is admitted, but its IO does not finish.
+        val requestsBeforeSleep = asleep.requests.size
+        asleep.clock.sleepBy(300_000) // elapsedRealtime advances; scheduled-executor time does not.
+        assertTrue(asleep.results.isEmpty())
+        asleep.clock.advanceBy(1_000) // Resume: no finishRead() to accidentally drive expiry.
+        assertTrue("sleep-expired preparation must time out promptly without an IO completion",
+            asleep.results.singleOrNull()?.exceptionOrNull() is CatalogIdentityTimeout)
+        assertEquals(requestsBeforeSleep, asleep.requests.size)
+        assertEquals(0, asleep.clock.pending)
+        asleep.finishRead()
+        assertEquals(1, asleep.results.size)
+
         val queued = Harness(error(503, PENDING))
         val queuedAttempt = queued.start()
         queued.finishRead()
@@ -186,24 +201,28 @@ class CatalogPreparationTest {
 
     private class Clock {
         var now = 0L
+        private var awake = 0L
         private class Task(val due: Long, val run: () -> Unit, var cancelled: Boolean = false)
         private val tasks = mutableListOf<Task>()
         val pending: Int get() = tasks.count { !it.cancelled }
         fun schedule(delay: Long, run: () -> Unit): CatalogPreparation.Cancel {
             require(delay >= 0)
-            val task = Task(now + delay, run)
+            val task = Task(awake + delay, run)
             tasks.add(task)
             return CatalogPreparation.Cancel { task.cancelled = true }
         }
+        fun sleepBy(ms: Long) { now += ms }
         fun advanceBy(ms: Long) {
-            val end = now + ms
+            val end = awake + ms
             while (true) {
                 val next = tasks.filter { !it.cancelled && it.due <= end }.minByOrNull { it.due } ?: break
                 tasks.remove(next)
-                now = next.due
+                now += next.due - awake
+                awake = next.due
                 next.run()
             }
-            now = end
+            now += end - awake
+            awake = end
         }
     }
 
