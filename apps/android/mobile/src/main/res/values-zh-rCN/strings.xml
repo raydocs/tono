@@ -82,6 +82,10 @@
     <string name="settings_title">设置</string>
     <string name="settings_back">返回</string>
     <string name="settings_routing">路由模式</string>
+    <string name="settings_routing_group">路由</string>
+    <string name="settings_routing_rules">路由规则</string>
+    <string name="settings_mode_where">在「详情」中切换模式。</string>
+    <string name="mode_selected">已选</string>
     <string name="mode_three_tier">三层路由（默认）</string>
     <string name="mode_three_tier_short">三层路由</string>
     <string name="mode_three_tier_desc">AI\u00A0→\u00A0家宽\u00A0· 视频\u00A0→\u00A0云\u00A0· 其他直连</string>
@@ -91,12 +95,13 @@
     <string name="mode_applies">修改会立即应用到正在运行的连接。</string>
     <string name="routing_scope_title">Tono 能识别什么、不能识别什么</string>
     <string name="routing_scope">优先级：21 项云端视频例外 → 194 项 AI／指定 Home 条目（另含 Anthropic 地址段，以及 Claude、ChatGPT、Grok 应用）→ 明确的云端列表 → 其他全部直连。命中的流量失败时会暂停，不会退回直连；命中的 UDP/QUIC 会被拒绝，应用会改用 TCP。使用 ECH、自带 DoH 或缓存地址的应用可能隐藏 AI 身份，这部分会走直连；无法保证未识别的 AI 走家宽。</string>
-    <string name="routing_platform">在 Android 上，所有应用、所有 TCP/UDP 端口以及 IPv4、IPv6 都进入隧道；局域网、链路本地与组播不进入。直连域名用你当前网络的 DNS 解析，命中名单的域名不会发给它。热点共享设备和你在下方排除的应用完全不经过 Tono。</string>
+    <string name="routing_platform">在 Android 上，所有应用、所有 TCP/UDP 端口以及 IPv4、IPv6 都进入隧道；局域网、链路本地与组播不进入。直连域名用你当前网络的 DNS 解析，命中名单的域名不会发给它。热点共享设备完全不经过 Tono。</string>
     <string name="settings_apps">不经过 Tono 的应用</string>
-    <string name="settings_apps_none">无：所有应用都按 Tono 规则走</string>
+    <string name="settings_apps_none">无</string>
     <plurals name="settings_apps_count">
-        <item quantity="other">%1$d 个应用不经过 Tono（其中的 AI 也不会走家宽）</item>
+        <item quantity="other">%1$d 个</item>
     </plurals>
+    <string name="settings_apps_footer">不经过 Tono 的应用完全不走它的规则，其中的 AI 也不会走家宽。</string>
     <string name="apps_search">搜索应用</string>
     <string name="apps_done">完成</string>
     <string name="settings_check">这个网址会怎么走？</string>
@@ -112,12 +117,15 @@
     <string name="system_verify_in_android">始终开启状态未确认。Tono 停止后，应用可能直连。</string>
     <string name="system_open">打开 VPN 设置</string>
     <string name="settings_account">账号</string>
+    <string name="settings_signed_in_as">已登录</string>
     <string name="settings_sign_out">退出登录</string>
+    <string name="sign_out_title">退出 Tono 登录？</string>
+    <string name="sign_out_body">再次登录需要新的邮箱验证码。</string>
+    <string name="a11y_confirm_sign_out">确认退出登录</string>
     <string name="settings_about">关于</string>
     <string name="about_version">Tono %1$s · 测试版</string>
     <string name="about_core">内核：sing-box %1$s（GPL-3.0-or-later，源码：github.com/SagerNet/sing-box）</string>
     <string name="about_contract">路由合同：raydocs/tono@%1$s</string>
-    <string name="about_test">供评估的测试版，不是商店正式版。</string>
     <string name="about_licenses">许可证与源代码</string>
     <string name="ipv6_on">当前网络 IPv6：有</string>
     <string name="ipv6_off">当前网络 IPv6：无（直连域名只返回 IPv4）</string>

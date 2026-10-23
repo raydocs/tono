@@ -129,7 +129,8 @@ class HorizonUiDeviceTest {
         compose.onNodeWithContentDescription(str(R.string.settings_title)).performClick(); check("settings"); shot("fixture-11-settings")
         compose.onNodeWithText(str(R.string.system_verify_in_android)).performScrollTo()
         shot("fixture-11b-system-guidance")
-        compose.onNodeWithText(str(R.string.settings_apps_none)).performScrollTo().performClick()
+        compose.onNodeWithText(str(R.string.settings_routing_rules)).performClick(); check("routing-rules"); shot("fixture-11c-routing-rules"); back()
+        compose.onNodeWithText(str(R.string.settings_apps)).performScrollTo().performClick()
         // The list, not its loading spinner: wait for the installed apps to arrive.
         compose.waitUntil(30_000) { compose.onAllNodes(hasTestTag("app-row")).fetchSemanticsNodes().isNotEmpty() }
         check("apps"); shot("fixture-12-apps")
