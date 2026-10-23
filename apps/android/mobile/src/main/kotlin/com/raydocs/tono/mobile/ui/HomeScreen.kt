@@ -79,6 +79,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.raydocs.tono.mobile.R
+import com.raydocs.tono.mobile.engine.CatalogPreparation
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.HomeKind
 import com.raydocs.tono.mobile.engine.Phase
@@ -261,7 +262,8 @@ fun statusLine(s: EngineSnapshot): String? {
     return when (s.phase) {
         Phase.IDLE -> stringResource(R.string.sentence_idle)
         Phase.NEEDS_PERMISSION -> stringResource(R.string.sentence_permission_short)
-        Phase.PREPARING -> stringResource(R.string.sentence_preparing)
+        Phase.PREPARING -> if (s.reasonCode == CatalogPreparation.PENDING_CODE) shortReason(CatalogPreparation.PENDING_CODE)
+            else stringResource(R.string.sentence_preparing)
         Phase.CONNECTING -> stringResource(R.string.sentence_connecting)
         Phase.CONNECTED -> {
             // Rechecking (Details, or a new Wi-Fi or mobile network): the last verdict is not repeated as current.

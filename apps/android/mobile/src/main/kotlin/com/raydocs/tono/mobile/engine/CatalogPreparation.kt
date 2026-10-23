@@ -31,20 +31,73 @@ internal class CatalogPreparation<T>(
     private val complete: (Result<T>) -> Unit,
 ) {
     fun interface Cancel { fun cancel() }
+    private var started = false
     private var active = false
+    private var deadlineMs: Long? = null
+    private var retryTask: Cancel? = null
+    private var deadlineTask: Cancel? = null
 
     fun start() {
+        if (started) return
+        started = true
         active = true
-        // RED scaffolding: the original single read still ends preparation on the first error.
-        request({ active && current() }) { result ->
-            if (active && current()) {
-                active = false
-                complete(result)
+        read()
+    }
+
+    fun cancel() {
+        active = false
+        retryTask?.cancel()
+        retryTask = null
+        deadlineTask?.cancel()
+        deadlineTask = null
+    }
+
+    /** Also checked when a queued read reaches AccountWorkQueue's engine-thread preparation. */
+    private fun accepts(): Boolean {
+        if (!active) return false
+        if (!current()) { cancel(); return false }
+        if (deadlineMs?.let { nowMs() >= it } == true) {
+            finish(Result.failure(CatalogIdentityTimeout()))
+            return false
+        }
+        return true
+    }
+
+    private fun read() {
+        retryTask = null
+        if (!accepts()) return
+        request(::accepts) { result ->
+            if (!accepts()) return@request
+            if (result.exceptionOrNull() !is CatalogIdentityPending) {
+                finish(result)
+                return@request
+            }
+            if (deadlineMs == null) {
+                // Start once, on the first explicit catalog signal; subsequent replies never extend it.
+                deadlineMs = nowMs() + BUDGET_MS
+                deadlineTask = schedule(BUDGET_MS, ::onDeadline)
+                waiting()
+            }
+            if (accepts()) {
+                val delay = minOf(RETRY_DELAY_MS, (deadlineMs!! - nowMs()).coerceAtLeast(0))
+                retryTask = schedule(delay, ::read)
             }
         }
     }
 
-    fun cancel() { active = false }
+    private fun onDeadline() {
+        deadlineTask = null
+        if (!accepts()) return
+        // An early scheduler callback is not evidence of expiry. elapsedRealtime owns the budget.
+        deadlineTask = schedule((deadlineMs!! - nowMs()).coerceAtLeast(0), ::onDeadline)
+    }
+
+    private fun finish(result: Result<T>) {
+        // In-flight IO may still commit a rotated token for its account; it cannot complete this
+        // preparation again. Do not invalidate the account queue just to cancel a connection.
+        cancel()
+        complete(result)
+    }
 
     companion object {
         const val PENDING_CODE = "EXIT_IDENTITY_PROPAGATING"

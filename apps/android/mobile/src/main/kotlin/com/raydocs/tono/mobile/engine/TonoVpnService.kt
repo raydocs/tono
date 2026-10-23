@@ -799,6 +799,8 @@ class TonoVpnService : VpnService() {
             is CatalogIdentityTimeout -> CatalogPreparation.TIMEOUT_CODE
             is ApiException -> when {
                 e.status == 429 -> "RATE_LIMITED"
+                // Only the typed GET signal means we are waiting; a POST refusal is terminal.
+                e.code == CatalogPreparation.PENDING_CODE -> "CATALOG_UNAVAILABLE"
                 else -> e.code
             }
             is CatalogRejected -> e.code

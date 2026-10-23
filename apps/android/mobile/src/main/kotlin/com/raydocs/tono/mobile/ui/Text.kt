@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import com.raydocs.tono.mobile.R
+import com.raydocs.tono.mobile.engine.CatalogPreparation
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.HomeKind
 import com.raydocs.tono.mobile.engine.Phase
@@ -37,6 +38,8 @@ fun phaseTitle(p: Phase): String = stringResource(
 
 @Composable
 fun reasonText(code: String): String = when (code) {
+    CatalogPreparation.PENDING_CODE -> stringResource(R.string.reason_EXIT_IDENTITY_PROPAGATING)
+    CatalogPreparation.TIMEOUT_CODE -> stringResource(R.string.reason_EXIT_IDENTITY_PREPARATION_TIMEOUT)
     "CATALOG_UNAVAILABLE" -> stringResource(R.string.reason_CATALOG_UNAVAILABLE)
     "NETWORK" -> stringResource(R.string.reason_NETWORK)
     "RATE_LIMITED" -> stringResource(R.string.reason_RATE_LIMITED)
@@ -53,6 +56,8 @@ fun reasonText(code: String): String = when (code) {
 
 /** Short reason resource for a known code; unknown codes are shown with the code itself. */
 fun shortReasonRes(code: String): Int? = when (code) {
+    CatalogPreparation.PENDING_CODE -> R.string.short_EXIT_IDENTITY_PROPAGATING
+    CatalogPreparation.TIMEOUT_CODE -> R.string.short_EXIT_IDENTITY_PREPARATION_TIMEOUT
     "CATALOG_UNAVAILABLE" -> R.string.short_CATALOG_UNAVAILABLE
     "NETWORK" -> R.string.short_NETWORK
     "RATE_LIMITED" -> R.string.short_RATE_LIMITED
