@@ -1,10 +1,16 @@
 //! One finite inline graph shared by the compiler and privileged Service.
 //! It is not permission to launch it: session protection/grants are separate.
-use crate::direct_domains::{CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_VIDEO_DOMAINS};
+use crate::direct_domains::{
+    CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_IPV4_CIDRS, CLOUD_IPV6_CIDRS,
+    CLOUD_VIDEO_DOMAINS, ENCRYPTED_DNS_PORTS, MOBILE_HOME_AUX_SUFFIXES, OVERSEAS_CLOUD_SUFFIXES,
+    OVERSEAS_UDP_REJECT_IPV4_CIDRS, OVERSEAS_UDP_REJECT_IPV6_CIDRS, PUBLIC_STUN_SUFFIXES,
+    STUN_UDP_PORTS, X_CLOUD_SUFFIXES,
+};
 use serde_json::{Value, json};
 
 pub const DIRECT: &str = "Tono-ThreeTier-Direct";
 pub const HOME_DNS: &str = "Tono-ThreeTier-Home-DNS";
+pub const CHINA_DNS: &str = "Tono-ThreeTier-China-DNS";
 const TEMPLATE: &str = include_str!("../../../../../tooling/scripts/sing-box/three-tier-template.json");
 
 pub fn is_three_tier_runtime(runtime: &Value) -> bool {
@@ -13,6 +19,15 @@ pub fn is_three_tier_runtime(runtime: &Value) -> bool {
     }) || runtime["outbounds"].as_array().is_some_and(|outbounds| {
         outbounds.iter().any(|outbound| outbound["tag"] == DIRECT)
     })
+}
+
+pub fn cloud_exit_suffixes() -> Vec<&'static str> {
+    X_CLOUD_SUFFIXES
+        .iter()
+        .chain(OVERSEAS_CLOUD_SUFFIXES.iter())
+        .chain(PUBLIC_STUN_SUFFIXES.iter())
+        .copied()
+        .collect()
 }
 
 fn physical_interface_ok(interface: &str) -> bool {
@@ -43,7 +58,73 @@ pub fn graph(home: &str, interface: &str, fake_range: &str) -> Result<Value, Str
             _ => value.clone(),
         }
     }
-    Ok(render(&snapshot["graph"], &replacements))
+    let mut rendered = render(&snapshot["graph"], &replacements);
+    let cloud_suffixes = cloud_exit_suffixes();
+
+    if let Some(rules) = rendered
+        .pointer_mut("/route/rules")
+        .and_then(Value::as_array_mut)
+    {
+        // Insert DoT 853, STUN UDP, public STUN UDP, and overseas UDP CIDR reject rules
+        // right before the first $video_suffixes resolve rule.
+        if let Some(video_idx) = rules.iter().position(|rule| {
+            rule.get("domain_suffix")
+                .and_then(Value::as_array)
+                .is_some_and(|hosts| hosts.contains(&json!("youtube.com")))
+        }) {
+            let anti_leak = [
+                json!({"port": ENCRYPTED_DNS_PORTS.as_slice(), "action": "reject"}),
+                json!({"network": ["udp", "icmp"], "port": STUN_UDP_PORTS.as_slice(), "action": "reject"}),
+                json!({"network": ["udp", "icmp"], "domain_suffix": PUBLIC_STUN_SUFFIXES.as_slice(), "action": "reject"}),
+                json!({"network": ["udp", "icmp"], "ip_cidr": OVERSEAS_UDP_REJECT_IPV4_CIDRS.as_slice(), "action": "reject"}),
+                json!({"ip_version": 6, "network": ["udp", "icmp"], "ip_cidr": OVERSEAS_UDP_REJECT_IPV6_CIDRS.as_slice(), "action": "reject"}),
+            ];
+            rules.splice(video_idx..video_idx, anti_leak);
+        }
+
+        // Insert MOBILE_HOME_AUX_SUFFIXES right after the first $home_cidrs rule.
+        if let Some(home_cidr_idx) = rules.iter().position(|rule| {
+            rule.get("outbound").and_then(Value::as_str) == Some(home)
+                && rule.get("ip_cidr").is_some()
+        }) {
+            let home_aux = [
+                json!({"network": "tcp", "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "resolve", "server": HOME_DNS, "strategy": "ipv4_only"}),
+                json!({"network": "tcp", "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "outbound": home}),
+            ];
+            rules.splice(home_cidr_idx + 1..home_cidr_idx + 1, home_aux);
+        }
+
+        // Insert X_CLOUD_SUFFIXES + OVERSEAS_CLOUD_SUFFIXES + PUBLIC_STUN_SUFFIXES + CLOUD_IPV4/IPV6_CIDRS
+        // right after the $overseas_full route rule and before the ordinary China-DNS resolve rule.
+        if let Some(overseas_idx) = rules.iter().position(|rule| {
+            rule.get("outbound").and_then(Value::as_str) == Some("Tono-Exit")
+                && rule.get("domain").is_some()
+        }) {
+            let cloud_rules = [
+                json!({"network": "tcp", "domain_suffix": cloud_suffixes, "action": "resolve", "server": "Tono-DoH", "strategy": "ipv4_only"}),
+                json!({"network": "tcp", "domain_suffix": cloud_suffixes, "action": "route", "outbound": "Tono-Exit"}),
+                json!({"network": "tcp", "ip_cidr": CLOUD_IPV4_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
+                json!({"ip_version": 6, "network": "tcp", "ip_cidr": CLOUD_IPV6_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
+            ];
+            rules.splice(overseas_idx + 1..overseas_idx + 1, cloud_rules);
+        }
+    }
+
+    if let Some(dns_rules) = rendered
+        .pointer_mut("/dns/rules")
+        .and_then(Value::as_array_mut)
+    {
+        let insert_at = dns_rules.len().saturating_sub(1);
+        let extra_dns = [
+            json!({"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30}),
+            json!({"domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "server": HOME_DNS}),
+            json!({"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain_suffix": cloud_suffixes, "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30}),
+            json!({"domain_suffix": cloud_suffixes, "action": "route", "server": "Tono-DoH"}),
+        ];
+        dns_rules.splice(insert_at..insert_at, extra_dns);
+    }
+
+    Ok(rendered)
 }
 
 /// Exact comparison, not a second permissive routing parser. The privileged

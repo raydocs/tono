@@ -254,7 +254,9 @@ pub const ALLOWED_DOMAIN_SUFFIXES: &[&str] = &[
 /// Addresses that may never receive a DIRECT permit (the pinned DoH
 /// resolvers ride the tunnel by contract).
 pub fn is_permanently_protected(address: Ipv4Addr) -> bool {
-    address == Ipv4Addr::new(1, 1, 1, 1) || address == Ipv4Addr::new(8, 8, 8, 8)
+    address == Ipv4Addr::new(1, 1, 1, 1)
+        || address == Ipv4Addr::new(8, 8, 8, 8)
+        || crate::direct_domains::is_protected_cidr_ipv4(address)
 }
 
 /// Wire shape of `GET traffic-policy` (digest semantics identical to the

@@ -673,6 +673,16 @@ mod tests {
         assert_eq!(routed("unlisted.example", Ipv4Addr::new(10, 2, 3, 4)), "reject");
         assert_eq!(routed("youtubei.googleapis.com", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
         assert_eq!(routed("www.wikipedia.org", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
+        assert_eq!(routed("auth.workos.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Home-Residential");
+        assert_eq!(routed("www.gstatic.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Home-Residential");
+        assert_eq!(routed("web.whatsapp.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Home-Residential");
+        assert_eq!(routed("grok.x.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Home-Residential");
+        assert_eq!(routed("api.x.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Exit");
+        assert_eq!(routed("web.telegram.org", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Exit");
+        assert_eq!(routed("discord.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Exit");
+        assert!(rules[..ordinary].contains(&json!({"network": "tcp", "ip_cidr": config::CLOUD_IPV4_CIDRS, "action": "route", "outbound": "Tono-Exit"})));
+        assert!(rules[..ordinary].contains(&json!({"port": config::ENCRYPTED_DNS_PORTS, "action": "reject"})));
+        assert!(rules[..ordinary].contains(&json!({"network": ["udp", "icmp"], "port": config::STUN_UDP_PORTS, "action": "reject"})));
         assert_eq!(document["route"]["final"], "Tono-ThreeTier-Direct");
         assert_eq!(rules.first().unwrap()["ip_version"], 6);
         assert_eq!(rules.last().unwrap(), &json!({"action":"reject","no_drop":true}));

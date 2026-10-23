@@ -26,6 +26,7 @@ pub mod policy;
 pub mod policy_signature;
 pub mod protected_connectivity;
 pub mod recovery;
+pub mod routing;
 pub mod sing_box;
 pub mod three_tier;
 pub mod unarmed_probe;
@@ -67,4 +68,8 @@ pub use protected_connectivity::{
 pub use update_journal::{
     UpdateHandoffJournal, UpdateHandoffPhase, commit_verified_recovery, incomplete_from_phase,
     record_install_started,
+};
+pub use routing::{
+    DesktopRoutingMode, RouteConnection, RouteExplainer, RouteTier, RouteVerdict,
+    apply_selective_anti_leak_and_routing, build_hardened_selective_runtime,
 };
