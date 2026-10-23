@@ -75,7 +75,7 @@ internal class CatalogPreparation<T>(
             if (deadlineMs == null) {
                 // Start once, on the first explicit catalog signal; subsequent replies never extend it.
                 deadlineMs = nowMs() + BUDGET_MS
-                deadlineTask = schedule(BUDGET_MS, ::onDeadline)
+                deadlineTask = schedule(minOf(BUDGET_MS, DEADLINE_RECHECK_MS), ::onDeadline)
                 waiting()
             }
             if (accepts()) {
@@ -88,8 +88,10 @@ internal class CatalogPreparation<T>(
     private fun onDeadline() {
         deadlineTask = null
         if (!accepts()) return
-        // An early scheduler callback is not evidence of expiry. elapsedRealtime owns the budget.
-        deadlineTask = schedule((deadlineMs!! - nowMs()).coerceAtLeast(0), ::onDeadline)
+        // Relative executor delays can pause in deep sleep. Recheck within one active second
+        // after resume even if HTTP never completes; this is not a wakeup alarm or a wake lock.
+        val delay = minOf(DEADLINE_RECHECK_MS, (deadlineMs!! - nowMs()).coerceAtLeast(0))
+        deadlineTask = schedule(delay, ::onDeadline)
     }
 
     private fun finish(result: Result<T>) {
@@ -102,6 +104,7 @@ internal class CatalogPreparation<T>(
     companion object {
         const val PENDING_CODE = "EXIT_IDENTITY_PROPAGATING"
         const val TIMEOUT_CODE = "EXIT_IDENTITY_PREPARATION_TIMEOUT"
+        private const val DEADLINE_RECHECK_MS = 1_000L
         const val RETRY_DELAY_MS = 15_000L
         const val BUDGET_MS = 5 * 60_000L
     }
