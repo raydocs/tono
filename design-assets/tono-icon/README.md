@@ -9,7 +9,7 @@ design references and are not runtime inputs.
 The masters live outside `apps/windows/app`, so Tauri does not bundle source
 artwork or generated previews in the installer.
 
-To regenerate the checked-in runtime assets:
+To regenerate the checked-in runtime assets with Python 3.11 or newer:
 
 ```powershell
 python -m pip install -r design-assets/tono-icon/requirements.txt

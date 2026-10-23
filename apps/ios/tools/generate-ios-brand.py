@@ -10,7 +10,7 @@ adaptation differs:
 - TonoMark: the mark (half sun and two reflections, no tile) for the in-app top bar and sign-in.
 - LaunchMark: the same mark, centred on the splash ground by the launch screen.
 
-    python3 apps/ios/tools/generate-ios-brand.py      # Pillow==12.3.0 (design-assets/tono-icon/requirements.txt)
+    python3 apps/ios/tools/generate-ios-brand.py      # install design-assets/tono-icon/requirements.txt first
 """
 
 from __future__ import annotations

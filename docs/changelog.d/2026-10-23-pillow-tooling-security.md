@@ -1,0 +1,11 @@
+## 2026-10-23 · 固定图标工具的 Pillow 安全版本，不改已审定产物
+- 归属：SHIP_PLAN G3 工具可复现与安全维护；五模型产品审计的依赖项后续，不改变客户发布门。
+- 来源：main `acafd91c5c6089b68b66f99ddf6550ff44ef95f2`；分支 `fix/tooling-pillow-security-20261023`，PR 与最终提交门禁见交付回执。
+- 缺陷修复：无客户端行为修复。GitHub Dependabot 本次读取将 39 条未关闭 Pillow 告警归于唯一 `design-assets/tono-icon/requirements.txt` 的 12.3.0 pin（4 critical、23 high、12 medium）；各条列出的 first patched version 均为 13.0.0。这些是依赖告警，不代表 39 个独立线上漏洞或已验证利用。
+- 新增/优化：仅把 pin 提到 `Pillow==13.0.0`；README 写明该版本要求 Python≥3.11，iOS 工具用法注释引用同一 requirements，不再重复旧版本号。没有升级 apt 管理的 CI Pillow、没有运行生产图标生成入口、没有改动图标或客户端代码。
+- 工程与测试：在 Mac 编辑机已有 CPython 3.14 上创建两个独立临时 venv，仅安装官方 binary wheels（12.3.0 与 13.0.0），未安装工具链/模拟器或编译 native App。通过真实图标函数生成有限样本至 `/tmp`，覆盖渐变/预乘 alpha 缩放、六状态 glyph、tuned raster、9 尺寸 ICO、ICNS 与诊断 contact sheet/像素指标；不是全量重新生成生产资源。
+- Ran：两版本各自的 smoke 均通过（21 个图像样本/帧）；去除版本标识后，全部结果、像素 hash、PNG/ICO/ICNS 文件 hash 及指标一致。两版本均执行 `python tooling/scripts/tests/test_mac_sea_polish_metrics.py`，各 5 tests、0 failures。149 个 tracked 品牌与应用资源文件的 SHA-256 前后一致。
+- Red check：不适用产品行为 RED；这是依赖安全 pin 更新，旧版本功能 smoke 预期同样通过。没有运行漏洞利用样本，不将版本比较或静态告警冒充漏洞行为复现。
+- 验证证据：原始告警对象、pip 安装报告（含 wheel 来源/摘要）、两版本 smoke/单测日志、比较结果和资源 hash 清单保存在 `/tmp/tono-product-audit-20261023/pillow/`；关键输出及最终 head 的 ci-gate 在 PR 回执长期记录。现有 services CI 的 apt Pillow 检查不冒充 pinned 13.0.0 的检查。
+- Not run：Windows/Linux 上该 pin 的轮子与完整图标再生成、原生 App 构建/设备、客户候选、漏洞利用复现；GitHub 告警自动关闭需合入后由服务刷新，不提前声称已关闭。
+- 候选/发布：仅工具依赖和说明，无新图标、签名包、候选、生产部署或客户源推进；不新增产品 findings 条目。
