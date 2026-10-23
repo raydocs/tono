@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| ANDROID-LEGACY-NETWORK-PERMISSION | Android 10/11 网络监控缺少正常权限，旧系统创建 VPN service 时抛异常 | open | 待开 | 高·已确认（API29） | API29 云端已复现；API30 同分支源码推导；修复 GREEN、独立审查和真机验证待补，未合 main/发布 |
+| ANDROID-LEGACY-NETWORK-PERMISSION | Android 10/11 网络监控缺少正常权限，旧系统创建 VPN service 时抛异常 | open | 待开 | 高·已确认（API29/30） | API29/30 云端 RED 已复现；修复在 API29/30/34 GREEN，独立审查通过；未合 main/发布，真机未测 |
 
 2026-10-23，通用 Android 审计 F1。冻结产品基线 `0465af814`，仅增加回归的
 `4fbf1e6a4b387c80498e14975595791591839ee6` 在
@@ -20,3 +20,12 @@
   API29/30 专项在 Devin 执行，持续 CI 版本矩阵缺口保留，不擅自把 Android 加进 `ci-gate`。
 - 原始证据：云会话附件 `api29-instrumentation.log`、`api34-instrumentation.log`、
   `api29-signedout-service-reproduction.log`、`apk-permission-inspection.log`。没有真实手机或发布包验收。
+
+修复验证：同会话固定 `8a3ba2cc7db6a305aa96a3ef65646c951a7b474c`，API29/30/34 各执行
+同一个回归，均 `OK (1 test)`；各自未登录 MainActivity → service 创建无原权限崩溃，未宣称已连接。
+API30 先安装原 RED APK：`Tests run: 1, Failures: 1` 且相同 `SecurityException`。
+GREEN app APK SHA256 `0209e7078f24151c1a97bd5127d7c9755c78e28b545f225ed5e04f9dbf3f02fd`；
+instrumentation APK 与 RED 字节相同。routing JVM：18 passed；mobile：102 passed、25 默认 opt-in skips，
+0 failures/errors；lint 通过。API30 首次云端网络预检有一次环境重试，所有固定 APK 回归均一次通过。
+独立 Sol/xhigh 审查覆盖上述 SHA，无 finding；原始附件 `api{29,30,34}-green-instrumentation.log`、
+`api30-red-instrumentation.log`、`routing-unit.log`、`mobile-unit.log`、`mobile-lint.log` 已由父任务读取。
