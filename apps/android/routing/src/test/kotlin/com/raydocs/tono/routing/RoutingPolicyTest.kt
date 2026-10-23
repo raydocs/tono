@@ -56,6 +56,58 @@ class RoutingPolicyTest {
     }
 
     @Test
+    fun xWebApiAndMediaUseCloudWithoutWideningGrokOrProviderTrees() {
+        // Exact first-party services, not x.com/twitter.com/twimg.com suffixes or shared CDNs.
+        assertEquals(exit, outbound(threeTier, Connection(domain = "x.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "www.x.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "mobile.x.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "api.x.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "twitter.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "www.twitter.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "mobile.twitter.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "api.twitter.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "upload.twitter.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "abs.twimg.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "pbs.twimg.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "video.twimg.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "ton.twimg.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "cdn.syndication.twimg.com")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "t.co")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "api.x.com", packageName = "com.twitter.android")))
+        assertEquals("reject", outbound(threeTier, Connection(domain = "x.com", network = "udp")))
+        assertEquals("reject", outbound(threeTier, Connection(domain = "pbs.twimg.com", network = "udp")))
+        assertEquals("reject", outbound(threeTier, Connection(domain = "t.co", network = "icmp")))
+        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "x.com", "A"))
+        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "api.twitter.com", "AAAA"))
+        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "pbs.twimg.com", "A"))
+        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "t.co", "AAAA"))
+        assertEquals("fakeip", RouteExplainer.dnsServer(Fixtures.config(ipv6 = false), "api.x.com", "AAAA"))
+        assertEquals(home, outbound(threeTier, Connection(domain = "grok.x.com")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "api.grok.x.com")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "grok.com")))
+        assertEquals("fakeip", RouteExplainer.dnsServer(threeTier, "grok.x.com", "A"))
+        assertEquals("reject", outbound(threeTier, Connection(domain = "grok.x.com", network = "udp")))
+        assertEquals(exit, outbound(threeTier, Connection(domain = "youtubei.googleapis.com", packageName = "ai.x.grok")))
+        assertEquals(home, outbound(threeTier, Connection(domain = "api.x.com", packageName = "ai.x.grok")))
+        assertEquals(direct, outbound(threeTier, Connection(domain = "unreviewed.x.com")))
+        assertEquals(direct, outbound(threeTier, Connection(domain = "unreviewed.twitter.com")))
+        assertEquals(direct, outbound(threeTier, Connection(domain = "unreviewed.twimg.com")))
+        assertEquals(direct, outbound(threeTier, Connection(domain = "twimg.com")))
+        assertEquals(direct, outbound(threeTier, Connection(domain = "x.com.example.net")))
+        assertEquals(direct, outbound(threeTier, Connection(domain = "unrelated.akamaized.net")))
+        assertEquals("local", RouteExplainer.dnsServer(threeTier, "unreviewed.x.com", "A"))
+        // No process-wide X pin: a raw-IP dial without a recovered name retains the mode boundary.
+        assertEquals(direct, outbound(threeTier, Connection(ip = "203.0.114.9", packageName = "com.twitter.android")))
+        assertEquals(exit, outbound(stable, Connection(domain = "x.com")))
+        assertEquals(exit, outbound(stable, Connection(domain = "api.twitter.com")))
+        assertEquals(exit, outbound(stable, Connection(domain = "pbs.twimg.com")))
+        assertEquals("reject", outbound(stable, Connection(domain = "x.com", network = "udp")))
+        assertEquals("fakeip", RouteExplainer.dnsServer(stable, "pbs.twimg.com", "AAAA"))
+        assertEquals(home, outbound(stable, Connection(domain = "grok.x.com")))
+        assertEquals("local", RouteExplainer.dnsServer(stable, "printer.local", "A"))
+    }
+
+    @Test
     fun lanDnsAndStaleFakeAddresses() {
         assertEquals(direct, outbound(threeTier, Connection(ip = "192.168.1.20", port = 445)))
         assertEquals(direct, outbound(stable, Connection(ip = "fd12::5", port = 22)))

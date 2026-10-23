@@ -7,6 +7,8 @@ selector, the Home SOCKS detour through the cloud exit) is the generated graph u
   * every VLESS cloud node becomes a SOCKS outbound to a local "cloud" server;
   * the Home SOCKS server is pointed at a local "home" server, still detoured via Tono-Exit,
     so a Home request must traverse cloud → home.
+The DIRECT outbound also becomes a local SOCKS stand-in with the same tag, so a
+misroute is detected without contacting a public destination or depending on local DNS.
 The stand-in servers answer HTTP with which hop served them. Then the harness kills the Home
 and cloud stand-ins and checks that matched traffic fails instead of leaving DIRECT.
 
@@ -26,6 +28,13 @@ import urllib.request
 
 CLOUD_PORT, HOME_PORT, MIXED_PORT, DIRECT_PORT = 21080, 21081, 21090, 21095
 HOME_USER, HOME_PASS = "home-user", "home-pass"
+# Reviewed exact first-party X services; do not substitute provider/CDN suffixes.
+X_HOSTS = (
+    "x.com", "www.x.com", "mobile.x.com", "api.x.com",
+    "twitter.com", "www.twitter.com", "mobile.twitter.com", "api.twitter.com",
+    "upload.twitter.com", "abs.twimg.com", "pbs.twimg.com", "video.twimg.com",
+    "ton.twimg.com", "cdn.syndication.twimg.com", "t.co",
+)
 
 
 class Socks5Stub(threading.Thread):
@@ -133,6 +142,8 @@ def transform(config):
     for i, out in enumerate(config["outbounds"]):
         if out["type"] == "vless":
             config["outbounds"][i] = {"type": "socks", "tag": out["tag"], "server": "127.0.0.1", "server_port": CLOUD_PORT, "version": "5"}
+        elif out["type"] == "direct":
+            config["outbounds"][i] = {"type": "socks", "tag": out["tag"], "server": "127.0.0.1", "server_port": DIRECT_PORT, "version": "5"}
         elif out["type"] == "socks":
             out["server"], out["server_port"] = "127.0.0.1", HOME_PORT
     config["route"]["auto_detect_interface"] = False
@@ -179,7 +190,8 @@ def main():
     ai = "home" if socks_home else "cloud"
     cloud = Socks5Stub(CLOUD_PORT, "cloud", relay_ports=[HOME_PORT])
     home = Socks5Stub(HOME_PORT, "home", auth=(HOME_USER, HOME_PASS))
-    cloud.start(); home.start()
+    direct = Socks5Stub(DIRECT_PORT, "direct")
+    cloud.start(); home.start(); direct.start()
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(config, f)
     proc = subprocess.Popen([binary, "run", "-c", f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -201,6 +213,13 @@ def main():
     expect("www.youtube.com", "cloud")
     expect("www.cloudflare.com", "cloud")
     expect("example.com", ordinary)
+    expect("grok.x.com", ai)
+    expect("grok.com", ai)
+    for host in X_HOSTS:
+        expect(host, "cloud")
+    # Exact means exact, including the media namespace and unrelated shared CDN users.
+    for host in ("unreviewed.x.com", "unreviewed.twitter.com", "unreviewed.twimg.com", "unrelated.akamaized.net"):
+        expect(host, ordinary)
     print(f"   home saw via cloud relay: {home.seen[:3]} … cloud saw: {[s for s in cloud.seen if '21081' in s][:1]}")
     print("== Home stand-in down")
     home.stop(); time.sleep(0.3)
@@ -213,7 +232,7 @@ def main():
     expect("example.com", ordinary)
     print("== cloud stand-in down")
     cloud.stop(); time.sleep(0.3)
-    for host in ("www.youtube.com", "claude.ai"):
+    for host in ("www.youtube.com", "claude.ai", "grok.x.com") + X_HOSTS:
         got = fetch(host)
         ok = got not in ("direct", "home", "cloud")
         print(f"{'ok  ' if ok else 'FAIL'} {host:38} -> {got:22} (must fail, never direct)")
@@ -227,6 +246,7 @@ def main():
         print(f"{'ok  ' if ok else 'FAIL'} {'example.com':38} -> {got:22} (stable: cloud down must fail, never direct)")
         if not ok:
             failures.append("example.com/stable-cloud-down")
+    direct.stop()
     proc.terminate()
     out = proc.communicate(timeout=5)[0]
     os.unlink(f.name)

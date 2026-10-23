@@ -3,7 +3,7 @@
   "scope": "bounded-service-classification-not-IP-geolocation",
   "provenance": {
     "domestic": "Narrow exact-host subset of Tono ADDRESS_FREE_WEB_SUFFIXES at b3c6185309bcba13627038ccaaf60de596db829d; excludes shared cloud, AI and general CDN parents",
-    "overseas": "Explicit public web endpoints, not their provider trees: Wikipedia, Mozilla, Linux, GNU, Debian, Microsoft and Cloudflare; includes the three existing Tono cloud-path connectivity origins (gstatic, cp.cloudflare, Apple)",
+    "overseas": "Explicit public web endpoints, not their provider trees: Wikipedia, Mozilla, Linux, GNU, Debian, Microsoft and Cloudflare, plus reviewed exact X web/API/media/link hosts (decision 132); includes the three existing Tono cloud-path connectivity origins (gstatic, cp.cloudflare, Apple)",
     "updates": "Bundled source only; changes require source review and a new client/privileged-component build. No latest.dat, user file or remote rule_set."
   },
   "domestic_full": [
@@ -14,7 +14,11 @@
   "overseas_full": [
     "www.wikipedia.org", "en.wikipedia.org", "www.mozilla.org", "www.kernel.org",
     "www.gnu.org", "www.debian.org", "www.microsoft.com", "www.cloudflare.com",
-    "www.gstatic.com", "cp.cloudflare.com", "www.apple.com"
+    "www.gstatic.com", "cp.cloudflare.com", "www.apple.com",
+    "x.com", "www.x.com", "mobile.x.com", "api.x.com",
+    "twitter.com", "www.twitter.com", "mobile.twitter.com", "api.twitter.com",
+    "upload.twitter.com", "abs.twimg.com", "pbs.twimg.com", "video.twimg.com",
+    "ton.twimg.com", "cdn.syndication.twimg.com", "t.co"
   ],
   "graph": {
     "route": {

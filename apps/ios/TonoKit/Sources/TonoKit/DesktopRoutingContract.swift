@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "8241722b40c90467243d6730b0cebba5d3370a19ee86a8a5c7f6984581506f75"
+    public static let sourceDigest = "ae825bb68d0db0fca74d2fd4cf3e367ed5a7a1a19e6798a4a826958384203e0e"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -305,5 +305,20 @@ public enum DesktopRoutingContract {
         "www.gstatic.com",
         "cp.cloudflare.com",
         "www.apple.com",
+        "x.com",
+        "www.x.com",
+        "mobile.x.com",
+        "api.x.com",
+        "twitter.com",
+        "www.twitter.com",
+        "mobile.twitter.com",
+        "api.twitter.com",
+        "upload.twitter.com",
+        "abs.twimg.com",
+        "pbs.twimg.com",
+        "video.twimg.com",
+        "ton.twimg.com",
+        "cdn.syndication.twimg.com",
+        "t.co",
     ]
 }
