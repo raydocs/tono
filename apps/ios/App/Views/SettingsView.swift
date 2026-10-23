@@ -132,13 +132,17 @@ struct SettingsView: View {
         // One detent: nothing to drag between, so no grabber (a swipe down still closes it). At AX5
         // the grabber's 76 x 25 pt target was flagged by the contrast/hit-area sweep.
         .presentationDragIndicator(.hidden)
-        .confirmationDialog(L.t("settings_sign_out"), isPresented: $confirmSignOut, titleVisibility: .visible) {
+        // An alert, not a confirmation dialog: on iOS 26 the dialog drew a centred panel with the
+        // destructive button alone and no Cancel (even an explicit cancel-role button was dropped),
+        // so the way out was a tap outside. The alert names the account and always shows Cancel.
+        .alert(L.t("settings_sign_out"), isPresented: $confirmSignOut) {
             Button(L.t("settings_sign_out"), role: .destructive) {
                 Task { await model.signOut() }
                 dismiss()
             }
-            // Explicit, so the way out is always a visible button, not only a tap outside.
             Button(L.t("action_cancel"), role: .cancel) {}
+        } message: {
+            Text(L.t("settings_signed_in_as", model.email ?? ""))
         }
     }
 

@@ -108,14 +108,16 @@ final class SettingsUITests: XCTestCase {
         XCTAssertTrue(signOut.waitForExistence(timeout: 4))
         if !signOut.isHittable { app.swipeUp() }
         signOut.tap()
-        let sheet = app.sheets.firstMatch
-        XCTAssertTrue(sheet.waitForExistence(timeout: 6), "Sign out acted without asking")
-        XCTAssertTrue(sheet.buttons["Sign out"].exists)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 6), "Sign out acted without asking")
+        XCTAssertTrue(alert.buttons["Sign out"].exists)
+        XCTAssertTrue(alert.label.contains("Sign out"), alert.label)
         save("settings-en-sign-out-confirm")
-        // The action sheet's Cancel is its own element under the sheet, not inside it.
-        app.buttons["Cancel"].tap()
+        let cancel = alert.buttons["Cancel"]
+        XCTAssertTrue(cancel.exists, "no Cancel: the confirmation must offer a visible way out")
+        cancel.tap()
         XCTAssertTrue(app.buttons["settingsClose"].waitForExistence(timeout: 4), "Cancel closed Settings")
-        XCTAssertFalse(sheet.exists)
+        XCTAssertFalse(alert.exists)
     }
 
     /// Chinese, default size: the same first screen, rules screen and confirmation, with the
@@ -136,11 +138,13 @@ final class SettingsUITests: XCTestCase {
         XCTAssertTrue(signOut.waitForExistence(timeout: 6))
         if !signOut.isHittable { app.swipeUp() }
         signOut.tap()
-        let sheet = app.sheets.firstMatch
-        XCTAssertTrue(sheet.waitForExistence(timeout: 6), "Sign out acted without asking")
-        XCTAssertTrue(sheet.buttons["退出登录"].exists)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 6), "Sign out acted without asking")
+        XCTAssertTrue(alert.buttons["退出登录"].exists)
         save("settings-zh-sign-out-confirm")
-        app.buttons["取消"].tap()
+        let cancel = alert.buttons["取消"]
+        XCTAssertTrue(cancel.exists, "no 取消: the confirmation must offer a visible way out")
+        cancel.tap()
         XCTAssertTrue(app.buttons["settingsClose"].waitForExistence(timeout: 4))
     }
 }
