@@ -783,6 +783,79 @@ pub(super) fn image_candidates(image_file_names: &[&str]) -> Result<Vec<(u32, Pr
     Ok(candidates)
 }
 
+/// Release-only receipt. Unlike image_candidates, inaccessible live identities and partial
+/// Toolhelp enumeration are not silently equivalent to an empty process table.
+#[cfg(windows)]
+pub(super) struct StrictImageCandidates {
+    pub(super) candidates: Vec<(u32, ProcessIdentity)>,
+    pub(super) complete: bool,
+    pub(super) notes: Vec<String>,
+}
+
+#[cfg(windows)]
+pub(super) fn image_candidates_strict(image_file_names: &[&str]) -> Result<StrictImageCandidates> {
+    use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
+    use windows_sys::Win32::Foundation::{ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, HANDLE,
+        INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W,
+        Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject};
+    // SAFETY: no borrowed pointers; successful snapshot ownership transfers to OwnedHandle.
+    let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if raw == INVALID_HANDLE_VALUE { return Err(std::io::Error::last_os_error()).context("strict writer snapshot failed"); }
+    let snapshot = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+    let mut receipt = StrictImageCandidates { candidates: Vec::new(), complete: true, notes: Vec::new() };
+    let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    // SAFETY: live snapshot and correctly sized out buffer through the entire enumeration.
+    let mut more = unsafe { Process32FirstW(snapshot.as_raw_handle() as HANDLE, &mut entry) } != 0;
+    loop {
+        if !more {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(ERROR_NO_MORE_FILES as i32) {
+                receipt.complete = false;
+                receipt.notes.push(format!("strict writer enumeration incomplete: {error}"));
+            }
+            break;
+        }
+        let end = entry.szExeFile.iter().position(|unit| *unit == 0).unwrap_or(entry.szExeFile.len());
+        let name = String::from_utf16_lossy(&entry.szExeFile[..end]);
+        if image_file_names.iter().any(|candidate| name.eq_ignore_ascii_case(candidate)) {
+            let pid = entry.th32ProcessID;
+            // Do not use process_identity's boolean pre-check: inaccessible is not exited.
+            let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION
+                | windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE, 0, pid) };
+            let inspected = if raw.is_null() {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) { Ok(None) }
+                else { Err(anyhow::Error::from(error)) }
+            } else {
+                // SAFETY: fresh owned process handle; identity and exit check share it.
+                let handle = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+                let raw = handle.as_raw_handle() as HANDLE;
+                match unsafe { WaitForSingleObject(raw, 0) } {
+                    WAIT_OBJECT_0 => Ok(None),
+                    WAIT_TIMEOUT => match windows_process_identity(raw) {
+                        Ok(identity) => Ok(Some(identity)),
+                        Err(_) if unsafe { WaitForSingleObject(raw, 0) } == WAIT_OBJECT_0 => Ok(None),
+                        Err(error) => Err(error),
+                    },
+                    _ => Err(std::io::Error::last_os_error().into()),
+                }
+            };
+            match inspected {
+                Ok(Some(identity)) => receipt.candidates.push((pid, identity)),
+                Ok(None) => {}, // Native exit evidence, not access-denied guessing.
+                Err(error) => {
+                    receipt.complete = false;
+                    receipt.notes.push(format!("writer candidate {pid} identity unknown: {error:#}"));
+                }
+            }
+        }
+        more = unsafe { Process32NextW(snapshot.as_raw_handle() as HANDLE, &mut entry) } != 0;
+    }
+    Ok(receipt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{orphan_core_exemptions, select_orphan_core_pids};

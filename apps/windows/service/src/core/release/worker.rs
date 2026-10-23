@@ -229,7 +229,8 @@ async fn release(request: &ReleaseRequest, owner_key: &str, job_owner: Incarnati
             false
         }
     };
-    let (ended, scan_complete) = terminate_writers().await;
+    let (ended, scan_complete, drain_notes) = terminate_writers(worker, record.generation, &boot).await;
+    notes.extend(drain_notes);
     if !scan_complete {
         notes.push("the writer scan was incomplete".into());
     }
@@ -519,42 +520,25 @@ fn tono_core_running() -> Result<bool> {
 /// Terminate every process that could write the network state again and return the ones that
 /// survived, and whether the scan saw every candidate. Each is matched by its inspected
 /// identity, so a reused PID is left alone. A failed scan is never read as "none left".
-async fn terminate_writers() -> (Vec<Incarnation>, bool) {
-    let mut stuck = Vec::new();
-    let mut complete = true;
-    let own = std::process::id();
-    let roots = writer_roots();
-    let candidates = match crate::core::process::image_candidates(WRITER_IMAGE_NAMES) {
-        Ok(candidates) => candidates,
-        Err(error) => {
-            tracing::warn!("release: writer scan failed: {error:#}");
-            complete = false;
-            Vec::new()
-        }
-    };
-    for (pid, identity) in candidates {
-        if pid == own || !under_any(&identity.executable, &roots) {
-            continue;
-        }
-        let ended = crate::core::process::terminate_process_if_identity_matches(pid, &identity).await;
-        let alive = crate::core::process::process_started_at(pid)
-            .map(|started| started == Some(identity.started_at))
-            .unwrap_or(true);
-        if alive {
-            tracing::warn!("release: writer {pid} survived termination: {ended:?}");
-            stuck.push(Incarnation {
-                pid,
-                started_at: identity.started_at,
-            });
-        }
-    }
+async fn terminate_writers(worker: Incarnation, generation: u64, boot: &super::BootStamp) -> (Vec<Incarnation>, bool, Vec<String>) {
+    use crate::core::dns::broker_ledger::dispatch_drain;
+    let mut boundary = WriterBoundary;
+    let outcome = dispatch_drain::fence_drain_then_terminate(
+        crate::core::paths::service_paths().persistent_state_dir(), boot, worker, generation, &mut boundary,
+    ).await;
+    let mut stuck = outcome.stuck;
+    let mut complete = outcome.complete;
+    let mut notes = outcome.notes;
+    // No broad writer sweep after drain. Only the existing installed-Core sweep remains.
     if let Err(error) = crate::core::process::sweep_orphan_core_processes(&[], false).await {
         tracing::warn!("release: core sweep failed: {error:#}");
         complete = false;
     }
-    match crate::core::process::image_candidates(&["tono-core.exe", "verge-mihomo.exe", "sing-box.exe"]) {
+    match crate::core::process::image_candidates_strict(&["tono-core.exe", "verge-mihomo.exe", "sing-box.exe"]) {
         Ok(cores) => {
-            for (pid, identity) in cores {
+            complete &= cores.complete;
+            notes.extend(cores.notes);
+            for (pid, identity) in cores.candidates {
                 if crate::core::runtime_generation::is_installed_core_image_path(Path::new(&identity.executable)) {
                     stuck.push(Incarnation {
                         pid,
@@ -568,16 +552,59 @@ async fn terminate_writers() -> (Vec<Incarnation>, bool) {
             complete = false;
         }
     }
-    (stuck, complete)
+    (stuck, complete, notes)
 }
 
-fn writer_roots() -> Vec<String> {
-    let paths = crate::core::paths::service_paths();
-    [paths.install_dir(), paths.persistent_state_dir().join("updates-v1")]
-        .into_iter()
-        .filter_map(|root| root.canonicalize().ok())
-        .map(|root| root.to_string_lossy().to_ascii_lowercase())
-        .collect()
+struct WriterBoundary;
+
+impl crate::core::dns::broker_ledger::dispatch_drain::Boundary for WriterBoundary {
+    fn now(&self) -> Instant { Instant::now() }
+
+    fn scan(&mut self) -> crate::core::dns::broker_ledger::dispatch_drain::Scan {
+        use crate::core::dns::broker_ledger::dispatch_drain::{Scan, Target};
+        let mut scan = Scan { targets: Vec::new(), complete: true, notes: Vec::new() };
+        let paths = crate::core::paths::service_paths();
+        let mut roots = Vec::new();
+        for root in [paths.install_dir(), paths.persistent_state_dir().join("updates-v1")] {
+            match root.canonicalize() {
+                Ok(root) => roots.push(root.to_string_lossy().to_ascii_lowercase()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(error) => {
+                    scan.complete = false;
+                    scan.notes.push(format!("writer allowed root unreadable {root:?}: {error}"));
+                }
+            }
+        }
+        match crate::core::process::image_candidates_strict(WRITER_IMAGE_NAMES) {
+            Ok(receipt) => {
+                scan.complete &= receipt.complete;
+                scan.notes.extend(receipt.notes);
+                for (pid, identity) in receipt.candidates {
+                    if pid != std::process::id() && under_any(&identity.executable, &roots) {
+                        scan.targets.push(Target { incarnation: Incarnation { pid, started_at: identity.started_at }, identity });
+                    }
+                }
+            }
+            Err(error) => {
+                scan.complete = false;
+                scan.notes.push(format!("writer scan failed: {error:#}"));
+            }
+        }
+        scan
+    }
+
+    fn alive(&self, target: Incarnation) -> Option<bool> {
+        crate::core::process::process_started_at(target.pid).ok().map(|started| started == Some(target.started_at))
+    }
+
+    async fn pause(&mut self, duration: Duration) { tokio::time::sleep(duration).await; }
+
+    async fn terminate(&mut self, target: &crate::core::dns::broker_ledger::dispatch_drain::Target) -> bool {
+        let result = crate::core::process::terminate_process_if_identity_matches(target.incarnation.pid, &target.identity).await;
+        let gone = self.alive(target.incarnation) == Some(false);
+        if !gone { tracing::warn!("release: writer {:?} survived termination: {result:?}", target.incarnation); }
+        gone
+    }
 }
 
 fn under_any(executable: &str, roots: &[String]) -> bool {
