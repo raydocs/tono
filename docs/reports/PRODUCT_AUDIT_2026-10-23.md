@@ -16,7 +16,7 @@ Tono 已有路由、特权保护、账户隔离和恢复机制；当前最需要
 
 ## 实际优化与交付状态
 
-2026-10-23 合入状态复核基于 main `e93dc5ba6`；下列“已合”只指源码，不代表设备/签名/发布资格。
+2026-10-23 合入状态复核基于 main `57dc80e73`；下列“已合”只指源码，不代表设备/签名/发布资格。WMI/Android 新增进展单列为未合入，不借用 main 的资格。
 
 | 修复 | 原问题与最小改动 | 已有证据 | 交付状态与剩余验证 |
 |---|---|---|---|
@@ -25,6 +25,7 @@ Tono 已有路由、特权保护、账户隔离和恢复机制；当前最需要
 | Windows 迟到失败清理竞争 | 旧 A 的 adapter 读取结束后可能清掉已成功 B 的认证 fallback port；清零移至持同一 state mutex 的 generation-owned 提交 | [#1725](https://github.com/raydocs/tono/pull/1725)：原/修复代码使用同一主动 EOF fixture；旧版在真实端口断言失败；`96125d828` ci-gate GREEN、772 项通过；最终独立审查通过 | 已合 main `3e8fa876a`，最终交付 head CI 通过；仍待 Win10/11 真机。原两次 fixture 超时未被计作 RED/GREEN |
 | Android POST 歧义重放 | 验证码/refresh 请求可能已送达但丢响应，旧客户端仍换路径重放；首次 HTTP write **之前**标记歧义，保留 GET 和写前回退 | [#1728](https://github.com/raydocs/tono/pull/1728)：`b97d55c28` 同一回归 RED/GREEN；routing18、mobile103 passed / 25 skipped，lint 通过；独立审查通过 | 已合 main `ca40f3baa`，最终 ci-gate/android-ci 通过；仍待实际公网 TLS 故障/设备验证，未改 iOS |
 | macOS 新登录的孤儿 AI Home 会话 | 只在新认证、当前空闲归属、authenticated broad false + fresh selective false 时清内存/磁盘记录；保留真实/未知 hold | [#1730](https://github.com/raydocs/tono/pull/1730)：旧行为在 `ai-home != stable` 断言 RED；最终 head `8ea8c3a71` CI39942446548 GREEN，758 tests/1 skipped/0 failures，独立 R1 approve | 已合 main `91d9b9bed`；仍待安装机账户切换/冷启动/真实 helper hold；不授权自动替换仍持有的 AI 保护 |
+| Windows Restore 在途 WMI | 隔离后立即杀 writer 可能留下本次开机无法安全退休的批次；新增精确进程实例单向封闸与共享最多 10 秒排空，未知/超时不新增退休证明 | [#1733](https://github.com/raydocs/tono/pull/1733)：RED39963653880 在真实顺序断言失败（642 pass/1 fail）；源码 `1d24786a8` GREEN39965161786，Service643/0、生产 build/native DNS 通过；Sol/xhigh R1 approve | **draft，未合入**；最终 head `fecaa41d9` exact CI39973037208 GREEN，源码未变。跨进程锁/ACL/SCM/混装/Win10/11 安装机验证待做，禁用自动合并 |
 | Ops 间接 Next 依赖 | 仅将 Geist 引入的 Next-family lock 条目16.4.0→16.4.2，不改字体和 Vite 应用逻辑 | [#1729](https://github.com/raydocs/tono/pull/1729)：442 tests、typecheck/lint/build/预算通过，字体 hash 不变；npm audit critical1→0，exact-head CI39938624059 GREEN | 已合 main `acafd91c5`；未部署，不声称已复现线上 Next 漏洞 |
 | Pillow 图标工具依赖 | 12.3.0→13.0.0；更新 Python≥3.11 前提，不重新生成已审定资源 | [#1731](https://github.com/raydocs/tono/pull/1731)：两版本各5 tests；21图像样本/帧和编码结果相同，149个 tracked 资源 hash 未变；exact-head gate39943798978 GREEN | 已合 main `e93dc5ba6`；仍未做其他 OS 的 wheel 运行/全量生成或漏洞利用验证，平台 CI 的跳过不冒充 Pillow13 运行 |
 
@@ -59,7 +60,7 @@ macOS保护范围 #1724 仍是 draft，等待人工视觉验收；准确状态�
 1. **P2，既有 `WIN-RESTORE-ABANDONS-INFLIGHT-WMI`**：Restore 中断持有在途 WMI DNS 批次的
    Service，可能使当前开机的账本无法安全退休。应先 fence 新写入，再对仍存活且归属可证的写入做
    有界 cooperative drain；未知/超时仍保留拒绝和重启恢复。**不能按等待时间或 PID 已死删除账本**。
-   方案已限定为独立短锁、精确进程实例的单向 dispatch fence 与共享有界排空；修复正在独立工作树实现，未称已通过。
+   该方案已在 #1733 实现，取得同一回归的真实 RED/GREEN、原生构建与精确差异独立审查；最终 head `fecaa41d9` CI 通过。仍为 draft，跨进程/安装机验收未过；不要重新实现或把旧 abandoned 账本当作可按超时删除。
    验收：冻结真实批次返回点的顺序回归，Win10/11 普通/管理员用户的 Service 进程边界验证。
 2. **P2，既有 `WIN-RESUME-RECEIPT-RACE`**：Service 保留 Core 与 App 二次采样之间有竞争，
    可能误报自身 `:53` 为外部 DNS 冲突。方向是带 owner/attempt/Core 身份、兼容旧 Service 的保留回执，
@@ -95,7 +96,7 @@ macOS保护范围 #1724 仍是 draft，等待人工视觉验收；准确状态�
 3. **P2/P3 候选，无上行与失败意图**：cached catalog + 离线不应无限停在 Connecting；Core 启动失败后
    `wantConnected` 的保留/清除需按自动恢复意图定义，避免之后意外重连。验收包括取消、服务重建和无网络预算届满。
 4. **P2，跨端首连契约**：`503 EXIT_IDENTITY_PROPAGATING` 在移动端按失败结束，桌面有有界等待。
-   应有稳定错误码驱动的等待/取消/截止状态，不盲目复制长轮询预算，更不能对所有 POST/503 自动重放。
+   WIP `74ee58ef5` 已加仅目录 GET 明确错误码驱动的等待/取消/固定截止；首次信号起最多 5 分钟、15 秒重读，独立于在途 IO，排队发送前复核归属，POST 分类隔离。单次读取 RED `301ae7bc6`、休眠 RED `755625aac` 与 FIX 的 engine/UI 测试逐字节相同，但**尚未编译或执行行为 RED/GREEN**，独立 R1 指出的 P2 休眠时钟缺口已在源码补最多 1 秒截止复核及双时钟回归；最终 R2 仍在运行，不能称预算已运行验证。仅 WIP refs，无 PR；既有 Devin 额度阻塞，未新建付费 VM。不能因源码已写而标 fixed。
 5. **P3，体验一致性**：consent 前说明按实际模式；Stable 的 degraded 不应沿用“部分可用”而不说明范围；
    增加重发验证码与冷却/无障碍反馈。先协调 #1722/#1723 的 settings 改动，不覆盖其文件。
 
@@ -111,8 +112,8 @@ macOS保护范围 #1724 仍是 draft，等待人工视觉验收；准确状态�
 - **依赖**：初始 GitHub API 历史快照 44 个告警：Next 3、图标工具 Pillow 39、glib 2（不是现在的未修数量）。
   Next 16.4.0 的修复指向 16.4.1，但 ops-console 实际是 Vite，不可把间接 Next 告警说成线上 Next 服务已可利用。
   Pillow 为资产生成工具；升级先做隔离回归，不重新生成所有已审定图标。glib 先核对 Windows 构建可达性。
-  告警数不是独立线上漏洞数。Next/Pillow 已分别通过 #1729/#1731 合入修复 pin；glib 尚未处理，
-  GitHub 告警自动关闭状态不由本报告猜测。
+  告警数不是独立线上漏洞数。Next/Pillow 已分别通过 #1729/#1731 合入修复 pin。随后 API 实查剩余两个 open 告警均为两份锁文件中的同一个 glib0.18.5 advisory；
+  [精确锁定包的目标条件核对](DEPENDENCY_TARGET_REACHABILITY_2026-10-23.md)显示所有 GTK 入口仅面向 Linux/BSD，未把它说成已复现 Windows 漏洞。没有强升不兼容 glib、删锁条目或 dismiss；仍缺 hosted target 解析图/产物证据。
 - **可访问性**：macOS/Windows 的大字号、键盘、VoiceOver/Narrator、减少动态效果和焦点恢复缺当前实机证据。
   Android 已有历史大字号 emulator 证据，但不是本轮新 SHA 或所有手机屏幕的通过证明。
 - **可测性与性能**：状态优先级做实际视图共用的投影；并发回归用受控事件而非 sleeps。
@@ -131,8 +132,9 @@ macOS保护范围 #1724 仍是 draft，等待人工视觉验收；准确状态�
 
 1. 首批三项非 UI 修复及后续 macOS 孤儿会话、两项依赖更新已核对精确交付门禁并合入 main。
    #1724 UI 仍待人工视觉验收；原夹具失败未被算作缺陷复现，macOS 末轮 minor 仍 open。
-2. 继续 Windows WMI 的有界实现与运行/审查；Android handoff 等既有云端额度恢复再验证。
-   Windows resume、Android 后台通知/首连传播/诊断身份等仍未完成，不因前述合入而划掉。
+2. Windows WMI #1733 已完成源码/运行/审查，等待 Win10/11 安装机专项；Android handoff 与首连传播 WIP 等既有云端额度恢复验证。
+   Windows resume 回执会涉及 #1643 的 Service handler 所有权路径，应先协调；macOS wake 门还缺同机时序证据，并与 #1504 的 helper/App 生命周期路径重叠。
+   Android 后台通知/首连传播/诊断身份及其他列明项仍未完成，不因前述合入而划掉。
 3. 通用 Android 按 API29/30（旧 requestNetwork）、31/32（新 callback）、33（通知权限）、34（FGS）、35/36（target 行为）
    分层验证；**本轮权限回归只覆盖 29/30/34**。云端之外至少补一台普通 Android 真机的 Wi-Fi/蜂窝、Doze、重启、always-on/lockdown。
 4. macOS 在可恢复的实际安装设备验证 AI Home/Stable/Three-tier、睡眠/唤醒、退出/重开、恢复网络、升级/卸载；
