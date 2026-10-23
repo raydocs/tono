@@ -236,25 +236,43 @@ pub(super) async fn record_connect_failure(
 mod tests {
     use super::*;
     use crate::tono::{state::TonoApiClient, transport::TonoTransport};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tono_core::auth::{ApiRequest, HttpMethod, HttpTransport as _};
     use tokio::{io::{AsyncReadExt as _, AsyncWriteExt as _}, sync::oneshot, time::timeout};
 
     #[tokio::test]
     async fn late_failure_keeps_successor_auth_tunnel_port() {
-        // Bound, non-listening sockets deterministically refuse the direct paths. Reserve the
-        // alternate ports on a separate loopback address too: no DNS, internet, or local daemon
-        // can answer before the real transport reaches B's published tunnel fallback.
-        let bind_refused = |port| {
-            let socket = socket2::Socket::new(
-                socket2::Domain::IPV4, socket2::Type::STREAM, Some(socket2::Protocol::TCP),
-            ).unwrap();
-            socket.bind(&std::net::SocketAddr::from(([127, 0, 0, 2], port)).into()).unwrap();
-            socket
-        };
-        let direct = bind_refused(0);
-        let address = direct.local_addr().unwrap().as_socket().unwrap();
-        let _alternates: Vec<_> = tono_service_protocol::CONTROL_PLANE_PORTS.iter()
-            .map(|port| bind_refused(*port)).collect();
+        // Accept and drain each direct/alternate request, then send EOF without an HTTP
+        // response. A GET retries this real transport error; no OS SYN/refusal timing, DNS,
+        // public endpoint, TLS exception, or alternate successful response is involved.
+        async fn reject_requests(listener: tokio::net::TcpListener, mut stopped: oneshot::Receiver<()>) {
+            loop {
+                let (mut stream, _) = tokio::select! {
+                    accepted = listener.accept() => accepted.unwrap(),
+                    _ = &mut stopped => return,
+                };
+                let mut header = Vec::new();
+                while !header.ends_with(b"\r\n\r\n") {
+                    header.push(stream.read_u8().await.unwrap());
+                    assert!(header.len() < 8192);
+                }
+                stream.shutdown().await.unwrap();
+            }
+        }
+        let direct = tokio::net::TcpListener::bind("127.0.0.2:0").await.unwrap();
+        let address = direct.local_addr().unwrap();
+        let mut endpoints = vec![direct];
+        for port in tono_service_protocol::CONTROL_PLANE_PORTS {
+            // The production alternate walk skips 443.
+            if port != 443 {
+                let alternate = std::net::SocketAddr::from(([127, 0, 0, 2], port));
+                endpoints.push(tokio::net::TcpListener::bind(alternate).await.unwrap());
+            }
+        }
+        let rejectors: Vec<_> = endpoints.into_iter().map(|listener| {
+            let (stop, stopped) = oneshot::channel();
+            (stop, tokio::spawn(reject_requests(listener, stopped)))
+        }).collect();
         let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mixed_port = proxy.local_addr().unwrap().port();
         let state = Arc::new(TonoState::for_test());
@@ -269,6 +287,10 @@ mod tests {
         };
         let (entered, at_adapters) = oneshot::channel();
         let (resume, resumed) = oneshot::channel();
+        let status_entered = Arc::new(AtomicBool::new(false));
+        let cleanup_entered = Arc::new(AtomicBool::new(false));
+        let status_observed = Arc::clone(&status_entered);
+        let cleanup_observed = Arc::clone(&cleanup_entered);
         let task_state = Arc::clone(&state);
         let failure_a = tokio::spawn(async move {
             fail_connect_with(
@@ -278,8 +300,14 @@ mod tests {
                     resumed.await.unwrap();
                     Vec::new()
                 },
-                async { panic!("stale A must not query privileged Service status") },
-                |_, _, _| async { panic!("stale A must not enter privileged cleanup") },
+                async move {
+                    status_observed.store(true, Ordering::SeqCst);
+                    panic!("stale A must not query privileged Service status")
+                },
+                move |_, _, _| {
+                    cleanup_observed.store(true, Ordering::SeqCst);
+                    async { panic!("stale A must not enter privileged cleanup") }
+                },
             ).await
         });
         timeout(Duration::from_secs(5), at_adapters).await.unwrap().unwrap();
@@ -307,6 +335,10 @@ mod tests {
         resume.send(()).unwrap();
         assert!(!timeout(Duration::from_secs(5), failure_a).await.unwrap().unwrap(),
             "A must return stale without running privileged cleanup");
+        // reconcile_failure's inner spawn maps panic to JoinError, then false. Observe entry
+        // independently after it has joined, so a swallowed panic cannot satisfy this oracle.
+        assert!(!status_entered.load(Ordering::SeqCst), "stale A entered Service status");
+        assert!(!cleanup_entered.load(Ordering::SeqCst), "stale A entered privileged cleanup");
         {
             let inner = state.lock().await;
             assert_eq!(inner.connect_generation, generation_b);
@@ -335,7 +367,8 @@ mod tests {
             bearer: Some("fixture-access-B".into()),
             json_body: None, binary_body: None, headers: Vec::new(),
         };
-        let response = timeout(Duration::from_secs(10), client.transport().send(request.clone())).await.unwrap();
+        let response = timeout(Duration::from_secs(10), client.transport().send(request.clone())).await
+            .expect("loopback rejection/fallback fixture must finish before the behavioral assertion");
         assert!(response.is_ok(), "stale A cleared B's authenticated tunnel fallback port: {response:?}");
         assert_eq!(response.unwrap().body, b"tunnel-B");
         let (proxy, header) = timeout(Duration::from_secs(5), server).await.unwrap().unwrap();
@@ -355,11 +388,16 @@ mod tests {
                 true
             },
         ).await);
-        assert!(timeout(Duration::from_secs(10), client.transport().send(request)).await.unwrap().is_err(),
+        assert!(timeout(Duration::from_secs(10), client.transport().send(request)).await
+            .expect("loopback rejection fixture must finish for the current-generation control").is_err(),
             "a current failure must retire its authenticated tunnel fallback port");
         let incoming = proxy.accept();
         tokio::pin!(incoming);
         assert!(futures::poll!(&mut incoming).is_pending(), "current failure left its tunnel port published");
+        for (stop, task) in rejectors {
+            stop.send(()).unwrap();
+            timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
+        }
         let inner = state.lock().await;
         assert_eq!(inner.connect_generation, generation_b);
         assert!(!inner.fsm.status().is_connected);
