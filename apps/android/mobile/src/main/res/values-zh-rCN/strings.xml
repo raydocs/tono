@@ -114,7 +114,7 @@
     <string name="verdict_BLOCKED">拦截</string>
     <string name="verdict_DNS">DNS</string>
     <string name="settings_system">Android 系统保护</string>
-    <string name="system_verify_in_android">始终开启状态未确认。Tono 停止后，应用可能直连。</string>
+    <string name="system_verify_in_android">始终开启状态未确认。Tono 停止后，应用可能直\u2060连。</string>
     <string name="system_open">打开 VPN 设置</string>
     <string name="settings_account">账号</string>
     <string name="settings_signed_in_as">已登录</string>
@@ -124,7 +124,7 @@
     <string name="a11y_confirm_sign_out">确认退出登录</string>
     <string name="settings_about">关于</string>
     <string name="about_version">Tono %1$s · 测试版</string>
-    <string name="about_core">内核：sing-box %1$s（GPL-3.0-or-later，源码：github.com/SagerNet/sing-box）</string>
+    <string name="about_core">内核：sing-box %1$s（GPL-3.0-or-later，源\u2060码：github.com/SagerNet/sing-box）</string>
     <string name="about_contract">路由合同：raydocs/tono@%1$s</string>
     <string name="about_licenses">许可证与源代码</string>
     <string name="ipv6_on">当前网络 IPv6：有</string>
