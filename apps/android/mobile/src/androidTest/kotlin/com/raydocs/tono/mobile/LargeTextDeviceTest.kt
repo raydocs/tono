@@ -8,7 +8,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -82,12 +84,31 @@ class LargeTextDeviceTest {
         compose.waitForIdle()
         cut += A11yContract.truncatedText(compose, "details")
         shot("fixture-14-font-2.0-details")
+        // The sheet scrolls: the mode control and the route check sit under the lanes at this size.
+        compose.onNodeWithTag("routeCheckHost").performScrollTo()
+        compose.waitForIdle()
+        shot("fixture-14b-font-2.0-details-mode-and-check")
         device.pressBack()
         compose.waitForIdle()
         compose.onNodeWithContentDescription(context.getString(R.string.settings_title)).performClick()
         compose.waitForIdle()
         cut += A11yContract.truncatedText(compose, "settings")
         shot("fixture-15-font-2.0-settings")
+        compose.onNodeWithText(context.getString(R.string.about_licenses)).performScrollTo()
+        compose.waitForIdle()
+        shot("fixture-15b-font-2.0-settings-bottom")
+        compose.onNodeWithText(context.getString(R.string.settings_routing_rules)).performScrollTo().performClick()
+        compose.waitForIdle()
+        cut += A11yContract.truncatedText(compose, "routing-rules")
+        shot("fixture-15c-font-2.0-routing-rules")
+        device.pressBack()
+        compose.waitForIdle()
+        compose.onNodeWithText(context.getString(R.string.settings_sign_out)).performScrollTo().performClick()
+        compose.waitForIdle()
+        cut += A11yContract.truncatedText(compose, "sign-out-confirm")
+        shot("fixture-15d-font-2.0-sign-out-confirm")
+        device.pressBack()
+        compose.waitForIdle()
         File(out, "font-2.0-report.txt").writeText(
             if (cut.isEmpty()) "font_scale 2.0: no text ellipsized or clipped in ${DeviceFixtures.homeStates.size} home states, sign-in, details and settings"
             else cut.joinToString("\n"),

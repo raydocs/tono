@@ -378,6 +378,8 @@ class HorizonUiDeviceTest {
         back()
         compose.onNodeWithContentDescription(zhContext.getString(R.string.settings_title)).performClick(); check("settings"); shot("fixture-24-zh-settings")
         assertTrue("Chinese copy is on screen", compose.onAllNodes(androidx.compose.ui.test.hasText(zhContext.getString(R.string.settings_title))).fetchSemanticsNodes().isNotEmpty())
+        compose.onNodeWithText(zhContext.getString(R.string.settings_routing_rules)).performClick(); check("routing-rules"); shot("fixture-24b-zh-routing-rules"); back()
+        compose.onNodeWithText(zhContext.getString(R.string.settings_sign_out)).performScrollTo().performClick(); check("sign-out-confirm"); shot("fixture-24c-zh-sign-out-confirm"); back()
         assertEquals(found.joinToString("\n"), 0, found.size)
     }
 
