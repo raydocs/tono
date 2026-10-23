@@ -21,3 +21,11 @@ unconfirmed、Protected Offline、degraded 仍先于已验证连接，这些状�
 原模式回归 RED：run [39919244126](https://github.com/raydocs/tono/actions/runs/39919244126)，
 实际断言 `Protected != AI protected`；原 head `6850784b2` GREEN 为
 [39919786180](https://github.com/raydocs/tono/actions/runs/39919786180)。新过渡态回归及修正的 RED/GREEN 待补。
+
+最终验收补充：过渡态 RED `96f4ecb9f` 的 run39921409612 执行新增方法，四个真实文案断言失败；
+相同测试在 `f32fcf93b3692e34005e9e16a2054158231922e9` 的 run39921670825 通过，
+TonoTests 759 tests / 1 skipped / 0 failures，LocalizationCoverageTests 通过，ci-gate 成功。
+Sol/xhigh R2覆盖该精确 diff，R1三项已修；新增 minor `MAC-DASHBOARD-RETRY-STATUS-SKEW`
+按末轮停止规则在 [#1727](https://github.com/raydocs/tono/pull/1727) 记录 open，并列入本 PR 验证评论。
+该差异是重试尾段徽章/指标与详情不同步，未证明保护释放或泄漏；不得声称所有状态一致。
+后续仅追加本文档证据，不改产品树。UI PR保持draft，人工视觉/实机资格未完成，不自动合并。

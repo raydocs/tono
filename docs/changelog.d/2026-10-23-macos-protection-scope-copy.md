@@ -16,3 +16,8 @@
 - 实际 hosted 证据：初始回归 RED run39919244126 执行 1 次失败于 `Protected != AI protected`；
   初始修复 head6850784b2 的 ci-gate run39919786180 成功。续修 head 的 RED/GREEN、R2 审查仍待完成；
   前一 head 通过不能代替当前 head 的验收。
+
+- 最终父任务验收：f32fcf93b的ci-gate39921670825成功；TonoTests759tests/1skipped/0failures，
+  两个scope回归和本地化检查通过；过渡态RED39921409612有四个预期文案断言失败。
+  R2覆盖f32fcf93b，R1已修；新增retry徽章/指标不同步minor保留open（#1727），无第三轮。
+  本次仅文档收尾，不改已验产品；人工UI/实机未完成，不自动合并或发布。
