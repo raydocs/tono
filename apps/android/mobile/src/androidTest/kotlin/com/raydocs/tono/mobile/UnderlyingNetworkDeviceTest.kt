@@ -91,6 +91,7 @@ class UnderlyingNetworkDeviceTest {
 
     private fun follows(vpn: Network, underlying: NetworkMonitor.Underlying, transport: Int): NetworkCapabilities =
         awaitValue("established VPN must follow physical handoff to ${underlying.network} / transport $transport") {
+            assertEquals("fixture reloaded the VPN; this is not a same-TUN handoff", vpn, this.vpn())
             connectivity.getNetworkCapabilities(vpn)?.takeIf {
                 it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && it.hasTransport(transport) &&
                     !it.hasTransport(if (transport == NetworkCapabilities.TRANSPORT_WIFI)
@@ -108,6 +109,7 @@ class UnderlyingNetworkDeviceTest {
         val animation = shell("settings get global animator_duration_scale").trim()
         assertTrue("known original Wi-Fi setting", wifi in setOf("0", "1"))
         assertTrue("known original mobile-data setting", data in setOf("0", "1"))
+        assertTrue("known original animation setting", animation == "null" || animation.toFloatOrNull() != null)
         val monitor = NetworkMonitor(connectivity)
         var bound = false
         var activity: ActivityScenario<MainActivity>? = null
