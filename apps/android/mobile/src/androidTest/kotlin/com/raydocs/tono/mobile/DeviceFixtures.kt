@@ -61,7 +61,8 @@ object Captures {
     /**
      * The "FIXTURE · no tunnel" pill ([FixtureFrame]) is in the picture: enough pixels of its colour in
      * the status-bar band, as drawn, under an open sheet's scrim (45 % or 55 % of the sheets' night
-     * colour) or under a Material dialog's scrim (32 % black, the sign-out confirmation). A fixture
+     * colour) or under a dialog window's dim (60 % black on this emulator, measured FFB4A0 → 664840 behind the
+     * sign-out confirmation). A fixture
      * capture without it could pass for the real app.
      */
     fun fixtureMarked(file: java.io.File): Boolean {
@@ -69,7 +70,7 @@ object Captures {
         val mark = intArrayOf(0xFF, 0xB4, 0xA0)
         val night = intArrayOf(0x06, 0x07, 0x0F)
         val looks = listOf(0f, 0.45f, 0.55f).map { scrim -> IntArray(3) { (mark[it] * (1 - scrim) + night[it] * scrim).toInt() } } +
-            listOf(IntArray(3) { (mark[it] * (1 - 0.32f)).toInt() })
+            listOf(IntArray(3) { (mark[it] * (1 - 0.6f)).toInt() })
         val band = (b.height * 0.06).toInt()
         var hits = 0
         for (y in 0 until band step 2) for (x in 0 until b.width step 2) {

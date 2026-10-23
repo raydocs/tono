@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -94,7 +95,8 @@ class LargeTextDeviceTest {
         compose.waitForIdle()
         cut += A11yContract.truncatedText(compose, "settings")
         shot("fixture-15-font-2.0-settings")
-        compose.onNodeWithText(context.getString(R.string.about_licenses)).performScrollTo()
+        // The colophon's last line, so the capture shows the end of the list clear of the navigation bar.
+        compose.onNode(hasText("GPL-3.0-or-later", substring = true)).performScrollTo()
         compose.waitForIdle()
         shot("fixture-15b-font-2.0-settings-bottom")
         compose.onNodeWithText(context.getString(R.string.settings_routing_rules)).performScrollTo().performClick()
