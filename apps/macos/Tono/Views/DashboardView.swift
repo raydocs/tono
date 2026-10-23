@@ -459,7 +459,7 @@ struct DashboardView: View {
         if appState.isProtectionBlockUnreadable { return "Protection unknown" }
         if appState.isProtectionBlocked { return "Protected offline" }
         if appState.isProtectionUnconfirmed { return "Protection unknown" }
-        if isDegradedWhileConnected { return "Protected — exit degraded" }
+        if isDegradedWhileConnected { return isListedAIScope ? "Degraded" : "Protected — exit degraded" }
         guard appState.isConnected else { return "Standby" }
         return isListedAIScope ? "AI protected" : "Protected"
     }
