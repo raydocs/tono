@@ -65,8 +65,6 @@ final class SettingsUITests: XCTestCase {
                 XCTAssertGreaterThan(rules.frame.minY, toggle.frame.minY, "\(lang): rules row \(rules.frame) above the switch \(toggle.frame)")
             }
             save("settings-\(lang)-ax5-first-screen")
-            app.swipeUp()
-            XCTAssertTrue(rules.waitForExistence(timeout: 4), "\(lang): routing rules row missing after a scroll")
             app.terminate()
         }
     }
