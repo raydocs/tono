@@ -23,6 +23,7 @@ final class TrafficMonitor {
     private let deliver: TrafficDelivery
     private var run: TrafficLifetime?
     private var session: Date?
+    private var statisticsStartEpoch: UInt64?
     var onRate: ((Int64, Int64) -> Void)?
 
     init(queue: DispatchQueue = DispatchQueue(label: "tono.app.traffic"),
@@ -36,8 +37,15 @@ final class TrafficMonitor {
     /// AppModel's statistics boundary, separate from tunnel/protection state. Kept here so tests
     /// exercise the production path from NE status and shared lifecycle intent to the real worker.
     func updateTunnel(_ status: TunnelStatus, session: Date?, eligible: Bool, startEpoch: UInt64?) {
-        if status == .connected, eligible { start(session: session) }
-        else { stop() }
+        // An explicit stop stays closed across disconnected/invalid/load/late-connected events.
+        // Only another shared explicit start (app or outside command) releases it. Epoch zero
+        // inherits a running tunnel on first load; On Demand retains the last permitted epoch.
+        guard status == .connected, eligible, let startEpoch else { stop(); return }
+        if statisticsStartEpoch != startEpoch {
+            stop() // Even an unchanged NE date cannot carry callbacks across explicit starts.
+            statisticsStartEpoch = startEpoch
+        }
+        start(session: session)
     }
 
     /// Repeated NE connected notifications do not bypass backoff. A new connected date belongs

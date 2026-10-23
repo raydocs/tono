@@ -33,3 +33,5 @@ coordinator generation 解锁无法区分 start 与 stop/remove/cancelPendingSta
 
 ### 2026-10-22 · 用户授权的 P3 统计意图续修
 先前兜底之后，用户明确授权最小跨入口接缝：只读区分共享 lifecycle 的启动 epoch、显式停止及初始继承，不用任意 generation 变化解锁，也不把 stop/remove 当 start。统计入口移到生产 TrafficMonitor 接缝，准备在云端执行一个真实旧准入 RED／修复 GREEN；证据未出前 P3 仍未关闭。隧道所有权/FSM、NE、保护语义和凭证完全不变，新增 delta 由父线程审查。
+
+生产修复：AppModel 只把 account gate 和共享只读 epoch 交给 TrafficMonitor，`userStopping` 继续仅保留原 UI/失败分类含义；统计 nil 意图不能由 NE 的 invalid/disconnected/connected 或 load 清除。新显式 start 同时替换统计 epoch（即使 NE 日期未变），合法 OnDemand 不需要新 generation；初次 load/重启允许继承现有 NE 会话。一个目标时序回归从首次 invalid Cancel、disconnected Cancel 运行到新外部 start、新 App start epoch、OnDemand、外部 Off、SignOut/remove 和初次继承；RED fixture `e535793e4b7d8251c5504e85deb1ab6d9a79e6b3` 仍保留旧准入。等待云端原始 RED/GREEN、真实 Libbox 编译后更新结果；不会把 shim 当真实 NE 证明。

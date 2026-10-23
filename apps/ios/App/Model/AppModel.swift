@@ -794,7 +794,9 @@ final class AppModel: ObservableObject {
         }
         tunnelStatus = status
         connectedSince = status.isUp ? since : nil
-        traffic.updateTunnel(status, session: since, eligible: signedIn && !signingOut && !userStopping,
+        // Statistics follows the shared explicit switch, not userStopping (a transient UI/failure
+        // classifier cleared by disconnected/invalid, and bypassed by external explicit starts).
+        traffic.updateTunnel(status, session: since, eligible: signedIn && !signingOut,
                              startEpoch: TunnelController.lifecycle.statisticsStartEpoch)
         switch status {
         case .connected:

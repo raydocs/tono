@@ -19,5 +19,6 @@
 ### 2026-10-22 · PR #1715 P3 扩围续修（统计意图接缝）
 - 用户明确继续修复，允许必要的跨入口统计意图关联；先前 open residual 记录为当时范围决策，不作当前修复通过证据。
 - 最小接缝：coordinator 只读 `statisticsStartEpoch`（初次 load/进程重启为继承 0；最新显式 start 为该 generation；stop/remove/cancelPendingStart 为 nil）。不改 coordinator 切换步骤、队列、wantOn 或 NE/保护行为。
-- 生产 `TrafficMonitor.updateTunnel` 从 AppModel 抽出原统计准入；一个窄时序回归编译真实生产 seam、coordinator 和 worker，OS 操作及统计连接/时钟注入。先保留旧准入运行 RED，再修复；本条证据待云端原始日志，不将原 9 测试当作 P3 证明。
+- 生产 `TrafficMonitor.updateTunnel` 从 AppModel 抽出原统计准入；改由 account gate + 共享显式 start epoch 准入，而非会被 disconnected/invalid 清掉的 `userStopping`。nil 停止意图不被 NE/load 解锁；新 start epoch 即使 connectedDate 相同也作废旧统计 run，OnDemand 仍沿用最新 start epoch 并按 NE 日期换会话。
+- 一个窄时序回归编译真实生产 seam、coordinator 和 worker，OS 操作及统计连接/时钟注入；无复制准入算法。旧准入 RED fixture 为 `e535793e4b7d8251c5504e85deb1ab6d9a79e6b3`（仅抽取接缝，不是 untouched baseline），先运行后修复；原始证据待云端返回，不将原 9 测试当作 P3 证明。
 - 未跑：新 P3 RED/GREEN、真实 Libbox 编译、签名真机 NE/socket 时序；不合并/部署/监控，新增 delta 待父线程独立审查。
