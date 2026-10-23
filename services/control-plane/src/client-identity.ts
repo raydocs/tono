@@ -10,12 +10,12 @@ import { API_PATH_KINDS } from './ops/contract/api-paths';
 
 export const CLIENT_HEADER = 'X-Tono-Client';
 
-const PLATFORMS = new Set(['macos', 'windows']);
+const PLATFORMS = new Set(['macos', 'windows', 'android']);
 const VERSION = /^[0-9][0-9A-Za-z.+-]{0,39}$/;
 
 export type ClientIdentity = { platform: string; version: string };
 
-/** `X-Tono-Client: <macos|windows>/<version>`; anything else reads as absent. */
+/** `X-Tono-Client: <macos|windows|android>/<version>`; anything else reads as absent. */
 export function clientIdentity(req: Request): ClientIdentity | null {
   const raw = req.headers.get(CLIENT_HEADER)?.trim() ?? '';
   const slash = raw.indexOf('/');

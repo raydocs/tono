@@ -118,3 +118,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0102
 
 - `0102_home_exit_egress.sql` — `home_exit_egress`: one row per home line holding the latest operator-asked egress lookup (IP seen through the line, per-provider geolocation answers as JSON, or the failed tunnel stage). Replaced on each lookup; orphans after a line delete are joined away on read.
+
+## 0103
+
+- `0103_android_client_identity.sql` — extends `devices.client_platform` to `macos`, `windows`, or `android` (still nullable); `client_version` keeps its existing bound. A temporary checked column copies existing values before the old metadata column is dropped and renamed. The device table, indexes, triggers, sessions and exit-credential rows stay in place; no foreign-key disable or table drop. Apply the file as one migration transaction, never as ad-hoc individual production statements. Local D1 upgrade/rollback coverage is not preview or production rehearsal. Rehearse on preview and export production before deployment under ops plan §2; a Worker rollback can keep this widened schema.

@@ -13,6 +13,24 @@ at most 2 MiB gzip, rate-limited per user, and deleted with the account. The
 per-day destination and process rollups parsed from them are kept 90 days
 (`retainTrafficDaily`) and are not removed by account deletion.
 
+## Client build metadata (separate from diagnostics uploads)
+
+Sign-in, token refresh and catalog requests may carry `X-Tono-Client` with the
+client's self-reported platform and app version. The control plane records the
+last valid pair on that authenticated device row, independently of telemetry
+preferences. Accepted platforms are `macos`, `windows` and `android`; the version
+is at most 40 characters using the existing restricted version syntax. Absent,
+malformed or other-platform values leave the last known pair unchanged. No raw
+header, OS fingerprint, account text or traffic content is added to this record.
+It is build metadata, not attestation or an authorization input.
+
+Android already sends this header. Recognizing it adds no client request or
+upload, enables no diagnostics switch, and changes neither desktop adoption
+rollups nor public/ops device DTOs. It shares the device row's existing lifetime
+(no separate history or retention job); deleting that row removes the pair.
+Migration 0103 and the matching Worker must be deployed before Android recording
+works in production. Source/local tests alone do not establish that deployment.
+
 ## Why the snapshot was off
 
 Commit `a68d4e76` (2026-09-03) defaulted periodic telemetry off and forced

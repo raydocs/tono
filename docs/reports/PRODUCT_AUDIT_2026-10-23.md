@@ -96,7 +96,7 @@ macOS保护范围 #1724 仍是 draft，等待人工视觉验收；准确状态�
 3. **P2/P3 候选，无上行与失败意图**：cached catalog + 离线不应无限停在 Connecting；Core 启动失败后
    `wantConnected` 的保留/清除需按自动恢复意图定义，避免之后意外重连。验收包括取消、服务重建和无网络预算届满。
 4. **P2，跨端首连契约**：`503 EXIT_IDENTITY_PROPAGATING` 在移动端按失败结束，桌面有有界等待。
-   WIP `74ee58ef5` 已加仅目录 GET 明确错误码驱动的等待/取消/固定截止；首次信号起最多 5 分钟、15 秒重读，独立于在途 IO，排队发送前复核归属，POST 分类隔离。单次读取 RED `301ae7bc6`、休眠 RED `755625aac` 与 FIX 的 engine/UI 测试逐字节相同，但**尚未编译或执行行为 RED/GREEN**，独立 R1 指出的 P2 休眠时钟缺口已在源码补最多 1 秒截止复核及双时钟回归；最终 R2 仍在运行，不能称预算已运行验证。仅 WIP refs，无 PR；既有 Devin 额度阻塞，未新建付费 VM。不能因源码已写而标 fixed。
+   WIP `74ee58ef5` 已加仅目录 GET 明确错误码驱动的等待/取消/固定截止；首次信号起最多 5 分钟、15 秒重读，独立于在途 IO，排队发送前复核归属，POST 分类隔离。单次读取 RED `301ae7bc6`、休眠 RED `755625aac` 与 FIX 的 engine/UI 测试逐字节相同，但**尚未编译或执行行为 RED/GREEN**，独立 R1 指出的 P2 休眠时钟缺口已在源码补最多 1 秒截止复核及双时钟回归；最终 R2 已对精确源码 `74ee58ef5` 完成并 approve、无新发现，但不能称预算已运行验证。仅 WIP refs，无 PR；既有 Devin 额度阻塞，未新建付费 VM。不能因源码已写而标 fixed。
 5. **P3，体验一致性**：consent 前说明按实际模式；Stable 的 degraded 不应沿用“部分可用”而不说明范围；
    增加重发验证码与冷却/无障碍反馈。先协调 #1722/#1723 的 settings 改动，不覆盖其文件。
 
@@ -104,7 +104,7 @@ macOS保护范围 #1724 仍是 draft，等待人工视觉验收；准确状态�
 
 - **诊断身份**：控制面 `client-identity.ts` 仅接受 macos/windows，Android 的 `android/<version>` 被视为缺失。
   迁移0092 的 `devices.client_platform` 还带 desktop-only CHECK，仅改 parser 会在 best-effort catch 中继续丢记录。
-  支持移动 platform 前需一起核对 DB、设备列表、统计和隐私边界；不能直接开启未经设计的诊断上传。
+  本轮 Android-only WIP 已同时扩展 parser 与新增迁移0103；本地真实 Worker/D1 的两项回归均先在旧代码失败，再在完整修复通过，仅改 parser 的对照仍失败。迁移覆盖已有数据/外键、故障回滚；设备 DTO/统计保持不变，没有新增诊断上传。独立差异审查、交付 CI 和 preview/生产迁移仍待验，不算已上线；iOS 仍未纳入。
 - **契约测试**：统一错误码分类、写前/歧义送达边界、refresh 单飞/账户代次、目录传播和取消语义。
   用同一场景规范各端独立回归，不强行共享生命周期实现；iOS 同类重放风险单列后续，不算本轮已修。
 - **交付**：Android 仍 debug/internal-only，单独 android-ci 不属于 ci-gate，是当前交付边界，不能当漏配直接改必需门。
