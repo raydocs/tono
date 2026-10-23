@@ -85,7 +85,7 @@ Windows 修正后的 RED `08c9854de` 在 [39922890390](https://github.com/raydoc
    后续 `NetworkMonitor` 变化是否同步到 VPN 的 transport/metered 属性需用 `dumpsys connectivity` 验证。
    修复要与 TUN 所属代次和销毁绑定，不能把旧回调写入新 VPN。
    续核：target Q+ 的 VPN 默认始终 metered，原“自动跟随”注释不成立；不能据静态上行声明推断已发生蜂窝计费泄漏。
-   当前修复/运行证据状态见 `ANDROID-UNDERLYING-NETWORK-DRIFT` 分片。R1 的 Binder 异常隔离问题已做候选修正；
+   当前修复/运行证据状态见 `ANDROID-UNDERLYING-NETWORK-DRIFT` 分片。R1 的 Binder 异常隔离问题已修正并通过 `316887d2a` 的最终 R2 源码审查；
    云端首次测试停在授权夹具，尚无行为 RED/GREEN。两个现存 Devin 会话均因额度耗尽暂停；不启动新付费任务，
    不把摘要中没有原始附件的新编译声明、旧日志或其他提交的绿灯当作当前验收。
 3. **P2/P3 候选，无上行与失败意图**：cached catalog + 离线不应无限停在 Connecting；Core 启动失败后

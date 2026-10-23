@@ -11,8 +11,8 @@
   每次读取最新上行，停止时清空；新增一个纯 JVM 故障回归，未扩大 native API/路由契约。
 - 授权夹具修正：从 resumed app Activity 启动正常 consent for-result；仍点击系统确认，
   不绕过权限，失败留存窗口 XML。新旧源码保留同一设备回归。
-- 验证：仅 scoped diff/selector、测试身份静态检查已接纳；R1 源码审查有一个 minor，候选已修，待末轮审查。
+- 验证：仅 scoped diff/selector、测试身份静态检查已接纳；R1 的一个 minor 已修；末轮 R2 approve，覆盖 `ca40f3baa...316887d2a` 十文件完整差异及实际 service 接线，无新增 finding。
   两个云会话均 out_of_quota；首次设备测试停在授权，不是行为 RED；修正后 RED/GREEN、JVM/lint 均未运行。
   摘要中的新 APK 编译成功没有对应原始附件，未接纳；先前模拟器两次退出 -11 亦未计通过。
 - 候选/发布：仅源码，无新签名候选、部署、客户发布或 owner gate 变更。
-- 剩余限制：新旧冻结提交的云端执行、精确差异独立审查、真实手机/真实网络与 API 分层仍待验。
+- 剩余限制：新旧冻结提交的云端执行、真实手机/真实网络与 API 分层仍待验；独立源码审查通过不替代这些检查。

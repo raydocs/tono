@@ -28,3 +28,6 @@ Wi-Fi → 蜂窝 → Wi-Fi → 无上行 → 恢复 → 断开，断言同一 VP
 没有 appops 授权绕过。追加一个纯 JVM 回归检查异常返回、有界重试与停止后清除；尚未运行。
 2026-10-23 两个云会话均 suspended/out_of_quota；最新摘要称 RED APK 已编译，
 但下载附件仍是早先缺 env 的失败日志，故未接纳为当前编译通过证据；FIX/JVM/lint 与设备验证继续待验。
+
+独立审查：最终 R2 覆盖 `ca40f3baa...316887d2a`，结论 approve；已确认 R1 异常隔离问题在源码层面解决，
+没有新增 finding。此项仍为 open：尚缺真实行为 RED/GREEN 与当前 JVM/lint，不把静态结论标为运行修复通过。
