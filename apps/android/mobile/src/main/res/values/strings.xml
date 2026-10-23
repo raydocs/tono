@@ -172,6 +172,11 @@
     <string name="notif_check_live">Open Tono to check the live connection status</string>
     <string name="notif_stopped_title">Tono stopped</string>
     <string name="notif_stopped_no_vpn">No VPN network · Open Tono to reconnect</string>
+    <string name="notif_revoked_title">Android turned off Tono\'s VPN</string>
+    <string name="notif_revoked_lockdown">Another VPN took over, or VPN permission was withdrawn. Lockdown is on, so Android keeps blocking connections outside a VPN. Open Tono to allow it again.</string>
+    <string name="notif_revoked_open">Another VPN took over, or VPN permission was withdrawn. Apps are now on your own network, not through Tono. Open Tono to allow it again.</string>
+    <string name="notif_failed_lockdown">Lockdown is on, so Android keeps blocking connections until Tono reconnects.</string>
+    <string name="notif_failed_open">Apps are now on your own network, not through Tono.</string>
     <string name="consent_title">Before Android asks</string>
     <string name="consent_ask">Android will ask once whether Tono may set up a VPN. Tap OK there.</string>
     <string name="consent_routes">AI and video go through Tono\'s exits; other apps go out directly.</string>

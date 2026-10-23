@@ -25,6 +25,10 @@ class NetworkMonitor(private val connectivity: ConnectivityManager) {
         private set
 
     private val listeners = LinkedHashSet<(Underlying?) -> Unit>()
+    private val sequenced = LinkedHashSet<(Underlying?, Long) -> Unit>()
+    /** Bumped on every change actually published, on the monitor thread; 0 = the initial (nothing yet) state. */
+    @Volatile var sequence = 0L
+        private set
     private val thread = HandlerThread("tono-network").apply { start() }
     private val handler = Handler(thread.looper)
     private var registered = false
@@ -71,6 +75,13 @@ class NetworkMonitor(private val connectivity: ConnectivityManager) {
     @Synchronized
     fun removeListener(listener: (Underlying?) -> Unit) { listeners -= listener }
 
+    /** Like [addListener], with the publish [sequence] so a consumer can drop stale, reordered deliveries. */
+    @Synchronized
+    fun addSequencedListener(listener: (Underlying?, Long) -> Unit) { sequenced += listener; listener(current, sequence) }
+
+    @Synchronized
+    fun removeSequencedListener(listener: (Underlying?, Long) -> Unit) { sequenced -= listener }
+
     private fun publish() {
         val network = best
         val next = network?.let {
@@ -88,8 +99,12 @@ class NetworkMonitor(private val connectivity: ConnectivityManager) {
             )
         }
         if (next == current) return
-        current = next
-        val snapshot = synchronized(this) { listeners.toList() }
+        val (snapshot, seq, ordered) = synchronized(this) {
+            current = next
+            sequence++
+            Triple(listeners.toList(), sequence, sequenced.toList())
+        }
+        ordered.forEach { runCatching { it(next, seq) } }
         snapshot.forEach { runCatching { it(next) } }
     }
 }

@@ -50,9 +50,27 @@ class BoxPlatform(
     private val dnsExecutor = Executors.newCachedThreadPool()
     private val interfaceListeners = HashMap<InterfaceUpdateListener, (NetworkMonitor.Underlying?) -> Unit>()
 
+    /**
+     * The TUN's underlying network follows the monitor for the TUN's whole life, not only at establish:
+     * Android otherwise keeps reporting the network the TUN was opened on (wrong metered state,
+     * apps told they are offline after a Wi-Fi to cellular move). Generation-bound, see [UnderlyingSync].
+     */
+    internal val underlying = UnderlyingSync<android.net.Network> { network ->
+        runCatching { service.setUnderlyingNetworks(network?.let { arrayOf(it) }) }.getOrDefault(false)
+    }
+    private val underlyingListener: (NetworkMonitor.Underlying?, Long) -> Unit = { u, seq -> underlying.onNetwork(u?.network, seq) }
+
+    init { monitor.addSequencedListener(underlyingListener) }
+
     fun closeTun() {
+        underlying.onTunClosed()
         tun?.let { runCatching { it.close() } }
         tun = null
+    }
+
+    fun release() {
+        monitor.removeSequencedListener(underlyingListener)
+        closeTun()
     }
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
@@ -92,6 +110,8 @@ class BoxPlatform(
         tun?.let { runCatching { it.close() } }
         tun = pfd
         tunsEstablished++
+        // Re-assert the newest network for this TUN generation: one may have arrived while establishing.
+        underlying.onTunEstablished()
         return pfd.fd
     }
 
