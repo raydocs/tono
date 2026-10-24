@@ -229,8 +229,6 @@
 "short_PLAN_EXPIRED" = "Plan expired";
 "reason_QUOTA_EXHAUSTED" = "You have used this period’s data allowance. Renew it or ask a family member for help; you do not need to sign out.";
 "short_QUOTA_EXHAUSTED" = "Data allowance used up";
-"reason_ACCOUNT_UNAVAILABLE" = "Tono cannot confirm your account is available. Ask a family member to check your plan or help you sign in again. Your sign-in and VPN configuration have been kept.";
-"short_ACCOUNT_UNAVAILABLE" = "Check your account or plan";
 "reason_DEVICE_REAUTH_REQUIRED" = "Your plan is available again. To restore this device, open Settings, sign out and sign in again, or ask a family member for help.";
 "short_DEVICE_REAUTH_REQUIRED" = "Sign in again to restore this device";
 "reason_USER_DISABLED" = "This account has been disabled. Please contact a family member or support for help.";

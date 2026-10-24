@@ -15,10 +15,10 @@ public enum AccountNetworkRelease {
 
     public static func requiresRelease(_ error: Error) -> Bool {
         guard let error = error as? APIError else { return false }
-        // 401 is ambiguous on older servers, but never authority to keep routing into a rejected
-        // identity. Ordinary NETWORK/429/5xx errors do not withdraw existing network authority.
-        return error.status == 401 || (error.status == 403 &&
-            (AccountErrors.isRestriction(error) || ["DEVICE_REAUTH_REQUIRED", "USER_DISABLED"].contains(error.code)))
+        // Authentication rejection uses sign-out/removal instead. An explicit account-status
+        // rejection releases only the network grant, even if an older server uses status 401.
+        return AccountErrors.isRestriction(error) || (error.status == 403 &&
+            ["DEVICE_REAUTH_REQUIRED", "USER_DISABLED"].contains(error.code))
     }
 
     /// Stop NE even if saving/reading back On Demand fails. Preserve the error so the UI cannot

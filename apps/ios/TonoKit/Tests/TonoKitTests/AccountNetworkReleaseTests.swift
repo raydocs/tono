@@ -31,15 +31,15 @@ final class AccountNetworkReleaseTests: XCTestCase {
     }
 
     @MainActor
-    func testLegacyRefreshRejectionAlsoReleasesNetworkWithoutDeletingConfiguration() async {
+    func testExplicitDeviceReauthCodeReleasesNetworkWithoutDeletingConfiguration() async {
         let lifecycle = TunnelStartCoordinator()
         let system = AccountConfiguration()
-        let receipt = await AccountNetworkRelease.handle(APIError(status: 401, code: "INVALID_REFRESH_TOKEN", message: "rejected"), accountEpoch: 8) {
+        let receipt = await AccountNetworkRelease.handle(APIError(status: 403, code: "DEVICE_REAUTH_REQUIRED", message: "reauth required"), accountEpoch: 8) {
             await lifecycle.stop(system)
         }
         XCTAssertEqual(system.events, ["disarm", "stop"])
         XCTAssertTrue(system.saved)
-        XCTAssertEqual(receipt?.reason, "ACCOUNT_UNAVAILABLE")
+        XCTAssertEqual(receipt?.reason, "DEVICE_REAUTH_REQUIRED")
     }
 
     @MainActor

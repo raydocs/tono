@@ -112,6 +112,27 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(transport.attempts.map(\.0.path), ["auth/refresh", "exit-catalog"])
     }
 
+    func testAccessRejectionCanRefreshBeforeReportingFinalSessionEnd() async throws {
+        let fresh = jwt(exp: now.timeIntervalSince1970 + 86_400)
+        let tokens = MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 9_999), refresh: "refresh-current", binding: "account-a"))
+        let transport = ScriptedTransport { request, _ in
+            if request.path == "auth/refresh" {
+                return json(200, .obj(("accessToken", .string(fresh)), ("refreshToken", "refresh-next")))
+            }
+            if request.headers.contains(where: { $0.0 == "Authorization" && $0.1 == "Bearer \(fresh)" }) {
+                return json(200, SampleCatalog.body())
+            }
+            return json(401, .obj(("error", .obj(("code", "UNAUTHORIZED")))))
+        }
+        let session = AccountSession(api: ControlPlaneClient(clientVersion: "1", transport: transport), tokens: tokens,
+                                     cache: MemoryCache(), now: { [now] in now })
+        let loaded = try await session.loadCatalog()
+        XCTAssertFalse(loaded.fromCache)
+        XCTAssertEqual(transport.attempts.map(\.0.path), ["exit-catalog", "auth/refresh", "exit-catalog"])
+        XCTAssertEqual(tokens.tokens?.binding, "account-a")
+        XCTAssertEqual(tokens.tokens?.refresh, "refresh-next")
+    }
+
     func testOlderCatalogRevisionIsRefusedAsRollback() async {
         let cache = MemoryCache(CachedCatalog(body: "{}", revision: 9, fetchedAt: now, owner: "login-a"))
         let transport = ScriptedTransport { _, _ in json(200, SampleCatalog.body(revision: 7)) }

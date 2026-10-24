@@ -6,7 +6,7 @@ import re
 root = Path(__file__).resolve().parents[1]
 view = (root / "App/Views/HomeView.swift").read_text()
 known = view.split("static let knownReasons: Set<String> = [", 1)[1].split("]", 1)[0]
-codes = ("PLAN_EXPIRED", "QUOTA_EXHAUSTED", "ACCOUNT_UNAVAILABLE", "ACCOUNT_RELEASE_FAILED", "DEVICE_REAUTH_REQUIRED", "USER_DISABLED")
+codes = ("PLAN_EXPIRED", "QUOTA_EXHAUSTED", "ACCOUNT_RELEASE_FAILED", "DEVICE_REAUTH_REQUIRED", "USER_DISABLED")
 for code in codes:
     assert f'"{code}"' in known, f"{code} would use generic raw-code rendering"
     for locale in ("en", "zh-Hans"):

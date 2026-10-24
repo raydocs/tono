@@ -64,9 +64,9 @@ public struct SessionSuperseded: Error, Equatable, Sendable {
 }
 
 public enum AccountErrors {
-    /// Only explicit session-end signals can delete the local account and VPN configuration.
-    /// Old servers conflate plan/quota restrictions with UNAUTHORIZED/INVALID_REFRESH_TOKEN.
-    public static let sessionEnded: Set<String> = ["SIGNED_OUT", "ACCOUNT_SUSPENDED"]
+    /// T8/T6 contract: authentication rejection ends the session. Only explicit account-status
+    /// codes preserve credentials/configuration; the server must distinguish those from auth.
+    public static let sessionEnded: Set<String> = ["UNAUTHORIZED", "INVALID_REFRESH_TOKEN", "SIGNED_OUT", "ACCOUNT_SUSPENDED"]
     public static let restrictions: Set<String> = ["ACCOUNT_EXPIRED", "QUOTA_EXCEEDED", "PLAN_EXPIRED", "QUOTA_EXHAUSTED"]
 
     public static func isRestriction(_ error: APIError) -> Bool {
@@ -88,7 +88,7 @@ public enum AccountErrors {
             if e.code == "QUOTA_EXCEEDED" { return "QUOTA_EXHAUSTED" }
             if e.code == "CATALOG_UNAVAILABLE" { return "HOME_UNAVAILABLE" }
             if e.status == 429 { return "RATE_LIMITED" }
-            if e.status == 401 && (e.code == "UNAUTHORIZED" || e.code == "INVALID_REFRESH_TOKEN") { return "ACCOUNT_UNAVAILABLE" }
+            if isSessionEnded(e) { return "SESSION_ENDED" }
             return e.code
         case let e as CatalogRejected:
             return e.code
@@ -253,7 +253,7 @@ public actor AccountSession {
                 let result = try await op(token)
                 try check(lease)
                 return result
-            } catch let e as APIError where e.status == 401 && !AccountErrors.isRestriction(e) && !AccountErrors.isSessionEnded(e) && e.code != "INVALID_REFRESH_TOKEN" {
+            } catch let e as APIError where e.status == 401 && !AccountErrors.isRestriction(e) && e.code != "INVALID_REFRESH_TOKEN" && e.code != "SIGNED_OUT" && e.code != "ACCOUNT_SUSPENDED" {
                 try check(lease)
                 let token = try await bearer(forceRefresh: true, lease: lease)
                 try check(lease)

@@ -2,16 +2,7 @@ import XCTest
 @testable import TonoKit
 
 final class AccountRestrictionTests: XCTestCase {
-    func testLegacyAmbiguousUnauthorizedDoesNotEndLocalSession() {
-        XCTAssertFalse(AccountErrors.isSessionEnded(APIError(status: 401, code: "UNAUTHORIZED", message: "Session is no longer active")))
-    }
-
-    func testLegacyAmbiguousRefreshRejectionDoesNotEndLocalSession() {
-        // Old server uses the very same error for exhausted quota, expired plan and revoked tokens.
-        XCTAssertFalse(AccountErrors.isSessionEnded(APIError(status: 401, code: "INVALID_REFRESH_TOKEN", message: "Invalid or expired refresh token")))
-    }
-
-    func testLegacy401PlanExpiredIsNotRefreshedIntoALogout() async {
+    func testExplicit401PlanStatusIsNotRefreshedIntoALogout() async {
         let tokens = MemoryTokens(SessionTokens(access: jwt(exp: 1_900_000_000), refresh: "synthetic", binding: "account-a"))
         let transport = ScriptedTransport { request, _ in
             if request.path == "auth/refresh" { return json(401, .obj(("error", .obj(("code", "INVALID_REFRESH_TOKEN"))))) }
@@ -44,7 +35,4 @@ final class AccountRestrictionTests: XCTestCase {
         XCTAssertEqual(transport.attempts.count, 1)
     }
 
-    func testLegacyAmbiguousRefreshFailureHasActionableAccountReason() {
-        XCTAssertEqual(AccountErrors.reasonCode(APIError(status: 401, code: "INVALID_REFRESH_TOKEN", message: "ambiguous")), "ACCOUNT_UNAVAILABLE")
-    }
 }

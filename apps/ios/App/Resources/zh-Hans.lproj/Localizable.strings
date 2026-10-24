@@ -229,8 +229,6 @@
 "short_PLAN_EXPIRED" = "套餐已到期";
 "reason_QUOTA_EXHAUSTED" = "本期流量已用完。请续费或联系家人帮忙；无需退出登录。";
 "short_QUOTA_EXHAUSTED" = "本期流量已用完";
-"reason_ACCOUNT_UNAVAILABLE" = "暂时无法确认账户是否可用。请联系家人检查套餐或帮助重新登录；已保留你的登录和 VPN 配置。";
-"short_ACCOUNT_UNAVAILABLE" = "请检查账户或套餐";
 "reason_DEVICE_REAUTH_REQUIRED" = "套餐已恢复。请在设置中退出后重新登录，以恢复这台设备；也可联系家人帮忙。";
 "short_DEVICE_REAUTH_REQUIRED" = "请重新登录以恢复此设备";
 "reason_USER_DISABLED" = "账户已被停用。请联系家人或客服帮忙。";
