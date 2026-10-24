@@ -1395,6 +1395,17 @@ nonisolated struct HelperManager {
         let execution: String?
         let disconnectVerified: Bool?
         let diagnostic: String?
+        let disconnectRequested: Bool?
+
+        init(pending: Bool, receipt: UpdateContractV1.Receipt?, execution: String?,
+             disconnectVerified: Bool?, diagnostic: String?, disconnectRequested: Bool? = nil) {
+            self.pending = pending
+            self.receipt = receipt
+            self.execution = execution
+            self.disconnectVerified = disconnectVerified
+            self.diagnostic = diagnostic
+            self.disconnectRequested = disconnectRequested
+        }
     }
 
     static func updatePackagePath(_ package: URL) throws -> String {

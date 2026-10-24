@@ -67,8 +67,8 @@ final class UpdateStorage {
 
     deinit { close(lockFD) }
 
-    func locked<T>(_ body: () throws -> T) throws -> T {
-        try Self.withLock(lockFD, body)
+    func locked<T>(timeout: TimeInterval? = nil, _ body: () throws -> T) throws -> T {
+        try Self.withLock(lockFD, timeout: timeout, body)
     }
 
     /// Recovery after normal store opening fails may still inspect saved
@@ -106,12 +106,17 @@ final class UpdateStorage {
         return try withLock(fd, body)
     }
 
-    private static func withLock<T>(_ fd: Int32, _ body: () throws -> T) throws -> T {
+    private static func withLock<T>(_ fd: Int32, timeout: TimeInterval? = nil,
+                                    _ body: () throws -> T) throws -> T {
+        let deadline = timeout.map { DispatchTime.now().uptimeNanoseconds + UInt64(max(0, $0) * 1_000_000_000) }
         // launchctl bootout must be able to stop a daemon waiting behind the
         // executor. A blocking flock would otherwise deadlock that bootout.
         while flock(fd, LOCK_EX | LOCK_NB) != 0 {
             guard errno == EWOULDBLOCK || errno == EINTR else {
                 throw HelperFailure.system("Update lock unavailable or helper stopping.")
+            }
+            if let deadline, DispatchTime.now().uptimeNanoseconds >= deadline {
+                throw HelperFailure.system("Update lock is busy; release evidence was not changed.")
             }
             // The stop request is our own update executor's bootout SIGTERM.
             // Report it as a clean stop, not as lock or ledger trouble, so the

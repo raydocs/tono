@@ -81,6 +81,7 @@ final class UpdateTransaction {
             "ok": true, "pending": pending,
             "receipt": try JSONSerialization.jsonObject(with: UpdateContractV1.canonical(attempt.receipt)),
             "execution": attempt.execution.rawValue,
+            "disconnectRequested": attempt.disconnectRequested,
             "disconnectVerified": attempt.disconnectVerified,
         ]
         if pending && (now() < attempt.receipt.updatedAtUnix || now() >= attempt.receipt.expiresAtUnix) {

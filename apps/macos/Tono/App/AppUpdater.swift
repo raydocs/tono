@@ -125,6 +125,7 @@ final class AppUpdater: ObservableObject {
             return true
         case "consumed", "rolledBack", "replaced":
             return pending.receipt?.blockedReason != nil
+                || pending.disconnectRequested == true
                 || pending.disconnectVerified == true
                 || pending.diagnostic != nil
         default:

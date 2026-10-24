@@ -260,6 +260,95 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
     }
 
+    func preemptiveFixture(_ directory: String) throws -> (UpdateStorage, UpdateTransaction, ReleaseStop.UpdateDisconnectIdentity) {
+        let store = try UpdateStorage(root: directory + "/store")
+        let engine = UpdateTransaction(storage: store, effects: effects())
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        guard let identity = try ReleaseStop.markUpdateDisconnectRequested(storage: store) else {
+            throw HelperFailure.invalid("Pending update lost its preemptive disconnect intent")
+        }
+        return (store, engine, identity)
+    }
+    func terminalReadback() -> [ReleaseReport.Component] {
+        ["pf", "core", "dns"].map { .init(name: $0, readback: "restored", risk: "settled", detail: nil) }
+    }
+
+    test("preemptive-restore-records-terminal-disconnect-without-completing-update") { directory in
+        let (store, engine, identity) = try preemptiveFixture(directory)
+        let before = try store.load()
+        try check(engine.status()["disconnectRequested"] as? Bool == true, "Status hid explicit disconnect intent")
+        try check(before.attempt?.disconnectVerified == false, "Intent alone fabricated verified disconnect")
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: terminalReadback())
+        let restarted = try UpdateStorage(root: store.root)
+        let after = try restarted.load()
+        try check(after.attempt?.disconnectVerified == true, "Terminal preemptive release was not durably verified")
+        try check(after.highWater == before.highWater && after.generation == before.generation
+                  && after.attempt?.receipt == before.attempt?.receipt && after.attempt?.execution == .consumed,
+                  "Release fabricated update completion or erased consumed evidence")
+    }
+
+    test("preemptive-restore-residual-pf-does-not-verify") { directory in
+        let (store, _, identity) = try preemptiveFixture(directory)
+        var readback = terminalReadback()
+        readback[0].readback = "residual"
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback)
+        try check(store.load().attempt?.disconnectVerified == false, "Residual PF certified release")
+    }
+
+    test("preemptive-restore-unreadable-core-does-not-verify") { directory in
+        let (store, _, identity) = try preemptiveFixture(directory)
+        var readback = terminalReadback()
+        readback[1].readback = "unreadable"
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback)
+        try check(store.load().attempt?.disconnectVerified == false, "Unreadable Core certified release")
+    }
+
+    test("preemptive-restore-late-dns-writer-does-not-verify") { directory in
+        let (store, _, identity) = try preemptiveFixture(directory)
+        var readback = terminalReadback()
+        readback[2].risk = "unknown"
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback)
+        try check(store.load().attempt?.disconnectVerified == false, "Unsettled DNS certified release")
+    }
+
+    test("preemptive-restore-missing-dns-proof-does-not-verify") { directory in
+        let (store, _, identity) = try preemptiveFixture(directory)
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: Array(terminalReadback().prefix(2)))
+        try check(store.load().attempt?.disconnectVerified == false, "Missing DNS certified release")
+    }
+
+    test("preemptive-restore-stale-generation-does-not-touch-update") { directory in
+        let (store, _, identity) = try preemptiveFixture(directory)
+        let before = try UpdateStorage.read(store.root + "/ledger.json", maximum: 128 * 1024)
+        let stale = ReleaseStop.UpdateDisconnectIdentity(attemptID: identity.attemptID, generation: identity.generation + 1)
+        try refuses { try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: stale, components: terminalReadback()) }
+        try check(UpdateStorage.read(store.root + "/ledger.json", maximum: 128 * 1024) == before,
+                  "A different attempt generation received old release proof")
+    }
+
+    test("preemptive-restore-busy-update-lock-does-not-run-late-writer") { directory in
+        let store = try UpdateStorage(root: directory + "/store")
+        let holder = try UpdateStorage(root: store.root)
+        var wrote = false
+        try holder.locked {
+            try refuses { try store.locked(timeout: 0) { wrote = true } }
+        }
+        try check(!wrote, "Timed-out update lock still admitted a writer")
+    }
+
+    test("preemptive-restore-save-failure-is-not-acknowledged") { directory in
+        let (store, _, identity) = try preemptiveFixture(directory)
+        let failing = try UpdateStorage(root: store.root, synchronizeDirectory: { _ in
+            throw HelperFailure.system("injected directory sync failure")
+        })
+        try refuses { try ReleaseStop.markUpdateDisconnectVerified(storage: failing, expected: identity, components: terminalReadback()) }
+        // Rename may have happened before failed sync: uncertain durability is
+        // not an acknowledgement and never permission to erase the attempt.
+        try check(store.load().attempt?.execution == .consumed && store.load().highWater == 14,
+                  "Failed proof persistence erased consumed update evidence")
+    }
+
     test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in
         let store = try UpdateStorage(root: directory)
         var observed: UpdateContractV1.Protection = .connected

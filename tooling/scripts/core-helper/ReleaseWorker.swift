@@ -233,7 +233,12 @@ enum ReleaseWorker {
 
         // 2. A pending native update must not resume its own teardown or
         //    re-arm when its executor comes back.
-        ReleaseStop.markUpdateDisconnectRequested()
+        var updateDisconnect: ReleaseStop.UpdateDisconnectIdentity?
+        do {
+            updateDisconnect = try ReleaseStop.markUpdateDisconnectRequested(storage: UpdateStorage())
+        } catch {
+            reporter.fail("Could not record the pending update's disconnect intent: \(error)")
+        }
 
         // 3. Cleanup, then every Tono command child ended and confirmed gone,
         //    then the second read. One more round when it is not clean.
@@ -266,6 +271,15 @@ enum ReleaseWorker {
         if record.unsettled?.isEmpty == true, let lost = record.historyLostBoot,
            !lost.isEmpty, let currentBoot, !ReleaseAuthority.sameBoot(lost, currentBoot) {
             record.historyLostBoot = nil
+        }
+        if let updateDisconnect {
+            do {
+                try ReleaseStop.markUpdateDisconnectVerified(
+                    storage: UpdateStorage(), expected: updateDisconnect, components: settled
+                )
+            } catch {
+                reporter.fail("Could not record the pending update's verified disconnect: \(error)")
+            }
         }
         record.workerFinished = true
         let finalStuck = stuckNow.map(\.pid)
@@ -550,23 +564,49 @@ enum ReleaseStop {
         return result
     }
 
-    /// Bounded: the update lock may be held by a process this release could
-    /// not see (an installer shell). Abandoning the wait changes nothing.
-    static func markUpdateDisconnectRequested() {
-        let done = DispatchSemaphore(value: 0)
-        Thread.detachNewThread {
-            defer { done.signal() }
-            guard let storage = try? UpdateStorage() else { return }
-            try? storage.locked {
-                var ledger = try storage.load()
-                guard var attempt = ledger.attempt, attempt.receipt.phase != .committed,
-                      !attempt.disconnectRequested else { return }
+    struct UpdateDisconnectIdentity: Equatable {
+        let attemptID: String
+        let generation: UInt64
+    }
+
+    /// Wait at most three seconds for the update lock. No detached writer can
+    /// change a later attempt after this release has already returned.
+    static func markUpdateDisconnectRequested(storage: UpdateStorage) throws -> UpdateDisconnectIdentity? {
+        try storage.locked(timeout: 3) {
+            var ledger = try storage.load()
+            guard var attempt = ledger.attempt, attempt.receipt.phase != .committed else { return nil }
+            let identity = UpdateDisconnectIdentity(attemptID: attempt.receipt.attemptId,
+                                                    generation: attempt.receipt.initiatingGeneration)
+            if !attempt.disconnectRequested {
                 attempt.disconnectRequested = true
                 ledger.attempt = attempt
                 try storage.save(ledger)
             }
+            return identity
         }
-        _ = done.wait(timeout: .now() + 3)
+    }
+
+    static func markUpdateDisconnectVerified(storage: UpdateStorage, expected: UpdateDisconnectIdentity,
+                                            components: [ReleaseReport.Component]) throws {
+        // A first read alone cannot exclude a late PF/DNS/Core writer. The
+        // worker passes only the terminal settlement, never cleanup intent.
+        guard ["pf", "core", "dns"].allSatisfy({ name in
+            let readings = components.filter { $0.name == name }
+            return readings.count == 1 && readings[0].readback == "restored" && readings[0].risk == "settled"
+        }) else { return }
+        try storage.locked(timeout: 3) {
+            var ledger = try storage.load()
+            guard var attempt = ledger.attempt, attempt.receipt.phase != .committed else { return }
+            guard attempt.receipt.attemptId == expected.attemptID,
+                  attempt.receipt.initiatingGeneration == expected.generation,
+                  attempt.disconnectRequested else {
+                throw HelperFailure.invalid("Pending update changed during Restore internet; disconnect proof was not applied.")
+            }
+            guard !attempt.disconnectVerified else { return }
+            attempt.disconnectVerified = true
+            ledger.attempt = attempt
+            try storage.save(ledger)
+        }
     }
 }
 
