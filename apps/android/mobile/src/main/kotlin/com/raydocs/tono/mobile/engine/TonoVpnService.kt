@@ -500,10 +500,15 @@ class TonoVpnService : VpnService() {
 
     private fun disconnect(reason: String?) {
         catalogWait.incrementAndGet()
-        store.update { it.copy(wantConnected = false) }
-        if (snapshot.get().phase != Phase.SIGNED_OUT) update { ledger.begin(it, Phase.DISCONNECTING) }
-        stopCore()
-        leaveForeground()
+        stopAndPersist(
+            stop = {
+                if (snapshot.get().phase != Phase.SIGNED_OUT) update { ledger.begin(it, Phase.DISCONNECTING) }
+                stopCore()
+                leaveForeground()
+            },
+            persist = { store.update { it.copy(wantConnected = false) } },
+            warn = { Log.w(TAG, "stop intent could not be saved") },
+        )
         val signedIn = store.refreshToken() != null
         update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
     }

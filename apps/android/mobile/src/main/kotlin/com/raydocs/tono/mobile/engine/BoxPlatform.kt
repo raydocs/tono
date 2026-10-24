@@ -28,7 +28,6 @@ import io.nekohasekai.libbox.TunOptions
 import io.nekohasekai.libbox.WIFIState
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import io.nekohasekai.libbox.NetworkInterface as BoxInterface
@@ -223,25 +222,23 @@ class BoxPlatform(
                 ctx.errnoCode(OsConstants.ENETUNREACH)
                 return
             }
-            val done = CountDownLatch(1)
             val cancel = CancellationSignal()
-            ctx.onCancel(object : Func { override fun invoke() { cancel.cancel() } })
+            val done = DnsCompletion { cancel.cancel() }
+            ctx.onCancel(object : Func { override fun invoke() { done.cancel() } })
             DnsResolver.getInstance().rawQuery(network, message, DnsResolver.FLAG_NO_RETRY, dnsExecutor, cancel,
                 object : DnsResolver.Callback<ByteArray> {
                     override fun onAnswer(answer: ByteArray, rcode: Int) {
-                        ctx.rawSuccess(answer)
-                        done.countDown()
+                        done.complete { ctx.rawSuccess(answer) }
                     }
 
                     override fun onError(error: DnsResolver.DnsException) {
                         val errno = (error.cause as? android.system.ErrnoException)?.errno
-                        if (errno != null) ctx.errnoCode(errno) else ctx.errorCode(2)
-                        done.countDown()
+                        done.complete { if (errno != null) ctx.errnoCode(errno) else ctx.errorCode(2) }
                     }
                 })
             if (!done.await(12, TimeUnit.SECONDS)) {
                 cancel.cancel()
-                ctx.errnoCode(OsConstants.ETIMEDOUT)
+                done.complete { ctx.errnoCode(OsConstants.ETIMEDOUT) }
             }
         }
 

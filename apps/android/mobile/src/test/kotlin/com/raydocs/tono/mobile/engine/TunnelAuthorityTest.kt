@@ -142,6 +142,20 @@ class TunnelAuthorityTest {
         assertNull("nothing to recheck without a confirmed tunnel", ledger.rechecking(base))
     }
 
+    @Test fun recheckingDoesNotTurnAWorkingTunnelIntoACancellableConnectionAttempt() {
+        val ledger = TunnelLedger()
+        val up = connected(ledger)
+        val checking = ledger.rechecking(up)!!
+        assertEquals(Phase.CONNECTED, checking.phase)
+        assertTrue(checking.tunnelUp)
+        assertEquals(up.attempt, checking.attempt)
+        assertEquals(up.applied, checking.applied)
+        assertEquals(ProbeState.CHECKING, checking.cloudProbe.state)
+        val failed = ExitProbe(ProbeState.FAILED)
+        val degraded = ledger.probed(checking, ledger.attempt, failed, homeOk)!!
+        assertEquals(Phase.DEGRADED, ledger.rechecking(degraded)!!.phase)
+    }
+
     @Test fun snapshotJsonCarriesTheConfirmationIdentity() {
         val s = connected(TunnelLedger()).copy(version = 12)
         assertEquals(s, EngineSnapshot.fromJson(s.toJson()))
