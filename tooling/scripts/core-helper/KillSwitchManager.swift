@@ -83,8 +83,7 @@ struct KillSwitchState {
     /// until the app re-arms with the setting.
     let allowLocalNetworkDevices: Bool
     var strictBlocking = false
-    var strictProof: StrictRuntimeProof?
-    private let disarmAuthority: HelperDisarmAuthority = nil
+    var strictProof: StrictRuntimeProof? = nil
     /// AI Home: no whole-host block. Only the AI prefixes are dropped outside
     /// the TUN; everything else leaves as without Tono. Persisted, so a heal or
     /// power transition keeps the session's scope; strict intent overrides it.
@@ -273,6 +272,9 @@ final class KillSwitchManager {
         _ object: [String: Any],
         commitAllowed: () -> Bool = { true }
     ) throws -> [String: Any] {
+        guard disarmAuthority == .runtime else {
+            throw HelperFailure.invalid("Root emergency recovery cannot re-arm protection.")
+        }
         var object = object
         if Self.strictIntentActive {
             // The root snapshot, not an IPC allowlist, owns every physical
@@ -1253,10 +1255,14 @@ final class KillSwitchManager {
     }
 
     private func disarmLocked(preserveAIHold: Bool) throws -> [String: Any] {
+        let strictIntent = Self.strictIntentActive
         do {
-            try disarmAuthority.authorize(effectiveUID: geteuid(), strictIntentActive: Self.strictIntentActive)
+            try disarmAuthority.authorize(effectiveUID: geteuid(), strictIntentActive: strictIntent)
         } catch {
             throw HelperFailure.invalid("Strict protection requires the authenticated release worker or root emergency CLI.")
+        }
+        if disarmAuthority == .rootEmergency && strictIntent {
+            fputs("Tono root emergency CLI is overriding strict or unreadable release intent; manual break-glass is outside the restore-lock guarantee.\n", stderr)
         }
         // The anchor flush below opens egress before later steps can still
         // throw. Any arm after a half-completed disarm must therefore take

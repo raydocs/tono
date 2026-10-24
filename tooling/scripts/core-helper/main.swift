@@ -1451,7 +1451,7 @@ func emergencyReleaseOutcome(dnsRestored: Bool, coreSurvived: Bool) -> Emergency
 
 /// PF and DNS release with no ledger access. Used when the store cannot be
 /// opened. Does not remove the installation or rewrite update files.
-func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
+func releaseNetworkWithoutLedger(disarmAuthority: HelperDisarmAuthority = .runtime) -> EmergencyReleaseOutcome {
     do {
         let allowedUID = try readAllowedUID()
         var coreSurvived = false
@@ -1471,7 +1471,7 @@ func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
             coreSurvived = true
         }
         let dns = try ProtectedDNSManager()
-        let manager = try KillSwitchManager(allowedUID: allowedUID, disarmAuthority: .rootEmergency)
+        let manager = try KillSwitchManager(allowedUID: allowedUID, disarmAuthority: disarmAuthority)
         var dnsRestored = true
         do {
             _ = try dns.restore(deferringLossNotice: true)
@@ -1495,12 +1495,13 @@ func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
 /// does not boot out unrelated processes, does not require DNS verification
 /// before opening PF, and does not record a flag that stops later starts.
 func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool {
-    emergencyRelease(underLock: suppliedStorage) != .refused
+    emergencyRelease(underLock: suppliedStorage, disarmAuthority: .rootEmergency) != .refused
 }
 
 /// `runEmergencyDisarm` with the DNS result kept apart, for the callers that
 /// remove the installation afterwards.
-func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> EmergencyReleaseOutcome {
+func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil,
+                      disarmAuthority: HelperDisarmAuthority = .runtime) -> EmergencyReleaseOutcome {
     guard geteuid() == 0 else {
         fputs("Tono emergency recovery must be run with sudo.\n", stderr)
         return .refused
@@ -1554,7 +1555,7 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
         // Restore DNS, then release PF. A DNS failure must not keep the block:
         // the host would stay offline with a dead resolver.
         let dns = try ProtectedDNSManager()
-        let manager = try KillSwitchManager(allowedUID: allowedUID, disarmAuthority: .rootEmergency)
+        let manager = try KillSwitchManager(allowedUID: allowedUID, disarmAuthority: disarmAuthority)
         if pending, var ledger, let core {
             let runtime = UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate())
             do {
@@ -1621,7 +1622,7 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
         guard emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false) else {
             return .refused
         }
-        return releaseNetworkWithoutLedger()
+        return releaseNetworkWithoutLedger(disarmAuthority: disarmAuthority)
     }
 }
 
@@ -1666,7 +1667,7 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     try? bootout.run()
     bootout.waitUntilExit()
 
-    return finishEmergencyReset(emergencyRelease(underLock: storage))
+    return finishEmergencyReset(emergencyRelease(underLock: storage, disarmAuthority: .rootEmergency))
 }
 
 /// What the reset does once the release outcome is known. The closures are the

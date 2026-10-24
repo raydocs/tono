@@ -1816,6 +1816,15 @@ nonisolated struct HelperManager {
         guard fd >= 0 else { throw HelperIPCError.socketFailed }
         defer { close(fd) }
 
+        // A helper can reject the peer or be booted out between connect and
+        // write. Turn EPIPE into the existing recoverable send error instead
+        // of terminating the app while its network protection is still armed.
+        var noSignalPipe: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignalPipe,
+                         socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            throw HelperIPCError.socketFailed
+        }
+
         var sendTimeout = timeval(tv_sec: 3, tv_usec: 0)
         _ = withUnsafePointer(to: &sendTimeout) {
             setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, $0, socklen_t(MemoryLayout<timeval>.size))

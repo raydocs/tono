@@ -7,10 +7,10 @@ nonisolated enum HelperDisarmAuthority {
 
     enum Refusal: Error { case rootRequired, strictProtection }
 
-    var restoresAtLaunch: Bool { true }
+    var restoresAtLaunch: Bool { self == .runtime }
 
     func authorize(effectiveUID: UInt32, strictIntentActive: Bool) throws {
         if self == .rootEmergency && effectiveUID != 0 { throw Refusal.rootRequired }
-        guard !strictIntentActive else { throw Refusal.strictProtection }
+        guard self == .rootEmergency || !strictIntentActive else { throw Refusal.strictProtection }
     }
 }

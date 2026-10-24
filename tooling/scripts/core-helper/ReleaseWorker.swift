@@ -1186,12 +1186,13 @@ func runReleaseCommand() -> Int32 {
 ///   preemptive-release guarantee; an administrator chose it.
 func runEmergencyUnderReleaseAuthority(
     authority: ReleaseAuthority = ReleaseAuthority(),
+    lockTimeout: TimeInterval = 3,
     _ body: () -> Bool
 ) -> Bool {
     // Both commands refuse without root themselves.
     guard geteuid() == 0 else { return body() }
     do {
-        return try authority.withLock(timeout: 3) { _ -> Bool in
+        return try authority.withLock(timeout: lockTimeout) { _ -> Bool in
             let currentBoot = try? TonoAuthenticatedPeer.bootSession()
             var record: ReleaseAuthority.Record
             do { record = try authority.load() } catch ReleaseAuthority.Failure.corrupt {

@@ -31,6 +31,9 @@ final class HelperBrokenPipeTests: XCTestCase {
             var size = socklen_t(MemoryLayout<Int32>.size)
             XCTAssertEqual(getsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &protected, &size), 0)
             XCTAssertEqual(protected, 1, "every helper socket must suppress SIGPIPE independently of app startup")
+            // Prove socket-level safety even without the app-wide fallback.
+            // On the old implementation retain SIG_IGN to report the assertion.
+            if protected == 1 { signal(SIGPIPE, SIG_DFL) }
             // The connect has completed; close its accepted peer before the
             // client writes. No scheduler race or sleeping is involved.
             let peer = accept(listener, nil, nil)
