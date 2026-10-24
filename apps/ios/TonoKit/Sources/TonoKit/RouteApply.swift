@@ -109,6 +109,14 @@ public struct RouteApplyReport: Equatable, Sendable {
 /// Changing the mode or line: save the inputs, ask a running tunnel to rebuild, and report only
 /// what the tunnel confirmed. The screens show `inEffect`, never the request, as the routes in use.
 public enum RouteApply {
+    /// Catalog availability orchestration, shared with the app so missing-input behavior is testable.
+    public static func withCatalog(_ catalog: LoadedCatalog?, requested: RouteSettings, previous: RouteSettings,
+                                   tunnelUp: Bool, refresh: () async -> LoadedCatalog?,
+                                   apply: (LoadedCatalog) async -> RouteApplyReport) async -> RouteApplyReport {
+        if let catalog { return await apply(catalog) }
+        return RouteApplyReport(.saved(requested))
+    }
+
     public static func run(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool,
                            save: (RouteSettings) throws -> Void,
                            reload: () async -> Data?,

@@ -58,7 +58,8 @@ final class AccountTests: XCTestCase {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     func testUnreachableSystemPathFallsBackToARelayAndReportsTheFailedPath() async throws {
-        let transport = ScriptedTransport { _, path in
+        let transport = ScriptedTransport { request, path in
+            request.transmission.preparing()
             if path == .systemDNS { throw Unreachable() }
             return json(202, .obj(("challengeId", "c-1")))
         }

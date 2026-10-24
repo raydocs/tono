@@ -508,9 +508,13 @@ final class AppModel: ObservableObject {
         // The tunnel's reply to this switch (or its silence) replaces what it said before, unless
         // the session ended while it was asked.
         let ticket = tunnelStatus.isUp ? tracker.ask() : nil
-        if let loaded = catalog {
-            let tunnel = self.tunnel
-            report = await RouteApply.run(requested, previous: previous, tunnelUp: ticket != nil,
+        let tunnel = self.tunnel
+        report = await RouteApply.withCatalog(catalog, requested: requested, previous: previous, tunnelUp: ticket != nil,
+                                             refresh: { [weak self] in
+                                                 guard let self, await self.refreshCatalog(quiet: false), self.accountEpoch == epoch else { return nil }
+                                                 return self.catalog
+                                             }) { loaded in
+            return await RouteApply.run(requested, previous: previous, tunnelUp: ticket != nil,
                                           save: { [weak self] settings in
                                               guard let self, self.accountEpoch == epoch, !self.signingOut else { throw SessionSuperseded() }
                                               try SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: settings.mode, selectedNode: settings.node))
@@ -521,9 +525,6 @@ final class AppModel: ObservableObject {
                                               guard let self, self.accountEpoch == epoch, !self.signingOut else { return false }
                                               return self.tracker.permits(RouteApplyReport(.unconfirmed(requested), answer: answer), ticket: ticket)
                                           })
-        } else {
-            // No catalog yet, so no tunnel to rebuild: the choice is kept for the first start.
-            report = RouteApplyReport(.saved(requested))
         }
         // Asked of a session that has since ended, or answered about an older graph than one heard
         // since: the reply says nothing about what runs now, so it moves neither the routes, the
