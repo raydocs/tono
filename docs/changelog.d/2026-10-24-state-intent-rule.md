@@ -12,3 +12,11 @@
 - 红：改 CI 之前，`services-ci.yml` 没有 `test_systemd_cadence.py`，`ci-gate.yml` 没有两份 `sync-desktop-routing.py --check`，也没有调用 `ios-ci.yml`。
 - 错误码扫描（本机 Python，与测试同一规则）：iOS 3 处、Android 6 处均在允许表内；macOS、Windows 0 处。无未列出项，无过期允许项。
 - 四端产品套件未在本机执行。`expected-failure` 用不等断言：产品一旦改到与契约一致，该行会变红，直到把 enforcement 改成 `enabled`。
+- 契约提交 `ed266e390`。
+
+### 2026-10-24 续记 · CI
+- ci-gate 以 `apple: false` 调用 `ios-ci`，pull request 只跑 Linux 路由作业。macos-26 仍只在 push `main` / `feat/ios-**` 和 `workflow_dispatch` 时跑。`ios-ci` 没有 `pull_request` 触发。
+- ci-gate 的 changes 作业增加 `apps/ios/tools/sync-desktop-routing.py --check` 和 `apps/android/scripts/routing/sync-desktop-routing.py --desktop --check`。`services-ci` 增加 `python3 services/exit-agent/test_systemd_cadence.py`。
+- 绿：`node --test tooling/scripts/tests/ci-gate-changes.test.mjs` 9 pass。两份 routing `--check` 通过（iOS “matches the desktop lists”，Android “matches desktop checkout”）。cadence `Ran 5 tests` `OK`。
+- Android JVM 测试未跑：现有 JDK 17 能启动 Gradle，但 `:mobile:verifyLibbox` 因缺少 `mobile/libs/libbox.aar` 失败。未构建 libbox。
+- 这三项是工程覆盖，不进发现总账。
