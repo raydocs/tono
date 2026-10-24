@@ -777,7 +777,7 @@ enum PhaseText {
     }
 
     static let knownReasons: Set<String> = [
-        "PLAN_EXPIRED", "QUOTA_EXHAUSTED", "ACCOUNT_UNAVAILABLE",
+        "PLAN_EXPIRED", "QUOTA_EXHAUSTED", "ACCOUNT_UNAVAILABLE", "DEVICE_REAUTH_REQUIRED", "USER_DISABLED",
         "HOME_UNAVAILABLE", "NETWORK", "RATE_LIMITED", "CORE_START", "CLOUD_UNREACHABLE", "HOME_UNREACHABLE",
         "REVOKED", "DENIED", "SESSION_ENDED", "CATALOG_ROLLBACK", "CORE_STOPPED", "NETWORK_CHANGED", "ROUTES_STOPPED",
     ]
@@ -787,7 +787,7 @@ enum PhaseText {
     }
 
     static func signInError(_ code: String) -> String {
-        if AccountErrors.restrictions.contains(code) || code == "ACCOUNT_UNAVAILABLE" { return reason(code) }
+        if AccountErrors.restrictions.contains(code) || ["ACCOUNT_UNAVAILABLE", "DEVICE_REAUTH_REQUIRED", "USER_DISABLED"].contains(code) { return reason(code) }
         let known: Set<String> = ["INVALID_EMAIL", "INVALID_CODE", "INVALID_OR_EXPIRED_CODE", "NETWORK", "RATE_LIMITED", "DEVICE_LIMIT"]
         return known.contains(code) ? L.t("signin_error_\(code)") : L.t("signin_error_generic", code)
     }
