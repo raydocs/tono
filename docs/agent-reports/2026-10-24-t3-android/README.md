@@ -7,14 +7,14 @@
 
 | 事件 | 应有状态/意图 | 通知 | 本 PR |
 |---|---|---|---|
-| 用户断开/取消 | 隧道先停；IDLE/SIGNED_OUT；wantConnected=false；旧回调不能写失败 | 不发 stopped；存储失败用中英文 Toast 告知重启可能重连 | 修复存储顺序、当前实例停止意图和已排队 core 回调 |
+| 用户断开/取消 | 隧道先停；IDLE/SIGNED_OUT；wantConnected=false；旧回调不能写失败 | 不发 stopped；存储失败用中英文 Toast 告知重启可能重连 | 修复存储顺序和已排队 core 回调；后续移除不正确的实例停止标志 |
 | 系统撤权 | 隧道停；NEEDS_PERMISSION；清恢复意图 | revoked；lockdown 不承诺网络放开 | 仅修复存储失败不得阻断状态/通知；系统设置引导未完成 |
 | 可恢复失败 | FAILED，自动恢复保留意图、手动尝试按既有定义 | 自动尝试应 stopped + 重试；lockdown 应说明仍受系统拦截 | 现有 fail 路径不变；全部失败出口覆盖仍未完成 |
 | 重新探测 | 保持 CONNECTED/DEGRADED 和同代 applied；probe=CHECKING | 不把工作隧道说成新连接 | 已修复，旧地理位置清空；Compose 补测未执行 |
 | DNS 取消 | 即刻释放同步等待，取消查询，不再调用已取消 ctx | 不产生连接失败 | 原子 single-completion；保持原 12s 正常查询预算 |
 
 停止持久化失败不伪装成功写盘：先关闭 TUN，再尝试保存，失败明确告警。
-同一服务实例阻止自动请求覆盖已停止意图；**进程重启后若磁盘旧值仍为 true，仍可能恢复**，Toast 明说并指向系统 Always-on 设置。
+**存储失败后磁盘旧值仍为 true 时，后续系统请求/进程重启仍可能恢复**，Toast 明说并指向系统 Always-on 设置。原实现曾用 explicitlyStopped 阻挡同实例请求，Claude 审查指出其会吞掉新的系统 Always-on 意图；本轮移除该标志，不再作出当前实例保持停止的承诺。
 Core 回调在入队时捕获 attempt，处理时检验代次和活动 phase；只保证已排队旧回调的隔离，不声称 libbox 在未来才生成的无来源回调已获得完整来源标记。
 
 ## 实际 RED / GREEN（MacBook，JDK17 + Kotlin2.3.20 + JUnit4.13.2）
@@ -58,3 +58,23 @@ WIP **没有进入本 PR**，仍需其独立集成、完整构建/UI 验证与�
 - 已复核 #1722/#1723 改动路径；不编辑其 settings/主 strings.xml。`316887d2a` 的 underlying reconciliation 未移植，集成方需检查共享 TonoVpnService hunk。
 - 真机待验：Doze、重启、always-on/lockdown、真实撤权、通知权限允许/拒绝、满盘下断开及重启提示。没有新候选/安装包、没有签名或发布证据。
 - 未独立审查；按编排约定交给 Claude 交叉审查，禁止合并/auto-merge。
+
+
+## Claude 交叉审查修订（审查基线 378c0c376）
+
+逐条处理：
+1. **阻塞项：接受并移除 explicitlyStopped**。SERVICE_INTERFACE 本身就是新的系统/用户意图，恢复原有 wantConnected=false 也可启动的语义。新增 AlwaysOnResumeServiceTest 使用真实 onCreate/onRevoke/onStartCommand/串行 engine；只替换账号存在和 OS consent，并用可控 IO 队列阻止实际 HTTP，检查同实例撤权后和断开后的系统启动均进入 PREPARING 并保存 wantConnected=true。不是纯 flag/helper 测试。
+2. **非阻塞 1：用 pinned 源码反驳“旧 core 退出回调”前提**。完整 pin `25b0d5ea` 中 ServiceStop 仅经 ManagedService.StopService RPC → platformHandler 同步转发；CloseService 不调用该方法，全部 .ServiceStop 调用点只有上述两个。这是到达时的新管理停止命令，不是旧 core 生命周期事件；接收时 stamp 并隔离入队后过期命令保留。证据链接与边界写入 [refuted finding](../../findings.d/ANDROID-CORE-STOP-CALLBACK-NO-ORIGIN.md)，pin 升级后需重查。
+3. **非阻塞 2：测试/KDoc 与生产对齐**。本轮恢复了物理关闭后 begin(DISCONNECTING) → end(IDLE) 的真实接线；测试保留相同阶段并明确先关闭 TUN，另加 IDLE 后同代回调拒绝断言。
+4. **非阻塞 3：恢复 DISCONNECTING，但在物理关闭之后发布**。这样 UI/磁贴/小组件仍收到忙碌阶段，同时任何 surface 写失败都不可能阻止前面的 TUN 关闭。服务接线测试监听真实 binder 广播，检查 DISCONNECTING 事件发生时 tunOpen=false，随后 IDLE。边界：native close 正在阻塞时仍不会提前显示 busy；主按钮防重复阶段覆盖的是关闭后的清理，不承诺阻塞 close 期间已禁用。
+5. **非阻塞 4：增强实际接线证据，保留 DNS 限制**。新增服务入口测试在真实 settings 临时文件路径上制造写失败，给真实 BoxPlatform 放入可关闭的 pipe TUN，检查 ACTION_DISCONNECT 实际释放 TUN、回到 IDLE/null reason 并显示告警。DNS 仍只有 completion 逻辑测试，不声称覆盖 libbox/Android resolver 完整接线。
+
+既有 CI 已取回 XML 并逐项核实：head 378c0c376 的 [android-ci 40084020477](https://github.com/raydocs/tono/actions/runs/40084020477) build 和 emulator(system/tunnel/ui) 均 success；HomeInteractionTest 15 run/0 failures/0 skipped，新增 recheckingKeepsDisconnectRatherThanOfferingCancel 确实执行，DnsCompletionTest 1、StopPersistenceTest 1、TunnelAuthorityTest 17 均无失败。该历史结果不代表修订 head 已验证，也不是 API29/30/34 全覆盖或真机证据。
+
+本轮服务回归 **真实 RED**：[android-ci 40086755072](https://github.com/raydocs/tono/actions/runs/40086755072)，源码 `282809586`（生产仍是被审查代码），同一 AlwaysOnResumeServiceTest 两测均执行，2 tests / 2 assertion failures / 0 errors / 0 skipped。原始 [XML](red-always-on-service.xml)：
+- Always-on must not silently consume the start after revoke expected PREPARING but was NEEDS_PERMISSION。
+- the service must publish DISCONNECTING after the physical close。
+
+更早的 5855e97d0 / run40086166924 失败是测试 shadow 未继承 ShadowService 的 ClassCastException，已修 fixture；**不计作行为 RED**。未修改生产来绕过测试。GREEN 源码为后续独立 fix commit，服务测试与 282809586 完全一致；新 head CI 未完成前不声称通过。
+
+Pinned DNS 线程补证：同一 upstream commit 的 [experimental/libbox/dns.go:114-130](https://github.com/SagerNet/sing-box/blob/25b0d5ea3e466d246c708ac0f20d0448110e566c/experimental/libbox/dns.go#L114-L130) 对 raw exchange 启动 Go goroutine 再调用 Android Exchange，外层 select 可响应 ctx.Done。因此本修复证明的是取消释放该 exchange 等待/避免迟到完成，**不是已观察到串行 tono-engine 被卡 12s**；真实 native/JVM线程身份仍待设备证据。

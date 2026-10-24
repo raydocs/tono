@@ -4,3 +4,5 @@
 
 源码证据：`apps/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/engine/BoxPlatform.kt:224-243；DnsCompletion.kt:9-28`。
 回归：`DnsCompletionTest.cancellationReleasesTheEngineWaitAndRejectsLateCallbacks`。完整运行范围、原始日志和遗漏项见 [T3 验证记录](../agent-reports/2026-10-24-t3-android/README.md)。
+
+审查续核：pin 25b0d5ea 的 experimental/libbox/dns.go:114-130 在 Go goroutine 调用 raw Exchange，外层 select 响应取消；所以不据 JVM seam 宣称串行 tono-engine 冻结 12s。实际修复范围为取消释放 exchange 等待及拒绝迟到 ctx 完成。
