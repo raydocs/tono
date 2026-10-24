@@ -17,7 +17,7 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const filters = filtersFromRepo(root)
-const heavy = ['macos', 'windows', 'services', 'singBox', 'connectBench']
+const heavy = ['macos', 'windows', 'services', 'singBox', 'connectBench', 'ios']
 
 const MACOS_PATHS = [
   'apps/macos/**',
@@ -92,6 +92,10 @@ const SING_BOX_PATHS = [
   'tooling/scripts/sing-box/**',
   'tooling/scripts/build-sing-box.sh',
 ]
+const IOS_PATHS = [
+  'apps/ios/**',
+  '.github/workflows/ios-ci.yml',
+]
 const CONNECT_BENCH = [
   'tooling/perf/connect-bench/**',
   'apps/windows/crates/tono-core/src/config.rs',
@@ -106,7 +110,7 @@ function workflow(name) {
 }
 
 function calls(should, result) {
-  return ['macos', 'windows', 'services', 'sing-box', 'connect-bench'].map((name) => ({ name, should, result }))
+  return ['macos', 'windows', 'services', 'sing-box', 'connect-bench', 'ios'].map((name) => ({ name, should, result }))
 }
 
 test('docs-only change skips every heavy workflow', () => {
@@ -126,6 +130,7 @@ test('ci-gate reuses the workflows push path lists', () => {
   assert.deepEqual(filters.services, SERVICES_PATHS)
   assert.deepEqual(filters.singBox, SING_BOX_PATHS)
   assert.deepEqual(filters.connectBench, CONNECT_BENCH)
+  assert.deepEqual(filters.ios, IOS_PATHS)
   assert.deepEqual(CONNECT_BENCH_PATHS, CONNECT_BENCH)
   const commented = `
 on:
@@ -143,6 +148,7 @@ test('a touched path selects the workflow that lists it', () => {
   const macos = matchingWorkflows(['apps/macos/Tono/App.swift'], filters)
   assert.equal(macos.macos, true)
   assert.equal(macos.windows, false)
+  assert.equal(macos.ios, false)
   assert.equal(macos.services, false)
   assert.equal(macos.singBox, false)
   assert.equal(macos.connectBench, false)
@@ -168,6 +174,11 @@ test('a touched path selects the workflow that lists it', () => {
   assert.equal(bench.connectBench, true)
   assert.equal(bench.macos, false)
   assert.equal(bench.windows, false)
+
+  const ios = matchingWorkflows(['apps/ios/TonoKit/Package.swift'], filters)
+  assert.equal(ios.ios, true)
+  assert.equal(ios.macos, false)
+  assert.equal(ios.android, undefined)
 })
 
 test('macOS release notes alone do not queue the macOS jobs', () => {
@@ -220,15 +231,19 @@ test('merge_group diffs its base and head SHAs', () => {
 test('pull_request triggering moved into ci-gate', () => {
   const gate = workflow('ci-gate.yml')
   assert.match(gate, /^on:\n {2}pull_request:\n {2}merge_group:\n {4}types: \[checks_requested\]\n {2}workflow_dispatch:\n/m)
-  assert.match(gate, /^ {2}ci-gate:\n {4}name: ci-gate\n {4}needs: \[changes, macos, windows, services, sing_box, connect_bench\]\n {4}if: always\(\)/m)
+  assert.match(gate, /^ {2}ci-gate:\n {4}name: ci-gate\n {4}needs: \[changes, macos, windows, services, sing_box, connect_bench, ios\]\n {4}if: always\(\)/m)
   assert.match(gate, /uses: \.\/\.github\/workflows\/macos-ci\.yml/)
   assert.match(gate, /uses: \.\/\.github\/workflows\/windows-ci\.yml/)
   assert.match(gate, /uses: \.\/\.github\/workflows\/services-ci\.yml/)
   assert.match(gate, /uses: \.\/\.github\/workflows\/sing-box-alpha9-check\.yml/)
   assert.match(gate, /uses: \.\/\.github\/workflows\/connect-bench\.yml/)
+  assert.match(gate, /uses: \.\/\.github\/workflows\/ios-ci\.yml\n {4}with:\n {6}apple: false/)
+  assert.match(gate, /python3 apps\/ios\/tools\/sync-desktop-routing\.py --check/)
+  assert.match(gate, /python3 apps\/android\/scripts\/routing\/sync-desktop-routing\.py --desktop "\$GITHUB_WORKSPACE" --check/)
+  assert.match(workflow('services-ci.yml'), /python3 services\/exit-agent\/test_systemd_cadence\.py/)
   assert.match(gate, /cancel-in-progress: \$\{\{ github\.event_name != 'merge_group' \}\}/)
   const keepCancel = "cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}"
-  for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml']) {
+  for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'ios-ci.yml']) {
     const yaml = workflow(name)
     assert.doesNotMatch(yaml, /^ {2}pull_request:/m)
     assert.match(yaml, /^ {2}workflow_call:/m)
@@ -244,6 +259,9 @@ test('pull_request triggering moved into ci-gate', () => {
   for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'sing-box-alpha9-check.yml']) {
     assert.ok(workflow(name).includes(pushBranches), name)
   }
+  const iosPush = "push:\n    branches:\n      - main\n      - 'feat/ios-**'\n"
+  assert.ok(workflow('ios-ci.yml').includes(iosPush), 'ios-ci.yml')
+  assert.doesNotMatch(workflow('ios-ci.yml'), /release\/macos/)
   assert.match(workflow('macos-ci.yml'), /^ {2}workflow_dispatch:/m)
   assert.match(workflow('connect-bench.yml'), /^ {2}workflow_dispatch:/m)
   assert.doesNotMatch(workflow('connect-bench.yml'), /^ {2}push:/m)
@@ -264,6 +282,8 @@ test('aggregate command passes a docs-only skip and fails a cancelled job', () =
     SING_BOX_SHOULD: 'false',
     CONNECT_BENCH: 'skipped',
     CONNECT_BENCH_SHOULD: 'false',
+    IOS: 'skipped',
+    IOS_SHOULD: 'false',
   }
   const pass = spawnSync(process.execPath, [script, 'aggregate'], { env: { ...process.env, ...base }, encoding: 'utf8' })
   assert.equal(pass.status, 0, pass.stderr)
