@@ -5,16 +5,31 @@
 import { hmacSha256, sha256 } from './crypto';
 import { tokens } from './sessions';
 import { type OidcProvider } from './oidc';
-import { ineligible } from './accounts';
+import { requireAccountEntitlement } from './accounts';
 import { consumeRateLimit } from './ops/ingest-limits';
 import { ApiError } from './errors';
 import { recordClient } from './client-identity';
 import { type Env, type Row, str, envInt, tailscaleEnrollmentEnabled, requiredSecret } from './env';
 import { clientIp } from './auth';
+import { API_RELAYS } from './api-relays';
 import { publicDevice } from './ops/shared-admin';
 import { publicUser } from './ops/reads';
 import { ensureDevice } from './devices';
 import { issueEnrollment } from './enrollment';
+
+// TLS-pass-through relays cannot attach an authenticated forwarded client ID.
+// Only Cloudflare's edge-owned source IP can identify an exact configured relay;
+// never trust X-Forwarded-For, client IDs, an ASN, or an address supplied in JSON.
+function fromApiRelay(req: Request): boolean {
+  return API_RELAYS.some((relay) => relay.host === clientIp(req));
+}
+
+// Subject limits prevent credential guessing; this shared backstop bounds D1
+// challenge/rate-limit writes through the public relay across all login kinds.
+async function rateLimitRelayAuth(e: Env, req: Request, windowSeconds: number) {
+  await consumeRateLimit(e, `rl:${await sha256(`relay-auth:ip:${clientIp(req)}`)}`,
+    envInt(e, 'RATE_LIMIT_RELAY_AUTH_IP', 200), windowSeconds);
+}
 
 // --- Rate limiting (D1) -------------------------------------------------------
 
@@ -23,7 +38,11 @@ export async function rateLimitEmailStart(e: Env, req: Request, emailAddr: strin
   const ipLimit = envInt(e, 'RATE_LIMIT_EMAIL_START_IP', 20);
   const emailLimit = envInt(e, 'RATE_LIMIT_EMAIL_START_EMAIL', 5);
   const ip = clientIp(req);
-  await consumeRateLimit(e, `rl:${await sha256(`email-start:ip:${ip}`)}`, ipLimit, windowSeconds);
+  if (fromApiRelay(req)) {
+    await rateLimitRelayAuth(e, req, windowSeconds);
+  } else {
+    await consumeRateLimit(e, `rl:${await sha256(`email-start:ip:${ip}`)}`, ipLimit, windowSeconds);
+  }
   await consumeRateLimit(e, `rl:${await sha256(`email-start:email:${emailAddr}`)}`, emailLimit, windowSeconds);
 }
 
@@ -46,12 +65,16 @@ export async function rateLimitChallenge(
       : 'RATE_LIMIT_OIDC_VERIFY_CHALLENGE',
     5,
   );
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`${kind}:ip:${clientIp(req)}`)}`,
-    ipLimit,
-    windowSeconds,
-  );
+  if (fromApiRelay(req)) {
+    await rateLimitRelayAuth(e, req, windowSeconds);
+  } else {
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`${kind}:ip:${clientIp(req)}`)}`,
+      ipLimit,
+      windowSeconds,
+    );
+  }
   await consumeRateLimit(
     e,
     `rl:${await sha256(`${kind}:challenge:${challengeId}`)}`,
@@ -62,12 +85,16 @@ export async function rateLimitChallenge(
 
 export async function rateLimitOidcStart(e: Env, req: Request, installationId: string) {
   const windowSeconds = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`oidc-start:ip:${clientIp(req)}`)}`,
-    envInt(e, 'RATE_LIMIT_OIDC_START_IP', 20),
-    windowSeconds,
-  );
+  if (fromApiRelay(req)) {
+    await rateLimitRelayAuth(e, req, windowSeconds);
+  } else {
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`oidc-start:ip:${clientIp(req)}`)}`,
+      envInt(e, 'RATE_LIMIT_OIDC_START_IP', 20),
+      windowSeconds,
+    );
+  }
   await consumeRateLimit(
     e,
     `rl:${await sha256(`oidc-start:installation:${installationId}`)}`,
@@ -166,7 +193,7 @@ export async function deliverEmailCode(
 }
 
 export async function completePasswordlessAuth(e: Env, req: Request, user: Row, deviceName: string, installationId: string) {
-  if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+  requireAccountEntitlement(user);
   const device = await ensureDevice(e, user.id, deviceName, installationId);
   await recordClient(e, req, String(device.id));
   return authResult(e, user, device);

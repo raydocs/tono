@@ -6,7 +6,7 @@ import { canonicalTelemetryWindow } from '../telemetry-window';
 import { DIAGNOSTICS_DAY_SECONDS, DIAGNOSTICS_MAX_REPORTED_AT_MS } from '../diagnostics-limits';
 import { rateLimitDiagnostics, rateLimitDiagnosticsLog, rateLimitTelemetry } from '../ops/ingest-limits';
 import { afterLogSegment, afterTelemetryWindow, ingestConnectFailure } from '../ops/ingest-hooks';
-import { storeDiagnosticsBundle, DIAGNOSTICS_BUNDLE_MAX_BYTES } from './diagnostics';
+import { diagnosticsRateLimitKind, storeDiagnosticsBundle, DIAGNOSTICS_BUNDLE_MAX_BYTES } from './diagnostics';
 import { authorizeDiagnosticsRead, failureClusterDetail, listFailureClusters } from './diagnostics-read';
 
 // A degraded client on the kill-switch recovery channel gets one bounded
@@ -496,7 +496,7 @@ export async function telemetryRoutes(
   if (p === '/api/v1/telemetry/diagnostics' && m === 'POST') {
     const a = await auth(req, e);
     const bundle = await body(req, DIAGNOSTICS_BUNDLE_MAX_BYTES);
-    await rateLimitTelemetry(e, a.userId, 'FAILURE');
+    await rateLimitTelemetry(e, a.userId, diagnosticsRateLimitKind(bundle));
     const stored = await storeDiagnosticsBundle(e.DB, a.userId, a.deviceId ?? null, bundle, e);
     return Response.json({ accepted: true, sessionId: stored.sessionId, events: stored.events }, { status: 202 });
   }

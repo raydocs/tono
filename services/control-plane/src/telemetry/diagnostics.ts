@@ -8,7 +8,17 @@ import { id, now, str, type Row } from '../env';
 import { diagnosticsInt, rejectUnexpectedKeys } from '../request';
 import { DIAGNOSTICS_MAX_REPORTED_AT_MS } from '../diagnostics-limits';
 import { isPlatform } from '../ops/platform';
-import { recordFailureCluster, type ClusterEnv, type FailureClusterInput } from './failure-clusters';
+import { clusterSeverity, recordFailureCluster, type ClusterEnv, type FailureClusterInput } from './failure-clusters';
+
+// Classification only selects a bounded bucket; storeDiagnosticsBundle still
+// validates every field before it can commit anything.
+export function diagnosticsRateLimitKind(bundle: unknown): 'P0' | 'DIAGNOSTICS' {
+  if (!bundle || typeof bundle !== 'object' || !('events' in bundle)) return 'DIAGNOSTICS';
+  return Array.isArray(bundle.events) && bundle.events.some((event: unknown) =>
+    event !== null && typeof event === 'object' && 'code' in event &&
+    typeof event.code === 'string' && clusterSeverity(event.code) === 'p0',
+  ) ? 'P0' : 'DIAGNOSTICS';
+}
 
 export const DIAGNOSTICS_BUNDLE_MAX_BYTES = 32 * 1024;
 const AI_RETENTION_NOTE = 'ai routes require aiServicesConsent and expire after 60 days';
