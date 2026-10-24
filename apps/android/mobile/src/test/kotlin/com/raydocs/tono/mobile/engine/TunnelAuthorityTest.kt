@@ -156,6 +156,22 @@ class TunnelAuthorityTest {
         assertEquals(Phase.DEGRADED, ledger.rechecking(degraded)!!.phase)
     }
 
+    @Test fun queuedCoreStopCannotOverrideAUserStopOrStopANewerConnection() {
+        val ledger = TunnelLedger()
+        var state = connected(ledger)
+        val oldAttempt = state.attempt
+        val callbacks = java.util.ArrayDeque<() -> Unit>()
+        callbacks.add { assertFalse(ledger.acceptsCoreStop(state, oldAttempt)) }
+        state = ledger.begin(state, Phase.DISCONNECTING)
+        assertFalse("closing our own core is not a failure", ledger.acceptsCoreStop(state, state.attempt))
+        state = ledger.end(state, Phase.IDLE, null)
+        callbacks.removeFirst().invoke()
+        callbacks.add { assertFalse(ledger.acceptsCoreStop(state, oldAttempt)) }
+        state = connected(ledger)
+        callbacks.removeFirst().invoke()
+        assertTrue("a current unexpected core stop is still actionable", ledger.acceptsCoreStop(state, state.attempt))
+    }
+
     @Test fun snapshotJsonCarriesTheConfirmationIdentity() {
         val s = connected(TunnelLedger()).copy(version = 12)
         assertEquals(s, EngineSnapshot.fromJson(s.toJson()))

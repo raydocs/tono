@@ -92,6 +92,9 @@ class TunnelLedger {
     fun rechecking(s: EngineSnapshot): EngineSnapshot? =
         if (!TunnelAuthority.confirmed(s)) null else s.copy(reasonCode = null, cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING))
 
+    /** Whether a queued core-stop callback still belongs to the live attempt. */
+    fun acceptsCoreStop(s: EngineSnapshot, gen: Long): Boolean = true
+
     /** Ends the current attempt in a resting [phase]; no tunnel is confirmed afterwards. */
     fun end(s: EngineSnapshot, phase: Phase, reasonCode: String?): EngineSnapshot {
         attempt++

@@ -650,7 +650,15 @@ class TonoVpnService : VpnService() {
             commandServerSecret = EngineStore.randomHex(16)
         })
         val server = Libbox.newCommandServer(object : CommandServerHandler {
-            override fun serviceStop() { engine.execute { disconnect(reason = "CORE_STOPPED"); postStopped("CORE_STOPPED") } }
+            override fun serviceStop() {
+                val gen = snapshot.get().attempt
+                engine.execute {
+                    if (ledger.acceptsCoreStop(snapshot.get(), gen)) {
+                        disconnect(reason = "CORE_STOPPED")
+                        postStopped("CORE_STOPPED")
+                    }
+                }
+            }
             override fun serviceReload() { engine.execute { reloadIfRunning() } }
             override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus()
             override fun setSystemProxyEnabled(enabled: Boolean) {}
