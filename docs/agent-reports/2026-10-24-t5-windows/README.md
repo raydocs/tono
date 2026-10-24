@@ -17,7 +17,24 @@ cargo test --manifest-path apps/windows/Cargo.toml -p tono-core --test telemetry
 cargo test --manifest-path apps/windows/Cargo.toml -p tono-core --test telemetry_outbox --ignore-rust-version
 ```
 
-[GREEN raw output](telemetry-green.log): 7 passed. Tests include the same two behaviors, legacy mixed-file P0, timeline opt-out, deterministic barrier-controlled simultaneous producers, cap and acknowledgement/backoff. The integration test includes the actual shipped outbox source; it does not reimplement it. Temp directories use an atomic suffix because parallel tests can see identical wall-clock ticks.
+[GREEN raw output](telemetry-green.log): 7 passed. Tests include the same two behaviors, legacy mixed-file P0, timeline opt-out, simultaneous producers (first Barrier-only test was later tightened; see review follow-up), cap and acknowledgement/backoff. The integration test includes the actual shipped outbox source; it does not reimplement it. Temp directories use an atomic suffix because parallel tests can see identical wall-clock ticks.
+
+## T6 Retry-After follow-up
+
+- Contract read-only: T6 commit `3205b5c76`, `docs/control-plane-error-contract.md` in the T6 worktree. Server supplies integer `Retry-After` for 429 and separate P0/ordinary buckets.
+- RED commit `c5519957e`: [auth boundary](retry-after-auth-red.log) dropped `Some(120)` to `None`; [queue scheduling](retry-after-queue-red.log) became due before the server's 7200-second deadline. Both failed assertions, not compilation.
+- Implementation `5eacf5be5`: HTTP transport reads `Retry-After`; typed `ApiResponse`/`ApiError::RateLimited` carry optional seconds; **both initial failed enqueue and later drain rejection** store a retry deadline at least as late as the server asks. Local exponential backoff remains capped at 30 minutes; a longer server deadline is not shortened to that cap. Invalid/missing/overflowing integer headers use local backoff; timestamp arithmetic saturates.
+- [Full portable tono-core GREEN](core-green.log): 360 unit tests + 24 integration tests passed (12 browser DNS, 8 outbox, 1 update contract, 3 journal). The unarmed policy-contract suite has zero tests on this host. The command was `cargo test --manifest-path apps/windows/Cargo.toml -p tono-core --ignore-rust-version`.
+- A real loopback HTTP 429 header test was added to the native transport suite, but not run locally; hosted Windows CI is still required.
+- New account-code compatibility checks cover `PLAN_EXPIRED`, `QUOTA_EXHAUSTED`, `DEVICE_REAUTH_REQUIRED`: HTTP 403 is `Forbidden`, not `Unauthorized` or `SessionVerdict::Refused`; refresh token and identity remain intact; no refresh/logout request. This is **existing safety compatibility**, not a claim of dedicated renewal/reauthentication UI. Their code-specific human messages/actions remain unimplemented (generic permission error today). No VPN configuration deletion path was added.
+
+## Independent review and corrections
+
+[Round 1](review-r1.txt), same model/fresh context, covered `322f48c6f…eef0b68ac` only. Verdict approve-with-fixes: P2 initial rejection did not back off; P3 concurrent test did not force the RMW boundary. P2 is corrected by `5eacf5be5`; P3 by `2909677ac`.
+
+The concurrent producer regression now pauses the first transaction after loading its snapshot, checks serialization is owned through the write boundary, then admits the second producer and verifies both reports survive. No sleeps or probabilistic collision requirement. [Mutex-removal mutation output](queue-lock-mutation-red.log) fails the precise serialization assertion; this is a mutation check, **not** a claim that the full new test ran on original main. Restored code passes [full GREEN](core-green.log).
+
+Round 2 must cover the current code, including Retry-After metadata and the concurrency-test correction. A pending/stale review is not merge coverage; no merge/auto-merge is requested.
 
 ## PR coordination (read-only)
 

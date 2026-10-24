@@ -1,0 +1,8 @@
+Same model, fresh context. Scope: 322f48c6f...eef0b68ac only.
+P2: initial rejected upload used immediate enqueue, not first backoff.
+P3: Barrier only synchronized producer entry; old implementation still passed 8/100 trials.
+Covered: kind/body acknowledgement isolation, P0 capacity/priority, legacy queue/retain_kind, RMW mutex without await, caps, no network/auth/TLS expansion.
+Reviewer ran portable outbox tests: 7/7 pass. Native Tauri/Service and hardware not run.
+VERDICT: approve-with-fixes
+Response: P2 addressed in 5eacf5be5 via enqueue_failed and initial deadline assertion; P3 addressed in 2909677ac via controlled post-load pause and critical-section assertion.
+Queue-lock mutation check: removing only enqueue_at_with's mutex caused the critical-section assertion to fail (queue-lock-mutation-red.log); restored code passes full suite. This mutation check is NOT represented as an original-baseline RED.
