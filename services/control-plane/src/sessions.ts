@@ -13,7 +13,7 @@ export async function tokens(
   user: string,
   device: string,
   installation: string,
-  rotate?: { from: string; replay: boolean; also: D1PreparedStatement[] },
+  rotate?: { from: string; replayRoot?: string; also: D1PreparedStatement[] },
 ) {
   const refresh = randomToken();
   const t = now();
@@ -46,14 +46,32 @@ export async function tokens(
       // Revoke and successor insert commit together, and only the request that
       // won the revoke inserts. A session superseded by a replay records no
       // rotated_at, so its own token never opens a second grace replay.
+      const replayGuard = rotate.replayRoot ? `
+        AND EXISTS (
+          SELECT 1 FROM sessions replay_root
+          WHERE replay_root.id = ? AND replay_root.successor_id = sessions.id
+            AND replay_root.user_id = sessions.user_id AND replay_root.device_id = sessions.device_id
+            AND replay_root.revoked_at IS NOT NULL
+            AND replay_root.rotated_at > ? AND replay_root.expires_at > ?
+        )` : '';
       const [revoked] = await e.DB.batch([
         e.DB.prepare(
-          'UPDATE sessions SET revoked_at = ?, rotated_at = ?, successor_id = ? WHERE id = ? AND revoked_at IS NULL',
-        ).bind(t, rotate.replay ? null : t, sid, rotate.from),
+          `UPDATE sessions SET revoked_at = ?, rotated_at = ?, successor_id = ?
+           WHERE id = ? AND revoked_at IS NULL${replayGuard}`,
+        ).bind(t, rotate.replayRoot ? null : t, sid, rotate.from,
+          ...(rotate.replayRoot ? [rotate.replayRoot, t - REFRESH_REPLAY_GRACE_SECONDS, t] : [])),
         retireSiblings,
         e.DB.prepare(
           `${insert} SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ? AND successor_id = ?)`,
         ).bind(...values, rotate.from, sid),
+        // Only the original normally-rotated token owns the grace. Repoint it
+        // in this same transaction so another lost response can recover again;
+        // never reset its deadline or grant grace to a replay-superseded token.
+        ...(rotate.replayRoot ? [e.DB.prepare(
+          `UPDATE sessions SET successor_id = ?
+           WHERE id = ? AND successor_id = ?
+             AND EXISTS (SELECT 1 FROM sessions WHERE id = ? AND successor_id = ?)`,
+        ).bind(sid, rotate.replayRoot, rotate.from, rotate.from, sid)] : []),
         ...rotate.also,
       ]);
       if (!revoked.meta.changes) throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token was already used');
@@ -95,10 +113,11 @@ export async function refreshSession(e: Env, req: Request, raw: string) {
   ).bind(key, t).first<Row>();
   let s = await session('refresh_hash = ?', await sha256(raw));
   // A client whose rotation response was lost still holds the token it just
-  // rotated. Inside the grace window, while the successor is live and has
-  // never been rotated itself, rotate that successor for it instead of
-  // declaring the session dead. Anything else is reuse and stays 401.
+  // rotated. The root points at the latest recovery successor, but only while
+  // that successor has not rotated normally. Its original grace deadline is
+  // never extended; tokens superseded by recovery have no grace of their own.
   const replay = !!s && s.revoked_at !== null;
+  const replayRoot = s && replay ? String(s.id) : undefined;
   if (s && replay) {
     s = s.successor_id && s.rotated_at !== null && s.rotated_at > t - REFRESH_REPLAY_GRACE_SECONDS
       ? await session('sessions.id = ?', s.successor_id)
@@ -122,7 +141,7 @@ export async function refreshSession(e: Env, req: Request, raw: string) {
   }
   const issued = await tokens(e, s.user_id, s.device_id, s.installation_id, {
     from: s.id,
-    replay,
+    replayRoot,
     also: [e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, s.device_id)],
   });
   // Only after the rotation committed, as on the pre-#329 path (#578).
