@@ -1807,7 +1807,7 @@ nonisolated struct HelperManager {
         path: String,
         body: Data? = nil,
         socket socketPath: String = HelperManager.socketPath,
-        connected: (Int32) throws -> Void = { _ in }
+        afterConnect: (Int32) throws -> Void = { _ in }
     ) throws -> (status: Int, body: Data) {
         let generationLine = socketPath == HelperManager.socketPath
             ? try sessionGenerationHeader(method: method, path: path)
@@ -1849,7 +1849,7 @@ nonisolated struct HelperManager {
             throw socketPath == HelperManager.socketPath ? connectFailure() : HelperIPCError.connectFailed
         }
 
-        try connected(fd)
+        try afterConnect(fd)
 
         let payload = body ?? Data()
         var request = Data(
