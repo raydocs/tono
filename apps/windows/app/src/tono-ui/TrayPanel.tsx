@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { emit } from '@tauri-apps/api/event'
 import { useLockFn } from 'ahooks'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +10,7 @@ import {
   useTonoStatus,
 } from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
+import { useUpdate } from '@/hooks/use-update'
 import {
   latencyColor,
   latencyLabelKey,
@@ -32,6 +34,8 @@ import { useManualBackupChannel } from '@/pages/tono/use-backup-channel'
 import { useQuery } from '@/services/query-client'
 import { connectIfIdleAfterSelection } from '@/services/server-selection'
 import { useThemeMode } from '@/services/states'
+import { snoozeUpdate, updateSnoozed } from '@/services/update-copy'
+import { SHOW_UPDATE_EVENT } from '@/services/update-prompt'
 import {
   formatTonoActionError,
   idleSelectShouldConnect,
@@ -55,6 +59,7 @@ import parseTraffic from '@/utils/parse-traffic'
 import { useAppearancePreferences } from './appearance-preferences'
 import { seaPresentation } from './sea-presentation'
 import { SeaTray } from './SeaTray'
+import { TrayUpdateNotice } from './TrayUpdateNotice'
 import { whileVisible } from './while-visible'
 
 const STATUS_LABEL: Record<TonoUiState, string> = {
@@ -105,6 +110,27 @@ const hex = (color: string, alpha: number) =>
 export const TrayPanel = () => {
   const { t } = useTranslation()
   const { newAppearance } = useAppearancePreferences()
+  const { updateInfo } = useUpdate()
+  const [laterSha, setLaterSha] = useState<string | null>(null)
+  const updateOffer =
+    updateInfo &&
+    updateInfo.manifestSha256 !== laterSha &&
+    !updateSnoozed(updateInfo.manifestSha256)
+      ? updateInfo
+      : null
+  const updateNotice = updateOffer ? (
+    <TrayUpdateNotice
+      version={updateOffer.version}
+      onLater={() => {
+        snoozeUpdate(updateOffer.manifestSha256)
+        setLaterSha(updateOffer.manifestSha256)
+      }}
+      onUpdateNow={() => {
+        void invoke('tray_flyout_open_dashboard')
+        void emit(SHOW_UPDATE_EVENT)
+      }}
+    />
+  ) : null
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     appearanceQueue = appearanceQueue
@@ -324,6 +350,7 @@ export const TrayPanel = () => {
         }
         ai={connected && status?.claudeHomeActive === true}
         error={actionError}
+        update={updateNotice}
         backup={
           backupAvailable ? (
             <button
@@ -561,6 +588,8 @@ export const TrayPanel = () => {
           {actionError}
         </div>
       )}
+
+      {updateNotice}
 
       {backupAvailable && (
         <button

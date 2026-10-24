@@ -59,7 +59,9 @@ export const useUpdate = (enabled: boolean = true) => {
     retry: 2,
     staleTime: 60 * 60 * 1000,
     refetchInterval: autoCheck ? 24 * 60 * 60 * 1000 : 0,
-    refetchIntervalInBackground: false,
+    // The window is usually hidden in the tray. A hidden document must still
+    // hear about a new version, or the tray never shows Update now / Later.
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: autoCheck,
   })

@@ -40,6 +40,20 @@ static INCOMPLETE: AtomicBool = AtomicBool::new(false);
 /// a refusal of the offer: the user may start the same update again.
 pub(crate) const DOWNLOAD_CANCELLED: &str = "TONO_UPDATE_CANCELLED";
 
+/// The marker a package download fails with before Prepare. The dialog may try that same
+/// offer again. A Service refusal, a lost executor, and anything after the download have
+/// no marker, so the dialog leaves Update now hidden.
+pub(crate) const DOWNLOAD_FAILED: &str = "TONO_UPDATE_DOWNLOAD_FAILED";
+
+/// Prefix a download-phase transport failure. A cancel keeps its own marker.
+fn mark_download_failure(error: anyhow::Error) -> anyhow::Error {
+    let text = format!("{error:#}");
+    if text.contains(DOWNLOAD_CANCELLED) {
+        return error;
+    }
+    anyhow::anyhow!("{DOWNLOAD_FAILED}: {text}")
+}
+
 /// The token of the update in flight, from the moment the install is admitted until its download
 /// ends (`DownloadCancelSlot`), so Cancel can never reach the proxy clear, Prepare or Install.
 static DOWNLOAD_CANCEL: std::sync::Mutex<Option<CancellationToken>> = std::sync::Mutex::new(None);
@@ -667,7 +681,7 @@ pub async fn tono_install_update(
         .await;
         // The download is over: Cancel no longer reaches anything after it.
         drop(cancel_slot);
-        downloaded?;
+        downloaded.map_err(mark_download_failure)?;
         file.sync_all().await?;
         drop(file);
         progress.send(serde_json::json!({"event":"Finished"}))?;
@@ -1326,6 +1340,19 @@ mod update_relay_tests {
         assert!(written.is_empty(), "nothing is fetched");
         drop(slot);
         drop(install);
+    }
+
+    #[test]
+    fn a_download_transport_failure_is_marked_and_a_cancel_is_left_alone() {
+        let transport = mark_download_failure(anyhow::anyhow!("connection timed out"));
+        assert!(transport.to_string().contains(DOWNLOAD_FAILED), "{transport:#}");
+        assert!(!transport.to_string().contains(DOWNLOAD_CANCELLED));
+
+        let cancel = mark_download_failure(anyhow::anyhow!(
+            "{DOWNLOAD_CANCELLED}: update download cancelled"
+        ));
+        assert!(cancel.to_string().starts_with(DOWNLOAD_CANCELLED), "{cancel:#}");
+        assert!(!cancel.to_string().contains(DOWNLOAD_FAILED));
     }
 
     /// WIN-UPDATE-PARTIAL-FILES: a package file is removed when its install ends (failure,

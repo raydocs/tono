@@ -80,6 +80,31 @@
   color: var(--sea-secondary);
   margin-bottom: 6px;
 }
+.sea-tray-update {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: inherit;
+}
+.sea-tray-update p {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.sea-tray-update-actions {
+  display: flex;
+  gap: 8px;
+}
+.sea-tray-update-actions button {
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: #ffffff14;
+  color: inherit;
+  cursor: pointer;
+}
 .sea-tray-action {
   width: 100%;
   height: 40px;

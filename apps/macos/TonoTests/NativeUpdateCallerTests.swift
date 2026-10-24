@@ -193,6 +193,67 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertTrue(AppProfile.defaults.bool(forKey: SettingsKey.lastTunEnabled))
     }
 
+    /// Disconnect already returned verified, and the kill switch is published
+    /// released before retire. A still-pending record must not tell the user
+    /// that network protection is still on.
+    func testVerifiedDisconnectThenFailedRetireDoesNotClaimProtectionIsOn() async throws {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let recovery = RuntimeCleanup.nativeUpdateRecovery
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            RuntimeCleanup.nativeUpdateRecovery = recovery
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = true
+        RuntimeCleanup.nativeUpdateRecovery = .protectedOffline
+        RuntimeCleanup.markCoreStarted(tunEnabled: true)
+        let app = AppState()
+        app.isProtectionBlocked = true
+        var calls = [String]()
+
+        do {
+            try await app.retireDisconnectedNativeUpdate(nativeUpdate: { operation in
+                calls.append(operation)
+                switch operation {
+                case "status":
+                    return self.status(.preparing, execution: "staged")
+                case "disconnect":
+                    return .init(pending: true, receipt: nil, execution: nil,
+                                 disconnectVerified: true, diagnostic: nil)
+                case "retire":
+                    return .init(pending: true, receipt: nil, execution: nil,
+                                 disconnectVerified: true, diagnostic: nil)
+                default:
+                    XCTFail("Unexpected update operation: \(operation)")
+                    throw Failure.preparation
+                }
+            })
+            XCTFail("A still-pending retire must surface")
+        } catch {
+            let shown = error.localizedDescription
+            XCTAssertEqual(shown, NativeUpdateDownload.Copy.retirementUnconfirmed)
+            XCTAssertTrue(
+                shown.localizedCaseInsensitiveContains("is back") || shown.contains("已经恢复"),
+                shown)
+            XCTAssertFalse(shown.localizedCaseInsensitiveContains("still on"), shown)
+            XCTAssertFalse(shown.contains("保护还在"), shown)
+        }
+
+        XCTAssertEqual(calls, ["status", "disconnect", "retire"])
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertTrue(app.nativeUpdatePending)
+    }
+
     func testUpdateSuspensionRetiresACancelledReloadBeforeTheNextSession() async {
         let app = AppState()
         app.nativeUpdatePending = true
@@ -254,9 +315,26 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertFalse(AppUpdater.reportsFailure(userInitiated: false, offerAccepted: false, updatePending: false))
     }
 
+    func testUpdateSentencesHaveSimplifiedChinese() throws {
+        let catalog = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Tono/Localizable.xcstrings")
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: catalog)) as! [String: Any]
+        let strings = try XCTUnwrap(json["strings"] as? [String: Any])
+        for key in NativeUpdateDownload.Copy.catalogKeys {
+            let entry = try XCTUnwrap(strings[key] as? [String: Any], key)
+            let locs = try XCTUnwrap(entry["localizations"] as? [String: Any])
+            let zh = try XCTUnwrap(locs["zh-Hans"] as? [String: Any])
+            let unit = try XCTUnwrap(zh["stringUnit"] as? [String: Any])
+            let value = try XCTUnwrap(unit["value"] as? String)
+            XCTAssertFalse(value.isEmpty)
+            XCTAssertNotEqual(value, key)
+        }
+    }
+
     func testNativeUpdateOfferAndFailureRender() async throws {
         let offer = AppUpdater.offerAlert(version: "0.0.73")
-        XCTAssertEqual(offer.buttons.map(\.title), ["Install and Restart", "Not Now"])
+        XCTAssertEqual(offer.buttons.map(\.title), ["Update now", "Later"])
         try await capture(offer, name: "native-update-offer")
         let failure = AppUpdater.failureAlert(detail: "Update consumption is uncertain. Network protection and recovery evidence remain in place.")
         XCTAssertEqual(failure.buttons.map(\.title), ["OK"])
