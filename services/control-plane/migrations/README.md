@@ -122,3 +122,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0103
 
 - `0103_mobile_client_platform.sql` — `devices.client_platform` CHECK widened to `macos` | `windows` | `android` | `ios` (0092 allowed desktop only). Replaced by add-copy-drop-rename, not a table rebuild: no index, view or trigger reads the column
+
+## 0104
+
+- `0104_device_entitlement_suspension.sql` — `devices.entitlement_suspended` records entitlement-only network revocation separately from explicit device revocation. Default 0 preserves existing revoked identities; it never revives old sessions or credentials. No production migration run by this PR.
