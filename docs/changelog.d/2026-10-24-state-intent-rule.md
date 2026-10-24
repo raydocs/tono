@@ -20,3 +20,9 @@
 - 绿：`node --test tooling/scripts/tests/ci-gate-changes.test.mjs` 9 pass。两份 routing `--check` 通过（iOS “matches the desktop lists”，Android “matches desktop checkout”）。cadence `Ran 5 tests` `OK`。
 - Android JVM 测试未跑：现有 JDK 17 能启动 Gradle，但 `:mobile:verifyLibbox` 因缺少 `mobile/libs/libbox.aar` 失败。未构建 libbox。
 - 这三项是工程覆盖，不进发现总账。
+
+### 2026-10-24 续记 · ci-gate 两处失败
+- 来源：[#1746](https://github.com/raydocs/tono/pull/1746) head `7de312969`，run `40084102769`。`services / ops-contract` 与 `ios / TonoKit + sing-box route checks (Linux)` 失败。不是基础设施抖动，没有 `gh run rerun`。
+- 记录检查：`records.test.mjs` 要求编号决策文件与 `## ` 标题一一对应（131 ≠ 130）。决策 134 的中文标题降为粗体，正文保留。英文 `##` 仍是唯一二级标题。没有放宽该测试。
+- 路由检查：`swift test` 135 通过。`stable-socks-home.json` 149 项通过。三个三层配置只在 `ipinfo.io` 上失败。`93.184.216.34` 是 harness 本地 DNS 桩的固定 A 应答，表示查询离开了进程，不是公网解析抖动。`ipinfo.io` 不在 Home/Cloud 名单里；三层对未收录名字走本地解析（与 `www.baidu.com` 的路由单测相同），稳定模式的 catch-all 仍要求 FakeIP。受保护名字仍必须 FakeIP，出现在本地桩里即失败。Android 同文 harness 一并改，避免两份分叉。未改 sing-box 规则，未放宽防泄漏。
+- 本机未跑 `swift test`、`check-singbox.sh`（需要 Swift 与 Linux sing-box）。记录检查在本机重跑。

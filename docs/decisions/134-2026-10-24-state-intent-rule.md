@@ -4,7 +4,7 @@
 - Why stricter: this does not widen PF, WFP, TLS, account isolation or the kill switch. Ordinary traffic stays fail-open unless the user has armed a strict kill switch ([RELEASE_READINESS](../RELEASE_READINESS.md)). An account hold stops presenting the device as signed out; it does not keep an exit credential after T6 has revoked the network grant. A user disconnect is not stored as a core failure, so the UI cannot offer Retry for a stop the user asked for.
 - Applied in: `fix/t8-state-rule` (`134-2026-10-24-state-intent-rule.md`). Account codes are [PR 1738](https://github.com/raydocs/tono/pull/1738) head `429e23427` (contract introduced `3205b5c76`), file `docs/control-plane-error-contract.md` on that branch. This decision does not copy that file and does not edit that branch. Decision 133 is that PR's account-entitlement file; this one is 134 so the numbers do not collide.
 
-## 2026-10-24 · 显示跟着用户意图和代次走，不跟着更晚的隧道事件走
+**2026-10-24 · 显示跟着用户意图和代次走，不跟着更晚的隧道事件走**
 - 状态：provisional
 - 选定：用户意图（已断开、已退出、正在停止）一旦记下，后来的隧道“未运行 / 失败”不能改画面。只有同会话里更新的用户意图，或新的一次连接尝试，才能盖过它。失败带 `{source, generation, at}`。`coreStopped` 必须知道当前是不是自己在停；用户发起的停止不写 failure。`403 PLAN_EXPIRED` / `403 QUOTA_EXHAUSTED` 保留账户、令牌和 VPN 配置，只撤销网络授权，画面是续费或联系家人。`403 DEVICE_REAUTH_REQUIRED` 保留账户和配置，请用户重新验证，不自动连接。显式撤权、停用、过期凭据仍是 `401`，会话结束。`429 RATE_LIMITED` 不登出、不删未发送的报告。失败或回滚要更新成功路径会更新的基线、owner 和界面状态，或者明确清掉。否决：用 `beatAt` 谁晚谁赢、把套餐或额度问题当成登出、以及 `let _ =` 丢掉新进程身份。
 - 为何更严：不放宽 PF、WFP、TLS、账户隔离或 Kill Switch。用户没开严格 Kill Switch 时，普通流量仍 fail-open（[RELEASE_READINESS](../RELEASE_READINESS.md)）。账户暂停不再显示成已登出，也不在 T6 已撤销出口凭据之后继续提供 VPN。用户断开不会被存成 core 失败，界面就不能对用户自己的停止给出“重试”。
