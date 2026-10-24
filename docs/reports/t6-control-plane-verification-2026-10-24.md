@@ -61,3 +61,23 @@ npm test
 - P2 OTP 上限：基线 `index.ts:260-267` 已 `attempts < max_attempts`、D1 原子递增，challenge 插入 `max_attempts=5`；“无限尝试”不成立，不改。
 - 其余可选 P2（OIDC 提供方失败耗次、邮件中文、OPS 三项）未做：优先完成三个 P1，不扩大跨服务范围。
 - 未触及 feed、签名、部署脚本、客户更新源、owner G1/G2/G3；无新包，仅源码。
+
+## 追加 WORKER-REFRESH-SECOND-REPLAY
+
+- 用户追加范围；仍使用同一分支/PR #1738。再次 `git fetch origin` 成功，origin/main 仍 `322f48c6f`；在本 PR 原 head `429e23427` 确认问题存在。
+- 实现/测试：`162f965495a1e241343e8313496310cf06ea37b6`，仅 `src/sessions.ts` 与新增 `test/worker-refresh-replay.test.ts`；无新 migration/客户端/部署更改。
+- RED 初稿 `08c78c3fe` 中 logout 新用例误写200（既有规范是204）；这条是测试编写错误，不计产品RED。`f1da98c94` 只纠正这条**新测试**为既有204规范，既有测试均未改。
+- 真实 RED：测试 `f1da98c94` + `git show 429e23427:services/control-plane/src/sessions.ts`（只暂换本线程拥有的源码，退出 trap 恢复），`npx vitest run test/worker-refresh-replay.test.ts` 输出 `Tests 3 failed | 2 passed (5)`；两条连续恢复 `expected 401 to be 200`，受控并发胜者的 root pointer 断言失败。无编译失败冒充RED。
+- GREEN 新实现同命令：`Tests 5 passed (5)`。覆盖连续两次丢响应恢复；S1/S2 rotated_at=NULL且access/refresh均拒绝；仅一个live会话；第599秒仍能多次恢复、第600秒拒绝且root时间不变；正常使用交付的 successor 后旧 root 不再恢复；logout拒绝所有遗留token；受控事件暂停旧replay的batch并让另一请求先提交，旧CAS失败且不撤销胜者（无sleep）。
+- `npm run typecheck`：初次 TS18047（s可能为空）已用显式空值检查修正；最终原始输出 `unchecked indexed access errors 520 (baseline 521)`、admin `76 (baseline 99)`，通过。
+- 扩大四文件命令：`npx vitest run test/worker-refresh-replay.test.ts test/worker-devices.test.ts test/worker-account-state.test.ts test/worker-auth.test.ts`，`Tests 1 failed | 43 passed (44)`；唯一失败是**未改动**的 `worker-devices.test.ts:160` 明确要求第二次T0重放401，实际200，与用户追加契约直接冲突。禁止据此宣称全绿。
+
+### 威胁模型与授权边界
+
+1. refresh token 是持有者凭据。服务器不能区别“合法设备没收到响应”和“窃取了同一个T0的人”；本次允许该持有者在**原有**600秒内反复恢复，不增加600秒，也不增加令牌/会话TTL。窃取T0者在这段窗口内仍可能与合法客户端竞争并使旧successor失效；这是明确的有限窗口风险，不声称刷新无重放风险。
+2. 只有正常轮换过的原root拥有恢复窗口。恢复时把当前successor原子换成新session，同时让root直接指向新session；root.rotated_at保持不变。被恢复替代的S1/S2记录rotated_at=NULL，不能因为自己掌握一个未交付token而再开600秒窗口。
+3. 不遍历任意正常轮换链：最新successor被正常使用后会撤销，旧root不再获准追到更后的正常successor。过期/显式撤权、logout、新登录、停用账户以及本PR套餐拒绝逻辑不放宽。升级前已经断裂的root链不回填/复活。
+4. D1原子batch在当前session的未撤销CAS中同时核对root仍指向它、同user/device、原窗口及root过期时间，再插入新session和重指root。失败CAS不能重指root、插入会话或撤销并发胜者。只对本次成功恢复的根做更新，不给中间token追加授权。
+5. 未完成独立安全审查，需编排者在合并前安排Claude交叉审查；不合并、不部署。新令牌不入日志/文档，只存hash。
+
+最终实现 `162f96549` 的完整 `npm test` 原始输出：`Test Files 2 failed | 68 passed (70)`；`Tests 3 failed | 1069 passed (1072)`，116.02秒。恰为之前两条套餐401契约冲突与旧one-replay契约冲突；没有隐藏或跳过。五个新增/相关窄文件重跑 `Tests 17 passed (17)`；`git diff --check` 通过。
