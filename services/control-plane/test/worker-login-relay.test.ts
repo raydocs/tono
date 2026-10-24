@@ -37,4 +37,13 @@ describe('relay login budgets', () => {
     await expect(rateLimitOidcStart(e, request('179.253.233.220'), 'installation-two')).resolves.toBeUndefined();
     await expect(rateLimitOidcStart(e, request('179.253.233.220'), 'installation-one')).rejects.toMatchObject({ status: 429 });
   });
+  it('bounds the aggregate writes from each relay across login kinds and identities', async () => {
+    const e = { ...env, RATE_LIMIT_RELAY_AUTH_IP: '2' } as unknown as Env;
+    await rateLimitEmailStart(e, request('179.253.233.220'), 'aggregate-one@example.com');
+    await rateLimitOidcStart(e, request('179.253.233.220'), 'aggregate-installation');
+    await expect(rateLimitChallenge(e, request('179.253.233.220'), 'oidc-verify', 'aggregate-challenge'))
+      .rejects.toMatchObject({ status: 429, extra: { retryAfterSeconds: expect.any(Number) } });
+    await expect(rateLimitEmailStart(e, request('179.255.154.17'), 'aggregate-two@example.com')).resolves.toBeUndefined();
+  });
+
 });
