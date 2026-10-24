@@ -631,6 +631,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
             let mut members = Vec::new();
             clear_retired_publish_scratch(dir.parent().context("attempt has no store root")?)?;
             collect_candidates(&dir.join("payload"), &a.install_root, &mut members)?;
+            // sing-box-sha256.txt is not a Service-dir member here: release/candidate
+            // App and Service prefer their compiled TONO_SING_BOX_SHA256 pin. The
+            // payload's resources/ pin is already covered by collect_candidates above;
+            // file-pin-only dev builds use the ordinary installer's
+            // publish_sing_box_digest_pin, not this signed native-update path.
             for name in ["tono-service.exe", "core-sha256.txt"] {
                 let source = dir.join("payload/resources").join(name);
                 members.push(CoordinatedBinaryReplacement::prepare(

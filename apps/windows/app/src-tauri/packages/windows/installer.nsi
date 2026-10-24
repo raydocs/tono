@@ -1038,6 +1038,9 @@ FunctionEnd
     Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.rollback"
     Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.restore"
     Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.publish"
+    Delete /REBOOTOK "$INSTDIR\resources\sing-box-sha256.txt.rollback"
+    Delete /REBOOTOK "$INSTDIR\resources\sing-box-sha256.txt.restore"
+    Delete /REBOOTOK "$INSTDIR\resources\sing-box-sha256.txt.publish"
   ${EndIf}
 !macroend
 

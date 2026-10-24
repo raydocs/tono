@@ -100,6 +100,10 @@ export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
   'sing-box-sha256.txt.install-rollback',
   'sing-box-sha256.txt.install-restore',
   'sing-box-sha256.txt.install-publish',
+  // Native update publishes the resources/ pin as a payload transaction member too.
+  'resources/sing-box-sha256.txt.rollback',
+  'resources/sing-box-sha256.txt.restore',
+  'resources/sing-box-sha256.txt.publish',
 ])
 
 // These inherited Clash Verge commands are not used by any route in the Tono
