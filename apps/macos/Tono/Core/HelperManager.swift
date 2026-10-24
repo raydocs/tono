@@ -1395,6 +1395,17 @@ nonisolated struct HelperManager {
         let execution: String?
         let disconnectVerified: Bool?
         let diagnostic: String?
+        let disconnectRequested: Bool?
+
+        init(pending: Bool, receipt: UpdateContractV1.Receipt?, execution: String?,
+             disconnectVerified: Bool?, diagnostic: String?, disconnectRequested: Bool? = nil) {
+            self.pending = pending
+            self.receipt = receipt
+            self.execution = execution
+            self.disconnectVerified = disconnectVerified
+            self.diagnostic = diagnostic
+            self.disconnectRequested = disconnectRequested
+        }
     }
 
     static func updatePackagePath(_ package: URL) throws -> String {
@@ -1802,11 +1813,12 @@ nonisolated struct HelperManager {
 
     // MARK: - Bounded Unix-socket HTTP client
 
-    private static func sendRequest(
+    static func sendRequest(
         method: String,
         path: String,
         body: Data? = nil,
-        socket socketPath: String = HelperManager.socketPath
+        socket socketPath: String = HelperManager.socketPath,
+        afterConnect: (Int32) throws -> Void = { _ in }
     ) throws -> (status: Int, body: Data) {
         let generationLine = socketPath == HelperManager.socketPath
             ? try sessionGenerationHeader(method: method, path: path)
@@ -1814,6 +1826,15 @@ nonisolated struct HelperManager {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw HelperIPCError.socketFailed }
         defer { close(fd) }
+
+        // A helper can reject the peer or be booted out between connect and
+        // write. Turn EPIPE into the existing recoverable send error instead
+        // of terminating the app while its network protection is still armed.
+        var noSignalPipe: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignalPipe,
+                         socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            throw HelperIPCError.socketFailed
+        }
 
         var sendTimeout = timeval(tv_sec: 3, tv_usec: 0)
         _ = withUnsafePointer(to: &sendTimeout) {
@@ -1847,6 +1868,8 @@ nonisolated struct HelperManager {
         guard connected == 0 else {
             throw socketPath == HelperManager.socketPath ? connectFailure() : HelperIPCError.connectFailed
         }
+
+        try afterConnect(fd)
 
         let payload = body ?? Data()
         var request = Data(

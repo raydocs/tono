@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 
 // MARK: - App Delegate for Window Configuration
 
@@ -31,6 +32,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Socket-specific suppression also protects IPC before/without AppKit startup.
+        signal(SIGPIPE, SIG_IGN)
+
         guard Self.canStartRuntimeFromCurrentLocation else {
             runtimeStopped = true
             NSApp.activate(ignoringOtherApps: true)

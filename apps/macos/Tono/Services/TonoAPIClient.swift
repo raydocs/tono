@@ -73,6 +73,7 @@ actor TonoAPIClient {
     enum APIError: LocalizedError, Equatable {
         case invalidConfiguration, transport(String), unauthorized, forbidden, notFound
         case deviceLimit, server(status: Int, message: String), invalidResponse
+        case rateLimited(retryAfter: TimeInterval)
         /// The credential is valid but the account may not use it — disabled,
         /// past its expiry, or at its data allowance. Kept apart from
         /// `unauthorized` so it is neither retried behind a token refresh nor
@@ -113,6 +114,7 @@ actor TonoAPIClient {
             case .deviceLimit: String(localized: "This Tono account has reached its device allowance. Revoke another device first.")
             // Server-provided text is shown verbatim; not a catalog key.
             case let .server(_, message): message
+            case .rateLimited: String(localized: "Tono is receiving too many requests. Please wait a little and try again.")
             case .invalidResponse: String(localized: "Tono returned an invalid response.")
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
@@ -129,6 +131,12 @@ actor TonoAPIClient {
         /// English operator text, so it is carried as detail rather than shown.
         private static func entitlementDescription(_ code: String) -> String {
             switch code {
+            case "PLAN_EXPIRED":
+                String(localized: "This Tono plan has expired. Renew it or ask a family member for help.")
+            case "QUOTA_EXHAUSTED":
+                String(localized: "This Tono plan has used its data allowance. Renew it or ask a family member for help.")
+            case "DEVICE_REAUTH_REQUIRED":
+                String(localized: "This device needs to be verified again. Sign out and sign in again before connecting.")
             case "ACCOUNT_EXPIRED":
                 String(localized: "This Tono plan has expired. Renew it to keep connecting.")
             case "QUOTA_EXCEEDED":
@@ -139,12 +147,13 @@ actor TonoAPIClient {
         }
     }
 
-    /// Reasons the control plane refuses an authenticated caller for an account
-    /// problem rather than a credential problem. `USER_DISABLED` is the only one
-    /// it names today — expiry and quota still answer 401 `UNAUTHORIZED`, which
-    /// is indistinguishable from a stale access token — so the rest are accepted
-    /// ahead of that server change instead of needing another client release.
+    /// Account/network entitlement refusals do not invalidate the login or
+    /// delete the device configuration. Network credentials stay withdrawn
+    /// until the control plane authorizes a newly verified device.
     static let entitlementCodes: Set<String> = [
+        "PLAN_EXPIRED",
+        "QUOTA_EXHAUSTED",
+        "DEVICE_REAUTH_REQUIRED",
         "ACCOUNT_DISABLED",
         "ACCOUNT_EXPIRED",
         "ACCOUNT_SUSPENDED",
@@ -1237,6 +1246,10 @@ actor TonoAPIClient {
                 // the code: the verify endpoint also answers a plain 401 (AUTHENTICATION_FAILED).
                 if status == 401, envelope?.error.code == "INVALID_OR_EXPIRED_CODE" { throw APIError.invalidOrExpiredCode }
                 if status == 401 { throw APIError.unauthorized }; if status == 403 { throw APIError.forbidden }
+                if status == 429 {
+                    let seconds = answer.retryAfter.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                    throw APIError.rateLimited(retryAfter: seconds.flatMap { $0 >= 0 ? TimeInterval($0) : nil } ?? 60)
+                }
                 if status == 404 { throw APIError.notFound }
                 if status == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }
                 if status == 503 && envelope?.error.code == "EXIT_IDENTITY_PROPAGATING" { throw APIError.exitIdentityPropagating }

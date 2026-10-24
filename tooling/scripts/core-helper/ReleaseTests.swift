@@ -243,6 +243,40 @@ func runReleaseSelfTests() -> Bool {
     }
     check(ran == 2 && (try? authority.load()) == secured, "emergency without C leaves the record alone")
 
+    // Root-only break-glass policy, with real isolated authority failures and
+    // no live PF effects. A root daemon's GUI/runtime policy must still refuse.
+    func emergencyEffect(_ authority: ReleaseAuthority) -> Bool {
+        do {
+            let strictOrUnreadable = (try? authority.load().strictIntent) ?? true
+            try HelperDisarmAuthority.rootEmergency.authorize(effectiveUID: geteuid(), strictIntentActive: strictOrUnreadable)
+            return !HelperDisarmAuthority.rootEmergency.restoresAtLaunch
+        } catch { return false }
+    }
+    var strictEmergency = secured
+    strictEmergency.strictRuntimeDigest = "strict-emergency-fixture"
+    try? authority.save(strictEmergency)
+    let busyEmergency = try? authority.withLock(timeout: 0) { (_: Int32) -> Bool in
+        runEmergencyUnderReleaseAuthority(authority: authority, lockTimeout: 0) { emergencyEffect(authority) }
+    }
+    check(busyEmergency == true && (try? authority.load()) == strictEmergency,
+          "root emergency disarms despite busy authority without rewriting strict record")
+
+    try? Data("{".utf8).write(to: URL(fileURLWithPath: authority.recordPath))
+    chmod(authority.recordPath, 0o600)
+    let corruptEmergency = runEmergencyUnderReleaseAuthority(authority: authority) { emergencyEffect(authority) }
+    check(corruptEmergency && (try? authority.load())?.mode == .released,
+          "root emergency recovers corrupt authority and disarms without startup rearm")
+
+    // rename of the saved record onto a directory fails deterministically,
+    // even as root; the unreadable record therefore remains fail-closed.
+    try? FileManager.default.removeItem(atPath: authority.recordPath)
+    try? FileManager.default.createDirectory(atPath: authority.recordPath, withIntermediateDirectories: false)
+    let unsavedEmergency = runEmergencyUnderReleaseAuthority(authority: authority) { emergencyEffect(authority) }
+    check(unsavedEmergency && (try? authority.load()) == nil,
+          "root emergency disarms when saving release record fails")
+    try? FileManager.default.removeItem(atPath: authority.recordPath)
+    try? authority.save(secured)
+
     // #1571: use the production durable authority API, then reconstruct it
     // just as a restarted daemon does. A failed replacement cannot retire
     // strict intent; only the explicitly fenced emergency release can.

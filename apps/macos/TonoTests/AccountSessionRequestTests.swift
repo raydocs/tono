@@ -51,8 +51,9 @@ nonisolated private final class HeldAccountProtocol: URLProtocol, @unchecked Sen
         handler(self)
     }
     override func stopLoading() {}
-    func respond(status: Int, body: String) {
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+    func respond(status: Int, body: String, headers: [String: String] = [:]) {
+        let fields = ["Content-Type": "application/json"].merging(headers) { _, new in new }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: fields)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -3961,6 +3962,41 @@ final class AccountSessionRequestTests: XCTestCase {
 
     private static let enabledMethods = #"{"email":{"enabled":true},"apple":{"enabled":false},"google":{"enabled":false}}"#
 
+    func testTelemetry429CarriesRetryAfterWithoutLoggingOut() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let send = Task { try await account.api.uploadSavedTelemetry(path: "telemetry/diagnostics", body: Data("{}".utf8)) }
+        let request = try await nextRequest(requests)
+        request.respond(status: 429, body: #"{"error":{"code":"RATE_LIMITED","message":"wait"}}"#, headers: ["Retry-After": "123"])
+        do {
+            try await send.value
+            XCTFail("429 must not be acknowledged as storage")
+        } catch {
+            XCTAssertEqual(error as? TonoAPIClient.APIError, .rateLimited(retryAfter: 123))
+            XCTAssertTrue(AccountSession.shouldQueueTelemetry(error))
+        }
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertEqual(account.user?.id, "original")
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
+    }
+
+    func testDeviceReauthRefusalRetainsLoginAndDoesNotDisarmProtection() async throws {
+        var disarms = 0
+        let (account, transport, host, requests) = fixture(killSwitchDisarmConsumer: { disarms += 1 })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let refresh = Task { await account.refreshAccount() }
+        let request = try await nextRequest(requests)
+        request.respond(status: 403, body: #"{"error":{"code":"DEVICE_REAUTH_REQUIRED","message":"verify device"}}"#)
+        await refresh.value
+        XCTAssertEqual(account.state, .suspended)
+        XCTAssertEqual(account.user?.id, "original")
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
+        XCTAssertEqual(disarms, 0)
+        XCTAssertEqual(account.entitlementDetail, TonoAPIClient.APIError.entitlementBlocked(code: "DEVICE_REAUTH_REQUIRED", message: nil).errorDescription)
+    }
+
 }
 
 /// Loopback connections a test keeps open until it ends.
@@ -4020,4 +4056,5 @@ private final class AccountResponseGate {
         waiters.removeAll()
         for waiter in pending { waiter.resume() }
     }
+
 }
