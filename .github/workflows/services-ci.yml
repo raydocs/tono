@@ -232,6 +232,9 @@ jobs:
         # used before a restart, and both look plausible from outside.
         run: python3 services/exit-agent/test_reconcile_and_report.py
 
+      - name: Exit agent systemd cadence
+        run: python3 services/exit-agent/test_systemd_cadence.py
+
       - name: Transactional node provisioner fixtures
         run: python3 tooling/scripts/tests/test_provision_tono_node.py
 
