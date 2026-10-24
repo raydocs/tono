@@ -3,18 +3,23 @@ const rawOf = (error: unknown): string => {
   return String(error ?? '')
 }
 
+/** Same token the native download attaches. The only install failure that may be tried again. */
+const DOWNLOAD_FAILED = 'TONO_UPDATE_DOWNLOAD_FAILED'
+
 const needsAttention =
   /a prior update needs reconciliation|needs attention|TONO_UPDATE_NEEDS_ATTENTION|rollback not proven|automatic update recovery failed/i
 const signatureRefusal = /signature|ed25519|minisign/i
 const floorRefusal =
   /release sequence|releaseSequence|installed floor|not newer|downgrade refused|release replay/i
+/** A Service refusal about the barrier, not a package that failed to download. */
+const serviceNetworkWording = /network protection|barrier|filters/i
 const networkFailure =
   /unreachable|timed out|timeout|network|offline|\bdns\b|connection refused|connection reset/i
-const hardRefusal =
-  /signature|ed25519|minisign|release sequence|releaseSequence|installed floor|not newer|downgrade refused|release replay|verified a different manifest|invalid manifest|unsupported manifest|Service refused|protection retained|another owner/i
 
-/** A signature, floor, or explicit service refusal cannot be retried as-is. */
-export const updateFailureSticks = (raw: string): boolean => hardRefusal.test(raw)
+const isDownloadTransport = (raw: string): boolean => raw.includes(DOWNLOAD_FAILED)
+
+/** Anything except a marked download-phase transport failure stays blocked for this offer. */
+export const updateFailureSticks = (raw: string): boolean => !isDownloadTransport(raw)
 
 type UpdateMessageKey =
   | 'tono.update.needsAttention'
@@ -22,16 +27,14 @@ type UpdateMessageKey =
   | 'tono.update.notNewer'
   | 'tono.update.network'
   | 'tono.update.refused'
-  | 'tono.update.notCompleted'
 
 /** Human sentence key. The raw chain stays in technical details. */
 export const updateFailureMessageKey = (raw: string): UpdateMessageKey => {
+  if (isDownloadTransport(raw)) return 'tono.update.network'
   if (needsAttention.test(raw)) return 'tono.update.needsAttention'
   if (signatureRefusal.test(raw)) return 'tono.update.signatureRefused'
   if (floorRefusal.test(raw)) return 'tono.update.notNewer'
-  if (networkFailure.test(raw)) return 'tono.update.network'
-  if (updateFailureSticks(raw)) return 'tono.update.refused'
-  return 'tono.update.notCompleted'
+  return 'tono.update.refused'
 }
 
 export const describeUpdateFailure = (
@@ -46,9 +49,10 @@ export const describeUpdateFailure = (
   }
 }
 
-/** Check-for-updates notice. Network failures keep the network sentence. */
+/** Check-for-updates notice. A barrier refusal is not a dropped download. */
 export const updateCheckNoticeKey = (raw: string): string => {
   if (needsAttention.test(raw)) return 'tono.update.needsAttention'
+  if (serviceNetworkWording.test(raw)) return 'tono.update.checkUnknown'
   if (networkFailure.test(raw)) return 'tono.settings.about.checkFailed'
   return 'tono.update.checkUnknown'
 }

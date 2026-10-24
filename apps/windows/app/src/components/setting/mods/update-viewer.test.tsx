@@ -149,7 +149,9 @@ describe('Windows Service-owned update caller', () => {
       }),
     )
     clickUpdate()
-    const error = new Error('Protected update stopped: connection timed out')
+    const error = new Error(
+      'Protected update stopped: TONO_UPDATE_DOWNLOAD_FAILED: connection timed out',
+    )
     await act(async () => refuse(error))
     await waitFor(() =>
       expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(
@@ -162,6 +164,31 @@ describe('Windows Service-owned update caller', () => {
         name: 'settings.modals.update.actions.update',
       }),
     ).toBeDefined()
+  })
+
+  it('hides Update now when the Service refused over network protection', async () => {
+    let refuse!: (error: Error) => void
+    mocks.nativeInstall.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        refuse = reject
+      }),
+    )
+    clickUpdate()
+    const error = new Error(
+      'Protected update stopped: network protection is uncertain',
+    )
+    await act(async () => refuse(error))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').querySelector('p')?.textContent).not.toBe(
+        'tono.update.network',
+      ),
+    )
+    expect(
+      screen.queryByRole('button', {
+        name: 'settings.modals.update.actions.update',
+      }),
+    ).toBeNull()
+    expect(mocks.nativeInstall).toHaveBeenCalledOnce()
   })
 
   it('cancels a download in flight and leaves the same offer available again', async () => {

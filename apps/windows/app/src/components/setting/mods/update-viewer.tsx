@@ -248,8 +248,8 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
     } catch (err) {
       // The user cancelled the download: not a refusal, the same offer may start again.
       if (String(err).includes(UPDATE_DOWNLOAD_CANCELLED)) return
-      // A signature, floor, or service refusal stays blocked for this manifest.
-      // A network failure keeps Update now, so the same offer can be tried again.
+      // Only a marked download-phase transport failure keeps Update now.
+      // Needs-attention and a Service refusal stay blocked for this manifest.
       const described = describeUpdateFailure(err, t)
       setFailedOffer({
         manifestSha256: updateInfo.manifestSha256,
