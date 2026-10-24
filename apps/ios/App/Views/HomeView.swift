@@ -302,7 +302,7 @@ struct HomeView: View {
             Button { showDetails = true } label: {
                 HStack(spacing: 8) {
                     StatusDot(color: model.phase == .failed ? TonoColor.error : TonoColor.warning, size: 7)
-                    Text(model.noCatalogNote ?? PhaseText.short(reason)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                    Text(PhaseText.short(reason)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                     GlyphIcon(glyph: .chevronRight, tint: TonoColor.textTertiary, size: chevronGlyph)
                 }
                 .frame(minHeight: 44, alignment: .leading)
@@ -310,7 +310,7 @@ struct HomeView: View {
                 .accessibilityElement(children: .ignore)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(model.noCatalogNote ?? PhaseText.short(reason))
+            .accessibilityLabel(PhaseText.short(reason))
             .accessibilityHint(PhaseText.reason(reason))
             .accessibilityIdentifier("reasonLine")
             .id(reason)

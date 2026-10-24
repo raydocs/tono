@@ -198,7 +198,6 @@
 "mode_stable_line" = "除局域网外，全部走 Tono。";
 "route_switching" = "正在切换到「%1$@」…";
 "route_not_applied" = "没能切换到「%1$@」";
-"route_no_catalog" = "暂时取不到线路列表，没有更改。请检查网络后再试。";
 "route_not_applied_full" = "没能切换到「%1$@」，仍在使用「%2$@」。";
 "check_empty" = "先输入一个网址，例如 claude.ai。";
 "check_invalid" = "「%1$@」不是网址，试试 claude.ai 这样的。";
