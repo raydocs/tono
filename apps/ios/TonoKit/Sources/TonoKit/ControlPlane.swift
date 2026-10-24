@@ -33,7 +33,19 @@ public enum APIPath: Equatable, Sendable {
     }
 }
 
+/// Per-path write boundary. Unknown transports are conservative; a transport must call
+/// preparing before connection setup, then willWrite BEFORE handing any HTTP bytes to the socket.
+public final class APITransmission: @unchecked Sendable {
+    private let lock = NSLock()
+    private var written = true
+    public init() {}
+    public func preparing() { lock.lock(); written = false; lock.unlock() }
+    public func willWrite() { lock.lock(); written = true; lock.unlock() }
+    public var mayHaveBeenSent: Bool { lock.lock(); defer { lock.unlock() }; return written }
+}
+
 public struct APIRequest: Equatable, Sendable {
+    public var transmission = APITransmission()
     public var method: String
     /// Path below the API base, e.g. "auth/email/start".
     public var path: String
@@ -54,9 +66,9 @@ public struct HTTPResponse: Equatable, Sendable {
     }
 }
 
-/// Carries one request over one path. The app implements it with URLSession (system path) and
-/// Network.framework TLS to a relay address with SNI and verification for the API host.
-/// A thrown error means the path is unusable; an HTTP answer of any status is returned.
+/// Carries one request over one path using Network.framework TLS, with SNI and verification for
+/// the API host. Transports report the first possible HTTP write through request.transmission;
+/// failures after that boundary may have executed the request. HTTP answers of any status return.
 public protocol APITransport: Sendable {
     func send(_ request: APIRequest, base: URL, via path: APIPath) async throws -> HTTPResponse
 }
@@ -123,6 +135,7 @@ public struct ControlPlaneClient: Sendable {
             } catch {
                 lastNetwork = "\(route.kind): \(error)"
                 failed.append(route)
+                if method == "POST", request.transmission.mayHaveBeenSent { break }
                 continue
             }
             let json = response.body.isEmpty ? nil : try? JSON.parse(response.body)
@@ -132,6 +145,7 @@ public struct ControlPlaneClient: Sendable {
             if response.status >= 500 && error?.object == nil {
                 lastNetwork = "HTTP \(response.status) via \(route.kind)"
                 failed.append(route)
+                if method == "POST" { break }
                 continue
             }
             throw APIError(status: response.status, code: error?["code"]?.string ?? "HTTP_\(response.status)",

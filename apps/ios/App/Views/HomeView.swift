@@ -62,6 +62,13 @@ struct HomeView: View {
             // Sort priorities only order siblings inside one accessibility container.
             .accessibilityElement(children: .contain)
         }
+        // A failed On Demand save must be visible even before NE finishes disconnecting;
+        // the ordinary phase reason is not shown while the system still reports connected.
+        .alert(L.t("short_ACCOUNT_RELEASE_FAILED"), isPresented: $model.showAccountReleaseFailure) {
+            Button(L.t("account_release_acknowledge"), role: .cancel) {}
+        } message: {
+            Text(L.t("reason_ACCOUNT_RELEASE_FAILED"))
+        }
         .sheet(isPresented: $showLines) {
             LinesSheet().environmentObject(model).tonoAccessibility()
                 .zoomTransition("lines", in: zoom, enabled: !reduceMotion)
@@ -777,6 +784,7 @@ enum PhaseText {
     }
 
     static let knownReasons: Set<String> = [
+        "PLAN_EXPIRED", "QUOTA_EXHAUSTED", "ACCOUNT_RELEASE_FAILED", "DEVICE_REAUTH_REQUIRED", "USER_DISABLED",
         "HOME_UNAVAILABLE", "NETWORK", "RATE_LIMITED", "CORE_START", "CLOUD_UNREACHABLE", "HOME_UNREACHABLE",
         "REVOKED", "DENIED", "SESSION_ENDED", "CATALOG_ROLLBACK", "CORE_STOPPED", "NETWORK_CHANGED", "ROUTES_STOPPED",
     ]
@@ -786,6 +794,9 @@ enum PhaseText {
     }
 
     static func signInError(_ code: String) -> String {
+        if code == "ACCOUNT_EXPIRED" { return reason("PLAN_EXPIRED") }
+        if code == "QUOTA_EXCEEDED" { return reason("QUOTA_EXHAUSTED") }
+        if AccountErrors.restrictions.contains(code) || ["ACCOUNT_RELEASE_FAILED", "DEVICE_REAUTH_REQUIRED", "USER_DISABLED"].contains(code) { return reason(code) }
         let known: Set<String> = ["INVALID_EMAIL", "INVALID_CODE", "INVALID_OR_EXPIRED_CODE", "NETWORK", "RATE_LIMITED", "DEVICE_LIMIT"]
         return known.contains(code) ? L.t("signin_error_\(code)") : L.t("signin_error_generic", code)
     }

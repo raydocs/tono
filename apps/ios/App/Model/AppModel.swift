@@ -107,6 +107,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var showOnboarding: Bool = !Preferences.onboarded
     /// Shown before the first iOS "Add VPN Configurations" prompt (and after a declined one).
     @Published var showVPNPrimer = false
+    @Published var showAccountReleaseFailure = false
     /// No usable network path right now (shown under the title; connecting stays possible).
     @Published private(set) var offline = false
     /// The catalog request in flight (the line picker shows a loading state instead of "no lines").
@@ -137,6 +138,8 @@ final class AppModel: ObservableObject {
     private var signedIn: Bool
     private var preparing = false
     private var tunnelStatus: TunnelStatus = .invalid
+    /// Account-origin stop attribution survives later expected NE disconnect callbacks.
+    private var accountRelease: AccountNetworkRelease.Receipt?
     /// The failure shown and the user's switches in flight (`TunnelIntentLedger`).
     private var ledger = TunnelIntentLedger()
     private var failure: String? { ledger.failure }
@@ -260,6 +263,9 @@ final class AppModel: ObservableObject {
             Preferences.email = reported ?? login.email
             email = Preferences.email
             signedIn = true
+            accountRelease = nil
+            showAccountReleaseFailure = false
+            if SharedFiles.loadFailure()?.source == "account" { SharedFiles.clearFailure() }
             ledger.clearFailure()
             login = LoginState()
             recompute()
@@ -282,6 +288,8 @@ final class AppModel: ObservableObject {
         TunnelController.lifecycle.cancelPendingStart()
         accountEpoch &+= 1
         signedIn = false
+        accountRelease = nil
+        showAccountReleaseFailure = false
         wantOn = false
         preparing = false
         catalogLoading = false
@@ -342,6 +350,7 @@ final class AppModel: ObservableObject {
         }
         primerConfirmed = false
         wantOn = true
+        accountRelease = nil
         ledger.userWantsOn()
         permission = nil
         SharedFiles.clearFailure()
@@ -504,9 +513,13 @@ final class AppModel: ObservableObject {
         // The tunnel's reply to this switch (or its silence) replaces what it said before, unless
         // the session ended while it was asked.
         let ticket = tunnelStatus.isUp ? tracker.ask() : nil
-        if let loaded = catalog {
-            let tunnel = self.tunnel
-            report = await RouteApply.run(requested, previous: previous, tunnelUp: ticket != nil,
+        let tunnel = self.tunnel
+        report = await RouteApply.withCatalog(catalog, requested: requested, previous: previous, tunnelUp: ticket != nil,
+                                             refresh: { [weak self] in
+                                                 guard let self, await self.refreshCatalog(quiet: false), self.accountEpoch == epoch else { return nil }
+                                                 return self.catalog
+                                             }, unavailableReason: { [weak self] in self?.failure ?? "HOME_UNAVAILABLE" }) { loaded in
+            return await RouteApply.run(requested, previous: previous, tunnelUp: ticket != nil,
                                           save: { [weak self] settings in
                                               guard let self, self.accountEpoch == epoch, !self.signingOut else { throw SessionSuperseded() }
                                               try SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: settings.mode, selectedNode: settings.node))
@@ -517,15 +530,14 @@ final class AppModel: ObservableObject {
                                               guard let self, self.accountEpoch == epoch, !self.signingOut else { return false }
                                               return self.tracker.permits(RouteApplyReport(.unconfirmed(requested), answer: answer), ticket: ticket)
                                           })
-        } else {
-            // No catalog yet, so no tunnel to rebuild: the choice is kept for the first start.
-            report = RouteApplyReport(.saved(requested))
         }
         // Asked of a session that has since ended, or answered about an older graph than one heard
         // since: the reply says nothing about what runs now, so it moves neither the routes, the
         // pending change nor the put-back. What the tunnel says now decides (`recompute`).
         guard epoch == accountEpoch, !signingOut else { return }
-        guard tracker.settle(report, ticket: ticket) else {
+        // A local preparation failure never asked the tunnel anything: show it without replacing
+        // its confirmed graph with an absent answer (or dropping the visible failure).
+        guard !report.wrote || tracker.settle(report, ticket: ticket) else {
             routeChange = nil
             recompute()
             return
@@ -704,6 +716,35 @@ final class AppModel: ObservableObject {
                 await signOut()
                 guard accountEpoch == epoch &+ 1 else { return false }
                 ledger.fail("SESSION_ENDED")
+                recompute()
+                return false
+            }
+            if AccountNetworkRelease.requiresRelease(error) {
+                // Withdraw both a pending start and the desire to reconnect before the first await.
+                TunnelController.lifecycle.cancelPendingStart()
+                wantOn = false
+                preparing = false
+                // The account's stop of a running (or handed-off) tunnel is expected, never a new failure.
+                ledger.userStops(tunnel: tunnelStatus)
+                traffic.stop()
+                probeTask?.cancel()
+                checks = ExitChecks()
+                ledger.fail(AccountErrors.reasonCode(error))
+                SharedFiles.recordFailure(TunnelFailure(code: AccountErrors.reasonCode(error), message: "account authority rejected",
+                                                       at: Date(), source: "account", accountEpoch: epoch))
+                recompute()
+                let receipt = await AccountNetworkRelease.handle(error, accountEpoch: epoch) { [tunnel] in
+                    try await tunnel.stopForAccount()
+                }
+                guard epoch == accountEpoch, signedIn, !signingOut else { return false }
+                accountRelease = receipt
+                showAccountReleaseFailure = receipt?.releaseFailed == true
+                ledger.fail(receipt?.reason ?? AccountErrors.reasonCode(error))
+                if let receipt {
+                    SharedFiles.recordFailure(TunnelFailure(code: receipt.reason, message: "account network release requested",
+                                                           at: receipt.at, source: receipt.source, accountEpoch: receipt.accountEpoch))
+                }
+                // Do not clear the saved inputs or tokens: a renewal/re-auth is still possible.
                 recompute()
                 return false
             }

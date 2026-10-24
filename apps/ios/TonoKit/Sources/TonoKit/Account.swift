@@ -64,8 +64,14 @@ public struct SessionSuperseded: Error, Equatable, Sendable {
 }
 
 public enum AccountErrors {
-    /// Codes that mean this phone's session is over; the account is cleared locally.
-    public static let sessionEnded: Set<String> = ["INVALID_REFRESH_TOKEN", "SIGNED_OUT", "UNAUTHORIZED", "ACCOUNT_SUSPENDED"]
+    /// T8/T6 contract: authentication rejection ends the session. Only explicit account-status
+    /// codes preserve credentials/configuration; the server must distinguish those from auth.
+    public static let sessionEnded: Set<String> = ["UNAUTHORIZED", "INVALID_REFRESH_TOKEN", "SIGNED_OUT", "ACCOUNT_SUSPENDED"]
+    public static let restrictions: Set<String> = ["ACCOUNT_EXPIRED", "QUOTA_EXCEEDED", "PLAN_EXPIRED", "QUOTA_EXHAUSTED"]
+
+    public static func isRestriction(_ error: APIError) -> Bool {
+        (error.status == 401 || error.status == 403) && restrictions.contains(error.code)
+    }
 
     public static func isSessionEnded(_ error: Error) -> Bool {
         guard let e = error as? APIError else { return false }
@@ -78,8 +84,11 @@ public enum AccountErrors {
     public static func reasonCode(_ error: Error) -> String {
         switch error {
         case let e as APIError:
+            if e.code == "ACCOUNT_EXPIRED" { return "PLAN_EXPIRED" }
+            if e.code == "QUOTA_EXCEEDED" { return "QUOTA_EXHAUSTED" }
             if e.code == "CATALOG_UNAVAILABLE" { return "HOME_UNAVAILABLE" }
             if e.status == 429 { return "RATE_LIMITED" }
+            if isSessionEnded(e) { return "SESSION_ENDED" }
             return e.code
         case let e as CatalogRejected:
             return e.code
@@ -244,7 +253,7 @@ public actor AccountSession {
                 let result = try await op(token)
                 try check(lease)
                 return result
-            } catch let e as APIError where e.status == 401 && e.code != "INVALID_REFRESH_TOKEN" && e.code != "SIGNED_OUT" {
+            } catch let e as APIError where e.status == 401 && !AccountErrors.isRestriction(e) && e.code != "INVALID_REFRESH_TOKEN" && e.code != "SIGNED_OUT" && e.code != "ACCOUNT_SUSPENDED" {
                 try check(lease)
                 let token = try await bearer(forceRefresh: true, lease: lease)
                 try check(lease)

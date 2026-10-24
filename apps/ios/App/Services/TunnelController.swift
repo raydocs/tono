@@ -78,6 +78,23 @@ final class TunnelController {
         await Self.lifecycle.stop(Steps(self))
     }
 
+    /// Account authority was rejected: retain the configuration, but do not let On Demand restart
+    /// a tunnel whose exit identity is no longer accepted. Never use serviceClose (a core failure).
+    /// A failed persistence/read-back is reported even though NE is still asked to stop.
+    func stopForAccount() async throws {
+        Self.lifecycle.cancelPendingStart()
+        try await Self.lifecycle.exclusive {
+            try await AccountNetworkRelease.checkedStop(disarm: {
+                guard let m = try await Self.savedConfiguration() else { return }
+                manager = m
+                m.isOnDemandEnabled = false
+                try await m.saveToPreferences()
+                try await m.loadFromPreferences()
+                guard !m.isOnDemandEnabled else { throw TunnelError.onDemandStillEnabled }
+            }, stop: { manager?.connection.stopVPNTunnel() })
+        }
+    }
+
     /// A user-started connection failed: do not let On Demand loop on it in the background. A newer
     /// start on its way keeps its own On Demand.
     func disableOnDemand() async {
@@ -230,4 +247,4 @@ final class TunnelController {
     }
 }
 
-enum TunnelError: Error { case denied, notConfigured }
+enum TunnelError: Error { case denied, notConfigured, onDemandStillEnabled }

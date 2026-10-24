@@ -99,20 +99,28 @@ public struct TunnelFailure: Equatable, Sendable {
     public var code: String
     public var message: String
     public var at: Date
+    /// Optional for old extension reports; account-origin releases identify their sign-in epoch.
+    public var source: String?
+    public var accountEpoch: UInt64?
 
-    public init(code: String, message: String, at: Date) {
+    public init(code: String, message: String, at: Date, source: String? = nil, accountEpoch: UInt64? = nil) {
         self.code = code
         self.message = message
         self.at = at
+        self.source = source
+        self.accountEpoch = accountEpoch
     }
 
     public func encoded() -> Data {
-        Data(JSON.obj(("code", .string(code)), ("message", .string(message)), ("at", .number(at.timeIntervalSince1970))).serialized().utf8)
+        Data(JSON.obj(("code", .string(code)), ("message", .string(message)), ("at", .number(at.timeIntervalSince1970)),
+                      ("source", source.map(JSON.string) ?? .null),
+                      ("accountEpoch", accountEpoch.map { .string(String($0)) } ?? .null)).serialized().utf8)
     }
 
     public static func decode(_ data: Data) -> TunnelFailure? {
         guard let j = try? JSON.parse(data), let code = j["code"]?.string, let message = j["message"]?.string,
               case .number(let at)? = j["at"] else { return nil }
-        return TunnelFailure(code: code, message: message, at: Date(timeIntervalSince1970: at))
+        return TunnelFailure(code: code, message: message, at: Date(timeIntervalSince1970: at),
+                             source: j["source"]?.string, accountEpoch: j["accountEpoch"]?.string.flatMap(UInt64.init))
     }
 }

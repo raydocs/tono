@@ -43,6 +43,8 @@ jobs:
         run: swift --version
       - name: Desktop routing contract is in sync
         run: python3 apps/ios/tools/sync-desktop-routing.py --check
+      - name: Account errors have human-readable copy
+        run: python3 apps/ios/tools/check-account-copy.py
       - name: TonoKit tests
         working-directory: apps/ios/TonoKit
         run: swift test
