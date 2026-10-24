@@ -11,6 +11,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -113,8 +114,43 @@ class UiRevisionRender {
     }
 
     @Test fun item8NeutralSettings() {
-        show { SettingsScreen(UiFixtures.idle, {}, {}, {}, { null }, {}) }
+        show { SettingsScreen(UiFixtures.idle, {}, {}, {}, {}) }
         compose.onNodeWithText(compose.activity.getString(R.string.system_verify_in_android)).performScrollTo()
         shot("8")
+    }
+
+    private fun openSettings() {
+        show { TonoRoot(UiFixtures.idle.copy(excludedPackages = listOf("com.example.bank")), actions) }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.settings_title)).performClick()
+        compose.waitForIdle()
+    }
+
+    @Test fun item9SettingsFirstScreen() {
+        openSettings()
+        shot("9-settings")
+    }
+
+    @Test fun item9SettingsFirstScreenLargeText() {
+        RuntimeEnvironment.setFontScale(2f)
+        openSettings()
+        shot("9-settings-font-200")
+    }
+
+    @Test fun item10RoutingRules() {
+        openSettings()
+        compose.onNodeWithText(compose.activity.getString(R.string.settings_routing_rules)).performClick()
+        shot("10-routing-rules")
+    }
+
+    @Test fun item11SignOutConfirm() {
+        openSettings()
+        compose.onNodeWithText(compose.activity.getString(R.string.settings_sign_out)).performScrollTo().performClick()
+        shot("11-sign-out-confirm")
+    }
+
+    @Test fun item12DetailsPickerAndRouteCheck() {
+        show { TonoRoot(UiFixtures.connected(), actions) }
+        compose.onNodeWithTag("details").performClick()
+        shot("12-details-mode-and-check")
     }
 }

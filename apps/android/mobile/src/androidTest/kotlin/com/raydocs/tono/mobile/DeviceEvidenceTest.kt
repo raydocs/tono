@@ -360,6 +360,10 @@ class DeviceEvidenceTest {
                 File(out, "settings-sign-out-report.txt").writeText("Sign out text bounds: $bounds; account text bounds: ${email.visibleBounds}; card bounds: ${email.parent.visibleBounds}; display ${device.displayWidth} × ${device.displayHeight}\n")
                 assertTrue("Sign out text has on-screen bounds", bounds.width() > 0 && bounds.height() > 0 && bounds.top >= 0 && bounds.bottom <= device.displayHeight)
                 signOut!!.click()
+                val confirm = device.wait(Until.findObject(By.desc(text(R.string.a11y_confirm_sign_out))), 5_000)
+                assertNotNull("sign-out confirmation", confirm)
+                shot("fixture-31b-settings-sign-out-confirm")
+                confirm!!.click()
                 assertNotNull("signed out", find(By.text(text(R.string.signin_title)), 10_000))
                 shot("fixture-32-settings-signed-out")
             } finally {
