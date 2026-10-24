@@ -759,10 +759,13 @@ class RosterControlSignals(unittest.TestCase):
         hy2_error: Exception | None = None,
         persist_error: Exception | None = None,
         counters: dict[str, int] | None = None,
+        seed_state: dict | None = None,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         path = Path(directory.name) / "state.json"
+        if seed_state is not None:
+            path.write_text(json.dumps(seed_state), encoding="utf-8")
         environment = {
             "TONO_HOME_AGENT_TOKEN": "node-token",
             "TONO_SOURCE_ID": "exit-node-a",
@@ -1215,10 +1218,13 @@ class RosterControlSignals(unittest.TestCase):
     def test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged(self) -> None:
         # TF-opus-8: a hy2 error used to end the round before the Xray
         # reconcile, so revoked accounts stayed on VLESS and no counter was read.
+        # The file has to exist: a missing ledger must not adopt the raw counter
+        # (see the following test). An empty existing ledger keeps this growth.
         label = agent.client_label("usr_1")
         path, reconcile, acknowledge = self.run_round(
             server_retire=False, hy2_error=agent.Refusal("injected hy2 write failure"),
             counters={label: 1_500},
+            seed_state=fresh_state(),
         )
         reconcile.assert_called_once()
         acknowledge.assert_not_called()
