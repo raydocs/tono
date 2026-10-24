@@ -162,9 +162,11 @@ class TunnelAuthorityTest {
         val oldAttempt = state.attempt
         val callbacks = java.util.ArrayDeque<() -> Unit>()
         callbacks.add { assertFalse(ledger.acceptsCoreStop(state, oldAttempt)) }
+        // Production closes the TUN before publishing DISCONNECTING, then ends in IDLE.
         state = ledger.begin(state, Phase.DISCONNECTING)
-        assertFalse("closing our own core is not a failure", ledger.acceptsCoreStop(state, state.attempt))
+        assertFalse("our own physical close is not an unexpected core stop", ledger.acceptsCoreStop(state, state.attempt))
         state = ledger.end(state, Phase.IDLE, null)
+        assertFalse("a stopped attempt cannot turn into a failure", ledger.acceptsCoreStop(state, state.attempt))
         callbacks.removeFirst().invoke()
         callbacks.add { assertFalse(ledger.acceptsCoreStop(state, oldAttempt)) }
         state = connected(ledger)

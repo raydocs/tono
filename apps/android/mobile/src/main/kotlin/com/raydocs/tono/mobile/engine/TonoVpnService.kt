@@ -92,8 +92,6 @@ class TonoVpnService : VpnService() {
     private val probeRequests = ProbeEpoch<Network>()
     private lateinit var apiBase: String
     private var localTestServer = false
-    /** A failed disk write must not undo this instance's explicit stop intent. Engine thread only. */
-    private var explicitlyStopped = false
 
     override fun onCreate() {
         super.onCreate()
@@ -141,7 +139,6 @@ class TonoVpnService : VpnService() {
         engine.execute {
             val lockdown = lockdownNow()
             catalogWait.incrementAndGet()
-            explicitlyStopped = true
             stopAndPersist(
                 stop = {
                     stopCore()
@@ -408,8 +405,6 @@ class TonoVpnService : VpnService() {
     // ---- tunnel ------------------------------------------------------------------------------
 
     private fun connect(userInitiated: Boolean) {
-        if (!userInitiated && explicitlyStopped) { leaveForeground(); return }
-        if (userInitiated) explicitlyStopped = false
         val current = snapshot.get()
         if (current.phase == Phase.PREPARING || current.phase == Phase.CONNECTING) return
         if (store.refreshToken() == null) {
@@ -510,12 +505,12 @@ class TonoVpnService : VpnService() {
 
     private fun disconnect(reason: String?) {
         catalogWait.incrementAndGet()
-        explicitlyStopped = true
         val signedIn = snapshot.get().phase != Phase.SIGNED_OUT
         stopAndPersist(
             stop = {
                 // No disk or surface publication may stand between the stop request and TUN close.
                 stopCore()
+                if (signedIn) update { ledger.begin(it, Phase.DISCONNECTING) }
                 leaveForeground()
                 update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
             },
@@ -651,6 +646,7 @@ class TonoVpnService : VpnService() {
         })
         val server = Libbox.newCommandServer(object : CommandServerHandler {
             override fun serviceStop() {
+                // Pinned libbox invokes this for ManagedService.StopService RPC, not a core exit.
                 val gen = snapshot.get().attempt
                 engine.execute {
                     if (ledger.acceptsCoreStop(snapshot.get(), gen)) {

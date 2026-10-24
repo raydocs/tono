@@ -57,7 +57,7 @@ class TunnelLedger {
 
     fun isCurrent(gen: Long) = gen == attempt
 
-    /** A new attempt in [phase] (PREPARING to connect, CONNECTING to reload, DISCONNECTING to stop). */
+    /** A new attempt in [phase]: PREPARING to connect, CONNECTING to reload, DISCONNECTING after physical close. */
     fun begin(s: EngineSnapshot, phase: Phase): EngineSnapshot {
         attempt++
         return s.copy(phase = phase, reasonCode = null, attempt = attempt, applied = null, cloudProbe = ExitProbe(), homeProbe = ExitProbe())
