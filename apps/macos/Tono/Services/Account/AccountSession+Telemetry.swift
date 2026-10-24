@@ -693,6 +693,7 @@ extension AccountSession {
 /// The send still uses the pinned control-plane client.
 nonisolated enum TelemetryOutbox {
     static let key = "telemetryOutbox.v1"
+    static let retryAfterKey = "telemetryOutbox.retryAfter.v1"
     static let maxItems = 32
 
     static func enqueue(kind: String, body: Data, defaults: UserDefaults = AppProfile.defaults) {
@@ -710,7 +711,15 @@ nonisolated enum TelemetryOutbox {
 
     @MainActor
     static func drain(api: TonoAPIClient) async {
-        let items = pending()
+        await drain(defaults: AppProfile.defaults, now: { Date() }) { path, body in
+            try await api.uploadSavedTelemetry(path: path, body: body)
+        }
+    }
+
+    @MainActor
+    static func drain(defaults: UserDefaults, now: () -> Date,
+                      upload: (String, Data) async throws -> Void) async {
+        let items = pending(defaults: defaults)
         guard !items.isEmpty else { return }
         var kept: [[String: String]] = []
         for item in items {
@@ -719,7 +728,7 @@ nonisolated enum TelemetryOutbox {
             let path = (kind == "diagnostics" || kind == "p0")
                 ? "telemetry/diagnostics" : "telemetry/failures"
             do {
-                try await api.uploadSavedTelemetry(path: path, body: body)
+                try await upload(path, body)
             } catch {
                 if AccountSession.shouldQueueTelemetry(error) {
                     kept.append(item)
@@ -727,7 +736,7 @@ nonisolated enum TelemetryOutbox {
             }
         }
         // Reports queued while it was sending stay queued.
-        AppProfile.defaults.set(kept + pending().dropFirst(items.count), forKey: key)
+        defaults.set(kept + pending(defaults: defaults).dropFirst(items.count), forKey: key)
     }
 
     /// The snapshot switch went off: what may carry error text is dropped,
