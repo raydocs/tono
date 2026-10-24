@@ -939,6 +939,18 @@ test('NSIS removes every known old payload on upgrade and uninstall', () => {
   )
 })
 
+test('NSIS cleans resource sing-box pin scratch only after repair evidence is retired', () => {
+  const macro = installerSource.match(/!macro RemoveKnownLegacyPayload\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  const guarded = macro.match(/\$\{IfNot\} \$\{FileExists\} "\$INSTDIR\\\.update-repair-evidence"([\s\S]*?)\$\{EndIf\}/)?.[1] ?? ''
+  for (const suffix of ['rollback', 'restore', 'publish']) {
+    const relative = `resources/sing-box-sha256.txt.${suffix}`
+    const statement = `Delete /REBOOTOK "$INSTDIR\\${relative.replaceAll('/', '\\')}"`
+    assert.ok(guarded.includes(statement), `${relative} must be cleaned only after repair evidence is gone`)
+    assert.ok(WINDOWS_RUNTIME_REPAIR_ARTIFACTS.includes(relative))
+    assert.match(validateNsisLegacyCleanup(installerSource.replace(statement, '')), /sing-box-sha256/)
+  }
+})
+
 test('NSIS uninstall removes the sing-box pin copied beside sing-box.exe', () => {
   const uninstall =
     installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
