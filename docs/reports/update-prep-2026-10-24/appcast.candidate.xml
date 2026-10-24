@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Tono DRY RUN — not for publish</title>
+        <item>
+            <title>0.0.80</title>
+            <pubDate>Fri, 24 Oct 2026 00:00:00 +0000</pubDate>
+            <sparkle:version>81</sparkle:version>
+            <sparkle:shortVersionString>0.0.80</sparkle:shortVersionString>
+            <description sparkle:format="markdown"><![CDATA[DRY RUN. Not a release. Do not upload. The signature is a placeholder, and the enclosure is not a package.]]></description>
+            <enclosure url="https://example.invalid/tono-dry-run/Tono-0.0.80-build81-arm64.zip" length="1" type="application/zip" sparkle:edSignature="UNSIGNED-DRY-RUN"/>
+        </item>
+    </channel>
+</rss>

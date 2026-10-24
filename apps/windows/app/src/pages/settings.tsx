@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
@@ -31,6 +31,11 @@ import {
   describeTonoActionError,
   type TonoActionErrorDescription,
 } from '@/services/tono'
+import { updateCheckNoticeKey } from '@/services/update-copy'
+import {
+  OPEN_UPDATE_STORAGE_KEY,
+  OPEN_UPDATE_WINDOW_EVENT,
+} from '@/services/update-prompt'
 import { TONO_UPDATES_CONFIGURED } from '@/services/update'
 import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { AppearanceCard } from '@/tono-ui/AppearanceCard'
@@ -776,6 +781,18 @@ const AboutCard = () => {
   const updateRef = useRef<DialogRef>(null)
   const { checkUpdate, loading } = useUpdate()
 
+  useEffect(() => {
+    const openIfAsked = () => {
+      if (sessionStorage.getItem(OPEN_UPDATE_STORAGE_KEY) !== '1') return
+      sessionStorage.removeItem(OPEN_UPDATE_STORAGE_KEY)
+      updateRef.current?.open()
+    }
+    openIfAsked()
+    window.addEventListener(OPEN_UPDATE_WINDOW_EVENT, openIfAsked)
+    return () =>
+      window.removeEventListener(OPEN_UPDATE_WINDOW_EVENT, openIfAsked)
+  }, [])
+
   const onCheckUpdate = useLockFn(async () => {
     if (!TONO_UPDATES_CONFIGURED) {
       showNotice.info('tono.settings.about.updatesUnavailable')
@@ -784,14 +801,19 @@ const AboutCard = () => {
     try {
       const result = await checkUpdate()
       if (result.error !== undefined) {
-        showNotice.error('tono.settings.about.checkFailed')
+        const raw =
+          result.error instanceof Error
+            ? result.error.message
+            : String(result.error)
+        showNotice.error(updateCheckNoticeKey(raw))
       } else if (result.data) {
         updateRef.current?.open()
       } else {
         showNotice.success('tono.settings.about.latestVersion')
       }
     } catch (error) {
-      showNotice.error(error)
+      const raw = error instanceof Error ? error.message : String(error ?? '')
+      showNotice.error(updateCheckNoticeKey(raw))
     }
   })
 

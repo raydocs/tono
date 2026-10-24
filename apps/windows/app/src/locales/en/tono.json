@@ -733,6 +733,19 @@
       "unsigned": "This installer is unsigned. Windows SmartScreen may warn; continue to install."
     }
   },
+  "update": {
+    "trayAvailable": "A new version is ready: {{version}}",
+    "updateNow": "Update now",
+    "later": "Later",
+    "needsAttention": "An earlier update still needs to be finished. Choose Update now, or ask a family member for help. This is not a network problem.",
+    "signatureRefused": "This update did not pass the check, so nothing was installed. Ask a family member for help.",
+    "notNewer": "This computer already has the newest Tono that can be installed.",
+    "network": "The update did not download. Check the network, then choose Update now again.",
+    "refused": "Tono did not install this update, and network protection is unchanged. Ask a family member for help before trying again.",
+    "notCompleted": "The update did not finish. You can try again. If it keeps failing, ask a family member for help.",
+    "technicalDetails": "Technical details",
+    "checkUnknown": "Tono could not check for updates. Try again in a little while."
+  },
   "cities": {
     "losAngeles": "Los Angeles",
     "saltLakeCity": "Salt Lake City",

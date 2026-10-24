@@ -16,6 +16,7 @@ const sentences = [
   'Tono cannot tell whether the update finished. Leave protection on and do not tap repeatedly. Ask a family member to look.',
   'The update could not be downloaded. Check the network, then try again.',
   'Update information could not be read. Check the network, then try again.',
+  'Update information was incomplete. Try again later.',
   'The downloaded update did not match the published file. Nothing was installed. Try again later.',
   'The update file could not be saved. Try again later.',
   'Update information was too large to read. Try again later.',
@@ -37,8 +38,8 @@ test('macOS update failures use localized human sentences', () => {
   assert.doesNotMatch(state, /Helper did not verify private update staging/)
   assert.doesNotMatch(state, /Helper did not authorize protected update preparation/)
   assert.doesNotMatch(state, /Update consumption is uncertain/)
-  assert.doesNotMatch(download, /system_dns\[/)
   assert.doesNotMatch(download, /The update package is unreachable:/)
+  assert.doesNotMatch(download, /Update discovery metadata is unreachable:/)
   for (const sentence of sentences) {
     const entry = catalog.strings[sentence]
     const value = entry?.localizations?.['zh-Hans']?.stringUnit?.value

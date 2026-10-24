@@ -1,6 +1,9 @@
 import Foundation
 import CryptoKit
 import Network
+import os
+
+private let updateLog = Logger(subsystem: "com.raydocs.tono", category: "native-update")
 
 nonisolated enum NativeUpdateDownload {
     static let origin = "https://releases.afk.ccwu.cc/desktop/v1/"
@@ -16,7 +19,67 @@ nonisolated enum NativeUpdateDownload {
     /// path carried it; a relay passes the TLS session through, so the
     /// answer is the release host's own).
     nonisolated struct NotPublished: LocalizedError {
-        var errorDescription: String? { "Update discovery metadata is unavailable or invalid." }
+        var errorDescription: String? { Copy.metadataIncomplete }
+    }
+
+    /// Sentences shown on the update alert. Path and helper diagnostics stay in the log.
+    enum Copy {
+        static var pendingUnfinished: String {
+            String(localized: "A previous update did not finish. Tono kept the record. You can try again later, or ask a family member for help.")
+        }
+        static var disconnectUnconfirmed: String {
+            String(localized: "Tono could not confirm that ordinary internet is back. Try again. If it still fails, ask a family member for help.")
+        }
+        static var retryNotYet: String {
+            String(localized: "This update cannot be tried again yet. Wait until recovery finishes, or ask a family member for help.")
+        }
+        static var retirementUnconfirmed: String {
+            String(localized: "Tono could not close the update record. Try again. Network protection is still on.")
+        }
+        static var packageUnchecked: String {
+            String(localized: "The update package did not pass the check, so nothing was installed. Try again later.")
+        }
+        static var installNotAllowed: String {
+            String(localized: "The update was not allowed to install, so nothing was replaced. Try again later.")
+        }
+        static var installUncertain: String {
+            String(localized: "Tono cannot tell whether the update finished. Leave protection on and do not tap repeatedly. Ask a family member to look.")
+        }
+        static var packageNotDownloaded: String {
+            String(localized: "The update could not be downloaded. Check the network, then try again.")
+        }
+        static var metadataUnreadable: String {
+            String(localized: "Update information could not be read. Check the network, then try again.")
+        }
+        static var metadataIncomplete: String {
+            String(localized: "Update information was incomplete. Try again later.")
+        }
+        static var packageMismatch: String {
+            String(localized: "The downloaded update did not match the published file. Nothing was installed. Try again later.")
+        }
+        static var packageNotSaved: String {
+            String(localized: "The update file could not be saved. Try again later.")
+        }
+        static var metadataTooLarge: String {
+            String(localized: "Update information was too large to read. Try again later.")
+        }
+        static let catalogKeys = [
+            "A previous update did not finish. Tono kept the record. You can try again later, or ask a family member for help.",
+            "Tono could not confirm that ordinary internet is back. Try again. If it still fails, ask a family member for help.",
+            "This update cannot be tried again yet. Wait until recovery finishes, or ask a family member for help.",
+            "Tono could not close the update record. Try again. Network protection is still on.",
+            "The update package did not pass the check, so nothing was installed. Try again later.",
+            "The update was not allowed to install, so nothing was replaced. Try again later.",
+            "Tono cannot tell whether the update finished. Leave protection on and do not tap repeatedly. Ask a family member to look.",
+            "The update could not be downloaded. Check the network, then try again.",
+            "Update information could not be read. Check the network, then try again.",
+            "Update information was incomplete. Try again later.",
+            "The downloaded update did not match the published file. Nothing was installed. Try again later.",
+            "The update file could not be saved. Try again later.",
+            "Update information was too large to read. Try again later.",
+            "Update now",
+            "Later",
+        ]
     }
 
     /// The signed offer, or nil when the discovery object is not published
@@ -74,10 +137,10 @@ nonisolated enum NativeUpdateDownload {
         }
         if let http = response as? HTTPURLResponse, http.statusCode == 404, http.url == url { throw NotPublished() }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, http.url == url,
-              response.expectedContentLength <= maximum else { throw failure("Update discovery metadata is unavailable or invalid.") }
+              response.expectedContentLength <= maximum else { throw failure(Copy.metadataIncomplete) }
         var data = Data()
         for try await byte in stream {
-            guard data.count < maximum else { throw failure("Update metadata exceeds its size limit.") }
+            guard data.count < maximum else { throw failure(Copy.metadataTooLarge) }
             data.append(byte)
         }
         return data
@@ -111,7 +174,7 @@ nonisolated enum NativeUpdateDownload {
                 answer = try await path.exchange(request, maximum)
             } catch is ControlPlaneExchangeError {
                 // Over the cap or not HTTP: an answer, never re-sent.
-                throw failure("Update discovery metadata is unavailable or invalid.")
+                throw failure(Copy.metadataIncomplete)
             } catch {
                 if isCancellation(error) { throw error }
                 failures.append("\(path.label)[\(error.localizedDescription)]")
@@ -119,11 +182,11 @@ nonisolated enum NativeUpdateDownload {
             }
             if answer.status == 404 { throw NotPublished() }
             guard answer.status == 200, answer.bodyFailure == nil, answer.body.count <= maximum else {
-                throw failure("Update discovery metadata is unavailable or invalid.")
+                throw failure(Copy.metadataIncomplete)
             }
             return answer.body
         }
-        throw failure("Update discovery metadata is unreachable: " + failures.joined(separator: "; "))
+        throw userFacing(Copy.metadataUnreadable, diagnostic: failures.joined(separator: "; "))
     }
 
     /// Stands in for the direct attempt that is not made while protection is
@@ -200,7 +263,7 @@ nonisolated enum NativeUpdateDownload {
         do {
             guard FileManager.default.createFile(atPath: destination.path, contents: nil,
                                                  attributes: [.posixPermissions: 0o600]) else {
-                throw failure("The update package could not be saved.")
+                throw failure(Copy.packageNotSaved)
             }
             let file = try FileHandle(forWritingTo: destination)
             defer { try? file.close() }
@@ -216,11 +279,11 @@ nonisolated enum NativeUpdateDownload {
                     failures.append("\(path.label)[\(error.localizedDescription)]")
                     continue
                 }
-                guard sink.isComplete else { throw failure("Downloaded update package size or origin differs.") }
+                guard sink.isComplete else { throw failure(Copy.packageMismatch) }
                 try file.synchronize()
                 return destination
             }
-            throw failure("The update package is unreachable: " + failures.joined(separator: "; "))
+            throw userFacing(Copy.packageNotDownloaded, diagnostic: failures.joined(separator: "; "))
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
@@ -229,6 +292,12 @@ nonisolated enum NativeUpdateDownload {
 
     static func failure(_ message: String) -> NSError {
         NSError(domain: "Tono.NativeUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    /// The alert shows `sentence`. `diagnostic` is the path list, for the log only.
+    static func userFacing(_ sentence: String, diagnostic: String) -> NSError {
+        updateLog.error("native update: \(diagnostic, privacy: .public)")
+        return failure(sentence)
     }
 }
 
@@ -274,7 +343,7 @@ nonisolated private final class NativePackageDownload: NSObject, URLSessionDownl
             guard let response = downloadTask.response as? HTTPURLResponse, response.statusCode == 200,
                   response.url == url,
                   (try FileManager.default.attributesOfItem(atPath: location.path)[.size] as? NSNumber)?.int64Value == size else {
-                throw NativeUpdateDownload.failure("Downloaded update package size or origin differs.")
+                throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageMismatch)
             }
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-update-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
@@ -300,7 +369,7 @@ nonisolated private final class NativePackageDownload: NSObject, URLSessionDownl
             // No response arrived: the GET may go to the relays.
             value = .failure(Undelivered(error: error))
         } else {
-            value = .failure(error ?? NativeUpdateDownload.failure("Update download did not complete."))
+            value = .failure(error ?? NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageNotDownloaded))
         }
         lock.unlock()
         completion?.resume(with: value)
@@ -367,7 +436,7 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
     }
 
     private func readHead() throws -> Bool {
-        let invalid = NativeUpdateDownload.failure("Downloaded update package size or origin differs.")
+        let invalid = NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageMismatch)
         while true {
             let bytes = [UInt8](pending)
             guard let lineEnd = PinnedResponse.find([13, 10], in: bytes, from: 0) else {
@@ -392,7 +461,7 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
                 pending = rest
                 continue
             }
-            guard code == 200 else { throw NativeUpdateDownload.failure("The update package is unavailable.") }
+            guard code == 200 else { throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageNotDownloaded) }
             guard headers["transfer-encoding"] == nil,
                   let declared = headers["content-length"].flatMap({ Int64($0) }), declared == size else {
                 throw invalid
@@ -405,7 +474,7 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
 
     private func write(_ data: Data) throws -> Bool {
         guard Int64(data.count) <= size - written else {
-            throw NativeUpdateDownload.failure("Downloaded update package size or origin differs.")
+            throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageMismatch)
         }
         if !data.isEmpty { try file.write(contentsOf: data) }
         written += Int64(data.count)

@@ -8587,6 +8587,156 @@
         }
       }
     },
+    "Update now": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "现在更新"
+          }
+        }
+      }
+    },
+    "Later": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "稍后"
+          }
+        }
+      }
+    },
+    "A previous update did not finish. Tono kept the record. You can try again later, or ask a family member for help.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一次更新没有完成。记录还留着。可以稍后再试，也可以请家人帮忙。"
+          }
+        }
+      }
+    },
+    "Tono could not confirm that ordinary internet is back. Try again. If it still fails, ask a family member for help.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还不能确认普通网络已经恢复。请再试一次。如果还是不行，请家人帮忙。"
+          }
+        }
+      }
+    },
+    "This update cannot be tried again yet. Wait until recovery finishes, or ask a family member for help.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这次更新暂时不能重试。请等恢复完成，或请家人帮忙。"
+          }
+        }
+      }
+    },
+    "Tono could not close the update record. Try again. Network protection is still on.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新记录没有收好。请再试一次。网络保护还在。"
+          }
+        }
+      }
+    },
+    "The update package did not pass the check, so nothing was installed. Try again later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新包没有通过检查，没有开始安装。请稍后再试。"
+          }
+        }
+      }
+    },
+    "The update was not allowed to install, so nothing was replaced. Try again later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新没有获得安装许可，没有替换程序。请稍后再试。"
+          }
+        }
+      }
+    },
+    "Tono cannot tell whether the update finished. Leave protection on and do not tap repeatedly. Ask a family member to look.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还不能确认更新有没有装上。请保持保护，不要反复点击。请家人帮忙看一下。"
+          }
+        }
+      }
+    },
+    "The update could not be downloaded. Check the network, then try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新没有下载下来。请检查网络后再试。"
+          }
+        }
+      }
+    },
+    "Update information could not be read. Check the network, then try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "读不到更新信息。请检查网络后再试。"
+          }
+        }
+      }
+    },
+    "Update information was incomplete. Try again later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新信息不完整。请稍后再试。"
+          }
+        }
+      }
+    },
+    "The downloaded update did not match the published file. Nothing was installed. Try again later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载的更新和公布的文件不一致，没有安装。请稍后再试。"
+          }
+        }
+      }
+    },
+    "The update file could not be saved. Try again later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新文件没有保存下来。请稍后再试。"
+          }
+        }
+      }
+    },
+    "Update information was too large to read. Try again later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新信息太大，没有读完。请稍后再试。"
+          }
+        }
+      }
+    },
     "Update not completed": {
       "localizations": {
         "zh-Hans": {

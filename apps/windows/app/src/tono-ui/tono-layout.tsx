@@ -23,6 +23,7 @@ import {
 import { TonoAuthGuard } from '@/pages/_layout/tono-auth-guard'
 import { handleNoticeMessage } from '@/pages/_layout/utils'
 import { useThemeMode } from '@/services/states'
+import { UpdatePromptListener } from '@/services/update-prompt'
 import {
   connectRejectionNeedsServerChoice,
   isSupersededConnectRejection,
@@ -267,6 +268,7 @@ const TonoLayout = () => {
   return (
     <ThemeProvider theme={theme}>
       <NoticeManager position={preferences?.notice_position} />
+      {!isTrayRoute && <UpdatePromptListener />}
       <div
         // A perpetual spinner over a frosted surface makes WebView2 recomposite
         // the whole blurred region every frame; on a GPU-less VM or over RDP

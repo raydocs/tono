@@ -254,9 +254,26 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertFalse(AppUpdater.reportsFailure(userInitiated: false, offerAccepted: false, updatePending: false))
     }
 
+    func testUpdateSentencesHaveSimplifiedChinese() throws {
+        let catalog = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Tono/Localizable.xcstrings")
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: catalog)) as! [String: Any]
+        let strings = try XCTUnwrap(json["strings"] as? [String: Any])
+        for key in NativeUpdateDownload.Copy.catalogKeys {
+            let entry = try XCTUnwrap(strings[key] as? [String: Any], key)
+            let locs = try XCTUnwrap(entry["localizations"] as? [String: Any])
+            let zh = try XCTUnwrap(locs["zh-Hans"] as? [String: Any])
+            let unit = try XCTUnwrap(zh["stringUnit"] as? [String: Any])
+            let value = try XCTUnwrap(unit["value"] as? String)
+            XCTAssertFalse(value.isEmpty)
+            XCTAssertNotEqual(value, key)
+        }
+    }
+
     func testNativeUpdateOfferAndFailureRender() async throws {
         let offer = AppUpdater.offerAlert(version: "0.0.73")
-        XCTAssertEqual(offer.buttons.map(\.title), ["Install and Restart", "Not Now"])
+        XCTAssertEqual(offer.buttons.map(\.title), ["Update now", "Later"])
         try await capture(offer, name: "native-update-offer")
         let failure = AppUpdater.failureAlert(detail: "Update consumption is uncertain. Network protection and recovery evidence remain in place.")
         XCTAssertEqual(failure.buttons.map(\.title), ["OK"])

@@ -1,0 +1,19 @@
+{
+  "kind": "tonoUpdateDryRun",
+  "publishable": false,
+  "appVersion": "0.0.80",
+  "sparkleBuild": 81,
+  "buildCommit": "322f48c6fcb13b26279fed22ae19f79dcc2522bb",
+  "releaseId": "dry-run-2026-10-24-not-for-publish",
+  "releaseSequencePlaceholder": 1,
+  "releaseSequenceIsInstalledFloor": false,
+  "componentDigestsAreLabels": true,
+  "signature": "UNSIGNED-DRY-RUN",
+  "urlsHost": "example.invalid",
+  "wroteCustomerFeed": false,
+  "liveFloors": {
+    "sparkleBuild": 67,
+    "macosShortVersion": "0.0.67",
+    "windowsVersion": "0.0.34"
+  }
+}

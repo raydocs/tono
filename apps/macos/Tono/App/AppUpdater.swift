@@ -43,7 +43,11 @@ final class AppUpdater: ObservableObject {
         }
         do {
             if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
-                throw NativeUpdateDownload.failure(pending.diagnostic ?? "A previous update is pending. Installation and recovery evidence are retained.")
+                let sentence = NativeUpdateDownload.Copy.pendingUnfinished
+                if let diagnostic = pending.diagnostic, !diagnostic.isEmpty {
+                    throw NativeUpdateDownload.userFacing(sentence, diagnostic: diagnostic)
+                }
+                throw NativeUpdateDownload.failure(sentence)
             }
             guard let offer = try await NativeUpdateDownload.discover() else {
                 // Nothing is published on the update channel (the release
@@ -136,8 +140,8 @@ final class AppUpdater: ObservableObject {
         let alert = NSAlert()
         alert.messageText = String(localized: "A Tono update is available")
         alert.informativeText = String(localized: "Install Tono \(version)? Tono will verify the full package, retain network protection during replacement, and restart. Recovery must be verified before the update is complete.")
-        alert.addButton(withTitle: String(localized: "Install and Restart"))
-        alert.addButton(withTitle: String(localized: "Not Now"))
+        alert.addButton(withTitle: String(localized: "Update now"))
+        alert.addButton(withTitle: String(localized: "Later"))
         return alert
     }
 

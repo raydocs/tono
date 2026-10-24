@@ -115,7 +115,7 @@ extension AppState {
                 guard !Task.isCancelled,
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
                 settled = true
-                guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+                guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.disconnectUnconfirmed) }
                 launchProtectionSequence &+= 1
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
@@ -197,12 +197,12 @@ extension AppState {
     ) async throws {
         let pending = try await nativeUpdate("status")
         guard pending.pending, AppUpdater.disconnectRetriable(pending) else {
-            throw NativeUpdateDownload.failure("This attempt cannot be retried before installation recovery.")
+            throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.retryNotYet)
         }
         nativeUpdatePending = true
         await suspendForNativeUpdate()
         let released = try await nativeUpdate("disconnect")
-        guard released.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+        guard released.disconnectVerified == true else { throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.disconnectUnconfirmed) }
         // An evidence archive failure cannot undo verified PF release.
         // Publish it before retirement so the UI cannot retain protection.
         launchProtectionSequence &+= 1
@@ -210,7 +210,7 @@ extension AppState {
         isProtectionBlocked = false
         resetReleasedSessionHistory()
         let retired = try await nativeUpdate("retire")
-        guard !retired.pending else { throw NativeUpdateDownload.failure("Update retirement did not commit.") }
+        guard !retired.pending else { throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.retirementUnconfirmed) }
         nativeUpdatePending = false
         RuntimeCleanup.nativeUpdatePending = false
         RuntimeCleanup.nativeUpdateBlocksConnect = false
@@ -235,21 +235,21 @@ enum NativeUpdatePreparation {
         let staged = try await stage()
         guard staged.pending, staged.execution == "staged", let receipt = staged.receipt,
               receipt.phase == .preparing, receipt.blockedReason == nil else {
-            throw NativeUpdateDownload.failure("Helper did not verify private update staging.")
+            throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageUnchecked)
         }
         await suspend()
         let prepared = try await prepare()
         guard prepared.receipt?.attemptId == receipt.attemptId,
               prepared.receipt?.phase == .installationAuthorized,
               prepared.receipt?.blockedReason == nil else {
-            throw NativeUpdateDownload.failure("Helper did not authorize protected update preparation.")
+            throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.installNotAllowed)
         }
         let consumed: HelperManager.UpdateStatus
         do { consumed = try await execute() }
         catch { consumed = try await query() } // Never repeat installation after a lost ACK.
         guard consumed.receipt?.attemptId == receipt.attemptId,
               consumed.receipt?.blockedReason == nil, consumed.execution == "consumed" else {
-            throw NativeUpdateDownload.failure("Update consumption is uncertain. Keep protection and query recovery.")
+            throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.installUncertain)
         }
         return consumed
     }

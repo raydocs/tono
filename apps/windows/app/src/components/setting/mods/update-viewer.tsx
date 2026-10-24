@@ -18,7 +18,7 @@ import { BaseDialog, type DialogRef } from '@/components/base'
 import { useUpdate } from '@/hooks/use-update'
 import { showNotice } from '@/services/notice-service'
 import { useSetUpdateState, useUpdateState } from '@/services/states'
-import { formatTonoActionError } from '@/services/tono'
+import { describeUpdateFailure } from '@/services/update-copy'
 import {
   cancelUpdateDownload,
   installUpdate,
@@ -152,11 +152,14 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
   const [failedOffer, setFailedOffer] = useState<{
     manifestSha256: string
     message: string
+    detail: string
+    sticks: boolean
   } | null>(null)
   const refusal =
     failedOffer?.manifestSha256 === updateInfo?.manifestSha256
       ? failedOffer
       : null
+  const blocked = refusal?.sticks === true
   const [downloaded, setDownloaded] = useState(0)
   const [total, setTotal] = useState(0)
   const downloadedRef = useRef(0)
@@ -202,7 +205,7 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
   }, [updateInfo])
 
   const onUpdate = useLockFn(async () => {
-    if (!updateInfo || refusal) return
+    if (!updateInfo || blocked) return
     if (breakChangeFlag) {
       showNotice.error('settings.modals.update.messages.breakChangeError')
       return
@@ -245,11 +248,14 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
     } catch (err) {
       // The user cancelled the download: not a refusal, the same offer may start again.
       if (String(err).includes(UPDATE_DOWNLOAD_CANCELLED)) return
-      // Keep the refusal inside the modal, and keep this offer blocked even
-      // after closing/reopening it. Only a different checked manifest is new.
+      // A signature, floor, or service refusal stays blocked for this manifest.
+      // A network failure keeps Update now, so the same offer can be tried again.
+      const described = describeUpdateFailure(err, t)
       setFailedOffer({
         manifestSha256: updateInfo.manifestSha256,
-        message: formatTonoActionError(err) || t('tono.errors.unknownAction'),
+        message: described.message,
+        detail: described.detail,
+        sticks: described.sticks,
       })
     } finally {
       setUpdateState(false)
@@ -309,8 +315,12 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
         pb: 1,
       }}
       okBtn={t('settings.modals.update.actions.update')}
-      cancelBtn={t('shared.actions.cancel')}
-      disableOk={refusal !== null}
+      cancelBtn={
+        updateState
+          ? t('shared.actions.cancel')
+          : t('settings.modals.update.actions.later')
+      }
+      disableOk={blocked}
       loading={updateState}
       onClose={() => setOpen(false)}
       onCancel={() => {
@@ -512,7 +522,13 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
             overflowWrap: 'anywhere',
           }}
         >
-          {refusal.message}
+          <p>{refusal.message}</p>
+          {refusal.detail && refusal.detail !== refusal.message && (
+            <details>
+              <summary>{t('tono.update.technicalDetails')}</summary>
+              <pre>{refusal.detail}</pre>
+            </details>
+          )}
         </Box>
       )}
       {updateState && (

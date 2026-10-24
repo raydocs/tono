@@ -733,6 +733,19 @@
       "unsigned": "安装包未签名，Windows 可能拦截。过 SmartScreen 后即可安装。"
     }
   },
+  "update": {
+    "trayAvailable": "有新版本：{{version}}",
+    "updateNow": "现在更新",
+    "later": "稍后",
+    "needsAttention": "上一次更新还没做完。请点「现在更新」，或请家人帮忙。这不是网络问题。",
+    "signatureRefused": "这次更新没有通过检查，没有安装。请家人帮忙。",
+    "notNewer": "这台电脑上的 Tono 已经是可安装的最新版。",
+    "network": "更新没有下载下来。请检查网络，然后再点一次「现在更新」。",
+    "refused": "这次更新没有装上，网络保护没有变化。请先请家人帮忙，再试一次。",
+    "notCompleted": "更新没有完成。可以再试一次。如果一直失败，请家人帮忙。",
+    "technicalDetails": "技术详情",
+    "checkUnknown": "暂时检查不了更新。请过一会儿再试。"
+  },
   "cities": {
     "losAngeles": "洛杉矶",
     "saltLakeCity": "盐湖城",
