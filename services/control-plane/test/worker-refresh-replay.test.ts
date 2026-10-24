@@ -74,7 +74,7 @@ describe('refresh response-loss recovery stays anchored to the original token', 
     expect((await refresh(account.refreshToken)).status).toBe(200);
     const replay = await refresh(account.refreshToken);
     const current = await replay.json() as any;
-    expect((await api('auth/logout', json({ refreshToken: current.refreshToken }, current.accessToken))).status).toBe(200);
+    expect((await api('auth/logout', json({ refreshToken: current.refreshToken }, current.accessToken))).status).toBe(204);
     expect((await refresh(account.refreshToken)).status).toBe(401);
     expect((await refresh(current.refreshToken)).status).toBe(401);
   });
