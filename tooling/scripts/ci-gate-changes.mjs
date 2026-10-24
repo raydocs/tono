@@ -27,6 +27,7 @@ const PUSH_WORKFLOWS = [
   ['windows', 'windows-ci.yml'],
   ['services', 'services-ci.yml'],
   ['singBox', 'sing-box-alpha9-check.yml'],
+  ['ios', 'ios-ci.yml'],
 ]
 
 const OUTPUT_KEYS = {
@@ -35,6 +36,7 @@ const OUTPUT_KEYS = {
   services: 'services',
   singBox: 'sing_box',
   connectBench: 'connect_bench',
+  ios: 'ios',
 }
 
 export function pushPathList(yamlText) {
@@ -211,6 +213,7 @@ function aggregateCli() {
     ['services', 'SERVICES', 'SERVICES_SHOULD'],
     ['sing-box', 'SING_BOX', 'SING_BOX_SHOULD'],
     ['connect-bench', 'CONNECT_BENCH', 'CONNECT_BENCH_SHOULD'],
+    ['ios', 'IOS', 'IOS_SHOULD'],
   ].map(([name, resultKey, shouldKey]) => {
     const should = process.env[shouldKey] || ''
     return { name, result: process.env[resultKey] || '', should }
