@@ -595,7 +595,7 @@ enum ReleaseStop {
     }
 
     static func markUpdateDisconnectVerified(storage: UpdateStorage, expected: UpdateDisconnectIdentity,
-                                            components: [ReleaseReport.Component], outcome: String = "restored") throws {
+                                            components: [ReleaseReport.Component], outcome: String) throws {
         // A first read alone cannot exclude a late PF/DNS/Core writer. The
         // worker passes only the terminal settlement, never cleanup intent.
         guard PreemptiveUpdateDisconnectProof.permits(outcome: outcome, components: components.map {

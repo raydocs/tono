@@ -279,7 +279,7 @@ func runUpdateSelfTests() -> Bool {
         let before = try store.load()
         try check(engine.status()["disconnectRequested"] as? Bool == true, "Status hid explicit disconnect intent")
         try check(before.attempt?.disconnectVerified == false, "Intent alone fabricated verified disconnect")
-        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: terminalReadback())
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: terminalReadback(), outcome: "restored")
         let restarted = try UpdateStorage(root: store.root)
         let after = try restarted.load()
         try check(after.attempt?.disconnectVerified == true, "Terminal preemptive release was not durably verified")
@@ -288,11 +288,20 @@ func runUpdateSelfTests() -> Bool {
                   "Release fabricated update completion or erased consumed evidence")
     }
 
+    test("preemptive-restore-partial-ai-remains-unverified") { directory in
+        let (store, _, identity) = try preemptiveFixture(directory)
+        let readback = terminalReadback() + [ReleaseReport.Component(name: "ai", readback: "residual", risk: "settled", detail: nil)]
+        let outcome = ReleaseReport.outcome(components: readback, stuck: [], finished: true)
+        try check(outcome == "partial", "Residual AI must remain a partial Restore")
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback, outcome: outcome)
+        try check(store.load().attempt?.disconnectVerified == false, "Partial Restore fabricated verified disconnect")
+    }
+
     test("preemptive-restore-residual-pf-does-not-verify") { directory in
         let (store, _, identity) = try preemptiveFixture(directory)
         var readback = terminalReadback()
         readback[0].readback = "residual"
-        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback)
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback, outcome: "restored")
         try check(store.load().attempt?.disconnectVerified == false, "Residual PF certified release")
     }
 
@@ -300,7 +309,7 @@ func runUpdateSelfTests() -> Bool {
         let (store, _, identity) = try preemptiveFixture(directory)
         var readback = terminalReadback()
         readback[1].readback = "unreadable"
-        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback)
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback, outcome: "restored")
         try check(store.load().attempt?.disconnectVerified == false, "Unreadable Core certified release")
     }
 
@@ -308,13 +317,13 @@ func runUpdateSelfTests() -> Bool {
         let (store, _, identity) = try preemptiveFixture(directory)
         var readback = terminalReadback()
         readback[2].risk = "unknown"
-        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback)
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: readback, outcome: "restored")
         try check(store.load().attempt?.disconnectVerified == false, "Unsettled DNS certified release")
     }
 
     test("preemptive-restore-missing-dns-proof-does-not-verify") { directory in
         let (store, _, identity) = try preemptiveFixture(directory)
-        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: Array(terminalReadback().prefix(2)))
+        try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: identity, components: Array(terminalReadback().prefix(2)), outcome: "restored")
         try check(store.load().attempt?.disconnectVerified == false, "Missing DNS certified release")
     }
 
@@ -322,7 +331,7 @@ func runUpdateSelfTests() -> Bool {
         let (store, _, identity) = try preemptiveFixture(directory)
         let before = try UpdateStorage.read(store.root + "/ledger.json", maximum: 128 * 1024)
         let stale = ReleaseStop.UpdateDisconnectIdentity(attemptID: identity.attemptID, generation: identity.generation + 1)
-        try refuses { try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: stale, components: terminalReadback()) }
+        try refuses { try ReleaseStop.markUpdateDisconnectVerified(storage: store, expected: stale, components: terminalReadback(), outcome: "restored") }
         try check(UpdateStorage.read(store.root + "/ledger.json", maximum: 128 * 1024) == before,
                   "A different attempt generation received old release proof")
     }
@@ -339,10 +348,22 @@ func runUpdateSelfTests() -> Bool {
 
     test("preemptive-restore-save-failure-is-not-acknowledged") { directory in
         let (store, _, identity) = try preemptiveFixture(directory)
-        let failing = try UpdateStorage(root: store.root, synchronizeDirectory: { _ in
-            throw HelperFailure.system("injected directory sync failure")
+        var synchronizations = 0
+        var failedDuringSave = false
+        let failing = try UpdateStorage(root: store.root, synchronizeDirectory: { path in
+            synchronizations += 1
+            if synchronizations == 2 {
+                // The first sync is load() re-establishing durability. At
+                // the second, save() has renamed the verified candidate.
+                let written = try JSONDecoder().decode(UpdateStorage.Ledger.self,
+                    from: UpdateStorage.read(store.root + "/ledger.json", maximum: 128 * 1024))
+                failedDuringSave = written.attempt?.disconnectVerified == true
+                throw HelperFailure.system("injected save directory sync failure")
+            }
+            try UpdateStorage.syncDirectory(path)
         })
-        try refuses { try ReleaseStop.markUpdateDisconnectVerified(storage: failing, expected: identity, components: terminalReadback()) }
+        try refuses { try ReleaseStop.markUpdateDisconnectVerified(storage: failing, expected: identity, components: terminalReadback(), outcome: "restored") }
+        try check(synchronizations == 2 && failedDuringSave, "Failure injection did not reach proof save")
         // Rename may have happened before failed sync: uncertain durability is
         // not an acknowledgement and never permission to erase the attempt.
         try check(store.load().attempt?.execution == .consumed && store.load().highWater == 14,
