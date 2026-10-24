@@ -138,8 +138,8 @@ final class AppModel: ObservableObject {
     private var preparing = false
     private var tunnelStatus: TunnelStatus = .invalid
     /// The failure shown and the user's switches in flight (`TunnelIntentLedger`).
-    private var intent = TunnelIntentLedger()
-    private var failure: String? { intent.failure }
+    private var ledger = TunnelIntentLedger()
+    private var failure: String? { ledger.failure }
     private var permission: String?
     /// The user's latest switch intent; a switch-off during PREPARING stops the start that is in flight.
     private var wantOn = false
@@ -217,7 +217,7 @@ final class AppModel: ObservableObject {
         publishStatus(force: true)
         if tunnelStatus == .connected, cloudProbe.state != .checking { runProbes() }
         retryPutBack()
-        if intent.foreground(tunnel: tunnelStatus, recordedFailure: SharedFiles.loadFailure()?.code) { recompute() }
+        if ledger.foreground(tunnel: tunnelStatus, recordedFailure: SharedFiles.loadFailure()?.code) { recompute() }
     }
 
     // MARK: - Sign-in
@@ -260,7 +260,7 @@ final class AppModel: ObservableObject {
             Preferences.email = reported ?? login.email
             email = Preferences.email
             signedIn = true
-            intent.clearFailure()
+            ledger.clearFailure()
             login = LoginState()
             recompute()
             await refreshCatalog(quiet: true)
@@ -288,7 +288,7 @@ final class AppModel: ObservableObject {
         login = LoginState()
         probeTask?.cancel()
         traffic.stop()
-        intent.signingOut()
+        ledger.signingOut()
         tracker.sessionEnded()
         catalogs.clear()
         unrecovered = nil
@@ -315,7 +315,7 @@ final class AppModel: ObservableObject {
         checks = ExitChecks()
         refreshExplained()
         signedIn = false
-        intent.signedOut()
+        ledger.signedOut()
         permission = nil
         signingOut = false
         recompute()
@@ -342,7 +342,7 @@ final class AppModel: ObservableObject {
         }
         primerConfirmed = false
         wantOn = true
-        intent.userWantsOn()
+        ledger.userWantsOn()
         permission = nil
         SharedFiles.clearFailure()
         preparing = true
@@ -354,25 +354,25 @@ final class AppModel: ObservableObject {
         do {
             try SharedFiles.saveInputs(inputs(for: loaded))
             unsavedRoutes = nil
-            intent.starting()
+            ledger.starting()
             let outcome = try await tunnel.start(includeAllNetworks: includeAllNetworks)
             guard epoch == accountEpoch else { return }
-            if outcome == .superseded { intent.startEnded() }
+            if outcome == .superseded { ledger.startEnded() }
         } catch TunnelError.denied {
             guard epoch == accountEpoch, wantOn else { return }
-            intent.startEnded()
+            ledger.startEnded()
             permission = "DENIED"
         } catch {
             guard epoch == accountEpoch, wantOn else { return }
-            intent.startEnded()
-            intent.fail("CORE_START")
+            ledger.startEnded()
+            ledger.fail("CORE_START")
         }
     }
 
     func disconnect() async {
         traffic.stop()
         wantOn = false
-        intent.userStops(tunnel: tunnelStatus)
+        ledger.userStops(tunnel: tunnelStatus)
         probeTask?.cancel()
         recompute()
         await tunnel.stop()
@@ -703,11 +703,11 @@ final class AppModel: ObservableObject {
             if AccountErrors.isSessionEnded(error) {
                 await signOut()
                 guard accountEpoch == epoch &+ 1 else { return false }
-                intent.fail("SESSION_ENDED")
+                ledger.fail("SESSION_ENDED")
                 recompute()
                 return false
             }
-            if !quiet { intent.fail(AccountErrors.reasonCode(error)) }
+            if !quiet { ledger.fail(AccountErrors.reasonCode(error)) }
             return false
         }
     }
@@ -795,7 +795,7 @@ final class AppModel: ObservableObject {
         traffic.updateTunnel(status, session: since, eligible: signedIn && !signingOut,
                              startEpoch: TunnelController.lifecycle.statisticsStartEpoch)
         let down = status == .disconnected || status == .invalid
-        let stop = intent.tunnel(status, before: before, recordedFailure: down ? SharedFiles.loadFailure()?.code : nil)
+        let stop = ledger.tunnel(status, before: before, recordedFailure: down ? SharedFiles.loadFailure()?.code : nil)
         switch status {
         case .connected:
             // The exit checks start once the tunnel confirms a graph (`recompute`).
