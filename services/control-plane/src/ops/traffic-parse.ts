@@ -15,6 +15,10 @@ export { UPSERT_BATCH, retainTrafficDaily, writeParsedSegment } from './traffic-
 
 export const MAX_SEGMENT_LINES = 20_000;
 export const MAX_DISTINCT_ETLD1 = 2_000;
+// One extra slot so the etld1 overflow host still lands in __other__ after
+// MAX_DISTINCT_ETLD1 real hosts. Days, routes and node names cannot grow past
+// this, which is what used to turn one segment into tens of thousands of rows.
+export const MAX_PARSE_BUCKETS = MAX_DISTINCT_ETLD1 + 1;
 export const MAX_PROCESS_CHARS = 40;
 export const OTHER_ETLD1 = '__other__';
 export const IP_ETLD1 = '__ip__';
@@ -111,14 +115,30 @@ function dayAt(tsMs: number): number {
 }
 
 function tsMsOf(row: Record<string, unknown>, receivedAt: number): number {
+  const receivedMs = receivedAt < 1e12 ? receivedAt * 1000 : receivedAt;
+  let ts: number | undefined;
   const iso = str(row, 'timestamp', 'started_at', 'startedAt');
   if (iso) {
     const parsed = Date.parse(iso);
-    if (Number.isFinite(parsed)) return parsed;
+    if (Number.isFinite(parsed)) ts = parsed;
   }
-  const n = intField(row, 'ts', 'time', 'tsMs');
-  if (n > 0) return n < 1e12 ? n * 1000 : n;
-  return receivedAt < 1e12 ? receivedAt * 1000 : receivedAt;
+  if (ts === undefined) {
+    const n = intField(row, 'ts', 'time', 'tsMs');
+    if (n > 0) ts = n < 1e12 ? n * 1000 : n;
+  }
+  if (ts === undefined) return receivedMs;
+  // A client clock ahead of ours must not plant a day retention can never
+  // prune. Same cap as connection-failure ingest and diagnostics events.
+  return Math.min(ts, receivedMs);
+}
+
+function takeBucket<T>(map: Map<string, T>, key: string, create: () => T): T | undefined {
+  const existing = map.get(key);
+  if (existing) return existing;
+  if (map.size >= MAX_PARSE_BUCKETS) return undefined;
+  const created = create();
+  map.set(key, created);
+  return created;
 }
 
 function hopText(row: Record<string, unknown>): string {
@@ -271,40 +291,40 @@ export async function parseAuditSegment(
     const day = dayAt(conn.tsMs);
     const seenSec = Math.floor(conn.tsMs / 1000);
     const dKey = destKey(day, e, conn.route, conn.node);
-    let dest = parsed.destinations.get(dKey);
-    if (!dest) {
-      dest = { connections: 0, bytesUp: 0, bytesDown: 0, processes: new Map() };
-      parsed.destinations.set(dKey, dest);
+    const dest = takeBucket(parsed.destinations, dKey, () => ({
+      connections: 0, bytesUp: 0, bytesDown: 0, processes: new Map(),
+    }));
+    if (dest) {
+      dest.connections += 1;
+      dest.bytesUp += conn.bytesUp;
+      dest.bytesDown += conn.bytesDown;
+      bumpProcess(dest, conn.process);
     }
-    dest.connections += 1;
-    dest.bytesUp += conn.bytesUp;
-    dest.bytesDown += conn.bytesDown;
-    bumpProcess(dest, conn.process);
 
     const family = e === OTHER_ETLD1 || e === IP_ETLD1 ? null : familyForHost(conn.host);
     if (family) {
       const sKey = serviceKey(day, family, conn.route);
-      let svc = parsed.services.get(sKey);
-      if (!svc) {
-        svc = { bytes: 0, sessions: 0, lastSeenAt: 0 };
-        parsed.services.set(sKey, svc);
+      const svc = takeBucket(parsed.services, sKey, () => ({
+        bytes: 0, sessions: 0, lastSeenAt: 0,
+      }));
+      if (svc) {
+        svc.bytes += conn.bytesUp + conn.bytesDown;
+        svc.sessions += 1;
+        if (seenSec > svc.lastSeenAt) svc.lastSeenAt = seenSec;
       }
-      svc.bytes += conn.bytesUp + conn.bytesDown;
-      svc.sessions += 1;
-      if (seenSec > svc.lastSeenAt) svc.lastSeenAt = seenSec;
     }
 
     if (conn.route === 'cloud' && e !== OTHER_ETLD1 && e !== IP_ETLD1 && isLikelyDomestic(e)) {
       const cKey = candidateKey(day, e);
-      let cand = parsed.candidates.get(cKey);
-      if (!cand) {
-        cand = { firstSeen: seenSec, lastSeen: seenSec, bytes: 0, connections: 0 };
-        parsed.candidates.set(cKey, cand);
+      const cand = takeBucket(parsed.candidates, cKey, () => ({
+        firstSeen: seenSec, lastSeen: seenSec, bytes: 0, connections: 0,
+      }));
+      if (cand) {
+        cand.connections += 1;
+        cand.bytes += conn.bytesUp + conn.bytesDown;
+        if (seenSec < cand.firstSeen) cand.firstSeen = seenSec;
+        if (seenSec > cand.lastSeen) cand.lastSeen = seenSec;
       }
-      cand.connections += 1;
-      cand.bytes += conn.bytesUp + conn.bytesDown;
-      if (seenSec < cand.firstSeen) cand.firstSeen = seenSec;
-      if (seenSec > cand.lastSeen) cand.lastSeen = seenSec;
     }
   }
   return parsed;

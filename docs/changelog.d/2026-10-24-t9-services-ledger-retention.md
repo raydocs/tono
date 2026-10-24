@@ -1,0 +1,12 @@
+## 2026-10-24 · 出口账本 hy2 失败与 Worker 遥测保留分批
+- 归属：运维侧账本与控制面保留；不是客户发布门。仅源码。
+- 来源：基线 `322f48c6fcb13b26279fed22ae19f79dcc2522bb` → 分支 `fix/t9-services`，[#1743](https://github.com/raydocs/tono/pull/1743)；未合 main。
+- 缺陷修复：
+  - EXIT-AGENT-HY2-ERROR-DROPS-LEDGER-MISSING：hy2 发布失败且 state 文件不存在时，不再把 xray 原始计数写成终身用量。已有账本的本轮增长仍保留。
+  - WORKER-TRAFFIC-PARSE-UNBOUNDED：流量审计段的客户端时间不超过收到时间；目的地、服务、候选 map 停在 `MAX_PARSE_BUCKETS`。
+  - WORKER-DIAGNOSTICS-RETENTION：诊断及相关 housekeeping DELETE 每轮最多 500 行。索引未进迁移。
+- 新增/优化：无新客户能力。
+- 工程与测试：WORKER-ENSURE-DEVICE-RACE 用强制交错复核后驳回，未改 `devices.ts`。报告中的 `vless_uuid` / `hy2_password` 与 `0034` schema 不符。
+- 验证：见 PR 正文的 RED/GREEN。本机跑了 exit-agent unittest 与 control-plane 相关 vitest。未部署，未连任何节点，未执行 D1。
+- 候选/发布：无新包。不部署，不推客户更新源。
+- 剩余限制：诊断表 `received_at` / `opened_at` 索引只在 `docs/ops/diagnostics-retention-index-candidate.sql`，待 owner staging 演练。已落库的未来 day 行不会被这次解析改动删除。

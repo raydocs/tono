@@ -24,6 +24,20 @@ export const V1_USAGE_REPORT_NOT_SUPERSEDED = `NOT EXISTS (
     AND later.source_id = usage_reports.source_id
 )`;
 
+// Each cron pass deletes at most this many rows per statement. Sessions,
+// usage reports and the audit log already used 500; the diagnostic tables
+// did not, so one tick could scan and delete an entire backlog.
+export const RETENTION_DELETE_BATCH = 500;
+
+// `table` is one of the fixed identifiers in this file, never request input.
+function limitedDelete(e: Env, table: string, predicate: string) {
+  return e.DB.prepare(
+    `DELETE FROM ${table} WHERE rowid IN (
+       SELECT rowid FROM ${table} WHERE ${predicate} LIMIT ${RETENTION_DELETE_BATCH}
+     )`,
+  );
+}
+
 // Each cron step logs and continues. One failing statement must not skip the
 // steps after it (retention, usage snapshots, the ops cron).
 export async function cronStep(name: string, run: () => Promise<unknown>) {
@@ -42,11 +56,13 @@ export async function runHousekeepingRetention(e: Env, t: number) {
   // window would silently reset the per-day cap every five minutes.
   const rateRetention = Math.max(rateWindow, DIAGNOSTICS_DAY_SECONDS) * 2;
   await cronStep('rate limit retention', () =>
-    e.DB.prepare('DELETE FROM rate_limits WHERE window_start <= ?').bind(t - rateRetention).run());
-  await cronStep('auth challenge retention', () => e.DB.prepare(
-    `DELETE FROM auth_challenges
-     WHERE expires_at <= ? OR (consumed_at IS NOT NULL AND consumed_at <= ?)`,
-  ).bind(t - 86_400, t - 86_400).run());
+    limitedDelete(e, 'rate_limits', 'window_start <= ?').bind(t - rateRetention).run());
+  await cronStep('auth challenge retention', () =>
+    limitedDelete(
+      e,
+      'auth_challenges',
+      'expires_at <= ? OR (consumed_at IS NOT NULL AND consumed_at <= ?)',
+    ).bind(t - 86_400, t - 86_400).run());
   // Keep each retention branch indexable. The old OR made SQLite scan the whole
   // sessions table every five minutes even though both predicates had indexes.
   await cronStep('revoked session retention', () => e.DB.prepare(
@@ -65,32 +81,49 @@ export async function runHousekeepingRetention(e: Env, t: number) {
   ).bind(t).run());
   // Diagnostics uploads are troubleshooting artifacts, not account records.
   await cronStep('diagnostics report retention', () =>
-    e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
+    limitedDelete(e, 'diagnostics_reports', 'received_at <= ?')
       .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
       .run());
   await cronStep('diagnostics log retention', () => sweepDiagnosticsLogs(e, t));
   await cronStep('telemetry retention', () =>
-    e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
+    limitedDelete(e, 'telemetry_windows', 'received_at <= ?')
       .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
       .run());
   const diagnosticsKeep = t - 90 * 86_400;
   const aiKeep = t - 60 * 86_400;
   for (const table of ['client_sessions', 'chain_hops', 'session_exit_observations', 'dns_checks']) {
     await cronStep(`${table} retention`, () =>
-      e.DB.prepare(`DELETE FROM ${table} WHERE received_at <= ?`).bind(diagnosticsKeep).run());
+      limitedDelete(e, table, 'received_at <= ?').bind(diagnosticsKeep).run());
   }
   await cronStep('ai service route retention', () =>
-    e.DB.prepare('DELETE FROM ai_service_routes WHERE received_at <= ?').bind(aiKeep).run());
+    limitedDelete(e, 'ai_service_routes', 'received_at <= ?').bind(aiKeep).run());
   await cronStep('failure cluster retention', async () => {
+    // Members first. A cluster row stays until its members are drained, so a
+    // bounded pass cannot delete the cluster and leave members nothing points at.
     await e.DB.prepare(
-      `DELETE FROM failure_cluster_members WHERE cluster_id IN (
-         SELECT id FROM failure_clusters WHERE opened_at <= ?
+      `DELETE FROM failure_cluster_members WHERE rowid IN (
+         SELECT failure_cluster_members.rowid
+         FROM failure_cluster_members
+         JOIN failure_clusters
+           ON failure_clusters.id = failure_cluster_members.cluster_id
+         WHERE failure_clusters.opened_at <= ?
+         LIMIT ${RETENTION_DELETE_BATCH}
        )`,
     ).bind(diagnosticsKeep).run();
-    await e.DB.prepare('DELETE FROM failure_clusters WHERE opened_at <= ?').bind(diagnosticsKeep).run();
+    await e.DB.prepare(
+      `DELETE FROM failure_clusters WHERE rowid IN (
+         SELECT rowid FROM failure_clusters
+         WHERE opened_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM failure_cluster_members
+             WHERE failure_cluster_members.cluster_id = failure_clusters.id
+           )
+         LIMIT ${RETENTION_DELETE_BATCH}
+       )`,
+    ).bind(diagnosticsKeep).run();
   });
   await cronStep('failure alert send retention', () =>
-    e.DB.prepare('DELETE FROM failure_alert_sends WHERE sent_at <= ?').bind(diagnosticsKeep).run());
+    limitedDelete(e, 'failure_alert_sends', 'sent_at <= ?').bind(diagnosticsKeep).run());
   // Individual report ids are bounded retry evidence, not the billing ledger.
   // usage_report_sources retains the monotonic per-node totals, so deleting old
   // ids cannot lower usage. A stale v2 replay is ignored by that source's
