@@ -102,3 +102,18 @@ npm test
 - 恢复当前实现后的窄GREEN：`Test Files 4 passed (4)`，`Tests 49 passed (49)`。typecheck/全量结果在本轮交付下补录。先前各节的“保留旧契约失败”是对应历史head的真实证据，不改写为当时已经通过。
 
 本轮最终本地GREEN（同一待提交树，无后续代码改动）：`npm test` 退出0，`Test Files 70 passed (70)`、`Tests 1072 passed (1072)`，83.22秒；istanbul门槛通过（Statements88.93%、Branches83.83%、Functions90.47%、Lines93.39%）。`npm run typecheck` 通过（520/521、admin76/99），`git diff --check` 通过。生产 `src/` 无本轮diff。新远端CI需等普通push后验证，未把本地结果当作CI绿灯。
+
+## Claude审查84e567140续修：已发布桌面兼容与授权边界
+
+验收：现有macOS/Windows的entitlement集合必须识别到期/超额；账户未恢复前维持403，恢复后未重新授权设备进入现有401登录恢复；公开relay写入预算有限；重激活后后续token失败不复活旧session。
+
+- 真RED测试提交49bd0fc91：`npx vitest run test/worker-review-boundaries.test.ts test/worker-login-relay.test.ts`，`Tests 6 failed | 4 passed (10)`。两条到期/配额返回码不在直接读取的macOS/Windows entitlement集合，续费原403≠期望401，relay第三次跨subject/kind未被cap拒绝，active/pending两条token插入故障后旧live session 1≠0。未用编译错或skip冒充RED。
+- 实现06a5408c2：ACCOUNT_EXPIRED/QUOTA_EXCEEDED保持403；ACCOUNT已恢复后暂停设备auth返回401 UNAUTHORIZED、refresh返回401 INVALID_REFRESH_TOKEN，原套餐判断仍在这之前。原会话行不等于继续网络授权，新登录前exit credential保持空。
+- 新relay聚合cap默认200/窗口（默认900秒），以精确Cloudflare relay源IP共用所有登录kind，RATE_LIMIT_RELAY_AUTH_IP可配置；原subject及直连IP cap保留，429带Retry-After。
+- 同D1 batch在当前设备仍revoked且user/id/installation匹配时先撤旧session，再重激活；不撤已经active/pending并发赢家的session。后续authResult token插入故障（真实trigger）不回滚已提交的旧身份撤销；重激活batch自身故障则与设备一起回滚且仍拒绝旧权限，两者分别验证。
+- GREEN：新review/relay/Env三文件 `Tests 11 passed (11)`；扩大8文件（含main合入的ensure-device-race）`Tests 62 passed (62)`；补充batch rollback后review六项 `Tests 6 passed (6)`；typecheck输出520/521、admin76/99，通过。完整npm test另补最终输出。
+- T2/T3已通过T3通知本次canonical码名变更（旧PLAN_EXPIRED/QUOTA_EXHAUSTED可作历史客户端别名）；续费旧401在iOS可保留VPN配置并提供重新登录，不能继续把已恢复账户称为套餐过期。
+- 原T0持有者600秒内重复恢复的竞争风险没有改窗口/TTL/授权；此项仍是需编排者或owner显式接受的风险，**未获批准声明**。只读交叉审查84e567140对未改范围的认可不等于覆盖06a5408c2的新改动，新范围需复审。
+- 无新migration/客户发布/部署；真实桌面UI、移动端映射、owner风险接受、第二轮独立安全审查未验证。历史报告中旧错误码/403 DEVICE_REAUTH_REQUIRED描述仅代表当时head，以现行错误表为准。
+
+06a5408c239149e4168d44874138c1293c1edbc7最终全量本地：`npm test`退出0，`Test Files 73 passed (73)`、`Tests 1084 passed (1084)`，75.92秒；coverage门槛通过（Statements88.93、Branches83.83、Functions90.47、Lines93.39%）。相对84e567140无新增migration/桌面或移动端源码修改；后续提交仅交付文档。CI和新delta独立复审待完成，不能沿用84e567140的绿灯/审查作为新head覆盖。

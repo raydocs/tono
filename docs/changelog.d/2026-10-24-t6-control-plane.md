@@ -19,3 +19,10 @@
 - 仅改两份集成测试，按已要求的403账户状态/原窗口多次恢复契约同步，同时补强credential撤销、roster排除、仅一live session、旧token拒绝及正常轮换/过期边界。生产安全逻辑、测试门槛和超时均不变。
 - 新契约对原322f的auth/sessions/devices源码真实RED三项；恢复当前实现窄回归49 passed。历史失败证据保留；最新完整结果及普通push见验证续记，无合并/部署。
 - 本轮最终本地：70文件/1072测试全部通过，覆盖率门槛通过；typecheck及diff检查通过。本轮无生产src改动；新head远端CI尚待完成，不沿用失败run为通过证据。
+
+### 2026-10-24 Claude 阻塞项与两项建议续修
+- 06a5408c2：采用已发布桌面预留403 ACCOUNT_EXPIRED/QUOTA_EXCEEDED；仅账户已恢复但旧设备仍撤权时，标准401进入重新登录，不等待客户端新版。错误表同步并通知T2/T3。
+- 同时修复公开中继无聚合cap（共用200次/900秒、subject限制不变）及重激活设备后token失败复活旧session（同batch先撤会话再改设备，两种激活分支/事务失败回滚均有回归）。无新增migration、feed、签名或部署脚本改动。
+- RED49bd0fc91：6 failed/4 passed（三个兼容契约、一个relay聚合cap、两个重激活分支）；当前三文件11 passed，扩大8文件62 passed，补充事务回滚6 passed；typecheck通过。完整重跑见验证续记。
+- 原T0在原600秒内多次恢复的有限竞争风险未改；编排者/owner显式接受仍待确认，不能据先前审查或provisional决定推定已批准。未合并/部署。
+- 最终续验：06a5408c2全量73文件/1084测试通过，coverage门槛与typecheck通过；新delta尚未独立复审，远端CI待新head执行。只补文档后普通push，不force-push、不合并/auto-merge/部署。
