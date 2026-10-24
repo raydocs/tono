@@ -83,7 +83,8 @@ struct KillSwitchState {
     /// until the app re-arms with the setting.
     let allowLocalNetworkDevices: Bool
     var strictBlocking = false
-    var strictProof: StrictRuntimeProof? = nil
+    var strictProof: StrictRuntimeProof?
+    private let disarmAuthority: HelperDisarmAuthority = nil
     /// AI Home: no whole-host block. Only the AI prefixes are dropped outside
     /// the TUN; everything else leaves as without Tono. Persisted, so a heal or
     /// power transition keeps the session's scope; strict intent overrides it.
@@ -149,6 +150,7 @@ final class HelperCommandLaunch: @unchecked Sendable {
 
 final class KillSwitchManager {
     var strictProof: StrictRuntimeProof?
+    private let disarmAuthority: HelperDisarmAuthority
     static var strictIntentActive: Bool {
         do {
             let record = try ReleaseAuthority().load()
@@ -213,7 +215,11 @@ final class KillSwitchManager {
     /// does not keep the host offline.
     static let coreDownRestoreThreshold = 3
 
-    init(allowedUID: uid_t) throws {
+    init(allowedUID: uid_t, disarmAuthority: HelperDisarmAuthority = .runtime) throws {
+        if disarmAuthority == .rootEmergency && geteuid() != 0 {
+            throw HelperFailure.invalid("Emergency recovery requires root.")
+        }
+        self.disarmAuthority = disarmAuthority
         self.allowedUID = allowedUID
         try Self.ensureRootDirectory("/Library/Application Support/Tono", permissions: 0o700)
         // Before any rule write. A leftover block file must not stay attached
@@ -228,7 +234,7 @@ final class KillSwitchManager {
                 "tono: /etc/pf.conf hook not migrated: \(detail)\n".utf8
             ))
         }
-        try restoreAtLaunch()
+        if disarmAuthority.restoresAtLaunch { try restoreAtLaunch() }
     }
 
     /// The arm request's `allowLocalNetworkDevices` (D7). Omission means off
@@ -1247,7 +1253,11 @@ final class KillSwitchManager {
     }
 
     private func disarmLocked(preserveAIHold: Bool) throws -> [String: Any] {
-        guard !Self.strictIntentActive else { throw HelperFailure.invalid("Strict protection requires the authenticated release worker.") }
+        do {
+            try disarmAuthority.authorize(effectiveUID: geteuid(), strictIntentActive: Self.strictIntentActive)
+        } catch {
+            throw HelperFailure.invalid("Strict protection requires the authenticated release worker or root emergency CLI.")
+        }
         // The anchor flush below opens egress before later steps can still
         // throw. Any arm after a half-completed disarm must therefore take
         // the full state flush — direct PF states established during the open

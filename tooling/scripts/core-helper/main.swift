@@ -1471,7 +1471,7 @@ func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
             coreSurvived = true
         }
         let dns = try ProtectedDNSManager()
-        let manager = try KillSwitchManager(allowedUID: allowedUID)
+        let manager = try KillSwitchManager(allowedUID: allowedUID, disarmAuthority: .rootEmergency)
         var dnsRestored = true
         do {
             _ = try dns.restore(deferringLossNotice: true)
@@ -1554,7 +1554,7 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
         // Restore DNS, then release PF. A DNS failure must not keep the block:
         // the host would stay offline with a dead resolver.
         let dns = try ProtectedDNSManager()
-        let manager = try KillSwitchManager(allowedUID: allowedUID)
+        let manager = try KillSwitchManager(allowedUID: allowedUID, disarmAuthority: .rootEmergency)
         if pending, var ledger, let core {
             let runtime = UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate())
             do {
