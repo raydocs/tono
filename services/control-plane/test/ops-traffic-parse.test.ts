@@ -12,6 +12,7 @@ import {
   deriveRoute,
   IP_ETLD1,
   MAX_DISTINCT_ETLD1,
+  MAX_PARSE_BUCKETS,
   MAX_PROCESS_CHARS,
   MAX_SEGMENT_LINES,
   OTHER_ETLD1,
@@ -209,6 +210,54 @@ describe('parseAuditSegment', () => {
     expect(fromGz.connectionRows).toBe(fromText.connectionRows);
     expect([...fromGz.destinations.keys()]).toEqual([...fromText.destinations.keys()]);
     expect(fromGz.services.get(`${DAY}\tchatgpt\tresidential`)?.sessions).toBe(1);
+  });
+
+  it('clamps a future client clock to receipt time and keeps an earlier one', async () => {
+    const future = await parseAuditSegment(
+      line({ host: 'future.example.com', timestamp: '2099-06-01T00:00:00.000Z' }),
+      ctx,
+    );
+    const futureSeconds = await parseAuditSegment(JSON.stringify({
+      kind: 'connection',
+      ts: 4_102_444_800,
+      host: 'future-sec.example.com',
+      route: 'Tono-Exit',
+    }), ctx);
+    expect([...future.destinations.keys()][0]?.startsWith(`${DAY}\t`)).toBe(true);
+    expect([...futureSeconds.destinations.keys()][0]?.startsWith(`${DAY}\t`)).toBe(true);
+
+    const past = '2020-01-15T12:00:00.000Z';
+    const pastDay = Math.floor(Date.parse(past) / 86_400_000) * 86_400;
+    const earlier = await parseAuditSegment(
+      line({ host: 'past.example.com', timestamp: past }),
+      ctx,
+    );
+    expect([...earlier.destinations.keys()][0]?.startsWith(`${pastDay}\t`)).toBe(true);
+  });
+
+  it('caps destination, service, and candidate maps for one segment', async () => {
+    const cap = MAX_PARSE_BUCKETS;
+    const rows = Array.from({ length: cap + 1 }, (_, i) => {
+      const timestamp = new Date(Date.parse(TS) - i * 86_400_000).toISOString();
+      return JSON.stringify({
+        kind: 'connection',
+        timestamp,
+        host: 'weixin.qq.com',
+        route: 'Tono-Exit',
+      });
+    });
+    rows.push(JSON.stringify({
+      kind: 'connection',
+      timestamp: TS,
+      host: 'weixin.qq.com',
+      route: 'Tono-Exit',
+    }));
+    const parsed = await parseAuditSegment(rows.join('\n'), ctx);
+    expect(parsed.connectionRows).toBe(cap + 2);
+    expect(parsed.destinations.size).toBe(cap);
+    expect(parsed.services.size).toBe(cap);
+    expect(parsed.candidates.size).toBe(cap);
+    expect([...parsed.destinations.values()].some((dest) => dest.connections === 2)).toBe(true);
   });
 });
 
