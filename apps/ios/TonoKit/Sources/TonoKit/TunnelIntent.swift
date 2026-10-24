@@ -67,10 +67,20 @@ public struct TunnelIntentLedger: Equatable, Sendable {
             failure = nil
             stoppedByUser = false
             return nil
+        case .connecting:
+            // A start the user did not make here (Control Center, Settings, On Demand): the earlier
+            // stop is no longer the user's last word, so this start's failure is shown.
+            if !userStopping { stoppedByUser = false }
+            return nil
         case .disconnected, .invalid:
-            let stop = TunnelStop.classify(before: before, userStarting: userStarting,
+            var stop = TunnelStop.classify(before: before, userStarting: userStarting,
                                            userStopping: userStopping || stoppedByUser,
                                            recordedFailure: recordedFailure)
+            // That outside start never connected and the tunnel recorded why. On Demand stays as it
+            // is (`stoppedBySystem`): this app did not arm it.
+            if stop == .expected, before == .connecting, !userStopping, !stoppedByUser, let recordedFailure {
+                stop = .stoppedBySystem(recordedFailure)
+            }
             switch stop {
             case .startFailed(let code), .stoppedBySystem(let code): failure = code
             case .expected: break
