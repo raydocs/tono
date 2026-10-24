@@ -11,10 +11,18 @@ import { ApiError } from './errors';
 import { recordClient } from './client-identity';
 import { type Env, type Row, str, envInt, tailscaleEnrollmentEnabled, requiredSecret } from './env';
 import { clientIp } from './auth';
+import { API_RELAYS } from './api-relays';
 import { publicDevice } from './ops/shared-admin';
 import { publicUser } from './ops/reads';
 import { ensureDevice } from './devices';
 import { issueEnrollment } from './enrollment';
+
+// TLS-pass-through relays cannot attach an authenticated forwarded client ID.
+// Only Cloudflare's edge-owned source IP can identify an exact configured relay;
+// never trust X-Forwarded-For, client IDs, an ASN, or an address supplied in JSON.
+function fromApiRelay(req: Request): boolean {
+  return API_RELAYS.some((relay) => relay.host === clientIp(req));
+}
 
 // --- Rate limiting (D1) -------------------------------------------------------
 
@@ -23,7 +31,9 @@ export async function rateLimitEmailStart(e: Env, req: Request, emailAddr: strin
   const ipLimit = envInt(e, 'RATE_LIMIT_EMAIL_START_IP', 20);
   const emailLimit = envInt(e, 'RATE_LIMIT_EMAIL_START_EMAIL', 5);
   const ip = clientIp(req);
-  await consumeRateLimit(e, `rl:${await sha256(`email-start:ip:${ip}`)}`, ipLimit, windowSeconds);
+  if (!fromApiRelay(req)) {
+    await consumeRateLimit(e, `rl:${await sha256(`email-start:ip:${ip}`)}`, ipLimit, windowSeconds);
+  }
   await consumeRateLimit(e, `rl:${await sha256(`email-start:email:${emailAddr}`)}`, emailLimit, windowSeconds);
 }
 
@@ -46,12 +56,14 @@ export async function rateLimitChallenge(
       : 'RATE_LIMIT_OIDC_VERIFY_CHALLENGE',
     5,
   );
+  if (!fromApiRelay(req)) {
   await consumeRateLimit(
     e,
     `rl:${await sha256(`${kind}:ip:${clientIp(req)}`)}`,
     ipLimit,
     windowSeconds,
   );
+  }
   await consumeRateLimit(
     e,
     `rl:${await sha256(`${kind}:challenge:${challengeId}`)}`,
@@ -62,12 +74,14 @@ export async function rateLimitChallenge(
 
 export async function rateLimitOidcStart(e: Env, req: Request, installationId: string) {
   const windowSeconds = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
+  if (!fromApiRelay(req)) {
   await consumeRateLimit(
     e,
     `rl:${await sha256(`oidc-start:ip:${clientIp(req)}`)}`,
     envInt(e, 'RATE_LIMIT_OIDC_START_IP', 20),
     windowSeconds,
   );
+  }
   await consumeRateLimit(
     e,
     `rl:${await sha256(`oidc-start:installation:${installationId}`)}`,
