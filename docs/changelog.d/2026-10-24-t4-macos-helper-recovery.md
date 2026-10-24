@@ -26,3 +26,9 @@
 - 修正保存失败测试：先允许 load 的同步；第二次同步确认磁盘候选已含 disconnectVerified，再注入 save 目录同步失败，并断言确实命中该阶段。新增 root partial-AI 测试；本轮 UpdateTests 共九项，仍待 root CI 执行，不声称旧八项已完整验证过保存失败。
 - helper 本轮 4.52.66 → 4.52.67，唯一编译清单增加共享证明源。编译完成，非 root 构建自测仍有既有六项 AI Home scope 失败，不能记整体通过。
 - 第二轮独立 Sol/xhigh 复审 `6c3a0be5f...f91689a31` 已启动；结果未回时不记通过。真机/P2 #21/#22 未完成边界不变，无 merge/auto-merge/deploy。
+
+### 2026-10-24 续记 · lockout R2 结束与残余交接
+- 独立 R2（same model, fresh context）覆盖 `6c3a0be5f...f91689a31`，结论 **approve-with-fixes**；确认 R1 partial-AI 门与 save 注入阶段均已修正。
+- R2 仍有 P2：proof 保存之后，最终 authority.save 或 quarantine recovery 失败可使报告 unknown，而 verified 已持久化。新增 `MAC-UPDATE-PROOF-FINALIZATION-ORDER`，状态 **open**，未修、未做故障回归。
+- 遵守两轮审查和 minor 一轮修正的停止规则，交给编排者，不开启第三轮；不把当前 PR 描述为无条件审查通过。
+- 本续记只改文档/账本，无新产品源码或测试结果；沿用准确源码 f91689a31 的既有本机 31 项通过，不将 CI/root/实机缺口写成通过。不合并、不 auto-merge、不部署。
