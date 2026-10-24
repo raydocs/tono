@@ -1,0 +1,888 @@
+{
+  "version": 1,
+  "decision": "docs/decisions/134-2026-10-24-state-intent-rule.md",
+  "account_contract": "docs/control-plane-error-contract.md",
+  "account_contract_pr": "https://github.com/raydocs/tono/pull/1738",
+  "account_contract_head": "429e23427",
+  "account_contract_introduced": "3205b5c76",
+  "scenarios": [
+    {
+      "id": "user-disconnect",
+      "rules": [
+        1,
+        2,
+        6
+      ],
+      "expect": {
+        "display": "off",
+        "notification": "none",
+        "button": "connect",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "expected-failure",
+          "owner": "T1",
+          "note": "SharedStatus.governs lets a later CORE_STOPPED beat replace the user's off note."
+        },
+        "android": {
+          "enforcement": "enabled",
+          "owner": "T3",
+          "note": "TunnelLedger.end to IDLE writes no failure reason."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "system-revoke",
+      "rules": [
+        2,
+        4
+      ],
+      "expect": {
+        "display": "needs-permission",
+        "notification": "permission-revoked",
+        "button": "open-settings",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "system",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T1",
+          "note": "OS VPN consent revoke is not covered by a TonoKit probe here."
+        },
+        "android": {
+          "enforcement": "enabled",
+          "owner": "T3",
+          "note": "TunnelLedger.end to NEEDS_PERMISSION with REVOKED matches the display."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "core-crash",
+      "rules": [
+        2
+      ],
+      "expect": {
+        "display": "failed",
+        "notification": "core-crashed",
+        "button": "retry",
+        "failure_written": true,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "core",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "enabled",
+          "owner": "T1",
+          "note": "A stopped tunnel report with CORE_STOPPED and no user note reads as failed."
+        },
+        "android": {
+          "enforcement": "enabled",
+          "owner": "T3",
+          "note": "TunnelLedger.end to FAILED with CORE_STOPPED matches the display."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "jetsam-or-process-killed",
+      "rules": [
+        2
+      ],
+      "expect": {
+        "display": "failed",
+        "notification": "process-killed",
+        "button": "retry",
+        "failure_written": true,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "core",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "enabled",
+          "owner": "T1",
+          "note": "TunnelStop.classify of a connected tunnel without userStopping is stoppedBySystem."
+        },
+        "android": {
+          "enforcement": "todo",
+          "owner": "T3",
+          "note": "No Android process-death probe beyond a generic failure end."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "network-lost",
+      "rules": [
+        2
+      ],
+      "expect": {
+        "display": "failed",
+        "notification": "network-lost",
+        "button": "retry",
+        "failure_written": true,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "network",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T1",
+          "note": "Reasserting is a different state; no loss probe here."
+        },
+        "android": {
+          "enforcement": "todo",
+          "owner": "T3",
+          "note": "Exit-probe failure currently degrades a live tunnel; not this row."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "sign-out",
+      "rules": [
+        1,
+        6
+      ],
+      "expect": {
+        "display": "signed-out",
+        "notification": "none",
+        "button": "sign-in",
+        "failure_written": false,
+        "keeps_session": false,
+        "keeps_vpn_profile": false,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "expected-failure",
+          "owner": "T1",
+          "note": "A later stopped tunnel report with no failure overrides the signed-out note and reads as off."
+        },
+        "android": {
+          "enforcement": "todo",
+          "owner": "T3",
+          "note": "No widget or shared-status probe for sign-out versus a late tunnel report."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "plan-expired",
+      "rules": [
+        3,
+        5
+      ],
+      "expect": {
+        "display": "account-hold",
+        "notification": "plan-expired",
+        "button": "renew",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": true,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "account",
+        "http": 403,
+        "code": "PLAN_EXPIRED",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "expected-failure",
+          "owner": "T2",
+          "note": "403 PLAN_EXPIRED is not isSessionEnded, but ConnectionState.derive still shows FAILED. Adopt PR 1738."
+        },
+        "android": {
+          "enforcement": "expected-failure",
+          "owner": "T3",
+          "note": "403 PLAN_EXPIRED is not isSessionEnded, but the engine failure phase is still FAILED. Adopt PR 1738."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "T4 owns macOS copy for the new code names. No probe here."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "T5 owns Windows copy. No probe here."
+        }
+      }
+    },
+    {
+      "id": "quota-exhausted",
+      "rules": [
+        3,
+        5
+      ],
+      "expect": {
+        "display": "account-hold",
+        "notification": "quota-exhausted",
+        "button": "renew",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": true,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "account",
+        "http": 403,
+        "code": "QUOTA_EXHAUSTED",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "expected-failure",
+          "owner": "T2",
+          "note": "Same hold as plan-expired. derive still shows FAILED for QUOTA_EXHAUSTED."
+        },
+        "android": {
+          "enforcement": "expected-failure",
+          "owner": "T3",
+          "note": "Same hold as plan-expired. The engine failure phase is still FAILED."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "T4 owns macOS copy. No probe here."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "T5 owns Windows copy. No probe here."
+        }
+      }
+    },
+    {
+      "id": "device-reauth-required",
+      "rules": [
+        3,
+        4
+      ],
+      "expect": {
+        "display": "reauth",
+        "notification": "reauth-required",
+        "button": "verify-login",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "account",
+        "http": 403,
+        "code": "DEVICE_REAUTH_REQUIRED",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "expected-failure",
+          "owner": "T2",
+          "note": "403 DEVICE_REAUTH_REQUIRED is not a session end, but derive shows FAILED and Retry, not verify-login."
+        },
+        "android": {
+          "enforcement": "expected-failure",
+          "owner": "T3",
+          "note": "Same gap on the Android failure phase."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "T4 owns macOS copy. No probe here."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "T5 owns Windows copy. No probe here."
+        }
+      }
+    },
+    {
+      "id": "explicit-credential-revoke",
+      "rules": [
+        3
+      ],
+      "expect": {
+        "display": "signed-out",
+        "notification": "signed-out",
+        "button": "sign-in",
+        "failure_written": false,
+        "keeps_session": false,
+        "keeps_vpn_profile": false,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "account",
+        "http": 401,
+        "code": "UNAUTHORIZED",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "enabled",
+          "owner": "T2",
+          "note": "401 UNAUTHORIZED is isSessionEnded. INVALID_REFRESH_TOKEN is the same class."
+        },
+        "android": {
+          "enforcement": "enabled",
+          "owner": "T3",
+          "note": "401 UNAUTHORIZED is TonoVpnService.isSessionEnded."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "Desktop session end is not probed here."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "Desktop session end is not probed here."
+        }
+      }
+    },
+    {
+      "id": "rate-limited",
+      "rules": [
+        3,
+        4,
+        5
+      ],
+      "expect": {
+        "display": "limited",
+        "notification": "rate-limited",
+        "button": "retry",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "account",
+        "http": 429,
+        "code": "RATE_LIMITED",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "enabled",
+          "owner": "T2",
+          "note": "429 is not a session end. A failed phase with RATE_LIMITED is the limited display, not logout."
+        },
+        "android": {
+          "enforcement": "enabled",
+          "owner": "T3",
+          "note": "429 is not isSessionEnded. The failure phase with RATE_LIMITED maps to limited."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "T4 owns the macOS 429 outbox and the new code names."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "T5 owns the Windows 429 outbox. Do not delete unsent reports."
+        }
+      }
+    },
+    {
+      "id": "recovery-success",
+      "rules": [
+        1,
+        2
+      ],
+      "expect": {
+        "display": "connected",
+        "notification": "recovered",
+        "button": "disconnect",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": true,
+        "baseline_updated": false,
+        "shown_connected": true
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T1",
+          "note": "The stale failure lives in AppModel, not in ConnectionState.derive. No probe here."
+        },
+        "android": {
+          "enforcement": "todo",
+          "owner": "T3",
+          "note": "No recovery probe here."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "retry-without-catalog",
+      "rules": [
+        4
+      ],
+      "expect": {
+        "display": "catalog-missing",
+        "notification": "catalog-missing",
+        "button": "retry",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "system",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T2",
+          "note": "The silent retry lives in AppModel. No probe here."
+        },
+        "android": {
+          "enforcement": "todo",
+          "owner": "T3",
+          "note": "No catalog-missing probe here."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "cancel-then-late-start",
+      "rules": [
+        1,
+        6
+      ],
+      "expect": {
+        "display": "off",
+        "notification": "none",
+        "button": "connect",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T1",
+          "note": "IOS-1672-R1-CANCEL-LATE-START. No TonoKit probe wired in this thread."
+        },
+        "android": {
+          "enforcement": "enabled",
+          "owner": "T3",
+          "note": "TunnelLedger.started for an earlier attempt after end returns null and the phase stays idle."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "recheck-while-connected",
+      "rules": [
+        6
+      ],
+      "expect": {
+        "display": "connected",
+        "notification": "none",
+        "button": "disconnect",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "system",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": true
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "expected-failure",
+          "owner": "T1",
+          "note": "ConnectionState.derive turns a connected tunnel with a checking probe into CONNECTING."
+        },
+        "android": {
+          "enforcement": "expected-failure",
+          "owner": "T3",
+          "note": "TunnelLedger.rechecking copies a confirmed tunnel to phase CONNECTING."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "No Windows product probe in this thread."
+        }
+      }
+    },
+    {
+      "id": "optional-rollback-failed",
+      "rules": [
+        2,
+        7
+      ],
+      "expect": {
+        "display": "failed",
+        "notification": "rollback-failed",
+        "button": "retry",
+        "failure_written": true,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "core",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": true,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T1",
+          "note": "No optional-feature rollback probe on iOS."
+        },
+        "android": {
+          "enforcement": "enabled",
+          "owner": "T3",
+          "note": "A failed reload ends FAILED and is not confirmed, so it is not shown connected."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No macOS product probe in this thread."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T5",
+          "note": "DIRECT rollback does not adopt the new Core PID baseline. T5 owns the fix. No probe here."
+        }
+      }
+    },
+    {
+      "id": "network-restored-update-retired",
+      "rules": [
+        4,
+        7
+      ],
+      "expect": {
+        "display": "ready",
+        "notification": "none",
+        "button": "connect",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": false,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No iOS update latch. The same rule applies if one is added."
+        },
+        "android": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No Android update latch. The same rule applies if one is added."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "restoreInternet while a retired update still latches nativeUpdateBlocksConnect. No probe here."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T7",
+          "note": "Windows update copy is T7. No connect-latch probe here."
+        }
+      }
+    },
+    {
+      "id": "network-restored-update-still-pending",
+      "rules": [
+        4,
+        7
+      ],
+      "expect": {
+        "display": "update-pending",
+        "notification": "update-still-pending",
+        "button": "explain-blocked",
+        "failure_written": false,
+        "keeps_session": true,
+        "keeps_vpn_profile": true,
+        "revokes_network_grant": false,
+        "auto_connect": false,
+        "silent_no_op": false,
+        "source": "",
+        "http": 0,
+        "code": "",
+        "deletes_reports": false,
+        "late_start_applied": false,
+        "connect_blocked": true,
+        "failure_cleared": false,
+        "baseline_updated": false,
+        "shown_connected": false
+      },
+      "platforms": {
+        "ios": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No iOS update latch. The same rule applies if one is added."
+        },
+        "android": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "No Android update latch. The same rule applies if one is added."
+        },
+        "macos": {
+          "enforcement": "todo",
+          "owner": "T4",
+          "note": "A still-pending update must block connect with a reason, not a silent no-op."
+        },
+        "windows": {
+          "enforcement": "todo",
+          "owner": "T7",
+          "note": "Windows update copy is T7. No probe here."
+        }
+      }
+    }
+  ]
+}
