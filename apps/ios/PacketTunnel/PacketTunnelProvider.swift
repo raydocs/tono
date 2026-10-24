@@ -38,6 +38,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// answer says no graph runs. Its own lock, so the core's callback never waits on `serviceLock`.
     private let stopLock = NSLock()
     private var coreStopCode: String?
+    /// Set when the system asked this provider to stop (`stopTunnel`): sing-box closing its service
+    /// from then on is that stop, not a core failure. Guarded by `stopLock`.
+    private var stopping = false
 
     override init() {
         LibboxPrepareCrashSignalHandlers()
@@ -52,6 +55,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         serviceLock.unlock()
         stopLock.lock()
         coreStopCode = nil
+        stopping = false
         stopLock.unlock()
         SharedFiles.clearFailure()
         underlying.start()
@@ -111,6 +115,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
         Self.log.info("tunnel stopping, reason \(reason.rawValue, privacy: .public)")
+        stopLock.lock()
+        stopping = true
+        stopLock.unlock()
         #if os(iOS)
         screenObserver?.cancel()
         screenObserver = nil
@@ -291,11 +298,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// latch makes every later record and answer say so, and the stop is written to the shared status
     /// before the tunnel is cancelled (iOS ends the process in its own time). Written from the reload
     /// queue so this callback never waits on `serviceLock`, which its caller may hold.
+    /// During `stopTunnel` the service closing is that stop: nothing is recorded and nothing cancelled.
     func coreStopped() {
-        SharedFiles.recordFailure(TunnelFailure(code: "CORE_STOPPED", message: "sing-box stopped the service", at: Date()))
         stopLock.lock()
+        if stopping {
+            stopLock.unlock()
+            Self.log.info("service closed while stopping")
+            return
+        }
         coreStopCode = "CORE_STOPPED"
         stopLock.unlock()
+        SharedFiles.recordFailure(TunnelFailure(code: "CORE_STOPPED", message: "sing-box stopped the service", at: Date()))
         reloadQueue.async { [weak self] in
             guard let self else { return }
             self.writeStatus(running: false)

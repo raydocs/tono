@@ -10,6 +10,9 @@ public struct TunnelIntentLedger: Equatable, Sendable {
     public private(set) var userStarting = false
     /// The user (or sign-out) is stopping a tunnel that is up: its stop is expected, not a failure.
     public private(set) var userStopping = false
+    /// The user's last explicit switch was off (Disconnect, Cancel, sign-out) and no session came up
+    /// since: a stop the tunnel reports or recorded after it is the user's, never a failure.
+    public private(set) var stoppedByUser = false
 
     public init() {}
 
@@ -19,7 +22,10 @@ public struct TunnelIntentLedger: Equatable, Sendable {
     public mutating func clearFailure() { failure = nil }
 
     /// The user switched on: nothing an earlier session said is about this start.
-    public mutating func userWantsOn() { failure = nil }
+    public mutating func userWantsOn() {
+        failure = nil
+        stoppedByUser = false
+    }
 
     /// The start is handed to the system.
     public mutating func starting() { userStarting = true }
@@ -28,15 +34,19 @@ public struct TunnelIntentLedger: Equatable, Sendable {
     public mutating func startEnded() { userStarting = false }
 
     /// Explicit disconnect or Cancel. `tunnel` is Network Extension's status when the user pressed it.
+    /// The user's own stop never shows a failure.
     public mutating func userStops(tunnel: TunnelStatus) {
+        failure = nil
         userStarting = false
         userStopping = tunnel != .disconnected && tunnel != .invalid
+        stoppedByUser = true
     }
 
     /// Sign-out takes the configuration away: its stop is expected.
     public mutating func signingOut() {
         userStarting = false
         userStopping = true
+        stoppedByUser = true
     }
 
     /// Sign-out finished: nothing of the old account's session is shown.
@@ -51,10 +61,15 @@ public struct TunnelIntentLedger: Equatable, Sendable {
     public mutating func tunnel(_ status: TunnelStatus, before: TunnelStatus, recordedFailure: String?) -> TunnelStop? {
         switch status {
         case .connected:
+            // A session is up again (the user's start, On Demand after a crash or jetsam, an outside
+            // command): what stopped an earlier one no longer describes anything.
             userStarting = false
+            failure = nil
+            stoppedByUser = false
             return nil
         case .disconnected, .invalid:
-            let stop = TunnelStop.classify(before: before, userStarting: userStarting, userStopping: userStopping,
+            let stop = TunnelStop.classify(before: before, userStarting: userStarting,
+                                           userStopping: userStopping || stoppedByUser,
                                            recordedFailure: recordedFailure)
             switch stop {
             case .startFailed(let code), .stoppedBySystem(let code): failure = code
@@ -72,7 +87,7 @@ public struct TunnelIntentLedger: Equatable, Sendable {
     /// tunnel is down and nothing else is. Returns whether the failure changed.
     @discardableResult
     public mutating func foreground(tunnel: TunnelStatus, recordedFailure: String?) -> Bool {
-        guard !tunnel.isUp, let recordedFailure, failure == nil, !userStopping else { return false }
+        guard !tunnel.isUp, let recordedFailure, failure == nil, !userStopping, !stoppedByUser else { return false }
         failure = recordedFailure
         return true
     }

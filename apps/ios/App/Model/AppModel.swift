@@ -319,6 +319,9 @@ final class AppModel: ObservableObject {
         permission = nil
         signingOut = false
         recompute()
+        // The phase may not have changed since the first recompute; the widgets still get the
+        // signed-out note written after the tunnel's last report.
+        publishStatus(force: true)
     }
 
     // MARK: - Connect / disconnect
