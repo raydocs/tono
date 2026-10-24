@@ -1225,6 +1225,59 @@ class RosterControlSignals(unittest.TestCase):
         self.acknowledge_metering.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["totals"], {label: 1_500})
 
+    def test_a_hy2_failure_on_a_missing_ledger_does_not_publish_the_raw_counter(self) -> None:
+        # The outage and disabled-node paths pass ledger_missing into
+        # keep_usage_locally. A hy2 failure on a state file that did not exist
+        # must do the same: the raw Xray counter is a baseline, not a new
+        # lifetime. The next round, with no server watermark, must not report it.
+        label = agent.client_label("usr_1")
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        posted: list[dict] = []
+
+        def capture_deliver(_base, _token, state_path, state):
+            posted.extend(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(state_path, state)
+            return len(posted), 0
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token",
+                 "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "api_address", return_value="127.0.0.1:10085"), \
+             patch.object(agent, "inbound_tag", return_value="vless-in"), \
+             patch.object(agent, "require_commands", return_value={"stats_query": "statsquery"}), \
+             patch.object(agent, "fetch_roster", return_value=(
+                 "exit-node-a", 1_700_000_000, [], False, None,
+             )), \
+             patch.object(agent, "reconcile_and_read_stable", return_value=(
+                 0, 0, {label}, {label: 80}, None,
+             )), \
+             patch.object(agent, "sync_hy2_roster", side_effect=agent.Refusal("injected hy2 write failure")), \
+             patch.object(agent, "acknowledge_roster") as acknowledge, \
+             patch.object(agent, "acknowledge_metering") as metering, \
+             patch.object(agent, "deliver_queue", side_effect=capture_deliver):
+            with self.assertRaisesRegex(agent.Refusal, "injected hy2 write failure"):
+                agent.run_once(path)
+            acknowledge.assert_not_called()
+            metering.assert_not_called()
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["totals"], {label: 0})
+            self.assertEqual(saved["counterBaseline"], {label: 80})
+            self.assertNotIn("_ledgerMissing", saved)
+
+            agent.sync_hy2_roster.side_effect = None
+            agent.run_once(path)
+
+        self.assertEqual(posted, [])
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["totals"], {label: 0})
+        self.assertEqual(saved["counterBaseline"], {label: 80})
+
     def test_an_unverifiable_live_client_inventory_is_never_acknowledged(self) -> None:
         path, _, acknowledge = self.run_round(
             server_retire=True,
