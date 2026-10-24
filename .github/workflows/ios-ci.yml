@@ -1,15 +1,21 @@
 name: iOS CI
 
-# Tono iOS (apps/ios) is not part of ci-gate yet: it is a pre-release client on a feature branch
-# and not a SHIP_PLAN gate. This workflow runs on pushes to feat/ios-** and by hand, on GitHub's
-# hosted runners only. It builds the pinned libbox from source, compiles the app and the packet
-# tunnel for the simulator and for devices (unsigned), runs TonoKit's tests on macOS and Linux
-# with the sing-box CLI route checks, and captures the DEBUG design preview in a simulator.
+# ci-gate calls this workflow with apple: false, so a pull request runs only the Linux
+# routing job (sync check, swift test, sing-box). The macos-26 Libbox and simulator job
+# runs on a push to main or feat/ios-**, on workflow_dispatch, or when a caller passes
+# apple: true. There is no pull_request trigger: ci-gate is the only pull-request entry.
 # Nothing is signed, uploaded to App Store Connect or published.
 on:
+  workflow_call:
+    inputs:
+      apple:
+        description: Run the macos-26 Libbox and simulator job
+        type: boolean
+        default: false
   workflow_dispatch:
   push:
     branches:
+      - main
       - 'feat/ios-**'
     paths:
       - apps/ios/**
@@ -20,7 +26,7 @@ permissions:
 
 concurrency:
   group: ios-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
 
 env:
   XCODEGEN_VERSION: 2.44.1
@@ -45,6 +51,7 @@ jobs:
 
   apple:
     name: Libbox + Xcode build + simulator preview (macOS)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || inputs.apple
     runs-on: macos-26
     timeout-minutes: 75
     steps:
