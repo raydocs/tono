@@ -19,7 +19,12 @@
 
 #![cfg_attr(not(all(windows, not(feature = "test"))), allow(dead_code))]
 
-use crate::core::release::{BootRelation, BootStamp};
+use crate::core::release::{BootRelation, BootStamp, Incarnation};
+
+pub(crate) mod dispatch_drain;
+
+/// The normal batch and the entire release grace share this budget.
+pub(crate) const NORMAL_BATCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
@@ -43,12 +48,24 @@ struct Entry {
     legacy: bool,
 }
 
+/// Flattened so old readers still see Entry, and old entries default to protocol zero.
+/// Keep legacy records intact: a PID without creation time is never an incarnation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RecordedEntry {
+    #[serde(flatten)]
+    batch: Entry,
+    #[serde(default)]
+    started_at: Option<u64>,
+    #[serde(default)]
+    dispatch_protocol: u32,
+}
+
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// One recorded batch. Dropping it without [`InFlight::returned`] leaves the entry in place.
 pub(crate) struct InFlight {
     path: PathBuf,
-    entry: Entry,
+    entry: RecordedEntry,
 }
 
 impl InFlight {
@@ -60,13 +77,13 @@ impl InFlight {
 
     /// Anything else: the calls may still run. The entry stays, marked.
     pub(crate) fn abandoned(mut self) {
-        self.entry.abandoned = true;
+        self.entry.batch.abandoned = true;
         let _ = rewrite(&self.path, &self.entry);
     }
 }
 
 /// Create `path` with `entry`, failing if it exists, and flush it to disk before returning.
-fn create(path: &Path, entry: &Entry) -> std::io::Result<()> {
+fn create(path: &Path, entry: &impl Serialize) -> std::io::Result<()> {
     let bytes = serde_json::to_vec(entry).map_err(std::io::Error::other)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -81,7 +98,7 @@ fn create(path: &Path, entry: &Entry) -> std::io::Result<()> {
 
 /// Replace an existing entry in place. A torn write reads back as unreadable, which counts as
 /// pending, never as finished.
-fn rewrite(path: &Path, entry: &Entry) -> Result<()> {
+fn rewrite(path: &Path, entry: &impl Serialize) -> Result<()> {
     let bytes = serde_json::to_vec(entry)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -95,7 +112,7 @@ fn rewrite(path: &Path, entry: &Entry) -> Result<()> {
 
 /// A name no earlier entry had: the process, the time and a counter, created exclusively, so an
 /// existing entry is never overwritten even when a PID comes back.
-fn create_unique(directory: &Path, entry: &Entry) -> Result<PathBuf> {
+fn create_unique(directory: &Path, entry: &impl Serialize) -> Result<PathBuf> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos())
@@ -116,7 +133,7 @@ fn create_unique(directory: &Path, entry: &Entry) -> Result<PathBuf> {
 }
 
 /// The first use of the ledger records one pending entry for versions that kept none.
-fn ensure_genesis(directory: &Path) -> Result<()> {
+fn ensure_genesis_with(directory: &Path, boot: impl FnOnce() -> BootStamp) -> Result<()> {
     std::fs::create_dir_all(directory).with_context(|| format!("failed to create {directory:?}"))?;
     let genesis = directory.join(GENESIS);
     if genesis.exists() {
@@ -124,7 +141,7 @@ fn ensure_genesis(directory: &Path) -> Result<()> {
     }
     let entry = Entry {
         pid: 0,
-        boot: crate::core::release::current_boot(),
+        boot: boot(),
         abandoned: true,
         legacy: true,
     };
@@ -137,8 +154,13 @@ fn ensure_genesis(directory: &Path) -> Result<()> {
     }
 }
 
+fn ensure_genesis(directory: &Path) -> Result<()> {
+    ensure_genesis_with(directory, crate::core::release::current_boot)
+}
+
 /// Record a batch before its process is created. A batch that cannot be recorded must not run:
 /// its absence here would later read as proof that nothing is pending.
+#[cfg(test)]
 pub(crate) fn begin_in(directory: &Path) -> Result<InFlight> {
     ensure_genesis(directory)?;
     let entry = Entry {
@@ -147,12 +169,58 @@ pub(crate) fn begin_in(directory: &Path) -> Result<InFlight> {
         abandoned: false,
         legacy: false,
     };
+    let entry = RecordedEntry { batch: entry, started_at: None, dispatch_protocol: 0 };
     let path = create_unique(directory, &entry)?;
     Ok(InFlight { path, entry })
 }
 
-pub(crate) fn begin() -> Result<InFlight> {
-    begin_in(crate::core::paths::service_paths().persistent_state_dir())
+/// The sole production entry for a compatibility batch, including every retry/fallback.
+/// The runner starts only after its durable admission, and only its own original complete
+/// marker can retire the entry. Panic/drop still leaves it pending.
+pub(crate) fn run_recorded_batch(runner: impl FnOnce() -> Result<String>) -> Result<String> {
+    let pid = std::process::id();
+    #[cfg(windows)]
+    let started_at = crate::core::process::process_started_at(pid)?;
+    #[cfg(not(windows))]
+    let started_at = crate::core::process::process_identity(pid)?.map(|identity| identity.started_at);
+    let own = Incarnation { pid, started_at: started_at.context("cannot read WMI caller incarnation")? };
+    run_recorded_batch_in(
+        crate::core::paths::service_paths().persistent_state_dir(),
+        own,
+        &crate::core::release::current_boot(),
+        runner,
+    )
+}
+
+fn run_recorded_batch_in(
+    directory: &Path,
+    own: Incarnation,
+    boot: &BootStamp,
+    runner: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    let in_flight = dispatch_drain::admit(directory, own, boot)?;
+    let run = runner();
+    if batch_settled(&run) {
+        in_flight.returned();
+    } else {
+        in_flight.abandoned();
+    }
+    run
+}
+
+fn record_admission(directory: &Path, own: Incarnation, boot: &BootStamp) -> Result<InFlight> {
+    ensure_genesis_with(directory, || boot.clone())?;
+    let entry = RecordedEntry {
+        batch: Entry { pid: own.pid, boot: boot.clone(), abandoned: false, legacy: false },
+        started_at: Some(own.started_at),
+        dispatch_protocol: 1,
+    };
+    let path = create_unique(directory, &entry)?;
+    Ok(InFlight { path, entry })
+}
+
+pub(super) fn batch_settled(run: &Result<String>) -> bool {
+    run.as_ref().is_ok_and(|stdout| stdout.lines().any(|line| line.trim() == SETTLED_MARKER))
 }
 
 /// A batch not known to have finished.

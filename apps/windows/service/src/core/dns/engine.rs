@@ -906,7 +906,7 @@ enum ApplyMode {
     Restore,
 }
 
-const POWERSHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const POWERSHELL_TIMEOUT: std::time::Duration = super::broker_ledger::NORMAL_BATCH_BUDGET;
 
 fn remaining(deadline: std::time::Instant) -> std::time::Duration {
     deadline.saturating_duration_since(std::time::Instant::now())
@@ -1131,9 +1131,9 @@ fn ipv4_not_enabled_does_not_skip_the_ipv6_block() {
 }
 
 /// Whether a batch run proves every WMI call it handed off finished.
+#[cfg(test)]
 fn batch_settled(run: &Result<String>) -> bool {
-    run.as_ref()
-        .is_ok_and(|stdout| stdout.lines().any(|line| line.trim() == super::broker_ledger::SETTLED_MARKER))
+    super::broker_ledger::batch_settled(run)
 }
 
 #[cfg(test)]
@@ -1214,26 +1214,13 @@ fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String,
     );
     // The IPv4 half runs in WmiPrvSE, beyond this process's Job; record it so a release can
     // tell whether a late DNS write is still possible (`broker_ledger`).
-    let in_flight = match super::broker_ledger::begin() {
-        Ok(in_flight) => in_flight,
-        Err(error) => {
-            tracing::warn!("dns: batch not run, its WMI call could not be recorded: {error:#}");
-            return entries.iter().map(|entry| (entry.guid.clone(), false)).collect();
-        }
-    };
-    let run = run_with_timeout(
-        "powershell.exe",
-        &["-NoProfile", "-NonInteractive", "-Command", &script],
-        POWERSHELL_TIMEOUT,
-    );
-    // Sol R2-F1: only a script that reached its end with every CIM call answered proves nothing
-    // is left in WmiPrvSE. A timeout, a spawn that missed its deadline (its thread may still
-    // create the process), a wait error or a script that died part way keeps the entry.
-    if batch_settled(&run) {
-        in_flight.returned();
-    } else {
-        in_flight.abandoned();
-    }
+    let run = super::broker_ledger::run_recorded_batch(|| {
+        run_with_timeout(
+            "powershell.exe",
+            &["-NoProfile", "-NonInteractive", "-Command", &script],
+            POWERSHELL_TIMEOUT,
+        )
+    });
     let reported = match run {
         Ok(stdout) => stdout
             .lines()
