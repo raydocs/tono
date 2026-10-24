@@ -99,11 +99,17 @@ pub fn enqueue_failed(dir: &Path, kind: &str, body: &str, now_ms: i64, err: &Api
 }
 
 fn enqueue_at(dir: &Path, kind: &str, body: &str, attempts: u32, next_at_ms: i64) {
+    enqueue_at_with(dir, kind, body, attempts, next_at_ms, || {});
+}
+
+// The callback observes the read/write boundary; production uses a no-op.
+fn enqueue_at_with(dir: &Path, kind: &str, body: &str, attempts: u32, next_at_ms: i64, after_load: impl FnOnce()) {
     if body.len() > OUTBOX_MAX_BYTES / 2 || body.is_empty() {
         return;
     }
     let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let mut file = load(dir, kind);
+    after_load();
     file.items.push(OutboxItem {
         kind: kind.to_string(),
         body: body.to_string(),
@@ -253,18 +259,27 @@ mod tests {
     #[test]
     fn simultaneous_producers_do_not_overwrite_each_others_reports() {
         let dir = temp();
-        let gate = std::sync::Barrier::new(3);
-        std::thread::scope(|scope| {
-            for kind in ["failure", "diagnostics"] {
-                let path = &dir.path;
-                let gate = &gate;
-                scope.spawn(move || {
-                    gate.wait();
-                    enqueue(path, kind, kind, 0);
+        let (loaded, loading) = std::sync::mpsc::channel();
+        let (resume, resumed) = std::sync::mpsc::channel();
+        let serialized = std::thread::scope(|scope| {
+            let path = &dir.path;
+            let first = scope.spawn(move || {
+                enqueue_at_with(path, "failure", "failure", 0, 0, || {
+                    loaded.send(()).unwrap();
+                    resumed.recv().unwrap();
                 });
-            }
-            gate.wait();
+            });
+            // Pause precisely after loading the queue, before committing the first producer.
+            loading.recv().unwrap();
+            let second = scope.spawn(|| enqueue(&dir.path, "diagnostics", "diagnostics", 0));
+            let serialized = OUTBOX_LOCK.try_lock().is_err();
+            // Always release/join before asserting, so a regression cannot strand the test.
+            resume.send(()).unwrap();
+            first.join().unwrap();
+            second.join().unwrap();
+            serialized
         });
+        assert!(serialized, "the queue transaction must own serialization between read and write");
         let items = due(&dir.path, 0);
         assert_eq!(items.len(), 2);
         assert!(items.iter().any(|item| item.kind == "failure"));
