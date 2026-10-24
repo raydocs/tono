@@ -12,4 +12,3 @@ test telemetry_outbox::tests::simultaneous_producers_do_not_overwrite_each_other
 test telemetry_outbox::tests::ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
-

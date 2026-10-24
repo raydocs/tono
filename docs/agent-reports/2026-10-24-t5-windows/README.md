@@ -34,14 +34,14 @@ cargo test --manifest-path apps/windows/Cargo.toml -p tono-core --test telemetry
 
 The concurrent producer regression now pauses the first transaction after loading its snapshot, checks serialization is owned through the write boundary, then admits the second producer and verifies both reports survive. No sleeps or probabilistic collision requirement. [Mutex-removal mutation output](queue-lock-mutation-red.log) fails the precise serialization assertion; this is a mutation check, **not** a claim that the full new test ran on original main. Restored code passes [full GREEN](core-green.log).
 
-Round 2 must cover the current code, including Retry-After metadata and the concurrency-test correction. A pending/stale review is not merge coverage; no merge/auto-merge is requested.
+[Round 2](review-r2.txt) approved telemetry through exact `52084a44d`, including Retry-After and concurrency-test corrections. Later pin-hygiene changes are outside that review. Full-range diff check found two raw-log EOF blank lines; only terminal blank lines were trimmed afterward. No merge/auto-merge is requested.
 
 ## PR coordination (read-only)
 
 - #1733: OPEN, draft, MERGEABLE; `ci-gate` success [39973037208](https://github.com/raydocs/tono/actions/runs/39973037208). DNS broker/engine, process, release worker paths. No unresolved review threads or CHANGES_REQUESTED at inspection.
 - #1668: OPEN, draft, MERGEABLE; `ci-gate` success [39033872734](https://github.com/raydocs/tono/actions/runs/39033872734). Installer, packaging tests, install/uninstall executors and update paths. No unresolved review threads or CHANGES_REQUESTED at inspection.
 - #1643: OPEN, draft, CONFLICTING. Service `server/{handlers,mod,owner_lifecycle_tests}.rs`, release and WFP owner-intent paths. This delivery does not touch those paths.
-- **No file overlap** between this telemetry delivery and any of those three PRs; no commits pushed to their branches. Win10/11 acceptance for #1668/#1733 remains with the coordinator.
+- The initial telemetry-only delivery had no file overlap. The later pin-hygiene addendum overlaps #1668 in `windows-packaging.test.mjs`, `installer.nsi`, `update_executor.rs`; its hunks are distinct (resource cleanup/test around942/1041 and comment634, vs #1668 gate/uninstall tests and installer dispatch322). Re-read #1668 head `74e419e636d24f7ec8551add6e512ea4a28950db` read-only; no pushes to its branch. #1733/#1643 remain untouched. Win10/11 acceptance for #1668/#1733 remains with the coordinator.
 
 ## Explicitly not fixed in this delivery
 
@@ -51,7 +51,7 @@ The requested T5 scope is not complete. These remain open, not silently marked i
 - `WIN-RESUME-RECEIPT-RACE`: no new IPC receipt or old/new Service pairing tests; requires coordination with #1643's ownership contract before changing it.
 - DIRECT rollback PID baseline: still missing adoption on the error and full-tunnel rollback paths in `connection/direct.rs:1884-1897,2025-2036`. The current IPC wrapper returns `Result<()>`, not CoreIdentity (`core/service/mod.rs:1355-1380`), so a correct fix must prove a fresh same-owner/session snapshot rather than invent a returned identity.
 - `release_general_traffic`: stop/release order, desired-state retirement and App's false-connected outcome remain unfixed (`service/src/core/sing_box_direct.rs:192-204`). Retiring the owner must coordinate with #1643; do not land an unreviewed partial reorder that leaves desired Core replayable.
-- All optional P2 items (unarmed probe, tray countdown, rules modal, route accessibility, installer scratch cleanup and update UX) were left untouched to keep this first independent P1 delivery small. Installer/update paths belong to other in-flight work.
+- Other optional P2 items (unarmed probe, tray countdown, rules modal, route accessibility and update UX) remain untouched. Installer scratch cleanup was subsequently requested explicitly and is covered by the addendum below.
 
 ## Not run / release limits
 
@@ -60,3 +60,12 @@ The requested T5 scope is not complete. These remain open, not silently marked i
 - Real HTTP 429, queue behavior across forced process/disk failure, Windows WebView2 and installed Win10/11: not verified.
 - Wi-Fi slow resume, disabled NIC, roaming, sleep and concurrent recovery: not verified; no claim that this delivery fixes those flows.
 - No feed, migration, signature, deployment script, server, release gate checkbox or customer update source touched. No deploy/package/publish/auto-merge.
+
+## P2 pin hygiene addendum (same PR)
+
+- Re-fetched origin/main; still `322f48c6f`. Formal/candidate builds compile `TONO_SING_BOX_SHA256`; selection and Service integrity checks use it before reading disk. No digest/validation behavior changes. Missing Service-dir file synchronization is not a release security defect; the update executor now explains why the extra Service-dir member is unnecessary. Dev-only disk pin setup is not broadened.
+- Added cleanup for exact `resources\sing-box-sha256.txt.{rollback,restore,publish}` names **inside the existing absent-repair-evidence guard**. Root-pin scratch cleanup and retained rollback evidence remain unchanged.
+- `ba1a73dd9` [real RED](pin-hygiene-red.log): resource rollback scratch missing from guarded cleanup. `657cf9fc2` [narrow GREEN](pin-hygiene-first-green.log):1/1. First full packaging run [failed39/2](packaging-first-full-fail.log) because the existing guard validator compared POSIX resource paths against NSIS backslash paths; no expected result was relaxed.
+- `80443f2aa` normalizes those paths in the validator and tests deletion removal/outside-guard mutations. [Final packaging GREEN](packaging-green.log):41/41 via `node --test apps/windows/app/scripts/windows-packaging.test.mjs`.
+- Update executor change is comment-only, no Service behavior or copy member changed. No native Service rebuild was run for that comment; NSIS compile/install/uninstall and repair-machine acceptance remain unverified.
+- Telemetry review through52084a44d is reused only for unchanged telemetry code. This new installer hygiene range is not covered by that review; coordinator cross-review and latest ci-gate still required before merge. No merge/auto-merge/deploy.

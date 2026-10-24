@@ -1,0 +1,27 @@
+✖ NSIS cleans resource sing-box pin scratch only after repair evidence is retired (0.991542ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 133.322208
+
+✖ failing tests:
+
+test at apps/windows/app/scripts/windows-packaging.test.mjs:942:1
+✖ NSIS cleans resource sing-box pin scratch only after repair evidence is retired (0.991542ms)
+  AssertionError [ERR_ASSERTION]: resources/sing-box-sha256.txt.rollback must be cleaned only after repair evidence is gone
+      at TestContext.<anonymous> (file:///Users/ruirui/tono-wt/t5-windows/apps/windows/app/scripts/windows-packaging.test.mjs:948:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

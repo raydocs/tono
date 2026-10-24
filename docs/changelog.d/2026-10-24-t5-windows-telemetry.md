@@ -16,3 +16,9 @@
 ### 审查纠正
 - 独立 Codex xhigh 第一轮只覆盖 `eef0b68ac`，发现首次 429 未退避（P2，已由 Retry-After 续修一并纠正）及并发回归只同步入口（P3）。`2909677ac` 受控暂停真实读写边界并验证锁所有权；移除该互斥的 mutation check 真实失败，恢复后全量 portable 测试通过。不是原 main 的新 RED 证据。
 - 第二轮当前差异审查未完成前不声称通过；本线程不合并或自动合并。
+
+### 2026-10-24 · P2 sing-box pin 卫生追加
+- 来源：ba1a73dd9真实RED → 657cf9fc2窄GREEN → 80443f2aa全量打包41/41。中间全量39/2失败是新嵌套资源路径与旧validator分隔符不一致，已修validator，未改期望；原始记录见同一T5报告。
+- 正式/候选 pin 内嵌且优先，原生更新额外同步 Service-dir 磁盘 pin 无需增加，update_executor仅补说明。新增NSIS resources pin事务暂存三路径清理，仍受repair证据guard保护；不更改签名、摘要、发布或恢复逻辑。
+- 与#1668现在有三个同文件不同hunk的重叠，已在报告/PR列明；不改其分支，不重实现其gate/uninstall功能。
+- Codex第二轮已批准52084a44d遥测范围；本次追加不在该范围，交编排者复核。NSIS编译、安装/卸载、Win10/11真机未运行，无新包/部署/合并。
