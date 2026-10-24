@@ -1,5 +1,4 @@
 import Foundation
-import Libbox
 import NetworkExtension
 import TonoKit
 
@@ -74,7 +73,7 @@ final class TunnelController {
     }
 
     /// Explicit disconnect: takes over from any start at once; On Demand off first (or iOS restarts the
-    /// tunnel at once), then sing-box closes its connections before the provider stops.
+    /// tunnel at once), then the provider stops (its `stopTunnel` closes sing-box's service).
     func stop() async {
         await Self.lifecycle.stop(Steps(self))
     }
@@ -214,9 +213,11 @@ final class TunnelController {
             try? await m.saveToPreferences()
         }
 
+        /// No libbox `serviceClose()` first: sing-box answers it through `serviceStop`, which the
+        /// provider must read as the core stopping on its own (CORE_STOPPED), so a user's disconnect
+        /// would be shown as a dropped connection. The provider's `stopTunnel` closes the service.
         func stopTunnel() async {
             guard let m = owner.manager else { return }
-            await Task.detached { try? LibboxNewStandaloneCommandClient()?.serviceClose() }.value
             m.connection.stopVPNTunnel()
         }
 

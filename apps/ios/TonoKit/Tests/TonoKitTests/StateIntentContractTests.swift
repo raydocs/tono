@@ -85,6 +85,28 @@ final class StateIntentContractTests: XCTestCase {
             let stop = TunnelStop.classify(before: .connected, userStarting: false, userStopping: false, recordedFailure: nil)
             if case .stoppedBySystem = stop { return "failed" }
             return "off"
+        case "recovery-success":
+            // Up, stopped by the system (failure on record), back up on its own: the old failure is gone.
+            var ledger = TunnelIntentLedger()
+            ledger.starting()
+            ledger.tunnel(.connected, before: .connecting, recordedFailure: nil)
+            ledger.tunnel(.disconnected, before: .connected, recordedFailure: "CORE_STOPPED")
+            ledger.tunnel(.connecting, before: .disconnected, recordedFailure: nil)
+            ledger.tunnel(.connected, before: .connecting, recordedFailure: nil)
+            guard ledger.failure == nil else { return "failed" }
+            return phaseWord(ConnectionState.derive(ConnectionFacts(
+                signedIn: true, tunnel: .connected, cloudProbe: ExitProbe(state: .ok), homeProbe: ExitProbe(state: .ok),
+                failure: ledger.failure, routing: .graph(RouteSettings(mode: .threeTier, node: "tokyo")))).phase)
+        case "cancel-then-late-start":
+            // Cancel after the start was handed to the system, before NE reported it; the cancelled
+            // start then fails on its way down.
+            var ledger = TunnelIntentLedger()
+            ledger.userWantsOn()
+            ledger.starting()
+            ledger.userStops(tunnel: .disconnected)
+            ledger.tunnel(.connecting, before: .disconnected, recordedFailure: nil)
+            ledger.tunnel(.disconnected, before: .connecting, recordedFailure: "CORE_START")
+            return phaseWord(ConnectionState.derive(ConnectionFacts(signedIn: true, tunnel: .disconnected, failure: ledger.failure)).phase)
         case "plan-expired":
             return accountDisplay(status: 403, code: "PLAN_EXPIRED")
         case "quota-exhausted":
@@ -124,6 +146,16 @@ final class StateIntentContractTests: XCTestCase {
                                   beatAt: t0.addingTimeInterval(2), catalog: nil)
         let app = note.map { AppNote(state: $0, writtenAt: t0) }
         return SharedStatus(tunnel: tunnel, app: app).reading(now: t0.addingTimeInterval(3)).snapshot?.state
+    }
+
+    private func phaseWord(_ phase: Phase) -> String {
+        switch phase {
+        case .idle, .needsPermission: return "off"
+        case .failed: return "failed"
+        case .signedOut: return "signed-out"
+        case .connected, .degraded: return "connected"
+        case .preparing, .connecting, .disconnecting: return "connecting"
+        }
     }
 
     private func word(_ state: StatusSnapshot.State?) -> String {
