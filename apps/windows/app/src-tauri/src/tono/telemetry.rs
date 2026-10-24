@@ -16,7 +16,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    ApiError, BytesByRoute, ConnectFailureReport, TransportKind, TELEMETRY_KIND_PERIODIC_WINDOW,
+    ApiError, BytesByRoute, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW,
     TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport, UNKNOWN_CLASSIFIED_FAILURE,
 };
 
@@ -353,11 +353,11 @@ async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
             _ => continue,
         };
         match result {
-            Ok(()) => telemetry_outbox::complete(state.audit().settings_dir(), &item.body),
+            Ok(()) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
             Err(err) if telemetry_outbox::should_queue(&err) => {
-                telemetry_outbox::postpone(state.audit().settings_dir(), &item.body, epoch_ms());
+                telemetry_outbox::postpone(state.audit().settings_dir(), &item.kind, &item.body, epoch_ms());
             }
-            Err(_) => telemetry_outbox::complete(state.audit().settings_dir(), &item.body),
+            Err(_) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
         }
     }
 }
