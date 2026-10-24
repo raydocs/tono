@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WORKER-ENSURE-DEVICE-RACE | 同一安装并发注册会留下没有出口凭据或停在 pending 的设备 | refuted | 待开 | 中·已确认 | 报告里的 SQL 与现行 schema 不符；强制交错测试下胜出事务带凭据，注册关闭时设备为 active |
+| WORKER-ENSURE-DEVICE-RACE | 同一安装并发注册会留下没有出口凭据或停在 pending 的设备 | refuted | [#1743](https://github.com/raydocs/tono/pull/1743) | 中·已确认 | 报告里的 SQL 与现行 schema 不符；强制交错测试下胜出事务带凭据，注册关闭时设备为 active |
 
 复核 `services/control-plane/src/devices.ts`：新设备的 `INSERT` 与 `INSERT OR IGNORE INTO device_exit_credentials` 在同一次 `DB.batch`（约 248–282 行），D1 batch 是一个事务。唯一约束失败的是输的那次，整批回滚。胜出方提交时凭据已经在内。
 
