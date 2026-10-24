@@ -71,7 +71,7 @@ nonisolated struct SignInRecovery: Equatable, Sendable {
         case let .server(status, _): return status >= 500 ? .service : nil
         case .invalidResponse, .notFound, .exitIdentityPropagating, .invalidConfiguration:
             return .service
-        case .unauthorized, .forbidden, .deviceLimit, .entitlementBlocked,
+        case .unauthorized, .forbidden, .deviceLimit, .entitlementBlocked, .rateLimited,
              .invalidOrExpiredCode, .credentialPersistence, .credentialRecoveryRecord:
             return nil
         }

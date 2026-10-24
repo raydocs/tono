@@ -329,6 +329,13 @@ extension AccountSession {
             transport: notice.transport
         )
         lastConnectFailureAt = Date()
+        guard TelemetryOutbox.maySend(kind: "failure") else {
+            if let body = try? TonoCoding.encoder().encode(report) {
+                TelemetryOutbox.enqueue(kind: "failure", body: body)
+            }
+            scheduleEarlyTelemetryWindow()
+            return
+        }
         do {
             // Consent is re-read before each attempt, not only here: a token
             // refresh or retry can wait while the user turns the switch off.
@@ -336,8 +343,9 @@ extension AccountSession {
                 AccountSession.failureReportStillAllowed(builtAs: scope, internalBuild: internalBuild)
             })
         } catch {
-            // A timeout may already have been delivered. Anything else that
-            // never left the machine waits for the next signed-in pass.
+            TelemetryOutbox.recordRateLimit(error, kind: "failure")
+            // A timeout may already have been delivered; a 429 explicitly
+            // refused storage, so keep it until Retry-After permits retry.
             if Self.shouldQueueTelemetry(error),
                let body = try? TonoCoding.encoder().encode(report) {
                 TelemetryOutbox.enqueue(kind: "failure", body: body)
@@ -684,6 +692,7 @@ extension AccountSession {
 
     /// A timeout may have reached the server. Other URL failures have not.
     nonisolated static func shouldQueueTelemetry(_ error: Error) -> Bool {
+        if TelemetryOutbox.retryDelay(error) != nil { return true }
         guard let urlError = error as? URLError else { return false }
         return urlError.code != .timedOut
     }
@@ -695,6 +704,25 @@ nonisolated enum TelemetryOutbox {
     static let key = "telemetryOutbox.v1"
     static let retryAfterKey = "telemetryOutbox.retryAfter.v1"
     static let maxItems = 32
+    @MainActor private static var draining = false
+
+    static func retryDelay(_ error: Error) -> TimeInterval? {
+        if case let TonoAPIClient.APIError.rateLimited(seconds) = error { return seconds }
+        // Compatibility for older in-process callers that still use server.
+        if case TonoAPIClient.APIError.server(status: 429, message: _) = error { return 60 }
+        return nil
+    }
+
+    static func maySend(kind: String, defaults: UserDefaults = AppProfile.defaults, now: Date = Date()) -> Bool {
+        now.timeIntervalSince1970 >= defaults.double(forKey: retryAfterKey + "." + kind)
+    }
+
+    static func recordRateLimit(_ error: Error, kind: String,
+                                defaults: UserDefaults = AppProfile.defaults, now: Date = Date()) {
+        guard let seconds = retryDelay(error) else { return }
+        let key = retryAfterKey + "." + kind
+        defaults.set(max(defaults.double(forKey: key), now.timeIntervalSince1970 + seconds), forKey: key)
+    }
 
     static func enqueue(kind: String, body: Data, defaults: UserDefaults = AppProfile.defaults) {
         var items = defaults.array(forKey: key) as? [[String: String]] ?? []
@@ -719,17 +747,25 @@ nonisolated enum TelemetryOutbox {
     @MainActor
     static func drain(defaults: UserDefaults, now: () -> Date,
                       upload: (String, Data) async throws -> Void) async {
+        guard !draining else { return }
+        draining = true
+        defer { draining = false }
         let items = pending(defaults: defaults)
         guard !items.isEmpty else { return }
         var kept: [[String: String]] = []
         for item in items {
             guard let kind = item["kind"], let encoded = item["body"],
                   let body = Data(base64Encoded: encoded) else { continue }
+            guard maySend(kind: kind, defaults: defaults, now: now()) else {
+                kept.append(item)
+                continue
+            }
             let path = (kind == "diagnostics" || kind == "p0")
                 ? "telemetry/diagnostics" : "telemetry/failures"
             do {
                 try await upload(path, body)
             } catch {
+                recordRateLimit(error, kind: kind, defaults: defaults, now: now())
                 if AccountSession.shouldQueueTelemetry(error) {
                     kept.append(item)
                 }

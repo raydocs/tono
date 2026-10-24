@@ -12,6 +12,14 @@ nonisolated struct ControlPlaneAnswer: Sendable {
     /// Set when the body stopped short after the status line. The status is
     /// still the server's answer (#582).
     let bodyFailure: (any Error)?
+    let retryAfter: String?
+
+    init(status: Int, body: Data, bodyFailure: (any Error)?, retryAfter: String? = nil) {
+        self.status = status
+        self.body = body
+        self.bodyFailure = bodyFailure
+        self.retryAfter = retryAfter
+    }
 }
 
 /// A response over the cap, or one that is not HTTP. `sendData` reports it
@@ -123,9 +131,9 @@ nonisolated struct ControlPlanePath: Sendable {
         } catch let error as ControlPlaneExchangeError {
             throw error
         } catch {
-            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error)
+            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error, retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
         }
-        return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil)
+        return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil, retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
     }
 
     /// The pinned addresses for `baseURL`'s host, or nil when it has none.
@@ -754,14 +762,14 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 received, atEnd: isComplete && error == nil, limit: maximumResponseBytes
             ) {
             case let .complete(status, body):
-                finish(.answered(ControlPlaneAnswer(status: status, body: body, bodyFailure: nil)))
+                finish(.answered(ControlPlaneAnswer(status: status, body: body, bodyFailure: nil, retryAfter: PinnedResponse.retryAfter(in: received))))
             case .tooLarge:
                 finish(.tooLarge)
             case .malformedHead:
                 finish(.failedAfterConnect(URLError(.badServerResponse)))
             case let .malformedBody(status, body):
                 finish(.answered(ControlPlaneAnswer(
-                    status: status, body: body, bodyFailure: URLError(.badServerResponse)
+                    status: status, body: body, bodyFailure: URLError(.badServerResponse), retryAfter: PinnedResponse.retryAfter(in: received)
                 )))
             case .incomplete:
                 guard isComplete || error != nil else {
@@ -792,9 +800,9 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
         guard connected else { return .notConnected(error.localizedDescription) }
         switch PinnedResponse.interpret(received, atEnd: false, limit: maximumResponseBytes) {
         case let .complete(status, body):
-            return .answered(ControlPlaneAnswer(status: status, body: body, bodyFailure: nil))
+            return .answered(ControlPlaneAnswer(status: status, body: body, bodyFailure: nil, retryAfter: PinnedResponse.retryAfter(in: received)))
         case let .incomplete(status?, body), let .malformedBody(status, body):
-            return .answered(ControlPlaneAnswer(status: status, body: body, bodyFailure: error))
+            return .answered(ControlPlaneAnswer(status: status, body: body, bodyFailure: error, retryAfter: PinnedResponse.retryAfter(in: received)))
         case .incomplete(.none, _), .malformedHead:
             return .failedAfterConnect(error)
         case .tooLarge:
@@ -814,6 +822,23 @@ nonisolated enum PinnedResponse {
         case malformedHead
         case malformedBody(status: Int, body: Data)
         case tooLarge
+    }
+
+    /// The final head owns Retry-After, not an informational response. A
+    /// truncated/malformed head cannot provide a trusted retry duration.
+    static func retryAfter(in received: Data) -> String? {
+        let bytes = [UInt8](received)
+        var start = 0
+        while let lineEnd = find([13, 10], in: bytes, from: start),
+              let status = parseStatusLine(bytes[start..<lineEnd]),
+              let headEnd = find([13, 10, 13, 10], in: bytes, from: lineEnd),
+              headEnd - start <= headLimit,
+              let headers = parseHeaders(bytes[min(lineEnd + 2, headEnd)..<headEnd]) {
+            if !(100..<200).contains(status) { return headers["retry-after"] }
+            guard status != 101 else { return nil }
+            start = headEnd + 4
+        }
+        return nil
     }
 
     static func interpret(_ received: Data, atEnd: Bool, limit: Int) -> Reading {
