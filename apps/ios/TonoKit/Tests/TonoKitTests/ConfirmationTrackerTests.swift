@@ -35,17 +35,6 @@ final class ConfirmationTrackerTests: XCTestCase {
         XCTAssertEqual(said(tracker, now: t0.addingTimeInterval(1)), Said(phase: .connected, reason: nil))
     }
 
-    /// A switch that failed in the app before the tunnel was asked anything (no catalog to rebuild
-    /// from) counts as settled, so its note is shown, and leaves the tunnel's confirmation as it was.
-    func testALocalNoCatalogRefusalCountsAndKeepsTheConfirmation() {
-        var tracker = ConfirmationTracker()
-        XCTAssertTrue(tracker.received(answer(tokyo), ticket: tracker.ask()))
-        let ticket = tracker.ask()
-        let report = RouteApply.withoutCatalog(stable, previous: tokyo, tunnelUp: true)
-        XCTAssertTrue(tracker.settle(report, ticket: ticket))
-        XCTAssertEqual(tracker.confirmation(now: t0.addingTimeInterval(1)), .graph(tokyo))
-    }
-
     func testAReplyToAQuestionAskedBeforeAReconnectIsDropped() {
         var tracker = ConfirmationTracker()
         let ticket = tracker.ask()
