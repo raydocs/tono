@@ -407,7 +407,7 @@ pub(super) fn auth_error(err: &ApiError) -> String {
 fn diagnostics_upload_error(err: &ApiError) -> String {
     let prefix = match err {
         ApiError::Unauthorized => "TONO_DIAG_SIGNED_OUT",
-        ApiError::RateLimited => "TONO_DIAG_RATE_LIMITED",
+        ApiError::RateLimited { .. } => "TONO_DIAG_RATE_LIMITED",
         ApiError::Transport { .. } => "TONO_DIAG_UNREACHABLE",
         // The intake is not deployed (or was withdrawn) — distinct from a
         // server fault, and there is nothing the user can do but copy the

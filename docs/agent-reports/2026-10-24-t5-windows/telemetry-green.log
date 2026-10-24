@@ -1,0 +1,14 @@
+   Compiling tono-core v0.1.0 (/Users/ruirui/tono-wt/t5-windows/apps/windows/crates/tono-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.04s
+     Running tests/telemetry_outbox.rs (apps/windows/target/debug/deps/telemetry_outbox-3dd6219fb3bbfe12)
+
+running 7 tests
+test telemetry_outbox::tests::the_queue_drops_the_oldest_item_past_the_cap ... ok
+test telemetry_outbox::tests::turning_the_timeline_off_keeps_only_the_network_loss_items ... ok
+test telemetry_outbox::tests::rate_limited_upload_is_retained_until_acknowledged ... ok
+test telemetry_outbox::tests::legacy_p0_backlog_survives_upgrade_and_timeline_opt_out ... ok
+test telemetry_outbox::tests::a_failed_post_is_retried_then_dropped_after_ack ... ok
+test telemetry_outbox::tests::simultaneous_producers_do_not_overwrite_each_others_reports ... ok
+test telemetry_outbox::tests::ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s

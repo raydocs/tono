@@ -1,0 +1,97 @@
+✔ NSIS private extraction cannot bypass native admission or mutate the live installation (4.250791ms)
+✔ NSIS private extraction never extracts a live GUI member (0.73675ms)
+✔ elevated setup never runs a Microsoft installer from the user temp directory (0.506958ms)
+✔ NSIS automatically upgrades without reinstall/uninstall choices (25.66ms)
+✔ privileged upgrade helper coordinates Service, Mihomo, and GUI publication (1.343ms)
+✔ NSIS names every gate refusal with its own dialog, code, first error line and log (5.408125ms)
+✔ an uninstaller hands the lease back when its work is done, not when its window closes (0.293875ms)
+✔ every uninstaller abort hands the manual lease back first (0.472542ms)
+✔ a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path (0.632709ms)
+✔ a confirmed orphan clear retires the stale connected owner only after the barrier is gone (0.331708ms)
+✔ Windows installers refuse to downgrade and hand back the manual lease on that exit (0.4815ms)
+✔ every installer init exit after the manual gate hands the lease back (0.191292ms)
+✔ NSIS uninstall removes leftover user control-plane pins (0.064375ms)
+✔ NSIS uninstall deletes in the approving account AppData only after the link check (0.335083ms)
+✔ all-profile app data is deleted only inside the repair gate, under the uninstaller lease (0.566708ms)
+✖ NSIS keeps the failed update recovery copies while a repair install is unfinished (0.937541ms)
+✔ NSIS removes every known old payload on upgrade and uninstall (0.265ms)
+✔ NSIS cleans resource sing-box pin scratch only after repair evidence is retired (1.078417ms)
+✖ NSIS uninstall removes the sing-box pin copied beside sing-box.exe (0.46ms)
+✔ release feature gate rejects synchronous traced WebView dispatch (0.044917ms)
+✔ release TLS gate requires proxy-free pinning and rejects verification bypasses (0.477ms)
+✔ Windows release stops when a native preflight command fails (0.363917ms)
+✔ local Windows release scripts write core-sha256.txt from the hashed sidecar (0.051ms)
+✔ packaging rejects a Service that lacks the exact packaged Core pin (0.1205ms)
+✔ release Tauri handler excludes unused native probes and secret-bearing reads (0.983167ms)
+✔ leftover Verge sidecar names are refused (0.323666ms)
+✔ sing-box digest accepts only the pinned alpha.12 bytes (0.063791ms)
+✔ externalBin accepts only the stable sidecar and pinned sing-box (0.265ms)
+✔ tauri.conf.json resources match the Windows allowlist (0.292292ms)
+✔ resources whitelist rejects whole-directory packaging (0.034167ms)
+✔ bundled resource executables are built from this repository (0.062541ms)
+✔ payload validator requires staged executables and rejects legacy junk (0.408959ms)
+✔ NSIS listing parser accepts real 7zz column variants (0.230583ms)
+✔ portable partition keeps only the allowlist (0.062375ms)
+✔ Core plugin runtime registration matches its generated ACL namespace (0.461042ms)
+✔ Core plugin guest-js/index.ts invokes the namespace granted by desktop ACL (0.261958ms)
+✔ Core plugin dist-js/index.js invokes the namespace granted by desktop ACL (0.232ms)
+✔ Core plugin dist-js/index.cjs invokes the namespace granted by desktop ACL (0.543209ms)
+✔ Support WebRTC check link is granted to the webview opener and nothing wider (0.453459ms)
+✔ the forked NSIS template is synced with the installed @tauri-apps/cli (0.5275ms)
+✔ prebuild.mjs parses, so the candidate build can run it (55.035333ms)
+ℹ tests 41
+ℹ suites 0
+ℹ pass 39
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 183.1025
+
+✖ failing tests:
+
+test at apps/windows/app/scripts/windows-packaging.test.mjs:868:1
+✖ NSIS keeps the failed update recovery copies while a repair install is unfinished (0.937541ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'installer.nsi deletes update recovery evidence outside the repair guard: resources/sing-box-sha256.txt.rollback'
+  - null
+
+      at TestContext.<anonymous> (file:///Users/ruirui/tono-wt/t5-windows/apps/windows/app/scripts/windows-packaging.test.mjs:869:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'installer.nsi deletes update recovery evidence outside the repair guard: resources/sing-box-sha256.txt.rollback',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at apps/windows/app/scripts/windows-packaging.test.mjs:954:1
+✖ NSIS uninstall removes the sing-box pin copied beside sing-box.exe (0.46ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'installer.nsi deletes update recovery evidence outside the repair guard: resources/sing-box-sha256.txt.rollback'
+  - null
+
+      at TestContext.<anonymous> (file:///Users/ruirui/tono-wt/t5-windows/apps/windows/app/scripts/windows-packaging.test.mjs:958:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'installer.nsi deletes update recovery evidence outside the repair guard: resources/sing-box-sha256.txt.rollback',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

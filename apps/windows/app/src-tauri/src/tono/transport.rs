@@ -967,6 +967,9 @@ impl TonoTransport {
         self.answers.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.preference.note_answer();
         let status = response.status().as_u16();
+        let retry_after_secs = response.headers().get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(tono_core::auth::retry_after_seconds);
         if response
             .content_length()
             .is_some_and(|length| length as usize > MAX_RESPONSE_BYTES)
@@ -992,7 +995,7 @@ impl TonoTransport {
             }
             body.extend_from_slice(&chunk);
         }
-        Ok(ApiResponse { status, body })
+        Ok(ApiResponse { retry_after_secs, status, body })
     }
 }
 
@@ -2665,6 +2668,34 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
     /// And when neither path works, the failure says so about both. "Pinned
     /// unreachable, system DNS fine" and "nothing reachable at all" need opposite
     /// responses, and a merged sentence cannot separate them.
+    #[tokio::test]
+    async fn rate_limit_response_preserves_retry_after_header() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                head.push(stream.read_u8().await.unwrap());
+            }
+            stream.write_all(b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 120\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let transport = TonoTransport::with_clients("tono-rate-limit.test", &[address], &[address]).unwrap();
+        let response = transport.send(ApiRequest {
+            method: HttpMethod::Get,
+            url: format!("http://tono-rate-limit.test:{}/", address.port()),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        }).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(response.status, 429);
+        assert_eq!(response.retry_after_secs, Some(120));
+    }
+
     #[tokio::test]
     async fn a_total_failure_reports_both_paths() {
         if blackhole_is_intercepted() {

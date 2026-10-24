@@ -1,0 +1,24 @@
+   Compiling tono-core v0.1.0 (/Users/ruirui/tono-wt/t5-windows/apps/windows/crates/tono-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.64s
+     Running unittests src/lib.rs (apps/windows/target/debug/deps/tono_core-45269f8e213b18b1)
+
+running 1 test
+test auth::tests::telemetry_429_preserves_retry_after_without_refresh_or_logout ... FAILED
+
+failures:
+
+---- auth::tests::telemetry_429_preserves_retry_after_without_refresh_or_logout stdout ----
+
+thread 'auth::tests::telemetry_429_preserves_retry_after_without_refresh_or_logout' (10827316) panicked at crates/tono-core/src/auth.rs:3078:9:
+assertion `left == right` failed
+  left: RateLimited { retry_after_secs: None }
+ right: RateLimited { retry_after_secs: Some(120) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    auth::tests::telemetry_429_preserves_retry_after_without_refresh_or_logout
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 355 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tono-core --lib`

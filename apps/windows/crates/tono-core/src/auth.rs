@@ -172,7 +172,7 @@ pub enum ApiError {
     /// say "wait and try again" instead of "something broke" — the
     /// diagnostics upload is the first endpoint the server rate-limits.
     #[error("too many requests; please wait and try again")]
-    RateLimited,
+    RateLimited { retry_after_secs: Option<u64> },
     #[error("server error {status}: {message}")]
     Server { status: u16, message: String },
     /// HTTP 503 `EXIT_IDENTITY_PROPAGATING`: this device's exit identity is
@@ -855,6 +855,7 @@ pub struct BinaryBody {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiResponse {
+    pub retry_after_secs: Option<u64>,
     pub status: u16,
     pub body: Vec<u8>,
 }
@@ -1702,6 +1703,16 @@ fn decode_json<R: DeserializeOwned>(body: &[u8]) -> Result<R, ApiError> {
     serde_json::from_slice(bytes).map_err(|_| ApiError::InvalidResponse)
 }
 
+/// T6's rate-limit contract uses integer delta-seconds, not an HTTP date.
+/// Reject malformed/overflowing metadata and keep the client's local fallback.
+pub fn retry_after_seconds(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
 fn map_status(response: ApiResponse) -> Result<Vec<u8>, ApiError> {
     if (200..300).contains(&response.status) {
         return Ok(response.body);
@@ -1717,7 +1728,7 @@ fn map_status(response: ApiResponse) -> Result<Vec<u8>, ApiError> {
         403 => Err(ApiError::Forbidden),
         404 => Err(ApiError::NotFound),
         409 if code.as_deref() == Some("DEVICE_LIMIT") => Err(ApiError::DeviceLimit),
-        429 => Err(ApiError::RateLimited),
+        429 => Err(ApiError::RateLimited { retry_after_secs: response.retry_after_secs }),
         503 if code.as_deref() == Some("EXIT_IDENTITY_PROPAGATING") => Err(ApiError::ExitIdentityPropagating),
         status => Err(ApiError::Server {
             status,
@@ -1829,7 +1840,7 @@ mod tests {
     }
 
     fn json(status: u16, body: &str) -> Result<ApiResponse, ApiError> {
-        Ok(ApiResponse {
+        Ok(ApiResponse { retry_after_secs: None,
             status,
             body: body.as_bytes().to_vec(),
         })
@@ -2089,7 +2100,7 @@ mod tests {
             let mut count = seen.lock().unwrap();
             *count += 1;
             if *count == 1 {
-                return Ok(ApiResponse { status: 401, body: Vec::new() });
+                return Ok(ApiResponse { retry_after_secs: None, status: 401, body: Vec::new() });
             }
             json(201, r#"{"segment":{"id":"seg-2","receivedAt":2}}"#)
         });
@@ -2519,7 +2530,7 @@ mod tests {
                     message: kind_message(kind).to_string(),
                 })
             } else {
-                Ok(ApiResponse {
+                Ok(ApiResponse { retry_after_secs: None,
                     status: ok_status,
                     body: ok_body.as_bytes().to_vec(),
                 })
@@ -3064,6 +3075,67 @@ mod tests {
         );
     }
 
+    async fn assert_account_status_keeps_credentials(code: &'static str) {
+        let (client, mock, store) = test_client(move |_| {
+            json(403, &format!(r#"{{"error":{{"code":"{code}"}}}}"#))
+        });
+        let verdicts = Arc::new(Verdicts::default());
+        let client = client.with_verdict_sink(verdicts.clone());
+        store.set_refresh_token("r0").unwrap();
+        client.adopt(&auth_response("access-1", None)).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        verdicts.0.lock().unwrap().clear();
+        assert_eq!(client.me().await.unwrap_err(), ApiError::Forbidden);
+        assert_eq!(*verdicts.0.lock().unwrap(), vec![(identity, SessionVerdict::Forbidden)]);
+        assert_eq!(store.refresh_token().unwrap().as_deref(), Some("r0"));
+        assert_eq!(client.diagnostics_log_identity().await, identity);
+        assert_eq!(mock.count_to("auth/refresh"), 0);
+        assert_eq!(mock.count_to("auth/logout"), 0);
+    }
+
+    #[tokio::test]
+    async fn account_contract_plan_expired_is_not_a_logout() {
+        assert_account_status_keeps_credentials("PLAN_EXPIRED").await;
+    }
+
+    #[tokio::test]
+    async fn account_contract_quota_exhausted_is_not_a_logout() {
+        assert_account_status_keeps_credentials("QUOTA_EXHAUSTED").await;
+    }
+
+    #[tokio::test]
+    async fn account_contract_device_reauth_required_is_not_a_logout() {
+        assert_account_status_keeps_credentials("DEVICE_REAUTH_REQUIRED").await;
+    }
+
+    #[test]
+    fn retry_after_accepts_only_nonnegative_integer_seconds() {
+        assert_eq!(retry_after_seconds(" 120 "), Some(120));
+        assert_eq!(retry_after_seconds("0"), Some(0));
+        assert_eq!(retry_after_seconds("-1"), None);
+        assert_eq!(retry_after_seconds("+1"), None);
+        assert_eq!(retry_after_seconds("1.5"), None);
+        assert_eq!(retry_after_seconds("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+        assert_eq!(retry_after_seconds("18446744073709551616"), None);
+    }
+
+    #[tokio::test]
+    async fn telemetry_429_preserves_retry_after_without_refresh_or_logout() {
+        let (client, mock, store) = test_client(|_| {
+            let mut response = json(429, r#"{"error":{"code":"RATE_LIMITED"}}"#)?;
+            response.retry_after_secs = Some(120);
+            Ok(response)
+        });
+        store.set_refresh_token("r0").unwrap();
+        client.adopt(&auth_response("access-1", None)).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        assert_eq!(client.upload_saved_telemetry(endpoints::TELEMETRY_DIAGNOSTICS, "{}", identity).await.unwrap_err(),
+            ApiError::RateLimited { retry_after_secs: Some(120) });
+        assert_eq!(store.refresh_token().unwrap().as_deref(), Some("r0"));
+        assert_eq!(mock.count_to("auth/refresh"), 0);
+        assert_eq!(mock.count_to("telemetry/diagnostics"), 1);
+    }
+
     #[tokio::test]
     async fn rate_limited_uploads_map_to_their_own_error() {
         let (client, _mock, store) = test_client(|_| {
@@ -3082,7 +3154,7 @@ mod tests {
                 .upload_diagnostics_report(&sample_report())
                 .await
                 .unwrap_err(),
-            ApiError::RateLimited
+            ApiError::RateLimited { retry_after_secs: None }
         );
     }
 

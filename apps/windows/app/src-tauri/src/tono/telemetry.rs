@@ -16,7 +16,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    ApiError, BytesByRoute, ConnectFailureReport, TransportKind, TELEMETRY_KIND_PERIODIC_WINDOW,
+    ApiError, BytesByRoute, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW,
     TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport, UNKNOWN_CLASSIFIED_FAILURE,
 };
 
@@ -267,12 +267,13 @@ pub(crate) fn spawn_connect_failure_report(
         };
         let queued = serde_json::to_string(&report).unwrap_or_default();
         if let Err(err) = client.upload_connect_failure_for_identity(&report, identity).await {
-            if should_queue(&err) && !queued.is_empty() {
-                telemetry_outbox::enqueue(
+            if telemetry_outbox::should_queue(&err) && !queued.is_empty() {
+                telemetry_outbox::enqueue_failed(
                     task_state.audit().settings_dir(),
                     "failure",
                     &queued,
                     epoch_ms(),
+                    &err,
                 );
             }
         }
@@ -283,12 +284,13 @@ pub(crate) fn spawn_connect_failure_report(
                     .upload_saved_telemetry(tono_core::auth::endpoints::TELEMETRY_DIAGNOSTICS, &body, identity)
                     .await
                 {
-                    if should_queue(&err) {
-                        telemetry_outbox::enqueue(
+                    if telemetry_outbox::should_queue(&err) {
+                        telemetry_outbox::enqueue_failed(
                             task_state.audit().settings_dir(),
                             "diagnostics",
                             &body,
                             epoch_ms(),
+                            &err,
                         );
                     }
                 }
@@ -297,15 +299,6 @@ pub(crate) fn spawn_connect_failure_report(
     }))
 }
 
-fn should_queue(err: &ApiError) -> bool {
-    match err {
-        // A timeout may have been delivered. Do not post it again.
-        ApiError::Transport { kind: TransportKind::Timeout, .. } => false,
-        ApiError::Transport { .. } | ApiError::NotFound => true,
-        ApiError::Server { status, .. } if *status == 404 || *status >= 500 => true,
-        _ => false,
-    }
-}
 
 fn diagnostics_bundle(report: &ConnectFailureReport) -> Result<serde_json::Value, ()> {
     let channel = if crate::tono::audit::internal_build() { "beta" } else { "release" };
@@ -362,11 +355,11 @@ async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
             _ => continue,
         };
         match result {
-            Ok(()) => telemetry_outbox::complete(state.audit().settings_dir(), &item.body),
-            Err(err) if should_queue(&err) => {
-                telemetry_outbox::postpone(state.audit().settings_dir(), &item.body, epoch_ms());
+            Ok(()) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
+            Err(err) if telemetry_outbox::should_queue(&err) => {
+                telemetry_outbox::postpone(state.audit().settings_dir(), &item.kind, &item.body, epoch_ms(), telemetry_outbox::retry_after_secs(&err));
             }
-            Err(_) => telemetry_outbox::complete(state.audit().settings_dir(), &item.body),
+            Err(_) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
         }
     }
 }

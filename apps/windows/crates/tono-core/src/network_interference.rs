@@ -152,7 +152,7 @@ mod tests {
         );
         assert_eq!(auth_support_prefix(&error), "TONO_AUTH_CAPTIVE");
 
-        let portal = ApiResponse {
+        let portal = ApiResponse { retry_after_secs: None,
             status: 511,
             body: b"<html>login</html>".to_vec(),
         };
@@ -160,7 +160,7 @@ mod tests {
             attribute(Ok(portal), false).1,
             Observation::Interfered(NetworkInterference::CaptivePortal)
         );
-        let answered = ApiResponse {
+        let answered = ApiResponse { retry_after_secs: None,
             status: 401,
             body: Vec::new(),
         };

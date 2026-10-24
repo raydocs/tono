@@ -1,0 +1,10 @@
+Same model, fresh context (gpt-6.1-sol). Independent read-only scope: 322f48c6f...52084a44d.
+No new functional/security findings; R1 P2 and P3 resolved.
+Covered: Retry-After transport/auth metadata, initial/drain deadlines and fallback; P0 separation, priority, kind/body acknowledgement, legacy and retain_kind; complete synchronous RMW serialization.
+Covered: API shape consumers; PLAN_EXPIRED/QUOTA_EXHAUSTED/DEVICE_REAUTH_REQUIRED remain Forbidden without credential/identity loss, Refused, refresh/logout; TLS/network policy unchanged.
+Reviewer ran offline/locked portable tests: outbox8/8, auth65/65, network_interference1/1, auth-rate-limit mapping1/1.
+RED/mutation logs checked, mutation not rerun; no claim of original-main RED from mutation.
+Source diff check passed; complete range had EOF blank lines in core-green.log:428 and telemetry-green.log:15 (subsequently trimmed only terminal blank lines).
+Not run: Windows native socket429/Tauri/Service, hardware or entire suite; no coverage for unimplemented Core/uplink/owner or dedicated account UX.
+This approval does not cover the later pin-hygiene addendum (ba1a73dd9...80443f2aa).
+VERDICT: approve

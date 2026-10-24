@@ -100,6 +100,10 @@ export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
   'sing-box-sha256.txt.install-rollback',
   'sing-box-sha256.txt.install-restore',
   'sing-box-sha256.txt.install-publish',
+  // Native update publishes the resources/ pin as a payload transaction member too.
+  'resources/sing-box-sha256.txt.rollback',
+  'resources/sing-box-sha256.txt.restore',
+  'resources/sing-box-sha256.txt.publish',
 ])
 
 // These inherited Clash Verge commands are not used by any route in the Tono
@@ -182,7 +186,7 @@ export function validateNsisLegacyCleanup(source) {
       ),
     ]
     for (const artifact of updateScratch) {
-      const statementAt = macro.indexOf(`Delete /REBOOTOK "$INSTDIR\\${artifact}"`)
+      const statementAt = macro.indexOf(`Delete /REBOOTOK "$INSTDIR\\${artifact.replaceAll('/', '\\')}"`)
       if (guardEnd < 0 || statementAt < guardAt || statementAt > guardEnd) {
         return `installer.nsi deletes update recovery evidence outside the repair guard: ${artifact}`
       }

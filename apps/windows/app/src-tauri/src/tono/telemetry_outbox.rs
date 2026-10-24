@@ -15,8 +15,37 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tono_core::auth::{ApiError, TransportKind};
+
+pub fn should_queue(err: &ApiError) -> bool {
+    match err {
+        // A timeout may have been delivered. Do not post it again.
+        ApiError::Transport { kind: TransportKind::Timeout, .. } => false,
+        ApiError::Transport { .. } | ApiError::NotFound | ApiError::RateLimited { .. } => true,
+        ApiError::Server { status, .. } if *status == 404 || *status == 429 || *status >= 500 => true,
+        _ => false,
+    }
+}
+
+pub fn retry_after_secs(err: &ApiError) -> Option<u64> {
+    match err {
+        ApiError::RateLimited { retry_after_secs } => *retry_after_secs,
+        _ => None,
+    }
+}
+
+// The server deadline is a minimum; only the local exponential delay is capped.
+fn next_retry_at(now_ms: i64, attempts: u32, retry_after_secs: Option<u64>) -> i64 {
+    let server_ms = retry_after_secs.unwrap_or(0).saturating_mul(1000).min(i64::MAX as u64) as i64;
+    let local_ms = backoff(attempts).as_millis() as i64;
+    now_ms.saturating_add(local_ms.max(server_ms))
+}
 
 pub const OUTBOX_FILE: &str = "telemetry-outbox.json";
+pub const P0_OUTBOX_FILE: &str = "telemetry-p0-outbox.json";
+// All filesystem transactions are synchronous; never hold this across a network await.
+static OUTBOX_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub const OUTBOX_MAX_ITEMS: usize = 32;
 pub const OUTBOX_MAX_BYTES: usize = 256 * 1024;
 const MAX_DELAY: Duration = Duration::from_secs(30 * 60);
@@ -34,23 +63,23 @@ struct OutboxFile {
     items: Vec<OutboxItem>,
 }
 
-fn path_of(dir: &Path) -> std::path::PathBuf {
-    dir.join(OUTBOX_FILE)
+fn path_of(dir: &Path, kind: &str) -> std::path::PathBuf {
+    dir.join(if kind == "p0" { P0_OUTBOX_FILE } else { OUTBOX_FILE })
 }
 
-fn load(dir: &Path) -> OutboxFile {
-    let Ok(body) = fs::read_to_string(path_of(dir)) else {
+fn load(dir: &Path, kind: &str) -> OutboxFile {
+    let Ok(body) = fs::read_to_string(path_of(dir, kind)) else {
         return OutboxFile::default();
     };
     serde_json::from_str(&body).unwrap_or_default()
 }
 
-fn store(dir: &Path, file: &OutboxFile) -> std::io::Result<()> {
+fn store(dir: &Path, kind: &str, file: &OutboxFile) -> std::io::Result<()> {
     let body = serde_json::to_string(file).unwrap_or_else(|_| "{\"items\":[]}".to_string());
     if body.len() > OUTBOX_MAX_BYTES {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "outbox too large"));
     }
-    fs::write(path_of(dir), body)
+    fs::write(path_of(dir, kind), body)
 }
 
 pub fn backoff(attempts: u32) -> Duration {
@@ -61,53 +90,93 @@ pub fn backoff(attempts: u32) -> Duration {
 
 /// Append one payload. Drops the oldest items until the file fits the cap.
 pub fn enqueue(dir: &Path, kind: &str, body: &str, now_ms: i64) {
+    enqueue_at(dir, kind, body, 0, now_ms);
+}
+
+/// An already-rejected upload must wait too, not just reports rejected during drain.
+pub fn enqueue_failed(dir: &Path, kind: &str, body: &str, now_ms: i64, err: &ApiError) {
+    enqueue_at(dir, kind, body, 1, next_retry_at(now_ms, 1, retry_after_secs(err)));
+}
+
+fn enqueue_at(dir: &Path, kind: &str, body: &str, attempts: u32, next_at_ms: i64) {
+    enqueue_at_with(dir, kind, body, attempts, next_at_ms, || {});
+}
+
+// The callback observes the read/write boundary; production uses a no-op.
+fn enqueue_at_with(dir: &Path, kind: &str, body: &str, attempts: u32, next_at_ms: i64, after_load: impl FnOnce()) {
     if body.len() > OUTBOX_MAX_BYTES / 2 || body.is_empty() {
         return;
     }
-    let mut file = load(dir);
+    let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let mut file = load(dir, kind);
+    after_load();
     file.items.push(OutboxItem {
         kind: kind.to_string(),
         body: body.to_string(),
-        attempts: 0,
-        next_at_ms: now_ms,
+        attempts,
+        next_at_ms,
     });
     while file.items.len() > OUTBOX_MAX_ITEMS {
-        file.items.remove(0);
+        // Older versions stored P0 in the ordinary file. Keep those until acknowledgement;
+        // new P0 reports have their own independent cap and file.
+        let Some(index) = file.items.iter().position(|item| kind == "p0" || item.kind != "p0") else { break; };
+        file.items.remove(index);
     }
     while serde_json::to_string(&file).map(|text| text.len()).unwrap_or(0) > OUTBOX_MAX_BYTES
         && !file.items.is_empty()
     {
-        file.items.remove(0);
+        // Older versions stored P0 in the ordinary file. Keep those until acknowledgement;
+        // new P0 reports have their own independent cap and file.
+        let Some(index) = file.items.iter().position(|item| kind == "p0" || item.kind != "p0") else { break; };
+        file.items.remove(index);
     }
-    let _ = store(dir, &file);
+    let _ = store(dir, kind, &file);
 }
 
 pub fn due(dir: &Path, now_ms: i64) -> Vec<OutboxItem> {
-    load(dir).items.into_iter().filter(|item| item.next_at_ms <= now_ms).collect()
+    let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    // Critical reports drain first and are not delayed behind the ordinary backlog.
+    let mut items = load(dir, "p0").items;
+    items.extend(load(dir, "ordinary").items);
+    items.retain(|item| item.next_at_ms <= now_ms);
+    items.sort_by_key(|item| item.kind != "p0");
+    items
 }
 
-pub fn complete(dir: &Path, body: &str) {
-    let mut file = load(dir);
-    if let Some(index) = file.items.iter().position(|item| item.body == body) {
-        file.items.remove(index);
-        let _ = store(dir, &file);
+pub fn complete(dir: &Path, kind: &str, body: &str) {
+    let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    for queue in ["p0", "ordinary"] {
+        let mut file = load(dir, queue);
+        // Include legacy P0 reports, but never acknowledge another kind with the same body.
+        if let Some(index) = file.items.iter().position(|item| item.kind == kind && item.body == body) {
+            file.items.remove(index);
+            let _ = store(dir, queue, &file);
+            return;
+        }
     }
 }
 
-/// Drops every item whose kind is not `kind`.
+/// Drops every item whose kind is not `kind`, including from the legacy mixed queue.
 pub fn retain_kind(dir: &Path, kind: &str) {
-    let mut file = load(dir);
-    file.items.retain(|item| item.kind == kind);
-    let _ = store(dir, &file);
+    let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    for queue in ["ordinary", "p0"] {
+        let mut file = load(dir, queue);
+        file.items.retain(|item| item.kind == kind);
+        let _ = store(dir, queue, &file);
+    }
 }
 
-pub fn postpone(dir: &Path, body: &str, now_ms: i64) {
-    let mut file = load(dir);
-    if let Some(item) = file.items.iter_mut().find(|item| item.body == body) {
-        item.attempts = item.attempts.saturating_add(1);
-        item.next_at_ms = now_ms.saturating_add(backoff(item.attempts).as_millis() as i64);
+pub fn postpone(dir: &Path, kind: &str, body: &str, now_ms: i64, retry_after_secs: Option<u64>) {
+    let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    for queue in ["p0", "ordinary"] {
+        let mut file = load(dir, queue);
+        if let Some(item) = file.items.iter_mut().find(|item| item.kind == kind && item.body == body) {
+            item.attempts = item.attempts.saturating_add(1);
+            item.next_at_ms = next_retry_at(now_ms, item.attempts, retry_after_secs);
+            let _ = store(dir, queue, &file);
+            return;
+        }
     }
-    let _ = store(dir, &file);
 }
 
 #[cfg(test)]
@@ -122,7 +191,8 @@ mod tests {
     impl Temp {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!("tono-outbox-{}", std::process::id()));
-            let path = path.join(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos().to_string());
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = path.join(format!("{}-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
             fs::create_dir_all(&path).unwrap();
             Self { path }
         }
@@ -139,15 +209,106 @@ mod tests {
     }
 
     #[test]
+    fn rate_limited_upload_is_retained_until_acknowledged() {
+        let dir = temp();
+        enqueue(&dir.path, "failure", "rate-limited-report", 1000);
+        assert!(should_queue(&ApiError::RateLimited { retry_after_secs: None }), "HTTP 429 is temporary, not an acknowledgement");
+        postpone(&dir.path, "failure", "rate-limited-report", 1000, None);
+        assert!(due(&dir.path, 1000).is_empty());
+        assert!(due(&dir.path, 60_999).is_empty());
+        assert_eq!(due(&dir.path, 61_000)[0].attempts, 1);
+        complete(&dir.path, "failure", "rate-limited-report");
+        assert!(due(&dir.path, i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report() {
+        let dir = temp();
+        enqueue(&dir.path, "p0", "critical", 0);
+        for index in 0..OUTBOX_MAX_ITEMS + 1 {
+            enqueue(&dir.path, "diagnostics", &format!("ordinary-{index}"), 0);
+        }
+        assert!(due(&dir.path, 0).iter().any(|item| item.kind == "p0" && item.body == "critical"));
+        // Identical bodies in the two independent queues must not share acknowledgements.
+        enqueue(&dir.path, "failure", "critical", 0);
+        complete(&dir.path, "failure", "critical");
+        assert!(due(&dir.path, 0).iter().any(|item| item.kind == "p0" && item.body == "critical"));
+        postpone(&dir.path, "p0", "critical", 0, None);
+        assert!(due(&dir.path, 0).iter().all(|item| item.kind != "p0"));
+        assert!(due(&dir.path, 60_000).iter().any(|item| item.kind == "p0"));
+    }
+
+    #[test]
+    fn legacy_p0_backlog_survives_upgrade_and_timeline_opt_out() {
+        let dir = temp();
+        fs::write(dir.path.join(OUTBOX_FILE), r#"{"items":[{"kind":"p0","body":"legacy","attempts":1,"next_at_ms":1000}]}"#).unwrap();
+        for index in 0..OUTBOX_MAX_ITEMS + 1 {
+            enqueue(&dir.path, "diagnostics", &format!("ordinary-{index}"), 0);
+        }
+        enqueue(&dir.path, "p0", "new-critical", 0);
+        retain_kind(&dir.path, "p0");
+        let items = due(&dir.path, 1000);
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().any(|item| item.body == "legacy"));
+        assert!(items.iter().any(|item| item.body == "new-critical"));
+        complete(&dir.path, "p0", "legacy");
+        assert_eq!(due(&dir.path, 1000).len(), 1);
+        assert_eq!(due(&dir.path, 1000)[0].body, "new-critical");
+    }
+
+    #[test]
+    fn simultaneous_producers_do_not_overwrite_each_others_reports() {
+        let dir = temp();
+        let (loaded, loading) = std::sync::mpsc::channel();
+        let (resume, resumed) = std::sync::mpsc::channel();
+        let serialized = std::thread::scope(|scope| {
+            let path = &dir.path;
+            let first = scope.spawn(move || {
+                enqueue_at_with(path, "failure", "failure", 0, 0, || {
+                    loaded.send(()).unwrap();
+                    resumed.recv().unwrap();
+                });
+            });
+            // Pause precisely after loading the queue, before committing the first producer.
+            loading.recv().unwrap();
+            let second = scope.spawn(|| enqueue(&dir.path, "diagnostics", "diagnostics", 0));
+            let serialized = OUTBOX_LOCK.try_lock().is_err();
+            // Always release/join before asserting, so a regression cannot strand the test.
+            resume.send(()).unwrap();
+            first.join().unwrap();
+            second.join().unwrap();
+            serialized
+        });
+        assert!(serialized, "the queue transaction must own serialization between read and write");
+        let items = due(&dir.path, 0);
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().any(|item| item.kind == "failure"));
+        assert!(items.iter().any(|item| item.kind == "diagnostics"));
+    }
+
+    #[test]
+    fn retry_after_is_a_minimum_even_when_longer_than_local_backoff() {
+        let dir = temp();
+        enqueue(&dir.path, "p0", "rate-limited-p0", 1000);
+        postpone(&dir.path, "p0", "rate-limited-p0", 1000, Some(7200));
+        assert!(due(&dir.path, 7_200_999).is_empty(), "must not retry before the server's deadline");
+        assert_eq!(due(&dir.path, 7_201_000).len(), 1);
+        enqueue_failed(&dir.path, "failure", "initially-rejected", 1000, &ApiError::RateLimited { retry_after_secs: Some(7200) });
+        assert!(due(&dir.path, 7_200_999).is_empty());
+        assert_eq!(due(&dir.path, 7_201_000).len(), 2);
+        assert_eq!(next_retry_at(1000, u32::MAX, Some(u64::MAX)), i64::MAX);
+    }
+
+    #[test]
     fn a_failed_post_is_retried_then_dropped_after_ack() {
         let dir = temp();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
         enqueue(&dir.path, "failure", "{\"schemaVersion\":1}", now);
         assert_eq!(due(&dir.path, now).len(), 1);
-        postpone(&dir.path, "{\"schemaVersion\":1}", now);
+        postpone(&dir.path, "failure", "{\"schemaVersion\":1}", now, None);
         assert!(due(&dir.path, now).is_empty(), "backoff hides the item until next_at");
         assert_eq!(due(&dir.path, now + 120_000).len(), 1);
-        complete(&dir.path, "{\"schemaVersion\":1}");
+        complete(&dir.path, "failure", "{\"schemaVersion\":1}");
         assert!(due(&dir.path, now + 86_400_000).is_empty());
     }
 
