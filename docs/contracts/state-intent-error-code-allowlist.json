@@ -1,0 +1,72 @@
+{
+  "patterns": [
+    "reason_generic",
+    "short_generic",
+    "signin_error_generic",
+    "r[\"error\"] as String"
+  ],
+  "scan": {
+    "ios": ["apps/ios/App"],
+    "android": ["apps/android/mobile/src/main"],
+    "macos": ["apps/macos/Tono"],
+    "windows": ["apps/windows/app/src/pages", "apps/windows/app/src/tono-ui"]
+  },
+  "allow": [
+    {
+      "platform": "ios",
+      "file": "apps/ios/App/Views/HomeView.swift",
+      "snippet": "L.t(\"reason_generic\", code)",
+      "owner": "T1",
+      "note": "Unknown tunnel reasons are interpolated into the status sentence."
+    },
+    {
+      "platform": "ios",
+      "file": "apps/ios/App/Views/HomeView.swift",
+      "snippet": "L.t(\"signin_error_generic\", code)",
+      "owner": "T1",
+      "note": "Unknown sign-in codes are interpolated into the sentence."
+    },
+    {
+      "platform": "android",
+      "file": "apps/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/ui/Text.kt",
+      "snippet": "stringResource(R.string.reason_generic, code)",
+      "owner": "T3",
+      "note": "Text.kt else branch renders the raw reason code."
+    },
+    {
+      "platform": "android",
+      "file": "apps/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/ui/Text.kt",
+      "snippet": "stringResource(R.string.short_generic, code)",
+      "owner": "T3",
+      "note": "Short reason falls back to the raw code."
+    },
+    {
+      "platform": "android",
+      "file": "apps/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/ui/Text.kt",
+      "snippet": "stringResource(R.string.signin_error_generic, code)",
+      "owner": "T3",
+      "note": "Unknown sign-in codes are rendered, including USER_DISABLED until T3 maps it."
+    },
+    {
+      "platform": "android",
+      "file": "apps/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/ui/SettingsScreen.kt",
+      "snippet": "r[\"error\"] as String",
+      "owner": "T3",
+      "note": "Route-check error text is shown as returned."
+    },
+    {
+      "platform": "android",
+      "file": "apps/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/engine/TonoNotifications.kt",
+      "snippet": "c.getString(R.string.short_generic, code)",
+      "owner": "T3",
+      "note": "The ongoing notification interpolates an unknown reason code."
+    },
+    {
+      "platform": "android",
+      "file": "apps/android/mobile/src/main/kotlin/com/raydocs/tono/mobile/surface/SurfaceCopy.kt",
+      "snippet": "c.getString(R.string.short_generic, code)",
+      "owner": "T3",
+      "note": "The tile and widget interpolate an unknown reason code."
+    }
+  ]
+}

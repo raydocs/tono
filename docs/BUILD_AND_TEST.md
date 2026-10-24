@@ -24,7 +24,7 @@ proposal or machine addresses in an [archived handoff](archive/README.md).
 `apps/android` is an internal test client (minSdk 29, targetSdk 36), not a signed customer release.
 Its separate [`android-ci`](../.github/workflows/android-ci.yml) runs routing/mobile JVM tests, lint,
 debug APK builds and API 34 device shards. It is not called by `ci-gate`; a green `ci-gate` alone
-does **not** verify Android. This documents the existing gate, not a change to release policy.
+does **not** verify Android. The iOS and Android routing-generator `--check` commands do run in `ci-gate`'s changes job, so a desktop-only edit cannot drift those copies. That check is not the Android emulator job. This documents the existing gate, not a change to release policy.
 
 For platform-permission and lifecycle changes, push an exact SHA on a `wip/` ref and use the
 `devin-cloud` workflow on Linux KVM. Do not install an Android SDK/emulator on the editing Mac.
@@ -113,8 +113,8 @@ The required status check is `ci-gate` (`.github/workflows/ci-gate.yml`), green 
 workflow below when a touched path matches that workflow's list, and passes when each such job succeeded
 or was skipped because its paths were not touched. A missing `ci-gate` run is not green. The lists are
 the workflows' `push` path filters (connect-bench keeps its list in `tooling/scripts/ci-gate-changes.mjs`).
-Those `push` triggers run on `main`, `release/macos`, and `release/windows` only, so a pull-request
-branch does not start the same jobs a second time. In short:
+Those `push` triggers, except `ios-ci.yml`, run on `main`, `release/macos`, and `release/windows`
+only, so a pull-request branch does not start the same jobs a second time. In short:
 
 | Touched paths | Called workflow |
 |---|---|
@@ -123,6 +123,9 @@ branch does not start the same jobs a second time. In short:
 | `services/**`, `ops-panel/**` (and the tooling scripts and `screenshots-nightly.yml` it lists) | `services-ci.yml` |
 | `tooling/scripts/sing-box/**`, `tooling/scripts/build-sing-box.sh` | `sing-box-alpha9-check.yml` |
 | `tooling/perf/connect-bench/**` (and the dial files it lists) | `connect-bench.yml` |
+| `apps/ios/**` | `ios-ci.yml` Linux routing job only (`apple: false`). The macos-26 job stays on push to `main` and `feat/ios-**`, and on `workflow_dispatch`. |
+
+`ios-ci.yml` also pushes on `feat/ios-**`, so a pull request from that branch runs the Linux job twice (the push, and ci-gate). The macos-26 job does not run from ci-gate. The other push triggers above stay on `main`, `release/macos`, and `release/windows` only.
 
 Docs-only means every touched path is `*.md` or under `docs/`, none is under `.agents/` or `.claude/`,
 and no filter above matches it. `ci-gate` still runs and passes with those jobs skipped; that skip is
