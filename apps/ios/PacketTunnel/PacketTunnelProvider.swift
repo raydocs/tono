@@ -20,6 +20,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// The inputs sing-box was last started from and whether a graph runs. A refused rebuild can
     /// leave none running; the heartbeat then says so instead of "on". Guarded by `serviceLock`.
     private var graph = TunnelGraph()
+    /// The underlying IPv6 the last graph build used. Guarded by `serviceLock`.
+    private var lastBuildIPv6: Bool?
     #if os(iOS)
     private var screenObserver: ScreenStateObserver?
     #endif
@@ -74,6 +76,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             throw fail("CORE_START", error.localizedDescription)
         }
         underlying.onIPv6Change = { [weak self] _ in self?.reloadInPlace(reason: "underlying IPv6 changed") }
+        // A change between the build and the line above had no one to tell: rebuild for it now.
+        if underlying.hasGlobalIPv6 != builtIPv6() { reloadInPlace(reason: "underlying IPv6 changed during start") }
         #if os(iOS)
         if let commandServer { screenObserver = ScreenStateObserver(commandServer: commandServer) }
         #endif
@@ -229,8 +233,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     /// Admission and the config build fail before libbox is touched: a running graph stays intact.
+    /// Called with `serviceLock` held.
     private func build(_ inputs: TunnelInputs) throws -> String {
-        try inputs.makeConfig(underlyingIPv6: underlying.hasGlobalIPv6, cacheFilePath: SharedFiles.cacheDB.path)
+        let ipv6 = underlying.hasGlobalIPv6
+        lastBuildIPv6 = ipv6
+        return try inputs.makeConfig(underlyingIPv6: ipv6, cacheFilePath: SharedFiles.cacheDB.path)
+    }
+
+    private func builtIPv6() -> Bool? {
+        serviceLock.lock()
+        defer { serviceLock.unlock() }
+        return lastBuildIPv6
     }
 
     /// libbox's StartOrReloadService closes the running graph before it builds this one.

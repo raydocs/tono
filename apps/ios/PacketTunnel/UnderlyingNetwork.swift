@@ -9,7 +9,8 @@ import notify
 /// Watches the phone's own network from inside the extension (whose sockets bypass the tunnel).
 /// Only global IPv6 matters to the graph: without it, DIRECT names answer IPv4 only.
 final class UnderlyingNetwork: @unchecked Sendable {
-    private let monitor = NWPathMonitor(prohibitedInterfaceTypes: [.other, .loopback])
+    /// A cancelled NWPathMonitor never starts again: each start gets a new one.
+    private var monitor: NWPathMonitor?
     private let queue = DispatchQueue(label: "tono.tunnel.underlying")
     private let lock = NSLock()
     private var ipv6 = false
@@ -22,6 +23,12 @@ final class UnderlyingNetwork: @unchecked Sendable {
     private var seenFirstPath = false
 
     func start() {
+        monitor?.cancel()
+        lock.lock()
+        seenFirstPath = false
+        lock.unlock()
+        let monitor = NWPathMonitor(prohibitedInterfaceTypes: [.other, .loopback])
+        self.monitor = monitor
         let first = DispatchSemaphore(value: 0)
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
@@ -43,7 +50,10 @@ final class UnderlyingNetwork: @unchecked Sendable {
         _ = first.wait(timeout: .now() + 3)
     }
 
-    func stop() { monitor.cancel() }
+    func stop() {
+        monitor?.cancel()
+        monitor = nil
+    }
 
     static func describe(_ path: NWPath) -> String {
         var parts: [String] = []
