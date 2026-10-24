@@ -1,3 +1,4 @@
+import { requireAccountEntitlement } from './accounts';
 import { jwtSign, randomToken, sha256 } from './crypto';
 import { type Env, type Row, now, id, envInt, requiredSecret } from './env';
 import { ApiError } from './errors';
@@ -86,7 +87,7 @@ export async function refreshSession(e: Env, req: Request, raw: string) {
   const t = now();
   const session = (where: string, key: string) => e.DB.prepare(
     `SELECT sessions.*, users.status user_status, users.quota_bytes, users.usage_bytes, users.expires_at user_expires_at,
-            devices.installation_id, devices.status device_status, devices.pending_expires_at
+            devices.installation_id, devices.status device_status, devices.entitlement_suspended, devices.pending_expires_at
      FROM sessions
      JOIN users ON users.id = sessions.user_id
      JOIN devices ON devices.id = sessions.device_id
@@ -107,12 +108,17 @@ export async function refreshSession(e: Env, req: Request, raw: string) {
     !s ||
     s.revoked_at !== null ||
     s.user_status !== 'active' ||
-    !['active', 'pending'].includes(s.device_status) ||
-    (s.device_status === 'pending' && s.pending_expires_at <= t) ||
-    (s.user_expires_at !== null && s.user_expires_at <= t) ||
-    (s.quota_bytes !== null && s.usage_bytes >= s.quota_bytes)
+    (!['active', 'pending'].includes(s.device_status) && !s.entitlement_suspended) ||
+    (s.device_status === 'pending' && s.pending_expires_at <= t)
   ) {
     throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token');
+  }
+  requireAccountEntitlement({
+    status: s.user_status, expires_at: s.user_expires_at,
+    quota_bytes: s.quota_bytes, usage_bytes: s.usage_bytes,
+  }, t);
+  if (s.entitlement_suspended) {
+    throw new ApiError(403, 'DEVICE_REAUTH_REQUIRED', 'Verify sign-in again to restore this device');
   }
   const issued = await tokens(e, s.user_id, s.device_id, s.installation_id, {
     from: s.id,

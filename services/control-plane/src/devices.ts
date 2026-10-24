@@ -210,6 +210,7 @@ export async function ensureDevice(e: Env, user: string, name: string, installat
           `UPDATE devices SET
              name = ?,
              status = 'pending',
+             entitlement_suspended = 0,
              pending_expires_at = ?,
              updated_at = ?,
              tailscale_node_id = NULL,
@@ -229,6 +230,7 @@ export async function ensureDevice(e: Env, user: string, name: string, installat
           `UPDATE devices SET
              name = ?,
              status = 'active',
+             entitlement_suspended = 0,
              pending_expires_at = NULL,
              updated_at = ?,
              tailscale_node_id = NULL,
@@ -319,6 +321,8 @@ export async function revokeDevice(e: Env, d: Row, requireIneligibleUser = false
   const t = now();
   const requireFlag = requireIneligibleUser ? 1 : 0;
   await e.DB.batch([
+    e.DB.prepare('UPDATE devices SET entitlement_suspended = 0 WHERE id = ? AND ? = 0')
+      .bind(d.id, requireFlag),
     // Resolve claim_generation inside this transaction. Reading it before the
     // batch creates a race where a concurrent confirm can advance generation
     // and make a successful-looking revoke update zero rows.
@@ -353,6 +357,9 @@ export async function revokeDevice(e: Env, d: Row, requireIneligibleUser = false
     e.DB.prepare(
       `UPDATE devices SET
          status = 'revoked',
+         entitlement_suspended = CASE WHEN ? = 1 AND EXISTS (
+           SELECT 1 FROM users WHERE users.id = devices.user_id AND users.status = 'active'
+         ) THEN 1 ELSE 0 END,
          claim_token = NULL,
          claim_expires_at = NULL,
          updated_at = ?
@@ -368,15 +375,16 @@ export async function revokeDevice(e: Env, d: Row, requireIneligibleUser = false
                )
              )
            )`,
-    ).bind(t, d.id, requireFlag, t),
+    ).bind(requireFlag, t, d.id, requireFlag, t),
     e.DB.prepare(
       `UPDATE sessions SET revoked_at = ?
        WHERE device_id = ? AND revoked_at IS NULL
          AND EXISTS (
            SELECT 1 FROM devices
            WHERE devices.id = ? AND devices.status = 'revoked'
+             AND (? = 0 OR devices.entitlement_suspended = 0)
          )`,
-    ).bind(t, d.id, d.id),
+    ).bind(t, d.id, d.id, requireFlag),
     e.DB.prepare(
       `DELETE FROM device_exit_credentials
        WHERE device_id = ?
@@ -486,10 +494,8 @@ export async function enforceUser(e: Env, userId: string, processNow = true) {
          WHERE users.id = ?
            AND (
              users.status != 'active'
-             OR (users.expires_at IS NOT NULL AND users.expires_at <= ?)
-             OR (users.quota_bytes IS NOT NULL AND users.usage_bytes >= users.quota_bytes)
            )
        )`,
-  ).bind(t, userId, userId, t).run();
+  ).bind(t, userId, userId).run();
   if (processNow) await processRevocations(e);
 }

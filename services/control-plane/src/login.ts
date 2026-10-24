@@ -5,7 +5,7 @@
 import { hmacSha256, sha256 } from './crypto';
 import { tokens } from './sessions';
 import { type OidcProvider } from './oidc';
-import { ineligible } from './accounts';
+import { requireAccountEntitlement } from './accounts';
 import { consumeRateLimit } from './ops/ingest-limits';
 import { ApiError } from './errors';
 import { recordClient } from './client-identity';
@@ -166,7 +166,7 @@ export async function deliverEmailCode(
 }
 
 export async function completePasswordlessAuth(e: Env, req: Request, user: Row, deviceName: string, installationId: string) {
-  if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+  requireAccountEntitlement(user);
   const device = await ensureDevice(e, user.id, deviceName, installationId);
   await recordClient(e, req, String(device.id));
   return authResult(e, user, device);

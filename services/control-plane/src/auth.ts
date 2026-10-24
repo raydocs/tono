@@ -1,3 +1,4 @@
+import { requireAccountEntitlement } from './accounts';
 import { type Env, type Row, now, requiredSecret } from './env';
 import { jwtVerify, sha256 } from './crypto';
 import { ApiError } from './errors';
@@ -30,7 +31,7 @@ export async function auth(req: Request, e: Env) {
   const t = now();
   const s = await e.DB.prepare(
     `SELECT sessions.*, users.status user_status, users.quota_bytes, users.usage_bytes, users.expires_at user_expires_at,
-            devices.status device_status, devices.pending_expires_at, devices.installation_id
+            devices.status device_status, devices.entitlement_suspended, devices.pending_expires_at, devices.installation_id
      FROM sessions
      JOIN users ON users.id = sessions.user_id
      JOIN devices ON devices.id = sessions.device_id
@@ -39,12 +40,17 @@ export async function auth(req: Request, e: Env) {
   if (
     !s ||
     s.user_status !== 'active' ||
-    !['active', 'pending'].includes(s.device_status) ||
-    (s.device_status === 'pending' && s.pending_expires_at <= t) ||
-    (s.user_expires_at !== null && s.user_expires_at <= t) ||
-    (s.quota_bytes !== null && s.usage_bytes >= s.quota_bytes)
+    (!['active', 'pending'].includes(s.device_status) && !s.entitlement_suspended) ||
+    (s.device_status === 'pending' && s.pending_expires_at <= t)
   ) {
     throw new ApiError(401, 'UNAUTHORIZED', 'Session is no longer active');
+  }
+  requireAccountEntitlement({
+    status: s.user_status, expires_at: s.user_expires_at,
+    quota_bytes: s.quota_bytes, usage_bytes: s.usage_bytes,
+  }, t);
+  if (s.entitlement_suspended) {
+    throw new ApiError(403, 'DEVICE_REAUTH_REQUIRED', 'Verify sign-in again to restore this device');
   }
   return {
     userId: String(s.user_id),

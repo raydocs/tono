@@ -12,6 +12,17 @@ export function ineligible(u: Row, t = now()) {
     (u.quota_bytes !== null && u.usage_bytes >= u.quota_bytes);
 }
 
+// Authentication and service entitlement are separate authorities.
+export function requireAccountEntitlement(u: Row, t = now()) {
+  if (u.status !== 'active') throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+  if (u.expires_at !== null && u.expires_at <= t) {
+    throw new ApiError(403, 'PLAN_EXPIRED', 'Your plan has expired; renew or contact your family');
+  }
+  if (u.quota_bytes !== null && u.usage_bytes >= u.quota_bytes) {
+    throw new ApiError(403, 'QUOTA_EXHAUSTED', 'Your data allowance is used up; renew or contact your family');
+  }
+}
+
 // Least recently seen first, over the live devices aliased `candidate`: the
 // later of the row's own last_seen_at (created_at before the first sighting)
 // and its newest telemetry heartbeat, then creation time, then rowid, so ties
@@ -165,7 +176,7 @@ export async function accountForVerifiedEmail(
 ): Promise<Row> {
   let user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(emailAddr).first<Row>();
   if (user) {
-    if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+    requireAccountEntitlement(user);
     await ensureEmailIdentity(e, user, emailAddr);
     return user;
   }
@@ -197,7 +208,7 @@ export async function accountForVerifiedEmail(
     }
     throw new ApiError(401, 'AUTHENTICATION_FAILED', 'Authentication could not be completed');
   }
-  if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+  requireAccountEntitlement(user);
   await ensureEmailIdentity(e, user, emailAddr, t);
   return user;
 }
@@ -213,7 +224,7 @@ export async function accountForOidcIdentity(
      WHERE auth_identities.provider = ? AND auth_identities.subject = ?`,
   ).bind(identity.provider, identity.subject).first<Row>();
   if (linked) {
-    if (ineligible(linked)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+    requireAccountEntitlement(linked);
     return linked;
   }
   if (!identity.email || !identity.emailVerified) {
@@ -274,7 +285,7 @@ export async function accountForOidcIdentity(
         'Identity linking is temporarily unavailable',
       );
     }
-    if (ineligible(raced)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+    requireAccountEntitlement(raced);
     return raced;
   }
 }
