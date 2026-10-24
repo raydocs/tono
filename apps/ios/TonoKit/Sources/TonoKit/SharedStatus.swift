@@ -180,14 +180,17 @@ public struct SharedStatus: Equatable, Sendable {
     /// reports too (`ConfirmationTracker.observed`). Any other note (another start, or none the app
     /// heard from) yields only to a start opened after it, or to negative news written after it: a
     /// report the app could not tie to its session never turns its "not confirmed" into connected.
+    /// Off and signed out are the user's intent: a start opened before them that reports it stopped
+    /// or failed afterwards (the stop the user asked for) never turns them into a failure.
     private func governs(_ note: AppNote) -> Bool {
         guard let tunnel else { return true }
+        let negative = !tunnel.running || tunnel.routing == nil
+        if note.state == .off || note.state == .signedOut, negative, tunnel.opened <= note.writtenAt { return true }
         if let session = note.session, session == tunnel.session, let generation = note.generation {
             if generation != tunnel.generation { return generation > tunnel.generation }
             return note.writtenAt >= tunnel.beatAt
         }
         if tunnel.opened > note.writtenAt { return false }
-        let negative = !tunnel.running || tunnel.routing == nil
         return !(negative && tunnel.beatAt > note.writtenAt)
     }
 

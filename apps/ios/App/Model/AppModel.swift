@@ -137,11 +137,10 @@ final class AppModel: ObservableObject {
     private var signedIn: Bool
     private var preparing = false
     private var tunnelStatus: TunnelStatus = .invalid
-    private var failure: String?
+    /// The failure shown and the user's switches in flight (`TunnelIntentLedger`).
+    private var ledger = TunnelIntentLedger()
+    private var failure: String? { ledger.failure }
     private var permission: String?
-    /// Set from "switch on" until the tunnel first reports connected; a stop in between is a start failure.
-    private var userStarting = false
-    private var userStopping = false
     /// The user's latest switch intent; a switch-off during PREPARING stops the start that is in flight.
     private var wantOn = false
     private var probeTask: Task<Void, Never>?
@@ -218,10 +217,7 @@ final class AppModel: ObservableObject {
         publishStatus(force: true)
         if tunnelStatus == .connected, cloudProbe.state != .checking { runProbes() }
         retryPutBack()
-        if !tunnelStatus.isUp, let f = SharedFiles.loadFailure(), failure == nil, !userStopping {
-            failure = f.code
-            recompute()
-        }
+        if ledger.foreground(tunnel: tunnelStatus, recordedFailure: SharedFiles.loadFailure()?.code) { recompute() }
     }
 
     // MARK: - Sign-in
@@ -264,7 +260,7 @@ final class AppModel: ObservableObject {
             Preferences.email = reported ?? login.email
             email = Preferences.email
             signedIn = true
-            failure = nil
+            ledger.clearFailure()
             login = LoginState()
             recompute()
             await refreshCatalog(quiet: true)
@@ -287,13 +283,12 @@ final class AppModel: ObservableObject {
         accountEpoch &+= 1
         signedIn = false
         wantOn = false
-        userStarting = false
         preparing = false
         catalogLoading = false
         login = LoginState()
         probeTask?.cancel()
         traffic.stop()
-        userStopping = true
+        ledger.signingOut()
         tracker.sessionEnded()
         catalogs.clear()
         unrecovered = nil
@@ -320,11 +315,13 @@ final class AppModel: ObservableObject {
         checks = ExitChecks()
         refreshExplained()
         signedIn = false
-        failure = nil
+        ledger.signedOut()
         permission = nil
-        userStopping = false
         signingOut = false
         recompute()
+        // The phase may not have changed since the first recompute; the widgets still get the
+        // signed-out note written after the tunnel's last report.
+        publishStatus(force: true)
     }
 
     // MARK: - Connect / disconnect
@@ -345,7 +342,7 @@ final class AppModel: ObservableObject {
         }
         primerConfirmed = false
         wantOn = true
-        failure = nil
+        ledger.userWantsOn()
         permission = nil
         SharedFiles.clearFailure()
         preparing = true
@@ -357,26 +354,25 @@ final class AppModel: ObservableObject {
         do {
             try SharedFiles.saveInputs(inputs(for: loaded))
             unsavedRoutes = nil
-            userStarting = true
+            ledger.starting()
             let outcome = try await tunnel.start(includeAllNetworks: includeAllNetworks)
             guard epoch == accountEpoch else { return }
-            if outcome == .superseded { userStarting = false }
+            if outcome == .superseded { ledger.startEnded() }
         } catch TunnelError.denied {
             guard epoch == accountEpoch, wantOn else { return }
-            userStarting = false
+            ledger.startEnded()
             permission = "DENIED"
         } catch {
             guard epoch == accountEpoch, wantOn else { return }
-            userStarting = false
-            failure = "CORE_START"
+            ledger.startEnded()
+            ledger.fail("CORE_START")
         }
     }
 
     func disconnect() async {
         traffic.stop()
         wantOn = false
-        userStarting = false
-        userStopping = tunnelStatus != .disconnected && tunnelStatus != .invalid
+        ledger.userStops(tunnel: tunnelStatus)
         probeTask?.cancel()
         recompute()
         await tunnel.stop()
@@ -707,11 +703,11 @@ final class AppModel: ObservableObject {
             if AccountErrors.isSessionEnded(error) {
                 await signOut()
                 guard accountEpoch == epoch &+ 1 else { return false }
-                failure = "SESSION_ENDED"
+                ledger.fail("SESSION_ENDED")
                 recompute()
                 return false
             }
-            if !quiet { failure = AccountErrors.reasonCode(error) }
+            if !quiet { ledger.fail(AccountErrors.reasonCode(error)) }
             return false
         }
     }
@@ -798,9 +794,10 @@ final class AppModel: ObservableObject {
         // classifier cleared by disconnected/invalid, and bypassed by external explicit starts).
         traffic.updateTunnel(status, session: since, eligible: signedIn && !signingOut,
                              startEpoch: TunnelController.lifecycle.statisticsStartEpoch)
+        let down = status == .disconnected || status == .invalid
+        let stop = ledger.tunnel(status, before: before, recordedFailure: down ? SharedFiles.loadFailure()?.code : nil)
         switch status {
         case .connected:
-            userStarting = false
             // The exit checks start once the tunnel confirms a graph (`recompute`).
             Task { await readStatus() }
         case .disconnected, .invalid:
@@ -810,18 +807,7 @@ final class AppModel: ObservableObject {
             if case .unconfirmed(let requested) = routeChange { setInEffect(requested); routeChange = nil }
             probeTask?.cancel()
             checks = ExitChecks()
-            switch TunnelStop.classify(before: before, userStarting: userStarting, userStopping: userStopping,
-                                       recordedFailure: SharedFiles.loadFailure()?.code) {
-            case .startFailed(let code):
-                failure = code
-                Task { await tunnel.disableOnDemand() }
-            case .stoppedBySystem(let code):
-                failure = code
-            case .expected:
-                break
-            }
-            userStarting = false
-            userStopping = false
+            if case .startFailed? = stop { Task { await tunnel.disableOnDemand() } }
         default:
             break
         }
