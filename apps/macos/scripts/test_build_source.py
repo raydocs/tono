@@ -50,6 +50,8 @@ class BuildSourceTests(unittest.TestCase):
             for name in ('tooling/scripts/build-core-helper.sh',
                          'apps/macos/Tono/Models/UpdateContractV1.swift',
                          'apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift',
+                         'apps/macos/Tono/Core/HelperDisarmAuthority.swift',
+                         'apps/macos/Tono/Core/PreemptiveUpdateDisconnectProof.swift',
                          'apps/macos/Tono/Core/ControlPlaneRelays.swift',
                          'apps/macos/Tono/Core/ThreeTierRoutingContract.swift',
                          'apps/macos/Tono/Core/HelperProtocolVersion.swift'):

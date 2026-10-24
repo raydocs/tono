@@ -32,3 +32,9 @@
 - R2 仍有 P2：proof 保存之后，最终 authority.save 或 quarantine recovery 失败可使报告 unknown，而 verified 已持久化。新增 `MAC-UPDATE-PROOF-FINALIZATION-ORDER`，状态 **open**，未修、未做故障回归。
 - 遵守两轮审查和 minor 一轮修正的停止规则，交给编排者，不开启第三轮；不把当前 PR 描述为无条件审查通过。
 - 本续记只改文档/账本，无新产品源码或测试结果；沿用准确源码 f91689a31 的既有本机 31 项通过，不将 CI/root/实机缺口写成通过。不合并、不 auto-merge、不部署。
+
+### 2026-10-24 续记 · policy-tests build-source fixture 补齐
+- CI run `40083991954`（PR head `191b3ee72`）的 `macos / policy-tests` 在 `test_build_source.py` 失败；非基础设施抖动。临时 repo 的显式源清单未复制本 PR 新增 HelperDisarmAuthority.swift / PreemptiveUpdateDisconnectProof.swift，真实 builder 的 --build-fingerprint 因缺输入退出 1。
+- 工程修正：仅把两个真实共享源复制进 fixture，保留全部 dirty/stale/手改二进制/源变化/recipe 变化/缺失 manifest 的既有断言，不改生产代码或安全规则。
+- 本机旧测试复现 `Ran 2 tests ... FAILED (errors=1)`（fixture 命令错误，不冒充产品运行时 assertion RED）；修复后 `Ran 2 tests ... OK`，contract guard `PASS`，diff whitespace 通过。
+- `gh run view 40083991954 --log-failed` 因整个 run 仍运行拒绝提供日志，改从已结束 job `120843634264` 的日志 API 取证；未盲目 rerun，普通 push 后等待新 CI。原有开放 P2/root/实机限制不变，未合并/部署。
