@@ -18,6 +18,16 @@ final class NativeUpdateCallerTests: XCTestCase {
         return .init(pending: true, receipt: receipt, execution: execution, disconnectVerified: false, diagnostic: nil)
     }
 
+    func testPreemptiveRestoreIntentAllowsRetryWithoutClaimingVerifiedRelease() throws {
+        let stopped = try JSONDecoder().decode(HelperManager.UpdateStatus.self, from: Data(
+            #"{"pending":true,"execution":"consumed","disconnectRequested":true,"disconnectVerified":false}"#.utf8))
+        XCTAssertTrue(AppUpdater.disconnectRetriable(stopped), "explicit Restore must not lock an interrupted update until receipt expiry")
+        XCTAssertEqual(stopped.disconnectVerified, false, "retry permission is not a protection-release receipt")
+        let installing = try JSONDecoder().decode(HelperManager.UpdateStatus.self, from: Data(
+            #"{"pending":true,"execution":"consumed","disconnectRequested":false,"disconnectVerified":false}"#.utf8))
+        XCTAssertFalse(AppUpdater.disconnectRetriable(installing), "do not interrupt a healthy consumed update")
+    }
+
     func testNativeCallerNeverExecutesAfterPreparationFailure() async throws {
         var calls = [String]()
         do {
