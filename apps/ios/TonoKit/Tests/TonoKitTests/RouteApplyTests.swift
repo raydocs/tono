@@ -115,4 +115,16 @@ final class RouteApplyTests: XCTestCase {
         XCTAssertFalse(tracker.settle(report, ticket: ticket))
     }
 
+
+    /// A running tunnel and no catalog to rebuild from (the app started on a tunnel already up and
+    /// the catalog could not be loaded): Retry and a mode switch must not report the request as
+    /// saved and in effect while the old graph (or none) still runs; they say it was not applied.
+    func testAChangeWithoutACatalogOnARunningTunnelIsNotAppliedNotSaved() {
+        let previous = RouteSettings(mode: .threeTier, node: "tokyo-1")
+        let requested = RouteSettings(mode: .stable, node: "tokyo-1")
+        let report = RouteApply.withoutCatalog(requested, previous: previous, tunnelUp: true)
+        XCTAssertEqual(report.outcome, .notApplied(code: "NO_CATALOG", inEffect: previous))
+        XCTAssertFalse(report.wrote)
+    }
+
 }
