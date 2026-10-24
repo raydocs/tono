@@ -15,6 +15,18 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tono_core::auth::{ApiError, TransportKind};
+
+pub fn should_queue(err: &ApiError) -> bool {
+    match err {
+        // A timeout may have been delivered. Do not post it again.
+        ApiError::Transport { kind: TransportKind::Timeout, .. } => false,
+        ApiError::Transport { .. } | ApiError::NotFound => true,
+        ApiError::Server { status, .. } if *status == 404 || *status >= 500 => true,
+        _ => false,
+    }
+}
+
 
 pub const OUTBOX_FILE: &str = "telemetry-outbox.json";
 pub const OUTBOX_MAX_ITEMS: usize = 32;
@@ -136,6 +148,36 @@ mod tests {
 
     fn temp() -> Temp {
         Temp::new()
+    }
+
+    #[test]
+    fn rate_limited_upload_is_retained_until_acknowledged() {
+        let dir = temp();
+        enqueue(&dir.path, "failure", "rate-limited-report", 1000);
+        assert!(should_queue(&ApiError::RateLimited), "HTTP 429 is temporary, not an acknowledgement");
+        postpone(&dir.path, "rate-limited-report", 1000);
+        assert!(due(&dir.path, 1000).is_empty());
+        assert!(due(&dir.path, 60_999).is_empty());
+        assert_eq!(due(&dir.path, 61_000)[0].attempts, 1);
+        complete(&dir.path, "rate-limited-report");
+        assert!(due(&dir.path, i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report() {
+        let dir = temp();
+        enqueue(&dir.path, "p0", "critical", 0);
+        for index in 0..OUTBOX_MAX_ITEMS + 1 {
+            enqueue(&dir.path, "diagnostics", &format!("ordinary-{index}"), 0);
+        }
+        assert!(due(&dir.path, 0).iter().any(|item| item.kind == "p0" && item.body == "critical"));
+        // Identical bodies in the two independent queues must not share acknowledgements.
+        enqueue(&dir.path, "failure", "critical", 0);
+        complete(&dir.path, "critical");
+        assert!(due(&dir.path, 0).iter().any(|item| item.kind == "p0" && item.body == "critical"));
+        postpone(&dir.path, "critical", 0);
+        assert!(due(&dir.path, 0).iter().all(|item| item.kind != "p0"));
+        assert!(due(&dir.path, 60_000).iter().any(|item| item.kind == "p0"));
     }
 
     #[test]
