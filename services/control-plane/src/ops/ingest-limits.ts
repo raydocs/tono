@@ -14,10 +14,12 @@ export async function consumeRateLimit(e: Env, key: string, limit: number, windo
      ON CONFLICT(key) DO UPDATE SET
        count = CASE WHEN rate_limits.window_start <= ? THEN 1 ELSE rate_limits.count + 1 END,
        window_start = CASE WHEN rate_limits.window_start <= ? THEN excluded.window_start ELSE rate_limits.window_start END
-     RETURNING count`,
+     RETURNING count, window_start`,
   ).bind(key, t, cutoff, cutoff).first<Row>();
   if (!row || Number(row.count) > limit) {
-    throw new ApiError(429, 'RATE_LIMITED', 'Too many attempts; try again later');
+    throw new ApiError(429, 'RATE_LIMITED', 'Too many attempts; try again later', {
+      retryAfterSeconds: Math.max(1, Number(row?.window_start ?? t) + windowSeconds - t),
+    });
   }
 }
 
@@ -68,15 +70,24 @@ const TELEMETRY_KEYS = {
     'RATE_LIMIT_FAILURE_USER_HOUR',
     'RATE_LIMIT_FAILURE_USER_DAY',
   ],
-} as const satisfies Record<'TELEMETRY' | 'FAILURE', readonly (keyof Env)[]>;
+  DIAGNOSTICS: [
+    'RATE_LIMIT_AUTOMATIC_DIAGNOSTICS_USER_HOUR',
+    'RATE_LIMIT_AUTOMATIC_DIAGNOSTICS_USER_DAY',
+  ],
+  P0: [
+    'RATE_LIMIT_PZERO_USER_HOUR',
+    'RATE_LIMIT_PZERO_USER_DAY',
+  ],
+} as const satisfies Record<'TELEMETRY' | 'FAILURE' | 'DIAGNOSTICS' | 'P0', readonly (keyof Env)[]>;
 
 // Failure reports keep their own bucket, or a burst of them starves the heartbeat.
 export async function rateLimitTelemetry(
   e: Env,
   uid: string,
-  kind: 'TELEMETRY' | 'FAILURE' = 'TELEMETRY',
+  kind: keyof typeof TELEMETRY_KEYS = 'TELEMETRY',
 ) {
-  const defaults = kind === 'FAILURE' ? [12, 60] : [6, 80];
+  const defaults = kind === 'P0' ? [24, 120]
+    : kind === 'TELEMETRY' ? [6, 80] : [12, 60];
   const scopes = [
     [`user-hour:${uid}`, DIAGNOSTICS_HOUR_SECONDS],
     [`user-day:${uid}`, DIAGNOSTICS_DAY_SECONDS],
