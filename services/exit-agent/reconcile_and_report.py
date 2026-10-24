@@ -1951,7 +1951,12 @@ def run_once(path: Path) -> None:
             raise Refusal(f"{hy2_error}; the state file is unusable: {state_error}")
         inventory_base = dict(state)
         try:
-            keep_usage_locally(path, state, installed, counters, settled_marker)
+            # Same guard as the outage and disabled-node paths. A rebuilt
+            # state file must not treat the raw counter as a new lifetime.
+            keep_usage_locally(
+                path, state, installed, counters, settled_marker,
+                ledger_missing=ledger_missing,
+            )
         except (Refusal, OSError) as error:
             # source_id can refuse before keep_usage_locally writes. The clients
             # already reconciled still have to be remembered.
