@@ -12,7 +12,8 @@ import { clusterSeverity, recordFailureCluster, type ClusterEnv, type FailureClu
 
 // Classification only selects a bounded bucket; storeDiagnosticsBundle still
 // validates every field before it can commit anything.
-export function diagnosticsRateLimitKind(bundle: Row): 'P0' | 'DIAGNOSTICS' {
+export function diagnosticsRateLimitKind(bundle: unknown): 'P0' | 'DIAGNOSTICS' {
+  if (!bundle || typeof bundle !== 'object' || !('events' in bundle)) return 'DIAGNOSTICS';
   return Array.isArray(bundle.events) && bundle.events.some((event: unknown) =>
     event !== null && typeof event === 'object' && 'code' in event &&
     typeof event.code === 'string' && clusterSeverity(event.code) === 'p0',

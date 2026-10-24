@@ -51,4 +51,12 @@ describe('P0 ingestion is independent of failure storms', () => {
     }
   });
 
+  it('rejects a null diagnostics root as a validation error without storing events', async () => {
+    const account = await createAccount('invalid-diagnostics-root');
+    const response = await api('telemetry/diagnostics', json(null, account.accessToken));
+    expect(response.status).toBe(400);
+    expect((await env.DB.prepare('SELECT COUNT(*) n FROM connection_events WHERE user_id = ?')
+      .bind(account.user.id).first<any>()).n).toBe(0);
+  });
+
 });
