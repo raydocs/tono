@@ -1,6 +1,6 @@
 ## 2026-10-24 · 四端状态意图契约与 CI 覆盖缺口
 - 归属：跨端状态显示规则，不是 SHIP_PLAN G1–G4 门，也不是 ops 计划的发布项。影响 iOS、Android、macOS、Windows 的契约测试和 ci-gate。
-- 来源：基线 `322f48c6f` → 分支 `fix/t8-state-rule`；PR 待开；未合 main。
+- 来源：基线 `322f48c6f` → 分支 `fix/t8-state-rule`；[#1746](https://github.com/raydocs/tono/pull/1746)。契约 `ed266e390`，CI `2bfb67d94`。未合 main。
 - 缺陷修复：不改各端产品行为。已知不一致留在夹具的 `expected-failure`，没有探针的行是 `todo`。`IOS-1672-STATE-AUTHORITY` 保持 open。
 - 新增/优化：决策 134（未占用 133）。共享场景夹具 `docs/contracts/state-intent-scenarios.json` 和错误码允许表。iOS TonoKit、Android JVM、macOS TonoTests、Windows `tono-core` 各一份表驱动契约测试。账户码引用 PR 1738 head `429e23427`（契约首提交 `3205b5c76`），不复制该文件，不改那条分支。
 - 工程与测试：四份契约测试读同一夹具。`enabled` 断言相等，`expected-failure` 断言不等，`todo` 不跑产品探针。错误码扫描对未列出的渲染和过期允许项失败。CI 接线在后续提交。
