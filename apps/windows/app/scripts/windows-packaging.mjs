@@ -186,7 +186,7 @@ export function validateNsisLegacyCleanup(source) {
       ),
     ]
     for (const artifact of updateScratch) {
-      const statementAt = macro.indexOf(`Delete /REBOOTOK "$INSTDIR\\${artifact}"`)
+      const statementAt = macro.indexOf(`Delete /REBOOTOK "$INSTDIR\\${artifact.replaceAll('/', '\\')}"`)
       if (guardEnd < 0 || statementAt < guardAt || statementAt > guardEnd) {
         return `installer.nsi deletes update recovery evidence outside the repair guard: ${artifact}`
       }
