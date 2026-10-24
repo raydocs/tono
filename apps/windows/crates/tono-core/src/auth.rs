@@ -3075,6 +3075,39 @@ mod tests {
         );
     }
 
+    async fn assert_account_status_keeps_credentials(code: &'static str) {
+        let (client, mock, store) = test_client(move |_| {
+            json(403, &format!(r#"{{"error":{{"code":"{code}"}}}}"#))
+        });
+        let verdicts = Arc::new(Verdicts::default());
+        let client = client.with_verdict_sink(verdicts.clone());
+        store.set_refresh_token("r0").unwrap();
+        client.adopt(&auth_response("access-1", None)).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        verdicts.0.lock().unwrap().clear();
+        assert_eq!(client.me().await.unwrap_err(), ApiError::Forbidden);
+        assert_eq!(*verdicts.0.lock().unwrap(), vec![(identity, SessionVerdict::Forbidden)]);
+        assert_eq!(store.refresh_token().unwrap().as_deref(), Some("r0"));
+        assert_eq!(client.diagnostics_log_identity().await, identity);
+        assert_eq!(mock.count_to("auth/refresh"), 0);
+        assert_eq!(mock.count_to("auth/logout"), 0);
+    }
+
+    #[tokio::test]
+    async fn account_contract_plan_expired_is_not_a_logout() {
+        assert_account_status_keeps_credentials("PLAN_EXPIRED").await;
+    }
+
+    #[tokio::test]
+    async fn account_contract_quota_exhausted_is_not_a_logout() {
+        assert_account_status_keeps_credentials("QUOTA_EXHAUSTED").await;
+    }
+
+    #[tokio::test]
+    async fn account_contract_device_reauth_required_is_not_a_logout() {
+        assert_account_status_keeps_credentials("DEVICE_REAUTH_REQUIRED").await;
+    }
+
     #[test]
     fn retry_after_accepts_only_nonnegative_integer_seconds() {
         assert_eq!(retry_after_seconds(" 120 "), Some(120));
