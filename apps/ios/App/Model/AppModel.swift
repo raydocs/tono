@@ -518,7 +518,8 @@ final class AppModel: ObservableObject {
                                               return self.tracker.permits(RouteApplyReport(.unconfirmed(requested), answer: answer), ticket: ticket)
                                           })
         } else {
-            report = RouteApply.withoutCatalog(requested, previous: previous, tunnelUp: ticket != nil)
+            // No catalog yet, so no tunnel to rebuild: the choice is kept for the first start.
+            report = RouteApplyReport(.saved(requested))
         }
         // Asked of a session that has since ended, or answered about an older graph than one heard
         // since: the reply says nothing about what runs now, so it moves neither the routes, the

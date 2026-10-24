@@ -109,11 +109,6 @@ public struct RouteApplyReport: Equatable, Sendable {
 /// Changing the mode or line: save the inputs, ask a running tunnel to rebuild, and report only
 /// what the tunnel confirmed. The screens show `inEffect`, never the request, as the routes in use.
 public enum RouteApply {
-    /// A change with no catalog to build from: the choice is kept for the first start.
-    public static func withoutCatalog(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool) -> RouteApplyReport {
-        RouteApplyReport(.saved(requested))
-    }
-
     public static func run(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool,
                            save: (RouteSettings) throws -> Void,
                            reload: () async -> Data?,
