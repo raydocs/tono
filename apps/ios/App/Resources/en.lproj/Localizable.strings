@@ -44,6 +44,9 @@
 "reason_HOME_UNAVAILABLE" = "Your assigned Home exit is unavailable right now. Tono won't quietly send AI elsewhere; try again later.";
 "reason_NETWORK" = "Can't reach Tono. Check the network and retry.";
 "reason_RATE_LIMITED" = "Too many attempts. Wait a moment.";
+"reason_PLAN_EXPIRED" = "Your plan has expired. Renew it, or ask the family member who set it up.";
+"reason_QUOTA_EXHAUSTED" = "Your data allowance is used up. Renew, or ask the family member who set it up.";
+"reason_DEVICE_REAUTH_REQUIRED" = "Your plan is active again. Sign out in Settings and sign in once more to connect this phone.";
 "reason_CORE_START" = "The tunnel core didn't start. Retry; if it keeps failing, restart the phone.";
 "reason_CLOUD_UNREACHABLE" = "The cloud exit isn't answering. Matched traffic is held, not sent direct. Try another line.";
 "reason_HOME_UNREACHABLE" = "Home isn't answering. AI traffic is held, not sent direct. Other apps still work.";
@@ -137,6 +140,9 @@
 "short_REVOKED" = "Another VPN took over";
 "short_CORE_START" = "The core didn't start";
 "short_RATE_LIMITED" = "Too many attempts";
+"short_PLAN_EXPIRED" = "Plan expired";
+"short_QUOTA_EXHAUSTED" = "Data used up";
+"short_DEVICE_REAUTH_REQUIRED" = "Sign in again";
 "short_SESSION_ENDED" = "Please sign in again";
 "short_CATALOG_ROLLBACK" = "Line list refused (older than before)";
 "short_CORE_STOPPED" = "Tap Retry to reconnect";

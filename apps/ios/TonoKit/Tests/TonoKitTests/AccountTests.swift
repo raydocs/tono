@@ -192,4 +192,17 @@ final class AccountTests: XCTestCase {
         XCTAssertFalse(AccountSession.isPlausibleEmail("ray@example"))
         XCTAssertFalse(AccountSession.isPlausibleEmail("ray example@x.io"))
     }
+
+    /// Control-plane account-state contract (T6, 2026-10-24): plan expiry, used-up quota and a renewed
+    /// plan that needs a fresh sign-in are 403s that keep the account, tokens and VPN configuration;
+    /// only 401 credential failures end the session.
+    func testAccountStateRefusalsDoNotEndTheSession() {
+        for code in ["PLAN_EXPIRED", "QUOTA_EXHAUSTED", "DEVICE_REAUTH_REQUIRED"] {
+            let error = APIError(status: 403, code: code, message: "")
+            XCTAssertFalse(AccountErrors.isSessionEnded(error), code)
+            XCTAssertEqual(AccountErrors.reasonCode(error), code)
+        }
+        XCTAssertTrue(AccountErrors.isSessionEnded(APIError(status: 401, code: "UNAUTHORIZED", message: "")))
+    }
+
 }

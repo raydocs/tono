@@ -779,6 +779,7 @@ enum PhaseText {
     static let knownReasons: Set<String> = [
         "HOME_UNAVAILABLE", "NETWORK", "RATE_LIMITED", "CORE_START", "CLOUD_UNREACHABLE", "HOME_UNREACHABLE",
         "REVOKED", "DENIED", "SESSION_ENDED", "CATALOG_ROLLBACK", "CORE_STOPPED", "NETWORK_CHANGED", "ROUTES_STOPPED",
+        "PLAN_EXPIRED", "QUOTA_EXHAUSTED", "DEVICE_REAUTH_REQUIRED",
     ]
 
     static func reason(_ code: String) -> String {
