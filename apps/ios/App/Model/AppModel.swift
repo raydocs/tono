@@ -510,8 +510,7 @@ final class AppModel: ObservableObject {
         retryPutBack()
         // The tunnel's reply to this switch (or its silence) replaces what it said before, unless
         // the session ended while it was asked.
-        // No catalog: the tunnel is not asked anything, so no question is left unanswered.
-        let ticket = tunnelStatus.isUp && catalog != nil ? tracker.ask() : nil
+        let ticket = tunnelStatus.isUp ? tracker.ask() : nil
         if let loaded = catalog {
             let tunnel = self.tunnel
             report = await RouteApply.run(requested, previous: previous, tunnelUp: ticket != nil,
@@ -526,7 +525,7 @@ final class AppModel: ObservableObject {
                                               return self.tracker.permits(RouteApplyReport(.unconfirmed(requested), answer: answer), ticket: ticket)
                                           })
         } else {
-            report = RouteApply.withoutCatalog(requested, previous: previous, tunnelUp: tunnelStatus.isUp)
+            report = RouteApply.withoutCatalog(requested, previous: previous, tunnelUp: ticket != nil)
         }
         // Asked of a session that has since ended, or answered about an older graph than one heard
         // since: the reply says nothing about what runs now, so it moves neither the routes, the

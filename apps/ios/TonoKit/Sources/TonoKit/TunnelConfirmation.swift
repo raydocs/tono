@@ -169,12 +169,11 @@ public struct ConfirmationTracker: Equatable, Sendable {
     /// older graph than one heard since, or one a later unanswered question overtook, leaves the
     /// routes, the pending change and the put-back as they are. A reply about the graph already held
     /// (the tunnel's report of the same rebuild was read first) counts. A switch the tunnel was not
-    /// asked about (`ticket` nil, a save that failed first, or no catalog to rebuild from) always
-    /// counts, and its silence says nothing about what runs.
+    /// asked about (`ticket` nil, or a save that failed first) always counts.
     public mutating func settle(_ report: RouteApplyReport, ticket: Ticket?) -> Bool {
         guard let ticket else { return true }
         switch report.outcome {
-        case .saved, .notApplied("SAVE_FAILED", _), .notApplied("NO_CATALOG", _): return true
+        case .saved, .notApplied("SAVE_FAILED", _): return true
         default: break
         }
         guard ticket.epoch == epoch else { return false }
