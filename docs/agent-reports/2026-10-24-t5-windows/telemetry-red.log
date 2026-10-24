@@ -1,0 +1,32 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running tests/telemetry_outbox.rs (apps/windows/target/debug/deps/telemetry_outbox-3dd6219fb3bbfe12)
+
+running 5 tests
+test telemetry_outbox::tests::a_failed_post_is_retried_then_dropped_after_ack ... ok
+test telemetry_outbox::tests::ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report ... FAILED
+test telemetry_outbox::tests::rate_limited_upload_is_retained_until_acknowledged ... FAILED
+test telemetry_outbox::tests::the_queue_drops_the_oldest_item_past_the_cap ... ok
+test telemetry_outbox::tests::turning_the_timeline_off_keeps_only_the_network_loss_items ... ok
+
+failures:
+
+---- telemetry_outbox::tests::ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report stdout ----
+
+thread 'telemetry_outbox::tests::ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report' (10717168) panicked at crates/tono-core/tests/../../../app/src-tauri/src/tono/telemetry_outbox.rs:173:9:
+assertion failed: due(&dir.path,
+            0).iter().any(|item| item.kind == "p0" && item.body == "critical")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- telemetry_outbox::tests::rate_limited_upload_is_retained_until_acknowledged stdout ----
+
+thread 'telemetry_outbox::tests::rate_limited_upload_is_retained_until_acknowledged' (10717169) panicked at crates/tono-core/tests/../../../app/src-tauri/src/tono/telemetry_outbox.rs:157:9:
+HTTP 429 is temporary, not an acknowledgement
+
+
+failures:
+    telemetry_outbox::tests::ordinary_backlog_cannot_evict_or_acknowledge_a_p0_report
+    telemetry_outbox::tests::rate_limited_upload_is_retained_until_acknowledged
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p tono-core --test telemetry_outbox`
