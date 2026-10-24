@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { type Env } from '../src/env';
 import { enforceUser, revokeDevice } from '../src/devices';
-import { api, json, createAccount, startEmailSignIn, useWorkerHarness } from './worker-harness';
+import { api, json, createAccount, emailSignIn, startEmailSignIn, useWorkerHarness } from './worker-harness';
 
 describe('account state is not authentication failure', () => {
   useWorkerHarness();
@@ -29,6 +29,12 @@ describe('account state is not authentication failure', () => {
     const renewed = await me();
     expect(renewed.status).toBe(403);
     expect(await renewed.json()).toMatchObject({ error: { code: 'DEVICE_REAUTH_REQUIRED' } });
+    const signedIn = await emailSignIn({ email: account.email, deviceName: 'Phone', installationId: 'expired-contract-installation-one' });
+    expect(signedIn.status).toBe(200);
+    const restored = await signedIn.json() as any;
+    expect((await api('me', { headers: { authorization: `Bearer ${restored.accessToken}` } })).status).toBe(200);
+    expect((await env.DB.prepare('SELECT entitlement_suspended FROM devices WHERE id = ?')
+      .bind(account.device.id).first<any>()).entitlement_suspended).toBe(0);
   });
 
   it('returns quota state on access, refresh and verified email without suppressing the email', async () => {

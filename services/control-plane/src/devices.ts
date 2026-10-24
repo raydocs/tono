@@ -492,9 +492,7 @@ export async function enforceUser(e: Env, userId: string, processNow = true) {
        AND EXISTS (
          SELECT 1 FROM users
          WHERE users.id = ?
-           AND (
-             users.status != 'active'
-           )
+           AND users.status != 'active'
        )`,
   ).bind(t, userId, userId).run();
   if (processNow) await processRevocations(e);

@@ -57,12 +57,12 @@ export async function rateLimitChallenge(
     5,
   );
   if (!fromApiRelay(req)) {
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`${kind}:ip:${clientIp(req)}`)}`,
-    ipLimit,
-    windowSeconds,
-  );
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`${kind}:ip:${clientIp(req)}`)}`,
+      ipLimit,
+      windowSeconds,
+    );
   }
   await consumeRateLimit(
     e,
@@ -75,12 +75,12 @@ export async function rateLimitChallenge(
 export async function rateLimitOidcStart(e: Env, req: Request, installationId: string) {
   const windowSeconds = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
   if (!fromApiRelay(req)) {
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`oidc-start:ip:${clientIp(req)}`)}`,
-    envInt(e, 'RATE_LIMIT_OIDC_START_IP', 20),
-    windowSeconds,
-  );
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`oidc-start:ip:${clientIp(req)}`)}`,
+      envInt(e, 'RATE_LIMIT_OIDC_START_IP', 20),
+      windowSeconds,
+    );
   }
   await consumeRateLimit(
     e,

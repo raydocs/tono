@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { rateLimitTelemetry } from '../src/ops/ingest-limits';
+import { sha256 } from '../src/crypto';
 import { type Env } from '../src/env';
 import { api, json, createAccount, useWorkerHarness } from './worker-harness';
 
@@ -34,4 +35,20 @@ describe('P0 ingestion is independent of failure storms', () => {
     expect((await env.DB.prepare('SELECT COUNT(*) n FROM connection_events WHERE user_id = ?')
       .bind(account.user.id).first<any>()).n).toBe(24);
   });
+  it('returns the actual remaining login window in Retry-After', async () => {
+    const t = Math.floor(Date.now() / 1000);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(t * 1000);
+    try {
+      await env.DB.prepare('INSERT INTO rate_limits(key, count, window_start) VALUES(?, ?, ?)')
+        .bind(`rl:${await sha256('email-start:ip:0.0.0.0')}`, 50, t - 123).run();
+      const response = await api('auth/email/start', json({
+        email: 'retry-window@example.com', deviceName: 'Phone', installationId: 'retry-window-phone',
+      }));
+      expect(response.status).toBe(429);
+      expect(response.headers.get('Retry-After')).toBe('777');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
 });
