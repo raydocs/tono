@@ -12,5 +12,5 @@
   取消 vs 晚到 start 的系统侧由已合入的 `TunnelStartCoordinatorTests` 覆盖（`IOS-1672-R1-CANCEL-LATE-START` 改为 fixed(e24adbc21)）。
 - 验证：见 PR 的验证评论（RED/GREEN run id）。未在模拟器/真机执行 NE、小组件、Live Activity。
 - 移交 T2：无 catalog 时的重试/切换模式（`IOS-ROUTES-STOPPED-RETRY-AND-MODE-SWITCH-NOOP-WITHOUT-CATALOG`）和 403 账户状态码的人话，
-  与 T2 `fix/t2-ios-account` 重叠，T1 的实现已用 revert 撤出本 PR（不 force-push），说明写在该 finding 里。
+  与 T2 `fix/t2-ios-account` 重叠，T1 的实现已用 revert 撤出本 PR（不 force-push）；该 finding 归 T2（#1745），T1 给 T2 的说明写在 #1741 正文。
 - 未处理：`IOS-LIVE-ACTIVITY-ENDED-UPDATE`（复核成立，无可测缝，保留 open）。
