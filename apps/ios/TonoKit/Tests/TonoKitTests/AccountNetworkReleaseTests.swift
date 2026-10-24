@@ -1,0 +1,72 @@
+import XCTest
+@testable import TonoKit
+
+final class AccountNetworkReleaseTests: XCTestCase {
+    @MainActor
+    func testAccountRestrictionDisarmsAndStopsWithoutDeletingConfigurationOrCredentials() async {
+        let lifecycle = TunnelStartCoordinator()
+        let system = AccountConfiguration()
+        let tokens = MemoryTokens(SessionTokens(access: "synthetic", refresh: "synthetic", binding: "account-a"))
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        let receipt = await AccountNetworkRelease.handle(APIError(status: 403, code: "ACCOUNT_EXPIRED", message: "expired"),
+                                                        accountEpoch: 7, at: at) {
+            await lifecycle.stop(system)
+        }
+        XCTAssertEqual(system.events, ["disarm", "stop"])
+        XCTAssertFalse(system.onDemandEnabled)
+        XCTAssertFalse(system.running)
+        XCTAssertTrue(system.saved)
+        XCTAssertEqual(tokens.tokens?.binding, "account-a")
+        XCTAssertEqual(receipt?.source, "account")
+        XCTAssertEqual(receipt?.accountEpoch, 7)
+        XCTAssertEqual(receipt?.at, at)
+        XCTAssertEqual(receipt?.releaseRequested, true)
+        XCTAssertEqual(receipt?.releaseFailed, false)
+    }
+
+    @MainActor
+    func testLegacyRefreshRejectionAlsoReleasesNetworkWithoutDeletingConfiguration() async {
+        let lifecycle = TunnelStartCoordinator()
+        let system = AccountConfiguration()
+        let receipt = await AccountNetworkRelease.handle(APIError(status: 401, code: "INVALID_REFRESH_TOKEN", message: "rejected"), accountEpoch: 8) {
+            await lifecycle.stop(system)
+        }
+        XCTAssertEqual(system.events, ["disarm", "stop"])
+        XCTAssertTrue(system.saved)
+        XCTAssertEqual(receipt?.reason, "ACCOUNT_UNAVAILABLE")
+    }
+
+    @MainActor
+    func testDisarmFailureIsVisibleAndNotReportedAsSuccessfulRelease() async {
+        struct DisarmFailed: Error {}
+        let receipt = await AccountNetworkRelease.handle(APIError(status: 403, code: "QUOTA_EXCEEDED", message: "quota"), accountEpoch: 9) {
+            throw DisarmFailed()
+        }
+        XCTAssertEqual(receipt?.reason, "ACCOUNT_RELEASE_FAILED")
+        XCTAssertEqual(receipt?.source, "account")
+        XCTAssertEqual(receipt?.releaseFailed, true)
+    }
+
+    @MainActor
+    func testOrdinaryNetworkErrorDoesNotStopAnExistingTunnel() async {
+        var releases = 0
+        let receipt = await AccountNetworkRelease.handle(APIError.network("offline"), accountEpoch: 10) { releases += 1 }
+        XCTAssertNil(receipt)
+        XCTAssertEqual(releases, 0)
+    }
+}
+
+@MainActor
+private final class AccountConfiguration: TunnelLifecycleSteps {
+    var saved = true
+    var running = true
+    var onDemandEnabled = true
+    var events: [String] = []
+    func refresh() async -> Bool { saved }
+    func saveForStart() async throws { saved = true; onDemandEnabled = true }
+    func reloadForStart() async throws {}
+    func startTunnel() throws { running = true }
+    func disarmOnDemand() async { events.append("disarm"); onDemandEnabled = false }
+    func stopTunnel() async { events.append("stop"); running = false }
+    func removeConfiguration() async { events.append("remove"); saved = false }
+}
