@@ -1,0 +1,12 @@
+FAIL threeTier DoT/DoQ before routing
+FAIL threeTier STUN ports before routing
+FAIL threeTier public STUN before routing
+FAIL threeTier overseas IPv4 before routing
+FAIL threeTier overseas IPv6 before routing
+FAIL threeTier HTTPS/SVCB before DNS routing
+FAIL aiHome DoT/DoQ before routing
+FAIL aiHome STUN ports before routing
+FAIL aiHome public STUN before routing
+FAIL aiHome overseas IPv4 before routing
+FAIL aiHome overseas IPv6 before routing
+FAIL aiHome HTTPS/SVCB before DNS routing

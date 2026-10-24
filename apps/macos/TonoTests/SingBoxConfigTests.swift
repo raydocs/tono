@@ -3,6 +3,69 @@ import CryptoKit
 @testable import Tono
 
 final class SingBoxConfigTests: XCTestCase {
+    private func antiLeakDocuments() throws -> [[String: Any]] {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeNodeName: "Fixture Alpha")
+        let stable = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: nil)
+        return [try XCTUnwrap(JSONSerialization.jsonObject(with: stable.runtimeJSON) as? [String: Any]),
+            try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential", physicalInterface: "en0", fakeRange: "198.18.128.0/20"),
+            try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential", physicalInterface: "en0", fakeRange: "198.18.128.0/20", variant: .aiHome)]
+    }
+
+    private func assertAntiLeakReject(_ matches: ([String: Any]) -> Bool,
+                                     file: StaticString = #filePath, line: UInt = #line) throws {
+        for document in try antiLeakDocuments() {
+            let rules = try XCTUnwrap((document["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+            let reject = try XCTUnwrap(rules.firstIndex(where: matches), file: file, line: line)
+            let dns = try XCTUnwrap(rules.lastIndex { $0["action"] as? String == "hijack-dns" })
+            let route = try XCTUnwrap(rules.firstIndex { $0["action"] as? String == "route" })
+            XCTAssertEqual(rules[reject]["action"] as? String, "reject", file: file, line: line)
+            XCTAssertLessThan(dns, reject, file: file, line: line)
+            XCTAssertLessThan(reject, route, file: file, line: line)
+        }
+    }
+
+    func testEncryptedDNSRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject { $0["port"] as? [Int] == [853] }
+    }
+
+    func testRawSTUNPortRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject {
+            $0["port"] as? [Int] == Array(19302...19309) && $0["network"] as? [String] == ["udp", "icmp"]
+        }
+    }
+
+    func testPublicSTUNRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject {
+            ($0["domain_suffix"] as? [String])?.contains("stun.cloudflare.com") == true
+                && $0["network"] as? [String] == ["udp", "icmp"]
+        }
+    }
+
+    func testOverseasIPv4UDPRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject {
+            ($0["ip_cidr"] as? [String])?.contains("74.125.0.0/16") == true
+                && $0["network"] as? [String] == ["udp", "icmp"]
+        }
+    }
+
+    func testOverseasIPv6UDPRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject {
+            ($0["ip_cidr"] as? [String])?.contains("2001:4860::/32") == true
+                && $0["network"] as? [String] == ["udp", "icmp"] && $0["ip_version"] as? Int == 6
+        }
+    }
+
+    func testHTTPSAndSVCBAreSuppressedBeforeDNSResolvers() throws {
+        for document in try antiLeakDocuments() {
+            let rules = try XCTUnwrap((document["dns"] as? [String: Any])?["rules"] as? [[String: Any]])
+            XCTAssertEqual(rules.first?["query_type"] as? [Int], [65, 64])
+            XCTAssertEqual(rules.first?["action"] as? String, "predefined")
+            XCTAssertEqual(rules.first?["rcode"] as? String, "NOERROR")
+        }
+    }
+
     private typealias Snapshot = ConfigPipeline.SingBoxOfflineSnapshot
     private typealias Requirements = ConfigPipeline.SingBoxDerivedRequirements
     private let secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
@@ -913,7 +976,11 @@ final class SingBoxConfigTests: XCTestCase {
         // the refusal stays a reset however many connections retry at once.
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: replacement) as? [String: Any])
         let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
-        XCTAssertEqual(rules[2] as NSDictionary,
+        let staleFakeIP = try XCTUnwrap(rules.firstIndex {
+            $0["ip_cidr"] as? [String] == ["198.18.128.0/17", "198.18.16.0/20"]
+        })
+        XCTAssertLessThan(staleFakeIP, try XCTUnwrap(rules.firstIndex { $0["action"] as? String == "route" }))
+        XCTAssertEqual(rules[staleFakeIP] as NSDictionary,
                        ["ip_cidr": ["198.18.128.0/17", "198.18.16.0/20"], "action": "reject",
                         "no_drop": true] as NSDictionary)
     }

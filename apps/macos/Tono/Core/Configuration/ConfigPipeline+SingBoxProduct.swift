@@ -221,7 +221,8 @@ nonisolated extension ConfigPipeline {
              "path": "/dns-query", "tls": ["enabled": true, "server_name": "dns.google", "alpn": ["h2"]],
              "detour": exitGroupName],
         ]
-        var dnsRules: [[String: Any]] = [["query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"]]
+        var dnsRules: [[String: Any]] = [ThreeTierRoutingContract.antiLeakDNSRule,
+            ["query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"]]
         // Preserve hostname identity for protected listeners before the broad
         // Alibaba China-DNS rule; outbound lookups still use tunnelled real DNS.
         dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"],
@@ -243,6 +244,8 @@ nonisolated extension ConfigPipeline {
             // `no_drop`: sing-box turns a reject into a drop after 50 in 30 s.
             ["ip_cidr": [singBoxFakeIPPool, singBoxFormerFakeIPPool], "action": "reject", "no_drop": true],
         ]
+        // Before any process/web DIRECT permit, including reviewed UDP routes.
+        rules.insert(contentsOf: try ThreeTierRoutingContract.antiLeakRouteRules(), at: 2)
         if !overlay.allowLocalNetworkDevices {
             // D7 (A29), "Allow local network devices" off: nothing the Core
             // carries (TUN packets, the loopback mixed proxy, a reviewed app's
