@@ -44,9 +44,6 @@
 "reason_HOME_UNAVAILABLE" = "分配给你的家宽出口暂时不可用。Tono 不会悄悄改走别的出口，请稍后再试。";
 "reason_NETWORK" = "连不上 Tono。请检查网络后重试。";
 "reason_RATE_LIMITED" = "尝试过多，请稍后再试。";
-"reason_PLAN_EXPIRED" = "套餐已到期。请续费，或联系帮你开通的家人。";
-"reason_QUOTA_EXHAUSTED" = "流量已用完。请续费，或联系帮你开通的家人。";
-"reason_DEVICE_REAUTH_REQUIRED" = "套餐已恢复。请在设置里点「退出登录」，再重新登录一次，这台手机就能再连接。";
 "reason_CORE_START" = "隧道内核没能启动。请重试；一直失败请重启手机。";
 "reason_CLOUD_UNREACHABLE" = "云端出口没有响应。命中的流量已拦住，不会直连。可以换一条线路。";
 "reason_HOME_UNREACHABLE" = "家宽没有响应。AI 流量已拦住，不会直连；其他应用照常。";
@@ -140,9 +137,6 @@
 "short_REVOKED" = "VPN 被其他应用接管";
 "short_CORE_START" = "内核没能启动";
 "short_RATE_LIMITED" = "尝试太频繁";
-"short_PLAN_EXPIRED" = "套餐已到期";
-"short_QUOTA_EXHAUSTED" = "流量已用完";
-"short_DEVICE_REAUTH_REQUIRED" = "需要重新登录";
 "short_SESSION_ENDED" = "请重新登录";
 "short_CATALOG_ROLLBACK" = "线路列表异常，已拒绝";
 "short_CORE_STOPPED" = "点「重试」重新连接";
