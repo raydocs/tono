@@ -34,7 +34,7 @@ cargo test --manifest-path apps/windows/Cargo.toml -p tono-core --test telemetry
 
 The concurrent producer regression now pauses the first transaction after loading its snapshot, checks serialization is owned through the write boundary, then admits the second producer and verifies both reports survive. No sleeps or probabilistic collision requirement. [Mutex-removal mutation output](queue-lock-mutation-red.log) fails the precise serialization assertion; this is a mutation check, **not** a claim that the full new test ran on original main. Restored code passes [full GREEN](core-green.log).
 
-[Round 2](review-r2.txt) approved telemetry through exact `52084a44d`, including Retry-After and concurrency-test corrections. Later pin-hygiene changes are outside that review. Full-range diff check found two raw-log EOF blank lines; only terminal blank lines were trimmed afterward. No merge/auto-merge is requested.
+[Round 2](review-r2.txt) approved telemetry through exact `52084a44d`, including Retry-After and concurrency-test corrections. Later pin-hygiene changes are outside that review. Full-range diff check found two raw-log EOF blank lines; only terminal blank lines/trailing whitespace were trimmed afterward (including the later Node failure log). No merge/auto-merge is requested.
 
 ## PR coordination (read-only)
 

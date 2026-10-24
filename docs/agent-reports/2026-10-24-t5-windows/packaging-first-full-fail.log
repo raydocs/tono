@@ -54,10 +54,10 @@ test at apps/windows/app/scripts/windows-packaging.test.mjs:868:1
 ✖ NSIS keeps the failed update recovery copies while a repair install is unfinished (0.937541ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'installer.nsi deletes update recovery evidence outside the repair guard: resources/sing-box-sha256.txt.rollback'
   - null
-  
+
       at TestContext.<anonymous> (file:///Users/ruirui/tono-wt/t5-windows/apps/windows/app/scripts/windows-packaging.test.mjs:869:10)
       at Test.runInAsyncScope (node:async_hooks:226:14)
       at Test.run (node:internal/test_runner/test:1402:25)
@@ -77,10 +77,10 @@ test at apps/windows/app/scripts/windows-packaging.test.mjs:954:1
 ✖ NSIS uninstall removes the sing-box pin copied beside sing-box.exe (0.46ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'installer.nsi deletes update recovery evidence outside the repair guard: resources/sing-box-sha256.txt.rollback'
   - null
-  
+
       at TestContext.<anonymous> (file:///Users/ruirui/tono-wt/t5-windows/apps/windows/app/scripts/windows-packaging.test.mjs:958:10)
       at Test.runInAsyncScope (node:async_hooks:226:14)
       at Test.run (node:internal/test_runner/test:1402:25)
