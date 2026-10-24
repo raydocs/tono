@@ -16,7 +16,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real service entry points and engine executor; only account presence/OS consent are fixtures. */
+/** Real service entry points and engine executor; account presence, OS consent and the remote watch binder are fixtures. */
 @RunWith(RobolectricTestRunner::class)
 @Config(
     sdk = [35],
@@ -24,6 +24,17 @@ import java.util.concurrent.atomic.AtomicReference
     instrumentedPackages = ["com.raydocs.tono.mobile.engine"],
 )
 class AlwaysOnResumeServiceTest {
+    @org.junit.Before fun provideTheRemoteWatchServiceBinder() {
+        // Robolectric does not instantiate :watch and otherwise delivers a null binder. Model the
+        // OS binding with a real Messenger endpoint, not a production bypass of EngineWatch.
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        val messenger = android.os.Messenger(android.os.Handler(android.os.Looper.getMainLooper()))
+        org.robolectric.Shadows.shadowOf(app).setComponentNameAndServiceForBindService(
+            android.content.ComponentName(app, com.raydocs.tono.mobile.surface.EngineWatchService::class.java),
+            messenger.binder,
+        )
+    }
+
     @Test fun systemAlwaysOnRequestAfterRevokeAndDisconnectEntersPreparingInTheSameInstance() {
         val controller = Robolectric.buildService(TonoVpnService::class.java)
         val service = controller.get()

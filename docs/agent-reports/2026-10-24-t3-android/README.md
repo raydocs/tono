@@ -63,7 +63,7 @@ WIP **没有进入本 PR**，仍需其独立集成、完整构建/UI 验证与�
 ## Claude 交叉审查修订（审查基线 378c0c376）
 
 逐条处理：
-1. **阻塞项：接受并移除 explicitlyStopped**。SERVICE_INTERFACE 本身就是新的系统/用户意图，恢复原有 wantConnected=false 也可启动的语义。新增 AlwaysOnResumeServiceTest 使用真实 onCreate/onRevoke/onStartCommand/串行 engine；只替换账号存在和 OS consent，并用可控 IO 队列阻止实际 HTTP，检查同实例撤权后和断开后的系统启动均进入 PREPARING 并保存 wantConnected=true。不是纯 flag/helper 测试。
+1. **阻塞项：接受并移除 explicitlyStopped**。SERVICE_INTERFACE 本身就是新的系统/用户意图，恢复原有 wantConnected=false 也可启动的语义。新增 AlwaysOnResumeServiceTest 使用真实 onCreate/onRevoke/onStartCommand/串行 engine；只替换账号存在、OS consent 与外部 watch 服务的 OS binder，并用可控 IO 队列阻止实际 HTTP，检查同实例撤权后和断开后的系统启动均进入 PREPARING 并保存 wantConnected=true。不是纯 flag/helper 测试。
 2. **非阻塞 1：用 pinned 源码反驳“旧 core 退出回调”前提**。完整 pin `25b0d5ea` 中 ServiceStop 仅经 ManagedService.StopService RPC → platformHandler 同步转发；CloseService 不调用该方法，全部 .ServiceStop 调用点只有上述两个。这是到达时的新管理停止命令，不是旧 core 生命周期事件；接收时 stamp 并隔离入队后过期命令保留。证据链接与边界写入 [refuted finding](../../findings.d/ANDROID-CORE-STOP-CALLBACK-NO-ORIGIN.md)，pin 升级后需重查。
 3. **非阻塞 2：测试/KDoc 与生产对齐**。本轮恢复了物理关闭后 begin(DISCONNECTING) → end(IDLE) 的真实接线；测试保留相同阶段并明确先关闭 TUN，另加 IDLE 后同代回调拒绝断言。
 4. **非阻塞 3：恢复 DISCONNECTING，但在物理关闭之后发布**。这样 UI/磁贴/小组件仍收到忙碌阶段，同时任何 surface 写失败都不可能阻止前面的 TUN 关闭。服务接线测试监听真实 binder 广播，检查 DISCONNECTING 事件发生时 tunOpen=false，随后 IDLE。边界：native close 正在阻塞时仍不会提前显示 busy；主按钮防重复阶段覆盖的是关闭后的清理，不承诺阻塞 close 期间已禁用。
@@ -75,6 +75,13 @@ WIP **没有进入本 PR**，仍需其独立集成、完整构建/UI 验证与�
 - Always-on must not silently consume the start after revoke expected PREPARING but was NEEDS_PERMISSION。
 - the service must publish DISCONNECTING after the physical close。
 
-更早的 5855e97d0 / run40086166924 失败是测试 shadow 未继承 ShadowService 的 ClassCastException，已修 fixture；**不计作行为 RED**。未修改生产来绕过测试。GREEN 源码为后续独立 fix commit，服务测试与 282809586 完全一致；新 head CI 未完成前不声称通过。
+更早的 5855e97d0 / run40086166924 失败是测试 shadow 未继承 ShadowService 的 ClassCastException，已修 fixture；**不计作行为 RED**。未修改生产来绕过测试。GREEN 源码为后续独立 fix commit，服务测试行为断言与 282809586 一致；后续补充外部 watch 服务的有效 Messenger binder fixture，避免 Robolectric 默认投递 null binder（没有修改 EngineWatch 或任何行为断言）。新 head CI 未完成前不声称通过。
 
 Pinned DNS 线程补证：同一 upstream commit 的 [experimental/libbox/dns.go:114-130](https://github.com/SagerNet/sing-box/blob/25b0d5ea3e466d246c708ac0f20d0448110e566c/experimental/libbox/dns.go#L114-L130) 对 raw exchange 启动 Go goroutine 再调用 Android Exchange，外层 select 可响应 ctx.Done。因此本修复证明的是取消释放该 exchange 等待/避免迟到完成，**不是已观察到串行 tono-engine 被卡 12s**；真实 native/JVM线程身份仍待设备证据。
+
+
+### 与编排者新合入 main 的集成
+首次普通 push 因远端由 378c0c376 前进到 118a98a55 被拒绝；按要求 git pull --no-rebase 合并为 b6eba419d，再普通 push，没有 force。
+新 main 带来 T8 契约，将 Android recheck 标为 expected-failure；本 PR 已修复行为，所以 [run40087443121](https://github.com/raydocs/tono/actions/runs/40087443121) 在 StateIntentContractTest.productProbesAgreeOrAreMarked 实际断言失败：`recheck-while-connected now matches the contract (connected); set android enforcement to enabled`。
+按该契约自身的升级规则，仅将这个 scenario 的 Android enforcement 改为 enabled 并改 note；**expect 的全部字段、其他平台/其他场景不变**。decision134 的对应覆盖说明同步，未更改账户码契约或其他线程。
+同次 run 的 service 测试出现外部 watch binder 的 fixture NPE（Robolectric 不会启动真实 :watch 进程）；补一个有效 Messenger binder 作为系统绑定端点，没改生产逻辑或测试断言，不把 fixture NPE 算作行为 RED/GREEN。

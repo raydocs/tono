@@ -50,7 +50,7 @@ One expectation for every platform. The owner column is who makes the product ma
 | recovery-success | connected | recovered | disconnect | kept | kept | The previous failure is cleared. Live bug is iOS `AppModel` keeping the old failure; no TonoKit probe, so todo. |
 | retry-without-catalog | catalog-missing | catalog-missing | retry | kept | kept | The button must say why. Not a silent no-op. T2. Probe todo. |
 | cancel-then-late-start | off | none | connect | kept | kept | A start from the cancelled generation must not come up. Android ledger probe is enabled. iOS is T1, todo here. |
-| recheck-while-connected | connected | none | disconnect | kept | kept | A recheck must not demote the visible phase to a fresh connect. iOS `ConnectionState.derive` and Android `TunnelLedger.rechecking` are expected-failure. |
+| recheck-while-connected | connected | none | disconnect | kept | kept | A recheck must not demote the visible phase to a fresh connect. iOS `ConnectionState.derive` remains expected-failure; Android `TunnelLedger.rechecking` is enabled by T3 PR1742. |
 | optional-rollback-failed | failed | rollback-failed | retry | kept | kept | source `core`. Baseline and owner match the process that is actually running, or are cleared. Not shown connected. Android's failed reload is enabled. Windows PID baseline is T5, todo here. |
 | network-restored-update-retired | ready | none | connect | kept | kept | Connect works when the pending update was retired. The known latch is macOS `nativeUpdateBlocksConnect`. T4. Probe todo. |
 | network-restored-update-still-pending | update-pending | update-still-pending | explain-blocked | kept | kept | Connect stays blocked, with a reason. Not a silent no-op, and not "ready". |

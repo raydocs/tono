@@ -14,3 +14,4 @@
 - 恢复物理关闭后的 DISCONNECTING 广播，测试/KDoc 与生产接线对齐；pinned 源码证实 serviceStop 是管理 RPC 而非旧 core 退出回调，记录 refuted finding 和升级复核边界。
 - 核实历史 head 378c0c376 的 android-ci 40084020477：完整构建、Compose 及 emulator(system/tunnel/ui)通过；不是新 head 或 API29/30/34/真机验证。新增测试执行结果见报告续记。
 - 本轮真实 Service RED：282809586 / android-ci 40086755072，两条真实断言失败（Always-on被吞、DISCONNECTING缺失）；第一次测试shadow配置失败不算RED。修复后新head CI待执行。
+- 编排者再次推进分支后按要求非rebase合并，无force；集成T8在run40087443121实际要求将已修复的Android recheck探针expected-failure升级enabled，仅改该平台metadata，不改期望行为。服务测试补齐外部watch服务OS binder fixture，生产EngineWatch不变；未把fixture NPE计作行为RED。

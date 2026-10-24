@@ -721,9 +721,9 @@
           "note": "ConnectionState.derive turns a connected tunnel with a checking probe into CONNECTING."
         },
         "android": {
-          "enforcement": "expected-failure",
+          "enforcement": "enabled",
           "owner": "T3",
-          "note": "TunnelLedger.rechecking copies a confirmed tunnel to phase CONNECTING."
+          "note": "PR1742: TunnelLedger.rechecking preserves the confirmed CONNECTED/DEGRADED phase; only probe verdicts become CHECKING."
         },
         "macos": {
           "enforcement": "todo",
