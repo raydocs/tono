@@ -27,6 +27,20 @@ pub fn should_queue(err: &ApiError) -> bool {
     }
 }
 
+pub fn retry_after_secs(err: &ApiError) -> Option<u64> {
+    match err {
+        ApiError::RateLimited { retry_after_secs } => *retry_after_secs,
+        _ => None,
+    }
+}
+
+// The server deadline is a minimum; only the local exponential delay is capped.
+fn next_retry_at(now_ms: i64, attempts: u32, retry_after_secs: Option<u64>) -> i64 {
+    let server_ms = retry_after_secs.unwrap_or(0).saturating_mul(1000).min(i64::MAX as u64) as i64;
+    let local_ms = backoff(attempts).as_millis() as i64;
+    now_ms.saturating_add(local_ms.max(server_ms))
+}
+
 pub const OUTBOX_FILE: &str = "telemetry-outbox.json";
 pub const P0_OUTBOX_FILE: &str = "telemetry-p0-outbox.json";
 // All filesystem transactions are synchronous; never hold this across a network await.
@@ -76,6 +90,15 @@ pub fn backoff(attempts: u32) -> Duration {
 
 /// Append one payload. Drops the oldest items until the file fits the cap.
 pub fn enqueue(dir: &Path, kind: &str, body: &str, now_ms: i64) {
+    enqueue_at(dir, kind, body, 0, now_ms);
+}
+
+/// An already-rejected upload must wait too, not just reports rejected during drain.
+pub fn enqueue_failed(dir: &Path, kind: &str, body: &str, now_ms: i64, err: &ApiError) {
+    enqueue_at(dir, kind, body, 1, next_retry_at(now_ms, 1, retry_after_secs(err)));
+}
+
+fn enqueue_at(dir: &Path, kind: &str, body: &str, attempts: u32, next_at_ms: i64) {
     if body.len() > OUTBOX_MAX_BYTES / 2 || body.is_empty() {
         return;
     }
@@ -84,8 +107,8 @@ pub fn enqueue(dir: &Path, kind: &str, body: &str, now_ms: i64) {
     file.items.push(OutboxItem {
         kind: kind.to_string(),
         body: body.to_string(),
-        attempts: 0,
-        next_at_ms: now_ms,
+        attempts,
+        next_at_ms,
     });
     while file.items.len() > OUTBOX_MAX_ITEMS {
         // Older versions stored P0 in the ordinary file. Keep those until acknowledgement;
@@ -137,13 +160,13 @@ pub fn retain_kind(dir: &Path, kind: &str) {
     }
 }
 
-pub fn postpone(dir: &Path, kind: &str, body: &str, now_ms: i64, _retry_after_secs: Option<u64>) {
+pub fn postpone(dir: &Path, kind: &str, body: &str, now_ms: i64, retry_after_secs: Option<u64>) {
     let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     for queue in ["p0", "ordinary"] {
         let mut file = load(dir, queue);
         if let Some(item) = file.items.iter_mut().find(|item| item.kind == kind && item.body == body) {
             item.attempts = item.attempts.saturating_add(1);
-            item.next_at_ms = now_ms.saturating_add(backoff(item.attempts).as_millis() as i64);
+            item.next_at_ms = next_retry_at(now_ms, item.attempts, retry_after_secs);
             let _ = store(dir, queue, &file);
             return;
         }
@@ -255,6 +278,10 @@ mod tests {
         postpone(&dir.path, "p0", "rate-limited-p0", 1000, Some(7200));
         assert!(due(&dir.path, 7_200_999).is_empty(), "must not retry before the server's deadline");
         assert_eq!(due(&dir.path, 7_201_000).len(), 1);
+        enqueue_failed(&dir.path, "failure", "initially-rejected", 1000, &ApiError::RateLimited { retry_after_secs: Some(7200) });
+        assert!(due(&dir.path, 7_200_999).is_empty());
+        assert_eq!(due(&dir.path, 7_201_000).len(), 2);
+        assert_eq!(next_retry_at(1000, u32::MAX, Some(u64::MAX)), i64::MAX);
     }
 
     #[test]

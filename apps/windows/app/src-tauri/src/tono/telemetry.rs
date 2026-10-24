@@ -268,11 +268,12 @@ pub(crate) fn spawn_connect_failure_report(
         let queued = serde_json::to_string(&report).unwrap_or_default();
         if let Err(err) = client.upload_connect_failure_for_identity(&report, identity).await {
             if telemetry_outbox::should_queue(&err) && !queued.is_empty() {
-                telemetry_outbox::enqueue(
+                telemetry_outbox::enqueue_failed(
                     task_state.audit().settings_dir(),
                     "failure",
                     &queued,
                     epoch_ms(),
+                    &err,
                 );
             }
         }
@@ -284,11 +285,12 @@ pub(crate) fn spawn_connect_failure_report(
                     .await
                 {
                     if telemetry_outbox::should_queue(&err) {
-                        telemetry_outbox::enqueue(
+                        telemetry_outbox::enqueue_failed(
                             task_state.audit().settings_dir(),
                             "diagnostics",
                             &body,
                             epoch_ms(),
+                            &err,
                         );
                     }
                 }
@@ -355,7 +357,7 @@ async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
         match result {
             Ok(()) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
             Err(err) if telemetry_outbox::should_queue(&err) => {
-                telemetry_outbox::postpone(state.audit().settings_dir(), &item.kind, &item.body, epoch_ms(), None);
+                telemetry_outbox::postpone(state.audit().settings_dir(), &item.kind, &item.body, epoch_ms(), telemetry_outbox::retry_after_secs(&err));
             }
             Err(_) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
         }

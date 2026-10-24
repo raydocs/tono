@@ -1703,6 +1703,16 @@ fn decode_json<R: DeserializeOwned>(body: &[u8]) -> Result<R, ApiError> {
     serde_json::from_slice(bytes).map_err(|_| ApiError::InvalidResponse)
 }
 
+/// T6's rate-limit contract uses integer delta-seconds, not an HTTP date.
+/// Reject malformed/overflowing metadata and keep the client's local fallback.
+pub fn retry_after_seconds(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
 fn map_status(response: ApiResponse) -> Result<Vec<u8>, ApiError> {
     if (200..300).contains(&response.status) {
         return Ok(response.body);
@@ -1718,7 +1728,7 @@ fn map_status(response: ApiResponse) -> Result<Vec<u8>, ApiError> {
         403 => Err(ApiError::Forbidden),
         404 => Err(ApiError::NotFound),
         409 if code.as_deref() == Some("DEVICE_LIMIT") => Err(ApiError::DeviceLimit),
-        429 => Err(ApiError::RateLimited { retry_after_secs: None }),
+        429 => Err(ApiError::RateLimited { retry_after_secs: response.retry_after_secs }),
         503 if code.as_deref() == Some("EXIT_IDENTITY_PROPAGATING") => Err(ApiError::ExitIdentityPropagating),
         status => Err(ApiError::Server {
             status,
@@ -3063,6 +3073,17 @@ mod tests {
                 .unwrap_err(),
             ApiError::InvalidResponse
         );
+    }
+
+    #[test]
+    fn retry_after_accepts_only_nonnegative_integer_seconds() {
+        assert_eq!(retry_after_seconds(" 120 "), Some(120));
+        assert_eq!(retry_after_seconds("0"), Some(0));
+        assert_eq!(retry_after_seconds("-1"), None);
+        assert_eq!(retry_after_seconds("+1"), None);
+        assert_eq!(retry_after_seconds("1.5"), None);
+        assert_eq!(retry_after_seconds("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+        assert_eq!(retry_after_seconds("18446744073709551616"), None);
     }
 
     #[tokio::test]
