@@ -513,7 +513,7 @@ final class AppModel: ObservableObject {
                                              refresh: { [weak self] in
                                                  guard let self, await self.refreshCatalog(quiet: false), self.accountEpoch == epoch else { return nil }
                                                  return self.catalog
-                                             }) { loaded in
+                                             }, unavailableReason: { [weak self] in self?.failure ?? "HOME_UNAVAILABLE" }) { loaded in
             return await RouteApply.run(requested, previous: previous, tunnelUp: ticket != nil,
                                           save: { [weak self] settings in
                                               guard let self, self.accountEpoch == epoch, !self.signingOut else { throw SessionSuperseded() }
@@ -530,7 +530,9 @@ final class AppModel: ObservableObject {
         // since: the reply says nothing about what runs now, so it moves neither the routes, the
         // pending change nor the put-back. What the tunnel says now decides (`recompute`).
         guard epoch == accountEpoch, !signingOut else { return }
-        guard tracker.settle(report, ticket: ticket) else {
+        // A local preparation failure never asked the tunnel anything: show it without replacing
+        // its confirmed graph with an absent answer (or dropping the visible failure).
+        guard !report.wrote || tracker.settle(report, ticket: ticket) else {
             routeChange = nil
             recompute()
             return

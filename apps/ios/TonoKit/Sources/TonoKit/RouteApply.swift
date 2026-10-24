@@ -112,9 +112,14 @@ public enum RouteApply {
     /// Catalog availability orchestration, shared with the app so missing-input behavior is testable.
     public static func withCatalog(_ catalog: LoadedCatalog?, requested: RouteSettings, previous: RouteSettings,
                                    tunnelUp: Bool, refresh: () async -> LoadedCatalog?,
+                                   unavailableReason: () -> String = { "HOME_UNAVAILABLE" },
                                    apply: (LoadedCatalog) async -> RouteApplyReport) async -> RouteApplyReport {
         if let catalog { return await apply(catalog) }
-        return RouteApplyReport(.saved(requested))
+        guard tunnelUp else { return RouteApplyReport(.saved(requested), wrote: false) }
+        guard let refreshed = await refresh() else {
+            return RouteApplyReport(.notApplied(code: unavailableReason(), inEffect: previous), wrote: false)
+        }
+        return await apply(refreshed)
     }
 
     public static func run(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool,

@@ -224,3 +224,10 @@
 "settings_signed_in" = "已登录";
 "settings_licences" = "许可与源码";
 "about_source_link" = "在 GitHub 查看源码";
+
+"reason_PLAN_EXPIRED" = "套餐已到期。请续费或联系家人帮忙；无需退出登录。";
+"short_PLAN_EXPIRED" = "套餐已到期";
+"reason_QUOTA_EXHAUSTED" = "本期流量已用完。请续费或联系家人帮忙；无需退出登录。";
+"short_QUOTA_EXHAUSTED" = "本期流量已用完";
+"reason_ACCOUNT_UNAVAILABLE" = "暂时无法确认账户是否可用。请联系家人检查套餐或帮助重新登录；已保留你的登录和 VPN 配置。";
+"short_ACCOUNT_UNAVAILABLE" = "请检查账户或套餐";

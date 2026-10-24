@@ -64,8 +64,14 @@ public struct SessionSuperseded: Error, Equatable, Sendable {
 }
 
 public enum AccountErrors {
-    /// Codes that mean this phone's session is over; the account is cleared locally.
-    public static let sessionEnded: Set<String> = ["INVALID_REFRESH_TOKEN", "SIGNED_OUT", "UNAUTHORIZED", "ACCOUNT_SUSPENDED"]
+    /// Only explicit session-end signals can delete the local account and VPN configuration.
+    /// Old servers conflate plan/quota restrictions with UNAUTHORIZED/INVALID_REFRESH_TOKEN.
+    public static let sessionEnded: Set<String> = ["SIGNED_OUT", "ACCOUNT_SUSPENDED"]
+    public static let restrictions: Set<String> = ["PLAN_EXPIRED", "QUOTA_EXHAUSTED"]
+
+    public static func isRestriction(_ error: APIError) -> Bool {
+        (error.status == 401 || error.status == 403) && restrictions.contains(error.code)
+    }
 
     public static func isSessionEnded(_ error: Error) -> Bool {
         guard let e = error as? APIError else { return false }
@@ -80,6 +86,7 @@ public enum AccountErrors {
         case let e as APIError:
             if e.code == "CATALOG_UNAVAILABLE" { return "HOME_UNAVAILABLE" }
             if e.status == 429 { return "RATE_LIMITED" }
+            if e.status == 401 && (e.code == "UNAUTHORIZED" || e.code == "INVALID_REFRESH_TOKEN") { return "ACCOUNT_UNAVAILABLE" }
             return e.code
         case let e as CatalogRejected:
             return e.code
@@ -244,7 +251,7 @@ public actor AccountSession {
                 let result = try await op(token)
                 try check(lease)
                 return result
-            } catch let e as APIError where e.status == 401 && e.code != "INVALID_REFRESH_TOKEN" && e.code != "SIGNED_OUT" {
+            } catch let e as APIError where e.status == 401 && !AccountErrors.isRestriction(e) && !AccountErrors.isSessionEnded(e) && e.code != "INVALID_REFRESH_TOKEN" {
                 try check(lease)
                 let token = try await bearer(forceRefresh: true, lease: lease)
                 try check(lease)
