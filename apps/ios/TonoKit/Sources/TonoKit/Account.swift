@@ -67,7 +67,7 @@ public enum AccountErrors {
     /// Only explicit session-end signals can delete the local account and VPN configuration.
     /// Old servers conflate plan/quota restrictions with UNAUTHORIZED/INVALID_REFRESH_TOKEN.
     public static let sessionEnded: Set<String> = ["SIGNED_OUT", "ACCOUNT_SUSPENDED"]
-    public static let restrictions: Set<String> = ["PLAN_EXPIRED", "QUOTA_EXHAUSTED"]
+    public static let restrictions: Set<String> = ["ACCOUNT_EXPIRED", "QUOTA_EXCEEDED", "PLAN_EXPIRED", "QUOTA_EXHAUSTED"]
 
     public static func isRestriction(_ error: APIError) -> Bool {
         (error.status == 401 || error.status == 403) && restrictions.contains(error.code)
@@ -84,6 +84,8 @@ public enum AccountErrors {
     public static func reasonCode(_ error: Error) -> String {
         switch error {
         case let e as APIError:
+            if e.code == "ACCOUNT_EXPIRED" { return "PLAN_EXPIRED" }
+            if e.code == "QUOTA_EXCEEDED" { return "QUOTA_EXHAUSTED" }
             if e.code == "CATALOG_UNAVAILABLE" { return "HOME_UNAVAILABLE" }
             if e.status == 429 { return "RATE_LIMITED" }
             if e.status == 401 && (e.code == "UNAUTHORIZED" || e.code == "INVALID_REFRESH_TOKEN") { return "ACCOUNT_UNAVAILABLE" }

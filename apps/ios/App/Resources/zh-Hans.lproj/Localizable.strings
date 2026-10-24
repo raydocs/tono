@@ -235,3 +235,5 @@
 "short_DEVICE_REAUTH_REQUIRED" = "请重新登录以恢复此设备";
 "reason_USER_DISABLED" = "账户已被停用。请联系家人或客服帮忙。";
 "short_USER_DISABLED" = "账户已停用";
+"reason_ACCOUNT_RELEASE_FAILED" = "未能确认已关闭自动连接。请打开 iPhone 设置 → VPN，关闭 Tono 以恢复网络；账户和 VPN 配置已保留。";
+"short_ACCOUNT_RELEASE_FAILED" = "请在 iPhone 的 VPN 设置中关闭 Tono";

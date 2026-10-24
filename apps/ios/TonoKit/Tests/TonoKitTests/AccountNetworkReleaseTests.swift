@@ -10,7 +10,10 @@ final class AccountNetworkReleaseTests: XCTestCase {
         let at = Date(timeIntervalSince1970: 1_800_000_000)
         let receipt = await AccountNetworkRelease.handle(APIError(status: 403, code: "ACCOUNT_EXPIRED", message: "expired"),
                                                         accountEpoch: 7, at: at) {
-            await lifecycle.stop(system)
+            try await lifecycle.exclusive {
+                try await AccountNetworkRelease.checkedStop(disarm: { await system.disarmOnDemand() },
+                                                            stop: { system.requestStop() })
+            }
         }
         XCTAssertEqual(system.events, ["disarm", "stop"])
         XCTAssertFalse(system.onDemandEnabled)
@@ -22,6 +25,9 @@ final class AccountNetworkReleaseTests: XCTestCase {
         XCTAssertEqual(receipt?.at, at)
         XCTAssertEqual(receipt?.releaseRequested, true)
         XCTAssertEqual(receipt?.releaseFailed, false)
+        let failure = TunnelFailure(code: "PLAN_EXPIRED", message: "account rejected", at: at,
+                                    source: receipt?.source, accountEpoch: receipt?.accountEpoch)
+        XCTAssertEqual(TunnelFailure.decode(failure.encoded()), failure)
     }
 
     @MainActor
@@ -39,12 +45,23 @@ final class AccountNetworkReleaseTests: XCTestCase {
     @MainActor
     func testDisarmFailureIsVisibleAndNotReportedAsSuccessfulRelease() async {
         struct DisarmFailed: Error {}
+        var stops = 0
         let receipt = await AccountNetworkRelease.handle(APIError(status: 403, code: "QUOTA_EXCEEDED", message: "quota"), accountEpoch: 9) {
-            throw DisarmFailed()
+            try await AccountNetworkRelease.checkedStop(disarm: { throw DisarmFailed() }, stop: { stops += 1 })
         }
+        XCTAssertEqual(stops, 1)
         XCTAssertEqual(receipt?.reason, "ACCOUNT_RELEASE_FAILED")
         XCTAssertEqual(receipt?.source, "account")
         XCTAssertEqual(receipt?.releaseFailed, true)
+    }
+
+    @MainActor
+    func testCanonicalQuotaCodeReleasesAndMapsToHumanCopyReason() async {
+        var releases = 0
+        let receipt = await AccountNetworkRelease.handle(APIError(status: 403, code: "QUOTA_EXCEEDED", message: "quota"), accountEpoch: 11) { releases += 1 }
+        XCTAssertEqual(releases, 1)
+        XCTAssertEqual(receipt?.reason, "QUOTA_EXHAUSTED")
+        XCTAssertFalse(AccountErrors.isSessionEnded(APIError(status: 403, code: "QUOTA_EXCEEDED", message: "quota")))
     }
 
     @MainActor
@@ -67,6 +84,7 @@ private final class AccountConfiguration: TunnelLifecycleSteps {
     func reloadForStart() async throws {}
     func startTunnel() throws { running = true }
     func disarmOnDemand() async { events.append("disarm"); onDemandEnabled = false }
-    func stopTunnel() async { events.append("stop"); running = false }
+    func requestStop() { events.append("stop"); running = false }
+    func stopTunnel() async { requestStop() }
     func removeConfiguration() async { events.append("remove"); saved = false }
 }

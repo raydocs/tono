@@ -10,3 +10,6 @@
 - 剩余限制：本机仅确认 Xcode 26.6；缺 pinned Libbox.xcframework、可用磁盘约 5.2 GiB，未做本地 xcodebuild app 测试；未安装运行时或工具链。真机隧道、真实 TLS/网络响应丢失、新旧服务端套餐错误联验未执行。CI fixture/单测不证明这些场景。
 
 - 2026-10-24 续记：T2 决策改编号 135，避免与 T6 的 133、T8 的 134 冲突；同步将该决策的子节改为三级标题，满足每份决策只有一个二级标题的 records 契约；`node --test tooling/scripts/tests/records.test.mjs` 3/3 通过，decisions/changelog 读取脚本与 `git diff --check` 通过。不改产品行为。
+
+- 2026-10-24 B1 续修：账户拒绝先关闭 On Demand 并请求停隧道，保留账户和NE配置；不清inputs、不调用serviceClose。账户停止收据带source/accountEpoch/at；保存或读回失败仍stop并明确要求系统VPN手动关闭，不声称已恢复。兼容T6最终403 ACCOUNT_EXPIRED/QUOTA_EXCEEDED与历史别名。新增AccountNetworkReleaseTests；RED/GREEN与原生编译结果在PR验证评论逐项记录。依赖#1741先合，以免扩展将主动停止再记为CORE_STOPPED。真实NE停止、On Demand持久化及移动网络仍未验证。
+- B1 RED 证据：`b38ce2f7a` / [run40085931165 job120848944236](https://github.com/raydocs/tono/actions/runs/40085931165/job/120848944236)，147 tests / 13 assertion failures；账户拒绝事件数组实际 `[]`，期望 `[disarm, stop]`，隧道/On Demand 仍开。修复同时将账户失败的source/accountEpoch持久化至既有failure文件（旧字段保持兼容），避免仅留字符串而丢失归因。

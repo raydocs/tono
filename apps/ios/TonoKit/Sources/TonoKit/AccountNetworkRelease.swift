@@ -14,7 +14,19 @@ public enum AccountNetworkRelease {
     }
 
     public static func requiresRelease(_ error: Error) -> Bool {
-        AccountErrors.isSessionEnded(error)
+        guard let error = error as? APIError else { return false }
+        // 401 is ambiguous on older servers, but never authority to keep routing into a rejected
+        // identity. Ordinary NETWORK/429/5xx errors do not withdraw existing network authority.
+        return error.status == 401 || (error.status == 403 &&
+            (AccountErrors.isRestriction(error) || ["DEVICE_REAUTH_REQUIRED", "USER_DISABLED"].contains(error.code)))
+    }
+
+    /// Stop NE even if saving/reading back On Demand fails. Preserve the error so the UI cannot
+    /// claim automatic reconnect was disabled; no configuration-removal capability is passed in.
+    @MainActor
+    public static func checkedStop(disarm: () async throws -> Void, stop: () -> Void) async throws {
+        defer { stop() }
+        try await disarm()
     }
 
     @MainActor

@@ -138,6 +138,8 @@ final class AppModel: ObservableObject {
     private var preparing = false
     private var tunnelStatus: TunnelStatus = .invalid
     private var failure: String?
+    /// Account-origin stop attribution survives later expected NE disconnect callbacks.
+    private var accountRelease: AccountNetworkRelease.Receipt?
     private var permission: String?
     /// Set from "switch on" until the tunnel first reports connected; a stop in between is a start failure.
     private var userStarting = false
@@ -345,6 +347,7 @@ final class AppModel: ObservableObject {
         }
         primerConfirmed = false
         wantOn = true
+        accountRelease = nil
         failure = nil
         permission = nil
         SharedFiles.clearFailure()
@@ -711,6 +714,34 @@ final class AppModel: ObservableObject {
                 await signOut()
                 guard accountEpoch == epoch &+ 1 else { return false }
                 failure = "SESSION_ENDED"
+                recompute()
+                return false
+            }
+            if AccountNetworkRelease.requiresRelease(error) {
+                // Withdraw both a pending start and the desire to reconnect before the first await.
+                TunnelController.lifecycle.cancelPendingStart()
+                wantOn = false
+                userStarting = false
+                preparing = false
+                userStopping = tunnelStatus != .disconnected && tunnelStatus != .invalid
+                traffic.stop()
+                probeTask?.cancel()
+                checks = ExitChecks()
+                failure = AccountErrors.reasonCode(error)
+                SharedFiles.recordFailure(TunnelFailure(code: AccountErrors.reasonCode(error), message: "account authority rejected",
+                                                       at: Date(), source: "account", accountEpoch: epoch))
+                recompute()
+                let receipt = await AccountNetworkRelease.handle(error, accountEpoch: epoch) { [tunnel] in
+                    try await tunnel.stopForAccount()
+                }
+                guard epoch == accountEpoch, signedIn, !signingOut else { return false }
+                accountRelease = receipt
+                failure = receipt?.reason ?? AccountErrors.reasonCode(error)
+                if let receipt {
+                    SharedFiles.recordFailure(TunnelFailure(code: receipt.reason, message: "account network release requested",
+                                                           at: receipt.at, source: receipt.source, accountEpoch: receipt.accountEpoch))
+                }
+                // Do not clear the saved inputs or tokens: a renewal/re-auth is still possible.
                 recompute()
                 return false
             }
