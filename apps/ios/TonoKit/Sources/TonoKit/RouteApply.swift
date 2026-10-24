@@ -109,9 +109,12 @@ public struct RouteApplyReport: Equatable, Sendable {
 /// Changing the mode or line: save the inputs, ask a running tunnel to rebuild, and report only
 /// what the tunnel confirmed. The screens show `inEffect`, never the request, as the routes in use.
 public enum RouteApply {
-    /// A change with no catalog to build from: the choice is kept for the first start.
+    /// A change with no catalog to build from. Tunnel off: the choice is kept for the first start.
+    /// Tunnel up: nothing can be rebuilt, so the request is not applied (and not written) and what
+    /// runs stays in effect; the app says so instead of taking the request as in use.
     public static func withoutCatalog(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool) -> RouteApplyReport {
-        RouteApplyReport(.saved(requested))
+        guard tunnelUp else { return RouteApplyReport(.saved(requested)) }
+        return RouteApplyReport(.notApplied(code: "NO_CATALOG", inEffect: previous), wrote: false)
     }
 
     public static func run(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool,

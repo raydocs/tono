@@ -198,6 +198,7 @@
 "mode_stable_line" = "Everything but your local network uses Tono.";
 "route_switching" = "Switching to %1$@…";
 "route_not_applied" = "Couldn't switch to %1$@";
+"route_no_catalog" = "Couldn't load the line list, nothing changed. Check the network and try again.";
 "route_not_applied_full" = "Couldn't switch to %1$@. Still using %2$@.";
 "check_empty" = "Type a site first, e.g. claude.ai.";
 "check_invalid" = "\"%1$@\" isn't a site address. Try one like claude.ai.";

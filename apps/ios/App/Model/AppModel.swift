@@ -500,6 +500,13 @@ final class AppModel: ObservableObject {
             return
         }
         #endif
+        // A tunnel already up when the app started, with no catalog loaded: load one first, else
+        // take the one the tunnel runs from the inputs file (this account's; sign-out removes it).
+        if catalog == nil, tunnelStatus.isUp {
+            await refreshCatalog(quiet: true)
+            guard epoch == accountEpoch, !signingOut else { return }
+            if catalog == nil { adoptRunningCatalog() }
+        }
         retryPutBack()
         // The tunnel's reply to this switch (or its silence) replaces what it said before, unless
         // the session ended while it was asked.
@@ -543,6 +550,21 @@ final class AppModel: ObservableObject {
                 await self.readStatus()
             }
         }
+    }
+
+    /// The catalog the running tunnel was built from, read back from the inputs file, becomes the
+    /// admitted one when none could be loaded (`change` on a tunnel up since before the app started).
+    private func adoptRunningCatalog() {
+        guard signedIn, !signingOut, let inputs = try? SharedFiles.loadInputs(),
+              let admitted = try? CatalogAdmission.admit(JSON.parse(inputs.catalogBody)) else { return }
+        apply(LoadedCatalog(catalog: admitted, body: inputs.catalogBody, fromCache: true))
+    }
+
+    /// A Retry or switch that found no catalog to rebuild from, for the line that otherwise says
+    /// only "tap Retry": the press is answered, not silent.
+    var noCatalogNote: String? {
+        if case .failed(_, "NO_CATALOG")? = routeChange { return L.t("route_no_catalog") }
+        return nil
     }
 
     /// Writes the routes in use back to the inputs file after an earlier put-back failed.
@@ -601,6 +623,7 @@ final class AppModel: ObservableObject {
     func routeNote(full: Bool) -> String? {
         let line = { (name: String?) in self.lines.first { $0.name == name }.map(self.displayName) ?? name ?? "" }
         let unsaved = full && unsavedRoutes != nil ? " " + L.t("route_unsaved") : ""
+        if let note = noCatalogNote { return note }
         switch routeChange {
         case .unconfirmed(let requested):
             let want = requested.mode != mode ? ModeText.name(requested.mode) : line(requested.node)
