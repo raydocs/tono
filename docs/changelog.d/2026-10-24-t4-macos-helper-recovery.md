@@ -18,3 +18,11 @@
 - 验证：RED 1 项/1 失败（明确 Restore 仍不可重试）；GREEN 更新相关 XCTest 20 项、0 失败，连同此前 P1/telemetry 的集成窄回归 28 项、0 失败（源码 b1c2ee773）。helper 编译通过，非 root 自测仍是此前已在原 main 源码复现的六项 AI Home scope 失败；新增八项 UpdateTests root 故障测试尚未执行，待 hosted CI。
 - 审查：本次新增并发/更新差异独立 Sol/xhigh 审查中；不沿用此前 P1 审查为该范围批准。
 - 剩余限制：无实机 pending update + Restore 端到端；P2 #21 ReleaseDaemon SIGTERM/最终报告时序及 #22 其余英文文案本续记未做。
+
+### 2026-10-24 续记 · lockout 独立审查 R1 修正
+- R1 `6c3a0be5f...b1c2ee773` verdict 为 approve-with-fixes，不记无条件批准：P2「AI 残留/terminal partial 仍可写 verified」与 P2 工程项「save 注入实际在 load 触发」。
+- 产品修正 `f91689a31`：共享终态证明门同时要求 terminal outcome=restored 与 PF/Core/DNS restored+settled；helper 调用必须显式传 outcome（包括 stuck/failures 的判定），不再默认为 restored。
+- RED `e4afdbba8` 本机新部分恢复 XCTest 1 项/1 失败：`partial Restore must not certify update disconnect`。GREEN `f91689a31` 本机更新+证明窄套件 23 项、0 失败，含 restored 正例和 unknown 拒绝；同源码与此前 P1/telemetry 集成共 31 项、0 失败。
+- 修正保存失败测试：先允许 load 的同步；第二次同步确认磁盘候选已含 disconnectVerified，再注入 save 目录同步失败，并断言确实命中该阶段。新增 root partial-AI 测试；本轮 UpdateTests 共九项，仍待 root CI 执行，不声称旧八项已完整验证过保存失败。
+- helper 本轮 4.52.66 → 4.52.67，唯一编译清单增加共享证明源。编译完成，非 root 构建自测仍有既有六项 AI Home scope 失败，不能记整体通过。
+- 第二轮独立 Sol/xhigh 复审 `6c3a0be5f...f91689a31` 已启动；结果未回时不记通过。真机/P2 #21/#22 未完成边界不变，无 merge/auto-merge/deploy。

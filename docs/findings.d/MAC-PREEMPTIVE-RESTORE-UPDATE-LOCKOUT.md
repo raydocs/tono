@@ -8,3 +8,6 @@
 `UpdateTransaction.swift:77-86`；`apps/macos/Tono/App/AppUpdater.swift:121-134`、`Core/HelperManager.swift:1392-1408`。
 终态验证只认同一次 release 的 settled + restored PF/Core/DNS；写回再核对 attempt ID 与 initiating generation；保留原 receipt、execution、high-water 和恢复义务。
 status 的 requested 只赋予明确重试动作，不是“已解除保护”证明；root 仍再次 Disconnect 并校验本机安装组件才允许 Retire。
+
+R1 修正：曾仅看三组件而忽略 partial outcome，见 [MAC-PREEMPTIVE-PARTIAL-VERIFIED](MAC-PREEMPTIVE-PARTIAL-VERIFIED.md)。
+`f91689a31` 加强 terminal restored 门，helper 4.52.67；root save 故障注入也已修正阶段，执行仍待 CI。
