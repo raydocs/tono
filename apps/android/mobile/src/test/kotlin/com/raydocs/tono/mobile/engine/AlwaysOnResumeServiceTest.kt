@@ -61,6 +61,49 @@ class AlwaysOnResumeServiceTest {
         }
     }
 
+    @Test fun disconnectClosesTheActualPlatformTunBeforeAFailedSettingsWriteAndWarns() {
+        val controller = Robolectric.buildService(TonoVpnService::class.java)
+        val service = controller.get()
+        val io = HoldingIo()
+        field("io").set(service, io)
+        val engine = field("engine").get(service) as ScheduledExecutorService
+        fun drain() { engine.submit {}.get(5, TimeUnit.SECONDS) }
+        val pipe = android.os.ParcelFileDescriptor.createPipe()
+        val blockedWrite = java.io.File(service.noBackupFilesDir, "tono/engine.json.tmp")
+        try {
+            controller.create()
+            drain()
+            val platform = field("platform").get(service) as BoxPlatform
+            BoxPlatform::class.java.getDeclaredField("tun").apply { isAccessible = true }.set(platform, pipe[0])
+            assertTrue(platform.tunOpen)
+            assertTrue(blockedWrite.mkdir()) // Real filesystem write failure, not a mocked stop helper.
+            val phases = mutableListOf<Pair<Phase, Boolean>>()
+            val listener = object : com.raydocs.tono.mobile.ipc.ITonoEngineListener.Stub() {
+                override fun onSnapshot(json: String) { phases += EngineSnapshot.fromJson(json).phase to platform.tunOpen }
+            }
+            val binder = com.raydocs.tono.mobile.ipc.ITonoEngine.Stub.asInterface(service.onBind(Intent("test-ui")))
+            binder.register(listener)
+            phases.clear()
+            service.onStartCommand(Intent(TonoVpnService.ACTION_DISCONNECT), 0, 1)
+            drain()
+            assertFalse("the real disconnect entry point must release the TUN despite storage failure", platform.tunOpen)
+            @Suppress("UNCHECKED_CAST")
+            val state = field("snapshot").get(service) as AtomicReference<EngineSnapshot>
+            assertEquals(Phase.IDLE, state.get().phase)
+            assertNull(state.get().reasonCode)
+            assertTrue("the service must publish DISCONNECTING after the physical close", phases.any { it.first == Phase.DISCONNECTING && !it.second })
+            assertEquals(Phase.IDLE, phases.last().first)
+            binder.unregister(listener)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertEquals(service.getString(com.raydocs.tono.mobile.R.string.stop_persistence_warning), org.robolectric.shadows.ShadowToast.getTextOfLatestToast())
+        } finally {
+            blockedWrite.delete()
+            controller.destroy()
+            pipe.forEach { it.close() }
+            io.shutdownNow()
+        }
+    }
+
     private fun field(name: String) = TonoVpnService::class.java.getDeclaredField(name).apply { isAccessible = true }
 
     /** Hold catalog HTTP without running it: PREPARING is observable, no real network or sleeps. */
@@ -81,7 +124,7 @@ class AlwaysOnResumeServiceTest {
     }
 
     @Implements(VpnService::class)
-    class GrantedVpn {
+    class GrantedVpn : org.robolectric.shadows.ShadowService() {
         companion object {
             @JvmStatic @Implementation fun prepare(context: Context): Intent? = null
         }
