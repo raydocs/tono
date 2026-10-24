@@ -10,7 +10,7 @@ const sentences = [
   'A previous update did not finish. Tono kept the record. You can try again later, or ask a family member for help.',
   'Tono could not confirm that ordinary internet is back. Try again. If it still fails, ask a family member for help.',
   'This update cannot be tried again yet. Wait until recovery finishes, or ask a family member for help.',
-  'Tono could not close the update record. Try again. Network protection is still on.',
+  'Ordinary internet is back, but Tono could not close the update record. Try again later.',
   'The update package did not pass the check, so nothing was installed. Try again later.',
   'The update was not allowed to install, so nothing was replaced. Try again later.',
   'Tono cannot tell whether the update finished. Leave protection on and do not tap repeatedly. Ask a family member to look.',
@@ -40,6 +40,21 @@ test('macOS update failures use localized human sentences', () => {
   assert.doesNotMatch(state, /Update consumption is uncertain/)
   assert.doesNotMatch(download, /The update package is unreachable:/)
   assert.doesNotMatch(download, /Update discovery metadata is unreachable:/)
+  assert.doesNotMatch(download, /Network protection is still on/)
+  assert.doesNotMatch(state, /Network protection is still on/)
+  const retire = state.slice(state.indexOf('func retireDisconnectedNativeUpdate'))
+  const releasedAt = retire.indexOf('isProtectionBlocked = false')
+  const thrownAt = retire.indexOf('retirementUnconfirmed')
+  assert.ok(releasedAt !== -1 && thrownAt > releasedAt, 'retire failure is thrown after protection is published as released')
+  const copy = download.slice(download.indexOf('enum Copy'), download.indexOf('static let catalogKeys'))
+  const localized = [...copy.matchAll(/String\(localized: "((?:\\.|[^"\\])*)"\)/g)].map((match) => match[1])
+  const catalogKeys = download.slice(
+    download.indexOf('static let catalogKeys'),
+    download.indexOf(']\n        }', download.indexOf('static let catalogKeys')),
+  )
+  for (const sentence of localized) {
+    assert.ok(catalogKeys.includes(JSON.stringify(sentence)), `catalogKeys missing ${sentence}`)
+  }
   for (const sentence of sentences) {
     const entry = catalog.strings[sentence]
     const value = entry?.localizations?.['zh-Hans']?.stringUnit?.value
@@ -47,4 +62,7 @@ test('macOS update failures use localized human sentences', () => {
     assert.notEqual(value, sentence)
     assert.doesNotMatch(value, /Helper|system_dns|CORE_|edSignature/)
   }
+  const retirement = catalog.strings[sentences[3]].localizations['zh-Hans'].stringUnit.value
+  assert.doesNotMatch(retirement, /网络保护还在|保护还在/)
+  assert.match(retirement, /已经恢复/)
 })

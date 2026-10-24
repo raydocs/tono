@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import en from '@/locales/en/tono.json'
+import zh from '@/locales/zh/tono.json'
+
 import {
   UPDATE_LATER_MS,
   describeUpdateFailure,
@@ -43,6 +46,26 @@ describe('update failure copy', () => {
     )
     expect(older.message).toBe('tono.update.notNewer')
     expect(older.sticks).toBe(true)
+
+    const downgrade = describeUpdateFailure(
+      new Error('release replay/downgrade refused'),
+      t,
+    )
+    expect(downgrade.message).toBe('tono.update.notNewer')
+    expect(downgrade.sticks).toBe(true)
+
+    const otherOwner = describeUpdateFailure(
+      new Error('active session belongs to another owner'),
+      t,
+    )
+    expect(otherOwner.message).toBe('tono.update.refused')
+    expect(otherOwner.sticks).toBe(true)
+    expect(en.update.refused).not.toMatch(/protection is unchanged/i)
+    expect(zh.update.refused).not.toContain('网络保护没有变化')
+
+    const replayLog = describeUpdateFailure(new Error('no Core replay'), t)
+    expect(replayLog.message).toBe('tono.update.notCompleted')
+    expect(replayLog.sticks).toBe(false)
   })
 
   it('does not call a leftover update a network failure', () => {
@@ -55,6 +78,18 @@ describe('update failure copy', () => {
     expect(updateCheckNoticeKey('Service refused: protection retained')).toBe(
       'tono.update.checkUnknown',
     )
+    expect(
+      updateCheckNoticeKey(
+        'rollback not proven complete; evidence cannot be retired',
+      ),
+    ).toBe('tono.update.needsAttention')
+    expect(
+      updateCheckNoticeKey(
+        'automatic update recovery failed 3 times and stopped; the installation needs manual repair',
+      ),
+    ).toBe('tono.update.needsAttention')
+    expect(en.update.needsAttention).not.toMatch(/Update now/)
+    expect(zh.update.needsAttention).not.toContain('现在更新')
   })
 
   it('hides one manifest for 24 hours and leaves the next one visible', () => {

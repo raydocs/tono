@@ -34,7 +34,7 @@ nonisolated enum NativeUpdateDownload {
             String(localized: "This update cannot be tried again yet. Wait until recovery finishes, or ask a family member for help.")
         }
         static var retirementUnconfirmed: String {
-            String(localized: "Tono could not close the update record. Try again. Network protection is still on.")
+            String(localized: "Ordinary internet is back, but Tono could not close the update record. Try again later.")
         }
         static var packageUnchecked: String {
             String(localized: "The update package did not pass the check, so nothing was installed. Try again later.")
@@ -67,7 +67,7 @@ nonisolated enum NativeUpdateDownload {
             "A previous update did not finish. Tono kept the record. You can try again later, or ask a family member for help.",
             "Tono could not confirm that ordinary internet is back. Try again. If it still fails, ask a family member for help.",
             "This update cannot be tried again yet. Wait until recovery finishes, or ask a family member for help.",
-            "Tono could not close the update record. Try again. Network protection is still on.",
+            "Ordinary internet is back, but Tono could not close the update record. Try again later.",
             "The update package did not pass the check, so nothing was installed. Try again later.",
             "The update was not allowed to install, so nothing was replaced. Try again later.",
             "Tono cannot tell whether the update finished. Leave protection on and do not tap repeatedly. Ask a family member to look.",

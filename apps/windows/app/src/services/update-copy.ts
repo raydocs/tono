@@ -4,14 +4,14 @@ const rawOf = (error: unknown): string => {
 }
 
 const needsAttention =
-  /a prior update needs reconciliation|needs attention|TONO_UPDATE_NEEDS_ATTENTION/i
+  /a prior update needs reconciliation|needs attention|TONO_UPDATE_NEEDS_ATTENTION|rollback not proven|automatic update recovery failed/i
 const signatureRefusal = /signature|ed25519|minisign/i
 const floorRefusal =
-  /release sequence|releaseSequence|installed floor|not newer/i
+  /release sequence|releaseSequence|installed floor|not newer|downgrade refused|release replay/i
 const networkFailure =
   /unreachable|timed out|timeout|network|offline|\bdns\b|connection refused|connection reset/i
 const hardRefusal =
-  /signature|ed25519|minisign|release sequence|releaseSequence|installed floor|not newer|verified a different manifest|invalid manifest|unsupported manifest|Service refused|protection retained|another owner/i
+  /signature|ed25519|minisign|release sequence|releaseSequence|installed floor|not newer|downgrade refused|release replay|verified a different manifest|invalid manifest|unsupported manifest|Service refused|protection retained|another owner/i
 
 /** A signature, floor, or explicit service refusal cannot be retried as-is. */
 export const updateFailureSticks = (raw: string): boolean => hardRefusal.test(raw)
