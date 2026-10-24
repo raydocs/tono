@@ -118,3 +118,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0102
 
 - `0102_home_exit_egress.sql` — `home_exit_egress`: one row per home line holding the latest operator-asked egress lookup (IP seen through the line, per-provider geolocation answers as JSON, or the failed tunnel stage). Replaced on each lookup; orphans after a line delete are joined away on read.
+
+## 0103
+
+- `0103_mobile_client_platform.sql` — `devices.client_platform` CHECK widened to `macos` | `windows` | `android` | `ios` (0092 allowed desktop only). Replaced by add-copy-drop-rename, not a table rebuild: no index, view or trigger reads the column

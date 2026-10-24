@@ -173,6 +173,59 @@ class MeasuredFronts(unittest.TestCase):
         self.assertIsNone(module.front_verdict("www.example.com")[0])
 
 
+class PinnedFronts(unittest.TestCase):
+    def test_the_four_reality_nodes_are_pinned_by_name_and_ip(self) -> None:
+        cases = {
+            ("Tokyo · Sakura", "162.4.194.103"): "www.uniqlo.com",
+            ("Tokyo · Fuji", "45.8.173.206"): "d1.awsstatic.com",
+            ("JP-VLESS-Reality", "199.30.91.172"): "www.sony.co.jp",
+            ("Buffalo · Erie", "198.46.140.254"): "s.yimg.com",
+        }
+        for (name, ip), front in cases.items():
+            self.assertEqual(front, module.pinned_front(name, "unrelated.example"))
+            self.assertEqual(front, module.pinned_front("renamed", ip))
+            self.assertIs(True, module.front_verdict(front)[0], front)
+
+    def test_an_unpinned_node_has_no_pin(self) -> None:
+        self.assertIsNone(module.pinned_front("Test · Node", "203.0.113.10"))
+
+
+class TcpProfileAndCadence(unittest.TestCase):
+    GOOD = {
+        "net.core.default_qdisc": "fq",
+        "net.ipv4.tcp_congestion_control": "bbr",
+        "net.ipv4.tcp_slow_start_after_idle": "0",
+        "net.ipv4.tcp_mtu_probing": "1",
+        "net.ipv4.tcp_fastopen": "3",
+        "net.core.rmem_max": "16777216",
+        "net.core.wmem_max": "16777216",
+    }
+
+    def test_the_full_profile_passes(self) -> None:
+        [(label, ok, detail)] = module.tcp_profile_rows(self.GOOD)
+        self.assertIs(True, ok, detail)
+        self.assertIn("bbr", label)
+
+    def test_every_drifted_key_is_named(self) -> None:
+        drifted = dict(self.GOOD, **{"net.ipv4.tcp_congestion_control": "cubic", "net.ipv4.tcp_fastopen": "1"})
+        [(_, ok, detail)] = module.tcp_profile_rows(drifted)
+        self.assertIs(False, ok)
+        self.assertIn("tcp_congestion_control=cubic", detail)
+        self.assertIn("tcp_fastopen=1", detail)
+        self.assertNotIn("default_qdisc", detail)
+
+    def test_buffers_alone_are_no_longer_enough(self) -> None:
+        # The old probe passed on wmem_max alone; a stock image on cubic passed.
+        [(_, ok, _)] = module.tcp_profile_rows({"net.core.wmem_max": "16777216"})
+        self.assertIs(False, ok)
+
+    def test_cadence_reads_systemd_timers_monotonic(self) -> None:
+        live = "{ OnUnitInactiveUSec=1min ; next_elapse=2h 3min 12.5s } "
+        self.assertIs(True, module.cadence_row(live)[1])
+        self.assertIs(False, module.cadence_row("{ OnUnitInactiveUSec=5min ; next_elapse=0 }")[1])
+        self.assertIs(False, module.cadence_row("")[1])
+
+
 class MeteringProbe(unittest.TestCase):
     """The probe text is run for real, against a stubbed node layout."""
 

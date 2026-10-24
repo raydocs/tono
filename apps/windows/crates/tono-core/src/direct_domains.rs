@@ -655,6 +655,10 @@ pub fn is_protected_from_direct(host: &str) -> bool {
         .iter()
         .chain(CLAUDE_HOME_DOMAINS.iter())
         .chain(CLOUD_VIDEO_DOMAINS.iter())
+        .chain(MOBILE_HOME_AUX_SUFFIXES.iter())
+        .chain(X_CLOUD_SUFFIXES.iter())
+        .chain(OVERSEAS_CLOUD_SUFFIXES.iter())
+        .chain(PUBLIC_STUN_SUFFIXES.iter())
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
@@ -664,6 +668,10 @@ pub fn direct_suffix_overlaps_protected(host: &str) -> bool {
             .iter()
             .chain(CLAUDE_HOME_DOMAINS.iter())
             .chain(CLOUD_VIDEO_DOMAINS.iter())
+            .chain(MOBILE_HOME_AUX_SUFFIXES.iter())
+            .chain(X_CLOUD_SUFFIXES.iter())
+            .chain(OVERSEAS_CLOUD_SUFFIXES.iter())
+            .chain(PUBLIC_STUN_SUFFIXES.iter())
             .any(|protected| {
                 protected.ends_with(&format!(".{host}"))
                 // Only these reviewed assistant children run ahead of the
@@ -671,6 +679,76 @@ pub fn direct_suffix_overlaps_protected(host: &str) -> bool {
                 && !(host == "aliyuncs.com"
                     && DEDICATED_MODEL_API_SUFFIXES.contains(protected))
             })
+}
+
+pub fn cidr_contains_ipv4(cidr: &str, ip: std::net::Ipv4Addr) -> bool {
+    let Some((base, bits)) = cidr.split_once('/') else {
+        return false;
+    };
+    let (Ok(base), Ok(bits)) = (base.parse::<std::net::Ipv4Addr>(), bits.parse::<u32>()) else {
+        return false;
+    };
+    if bits > 32 {
+        return false;
+    }
+    let mask = if bits == 0 { 0 } else { u32::MAX << (32 - bits) };
+    (u32::from(ip) & mask) == (u32::from(base) & mask)
+}
+
+pub fn cidr_contains_ipv6(cidr: &str, ip: std::net::Ipv6Addr) -> bool {
+    let Some((base, bits)) = cidr.split_once('/') else {
+        return false;
+    };
+    let (Ok(base), Ok(bits)) = (base.parse::<std::net::Ipv6Addr>(), bits.parse::<u32>()) else {
+        return false;
+    };
+    if bits > 128 {
+        return false;
+    }
+    let mask = if bits == 0 {
+        0
+    } else {
+        u128::MAX << (128 - bits)
+    };
+    (u128::from(ip) & mask) == (u128::from(base) & mask)
+}
+
+pub fn is_claude_home_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    CLAUDE_HOME_IPV4_CIDRS
+        .iter()
+        .any(|cidr| cidr_contains_ipv4(cidr, ip))
+}
+
+pub fn is_cloud_exit_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    CLOUD_IPV4_CIDRS
+        .iter()
+        .any(|cidr| cidr_contains_ipv4(cidr, ip))
+}
+
+pub fn is_cloud_exit_ipv6(ip: std::net::Ipv6Addr) -> bool {
+    CLOUD_IPV6_CIDRS
+        .iter()
+        .any(|cidr| cidr_contains_ipv6(cidr, ip))
+}
+
+pub fn is_overseas_udp_reject_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    OVERSEAS_UDP_REJECT_IPV4_CIDRS
+        .iter()
+        .any(|cidr| cidr_contains_ipv4(cidr, ip))
+}
+
+pub fn is_overseas_udp_reject_ipv6(ip: std::net::Ipv6Addr) -> bool {
+    OVERSEAS_UDP_REJECT_IPV6_CIDRS
+        .iter()
+        .any(|cidr| cidr_contains_ipv6(cidr, ip))
+}
+
+pub fn is_protected_cidr_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    is_claude_home_ipv4(ip) || is_cloud_exit_ipv4(ip) || is_overseas_udp_reject_ipv4(ip)
+}
+
+pub fn is_protected_cidr_ipv6(ip: std::net::Ipv6Addr) -> bool {
+    is_cloud_exit_ipv6(ip) || is_overseas_udp_reject_ipv6(ip)
 }
 
 #[cfg(test)]
@@ -712,5 +790,18 @@ mod tests {
         for cidr in CLOUD_IPV6_CIDRS {
             assert!(cidr.contains('/') && cidr.contains(':'), "invalid Cloud IPv6 CIDR: {cidr}");
         }
+        assert!(is_protected_from_direct("workos.com"));
+        assert!(is_protected_from_direct("auth.workos.com"));
+        assert!(is_protected_from_direct("x.com"));
+        assert!(is_protected_from_direct("telegram.org"));
+        assert!(is_protected_from_direct("stun.cloudflare.com"));
+        assert!(direct_suffix_overlaps_protected("apple.com"));
+        assert!(is_claude_home_ipv4("160.79.104.10".parse().unwrap()));
+        assert!(is_cloud_exit_ipv4("149.154.167.91".parse().unwrap()));
+        assert!(is_cloud_exit_ipv6("2001:b28:f23d::1".parse().unwrap()));
+        assert!(is_overseas_udp_reject_ipv4("74.125.250.129".parse().unwrap()));
+        assert!(is_overseas_udp_reject_ipv6("2606:4700:4700::1111".parse().unwrap()));
+        assert!(is_protected_cidr_ipv4("149.154.167.91".parse().unwrap()));
+        assert!(!is_protected_cidr_ipv4("223.5.5.5".parse().unwrap()));
     }
 }

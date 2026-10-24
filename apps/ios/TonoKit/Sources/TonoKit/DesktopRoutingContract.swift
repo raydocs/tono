@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "3a768d3cdf1d50f362db3f7c972b70cd3e057cd47950bd0b876a4acf30275c78"
+    public static let sourceDigest = "20976a7c43eef9df627d7cd9c75cd244497097dae78e9fbd6d1a84d3c97cfebf"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [

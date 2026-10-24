@@ -23,13 +23,28 @@
     "www.ucsb.edu",
     "www.csulb.edu",
     "www.usfca.edu",
-    "www.sfsu.edu"
+    "www.sfsu.edu",
+    "www.uniqlo.com",
+    "d1.awsstatic.com",
+    "www.sony.co.jp",
+    "s.yimg.com"
   ],
+  "nodeTargets": {
+    "Tokyo · Sakura": "www.uniqlo.com",
+    "162.4.194.103": "www.uniqlo.com",
+    "Tokyo · Fuji": "d1.awsstatic.com",
+    "45.8.173.206": "d1.awsstatic.com",
+    "JP-VLESS-Reality": "www.sony.co.jp",
+    "199.30.91.172": "www.sony.co.jp",
+    "Buffalo · Erie": "s.yimg.com",
+    "198.46.140.254": "s.yimg.com"
+  },
   "unusable": [
     "cloudflare.com",
     "apple.com",
     "microsoft.com",
     "amazon.com",
     "nvidia.com"
-  ]
+  ],
+  "nodeTargetsNote": "Per-node fronts verified in production on 2026-10-23, keyed by catalog name and by public IPv4. provision-reality-node.rb defaults to the pinned front for these nodes, provision-tono-node.py refuses an inventory realityTarget that differs, and check-node-in-fleet.py fails a published node whose catalog servername drifted. Change the pin here first, after re-measuring from inside the market."
 }

@@ -71,6 +71,9 @@ class TonoVpnService : VpnService() {
     private lateinit var api: ControlPlane
     private lateinit var monitor: NetworkMonitor
     private lateinit var platform: BoxPlatform
+    /** Bumped whenever a pending catalog wait must stop (disconnect, revoke, sign-out, teardown). */
+    private val catalogWait = java.util.concurrent.atomic.AtomicLong()
+    private val propagationWait = PropagationWait()
     private var commandServer: CommandServer? = null
     @Volatile private var catalog: ExitCatalog? = null
     private var accessToken: String? = null
@@ -116,7 +119,7 @@ class TonoVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> { enterForeground(); engine.execute { connect(userInitiated = true) } }
-            ACTION_DISCONNECT -> engine.execute { disconnect(reason = null) }
+            ACTION_DISCONNECT -> engine.execute { disconnect(reason = null); clearStopNotice() }
             // Always-on VPN or a restart after the OS reclaimed the process.
             SERVICE_INTERFACE, null -> {
                 if (store.settings().wantConnected || intent?.action == SERVICE_INTERFACE) {
@@ -134,15 +137,19 @@ class TonoVpnService : VpnService() {
     override fun onRevoke() {
         // Another VPN took over or the user revoked consent in Settings.
         engine.execute {
+            val lockdown = lockdownNow()
+            catalogWait.incrementAndGet()
             stopCore()
             store.update { it.copy(wantConnected = false) }
             update { ledger.end(it, Phase.NEEDS_PERMISSION, "REVOKED") }
             leaveForeground()
+            postRevoked(lockdown)
         }
     }
 
     override fun onDestroy() {
-        engine.execute { accountWork.invalidate(); loginRequests.next(); stopCore() }
+        catalogWait.incrementAndGet()
+        engine.execute { accountWork.invalidate(); loginRequests.next(); stopCore(); platform.release() }
         engine.shutdown()
         engine.awaitTermination(3, TimeUnit.SECONDS)
         retired = true
@@ -263,6 +270,7 @@ class TonoVpnService : VpnService() {
                         update { it.copy(login = it.login.copy(busy = false, errorCode = "SERVER_ERROR")) }
                         return@execute
                     }
+                    catalogWait.incrementAndGet()
                     accountWork.invalidate()
                     loginRequests.next()
                     stopCore()
@@ -283,6 +291,7 @@ class TonoVpnService : VpnService() {
     }
 
     private fun signOut() {
+        catalogWait.incrementAndGet()
         accountWork.invalidate()
         loginRequests.next()
         stopCore()
@@ -301,6 +310,7 @@ class TonoVpnService : VpnService() {
     /** Captured on the engine thread. Never consult the current account from a delayed IO job. */
     private class CatalogInput(
         var access: String?, var refresh: String?, val settings: EngineSettings, val cachedBody: String?,
+        val waitEpoch: Long = 0,
     )
     private class CatalogResponse(val input: CatalogInput, val result: Result<LoadedCatalog>)
     private class LoadedCatalog(
@@ -322,10 +332,15 @@ class TonoVpnService : VpnService() {
             input.refresh = refresh
             return access!!
         }
+        val waitEpoch = input.waitEpoch
         return try {
-            val body = try { api.get("exit-catalog", bearer()) } catch (e: ApiException) {
-                if (e.status != 401 || e.code == "INVALID_REFRESH_TOKEN") throw e
-                api.get("exit-catalog", bearer(force = true))
+            // A new device's exit identity is not served until an exit node acknowledges it: wait (bounded),
+            // instead of failing the connect. Cancelled by disconnect, revoke, sign-out or teardown.
+            val body = propagationWait.run(cancelled = { catalogWait.get() != waitEpoch || retired }) {
+                try { api.get("exit-catalog", bearer()) } catch (e: ApiException) {
+                    if (e.status != 401 || e.code == "INVALID_REFRESH_TOKEN") throw e
+                    api.get("exit-catalog", bearer(force = true))
+                }
             }
             val admitted = CatalogAdmission.admit(body)
             if (admitted.revision < input.settings.catalogRevision) throw CatalogRejected("CATALOG_ROLLBACK", "catalog revision went backwards")
@@ -342,7 +357,7 @@ class TonoVpnService : VpnService() {
         // Serialized within the account, including refresh rotation. Invalidation happens before
         // clearing/replacing credentials. The queue checks ownership BEFORE any persistent write.
         accountWork.submit(prepare = {
-            val input = CatalogInput(accessToken ?: store.accessToken(), store.refreshToken(), store.settings(), store.cachedCatalogBody())
+            val input = CatalogInput(accessToken ?: store.accessToken(), store.refreshToken(), store.settings(), store.cachedCatalogBody(), catalogWait.get())
             val work: () -> CatalogResponse = { CatalogResponse(input, runCatching { loadCatalog(input) }) }
             work
         }, commit = { response ->
@@ -484,6 +499,7 @@ class TonoVpnService : VpnService() {
     }
 
     private fun disconnect(reason: String?) {
+        catalogWait.incrementAndGet()
         store.update { it.copy(wantConnected = false) }
         if (snapshot.get().phase != Phase.SIGNED_OUT) update { ledger.begin(it, Phase.DISCONNECTING) }
         stopCore()
@@ -506,6 +522,7 @@ class TonoVpnService : VpnService() {
     }
 
     private fun endSession() {
+        catalogWait.incrementAndGet()
         accountWork.invalidate()
         loginRequests.next()
         stopCore()
@@ -640,8 +657,21 @@ class TonoVpnService : VpnService() {
         val retry = PendingIntent.getForegroundService(
             this, 2, Intent(this, TonoVpnService::class.java).setAction(ACTION_CONNECT), PendingIntent.FLAG_IMMUTABLE,
         )
-        getSystemService(NotificationManager::class.java).notify(NOTICE_ID, TonoNotifications.stopped(this, code, configureIntent(), retry))
+        getSystemService(NotificationManager::class.java).notify(NOTICE_ID, TonoNotifications.stopped(this, code, configureIntent(), retry, lockdownNow()))
     }
+
+    private fun postRevoked(lockdown: Boolean) {
+        getSystemService(NotificationManager::class.java).notify(NOTICE_ID, TonoNotifications.revoked(this, configureIntent(), lockdown))
+    }
+
+    /** The user stopped Tono themselves: an earlier "stopped" notice is no longer news. */
+    private fun clearStopNotice() { getSystemService(NotificationManager::class.java).cancel(NOTICE_ID) }
+
+    /**
+     * Lockdown as Android reports it now, or as recorded for the last attempt: either one true means the
+     * notice must not say traffic is going out directly.
+     */
+    private fun lockdownNow(): Boolean = snapshot.get().lockdown || runCatching { isLockdownEnabled }.getOrDefault(true)
 
     private fun createChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -720,7 +750,7 @@ class TonoVpnService : VpnService() {
     private fun handle(cmd: Map<String, Any?>) {
         when (cmd["op"]) {
             "connect" -> connect(userInitiated = true)
-            "disconnect" -> disconnect(reason = null)
+            "disconnect" -> { disconnect(reason = null); clearStopNotice() }
             "startEmail" -> startEmail(cmd["email"] as? String ?: "")
             "verifyCode" -> verifyCode(cmd["code"] as? String ?: "")
             "cancelLogin" -> { loginRequests.next(); update { it.copy(login = LoginView(email = it.login.email)) } }

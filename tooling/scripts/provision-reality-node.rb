@@ -37,6 +37,9 @@ HYSTERIA_ASSETS = {
 # reads the same file, so re-measuring cannot leave one of them behind.
 REALITY_FRONTS = JSON.parse(File.read(File.expand_path("reality-fronts.json", __dir__))).freeze
 DEFAULT_REALITY_TARGET = REALITY_FRONTS.fetch("default")
+# Fronts verified per node in production. A re-provision of one of these nodes
+# defaults to its own front, not the fleet default it was moved off.
+NODE_REALITY_TARGETS = REALITY_FRONTS.fetch("nodeTargets", {}).freeze
 SSH_OPTIONS = [
   "-o", "BatchMode=yes",
   "-o", "StrictHostKeyChecking=yes",
@@ -76,6 +79,10 @@ def measured_unusable_front?(hostname)
   REALITY_FRONTS.fetch("unusable").any? do |domain|
     hostname == domain || hostname.end_with?(".#{domain}")
   end
+end
+
+def pinned_reality_target(node_name, server)
+  NODE_REALITY_TARGETS[node_name] || NODE_REALITY_TARGETS[server.to_s]
 end
 
 def valid_server!(value)
@@ -271,7 +278,7 @@ options = {
   hy2: false,
   hy2_port: 443,
   hy2_sync_identities: false,
-  target: DEFAULT_REALITY_TARGET,
+  target: nil,
   allow_unusable_servername: false,
   apply: false,
 }
@@ -308,7 +315,11 @@ begin
   node_name = valid_node_name!(options[:name])
   fail!("--port must be between 1 and 65535.") unless (1..65_535).cover?(options[:port])
   fail!("--hy2-port must be between 1 and 65535.") unless (1..65_535).cover?(options[:hy2_port])
-  target = valid_hostname!(options[:target], "--servername")
+  pinned_target = pinned_reality_target(node_name, options[:server] && options[:server].to_s.strip.downcase)
+  target = valid_hostname!(options[:target] || pinned_target || DEFAULT_REALITY_TARGET, "--servername")
+  if pinned_target && target != pinned_target
+    warn("warning: #{node_name} was verified in production on #{pinned_target}; installing #{target} instead.")
+  end
   # The TLS 1.3 precheck below runs on the VPS and the data-plane test runs on
   # this machine, so neither ever stands where the customer does: a front that
   # cannot be reached from inside the main market passes both.

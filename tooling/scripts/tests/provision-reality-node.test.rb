@@ -68,6 +68,47 @@ class MeasuredRealityFront < Minitest::Test
   end
 end
 
+class PinnedNodeFront < Minitest::Test
+  # A re-provision of a node verified in production on its own front must
+  # default to that front, not the fleet default it was moved off.
+  def pinned(name, server)
+    stdout, stderr, status = Open3.capture3(
+      RbConfig.ruby, "-e", "load ARGV.shift; print pinned_reality_target(ARGV[0], ARGV[1]).to_s",
+      SCRIPT, name, server,
+    )
+    assert_predicate(status, :success?, stderr)
+    stdout
+  end
+
+  def test_the_four_production_nodes_are_pinned_by_name_and_by_ip
+    {
+      ["Tokyo · Sakura", "162.4.194.103"] => "www.uniqlo.com",
+      ["Tokyo · Fuji", "45.8.173.206"] => "d1.awsstatic.com",
+      ["JP-VLESS-Reality", "199.30.91.172"] => "www.sony.co.jp",
+      ["Buffalo · Erie", "198.46.140.254"] => "s.yimg.com",
+    }.each do |(name, ip), front|
+      assert_equal(front, FRONTS.fetch("nodeTargets").fetch(name))
+      assert_equal(front, FRONTS.fetch("nodeTargets").fetch(ip))
+      assert_includes(FRONTS.fetch("usable"), front)
+      assert_equal(front, pinned(name, "203.0.113.10"))
+      assert_equal(front, pinned("Renamed · Node", ip))
+    end
+  end
+
+  def test_an_unpinned_node_keeps_the_fleet_default
+    assert_equal("", pinned("Test · Node", "203.0.113.10"))
+    assert_includes(File.read(SCRIPT), "options[:target] || pinned_target || DEFAULT_REALITY_TARGET")
+  end
+
+  def test_no_pinned_front_is_measured_unusable
+    FRONTS.fetch("nodeTargets").each_value do |front|
+      FRONTS.fetch("unusable").each do |domain|
+        refute(front == domain || front.end_with?(".#{domain}"), front)
+      end
+    end
+  end
+end
+
 class Hy2StaysOptIn < Minitest::Test
   REALITY_REMOTE = File.expand_path("../remote/manage-tono-reality-node.sh", __dir__)
   HY2_REMOTE = File.expand_path("../remote/manage-tono-hy2-node.sh", __dir__)

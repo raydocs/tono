@@ -77,12 +77,16 @@ CARRIER_ALIASES = {
     "cm": ("cm", "mobile", "yidong", "移动"),
 }
 
+# The high-BDP profile tooling/scripts/remote/tune-tono-tcp.sh installs.
 TCP_TUNING_KEYS = (
+    "net.core.default_qdisc",
     "net.ipv4.tcp_rmem",
     "net.ipv4.tcp_wmem",
     "net.core.rmem_max",
     "net.core.wmem_max",
     "net.ipv4.tcp_slow_start_after_idle",
+    "net.ipv4.tcp_mtu_probing",
+    "net.ipv4.tcp_fastopen",
 )
 
 EXIT_AGENT_UNIT = "tono-exit-agent.service"

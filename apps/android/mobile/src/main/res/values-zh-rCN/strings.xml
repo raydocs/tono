@@ -171,6 +171,11 @@
     <string name="notif_check_live">打开 Tono 查看实时连接状态</string>
     <string name="notif_stopped_title">Tono 已停止</string>
     <string name="notif_stopped_no_vpn">系统无 VPN 网络 · 打开 Tono 重新连接</string>
+    <string name="notif_revoked_title">系统已关闭 Tono 的 VPN</string>
+    <string name="notif_revoked_lockdown">其他 VPN 已接管，或 VPN 授权已被撤销。“屏蔽未使用 VPN 的连接”已开启，系统会继续阻断 VPN 之外的连接。打开 Tono 重新授权。</string>
+    <string name="notif_revoked_open">其他 VPN 已接管，或 VPN 授权已被撤销。应用现在直接使用本机网络，不经过 Tono。打开 Tono 重新授权。</string>
+    <string name="notif_failed_lockdown">“屏蔽未使用 VPN 的连接”已开启，Tono 重新连接前系统会继续阻断网络。</string>
+    <string name="notif_failed_open">应用现在直接使用本机网络，不经过 Tono。</string>
     <string name="consent_title">系统询问之前</string>
     <string name="consent_ask">Android 会询问一次是否允许 Tono 建立 VPN，请在系统弹窗中点“确定”。</string>
     <string name="consent_routes">AI 与视频经 Tono 出口，其余应用直连。</string>

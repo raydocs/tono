@@ -115,7 +115,17 @@ def read_inventory(path: Path, node_id: str) -> dict:
     # and the verification runs here, so an unreachable front passes both.
     host = str(n["realityTarget"]).strip().lower()
     if any(host == d or host.endswith(f".{d}") for d in REALITY_FRONTS["unusable"]): raise ProvisionError(f"realityTarget {host} was measured unusable from inside the main market; see tooling/scripts/reality-fronts.json")
+    # A node verified in production on its own front must not be re-provisioned
+    # back onto another one: that is how a working node regresses silently.
+    pinned = pinned_reality_target(str(n["catalogName"]), str(n["publicServer"]), str(n["host"]))
+    if pinned and host != pinned: raise ProvisionError(f"realityTarget {host} differs from the production-verified front {pinned} for this node; update tooling/scripts/reality-fronts.json nodeTargets first")
     return n
+
+def pinned_reality_target(*keys: str) -> str | None:
+    targets = REALITY_FRONTS.get("nodeTargets") or {}
+    for key in keys:
+        if key in targets: return targets[key]
+    return None
 
 def desired(inv: dict, flags: argparse.Namespace) -> dict:
     return {k: inv[k] for k in ("mode","servicePort","realityTarget","configPath","serviceName")} | {"version": XRAY_VERSION, "enableBbr": flags.enable_bbr, "allowFirewallChange": flags.allow_firewall_change}

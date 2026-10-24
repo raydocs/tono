@@ -1,0 +1,16 @@
+## 2026-10-23 · Phase 2：桌面路由对齐、节点 Reality/TCP 固化、Android 可靠性、控制面移动端身份
+- 归属：SHIP_PLAN G1（已连接=能用、防泄漏）；ops plan 节点配置与 Android / 控制面客户端身份。四项独立提交，可分别审查。
+- 来源：`origin/main` `6482ddc`（#1736 合入后）→ 本地 main 四个提交（tono-core / fleet / control-plane / android）；未 push、未开 PR、未合 main。
+- 缺陷修复：
+  - Android：系统撤销 VPN（`onRevoke`）原先不发通知；现在用户主动停止、系统撤销、可恢复失败三种情况分开通知（撤销=打开 Tono，失败=重试，用户停止=清除旧通知）。始终开启 VPN 的锁定模式下文案只说"系统继续阻断"，绝不说"已直连/网络已放开"；调用方不确定时按锁定处理。
+  - Android：`setUnderlyingNetworks` 原先只在建 TUN 时设一次，切 Wi-Fi/蜂窝后系统仍报旧网络；现按 TUN 代次 + 网络序号同步，旧 TUN 或乱序回调不会覆盖当前值。
+  - Android：目录 GET 遇 503 `EXIT_IDENTITY_PROPAGATING` 直接失败；现每 15 s 重试，单调时钟 5 min 截止，断开/撤销/登出/销毁可在 1 s 内取消。
+  - 控制面：`client-identity.ts` 只接受 macos/windows，Android 已发送的 `X-Tono-Client: android/<ver>` 被丢弃；现接受 android/ios（linux 仍拒绝），迁移 `0103_mobile_client_platform.sql` 放宽 `devices.client_platform` CHECK。
+- 新增/优化：
+  - tono-core 桌面路由与防泄漏常量对齐 `direct_domains.rs`（新增 `routing.rs`），iOS 合同同步。
+  - `reality-fronts.json` 增加 `nodeTargets`（Sakura→www.uniqlo.com、Fuji→d1.awsstatic.com、JP-VLESS-Reality→www.sony.co.jp、Buffalo·Erie→s.yimg.com），Ruby/Python 部署脚本按节点名或 IP 取固定 SNI 并拒绝不一致的覆盖；`check-node-in-fleet.py` 校验 SNI、TCP 配置与 exit-agent 节奏。
+  - `tune-tono-tcp.sh` 固化 bbr、fq、slow_start_after_idle=0、mtu_probing=1、fastopen=3、16 MB 缓冲；exit-agent 定时器 drop-in `OnUnitInactiveSec=60s` 及幂等安装脚本。两台 Matrix 服务器（38.14.195.144、154.84.56.196）不在任何新增目标中。
+- 工程与测试：每项均有新单测（Rust routing、fleet Python/Ruby、exit-agent cadence、control-plane client-identity/迁移、Android PropagationWait/UnderlyingSync/StopNotice）。
+- 验证（Linux box）：`cargo test`（tono-core）通过；两份 sync-desktop-routing `--check` 通过；fleet Python 套件、Ruby provisioner 15 runs、exit-agent 126、ops-panel 30 均 OK；控制面 `npm test` `Test Files 66 passed` / `Tests 1056 passed`，`npm run typecheck` 0（unchecked 520/76）；Android `./gradlew test` BUILD SUCCESSFUL，164 tests、0 失败、25 skipped（既有），libbox.aar 由 pin 在 JDK 17 下重建，SHA-256 与 pin 一致。macOS 专属 Python 测试 4 项在基线即失败，与本次无关。
+- 候选/发布：仅源码，无新候选、签名包、生产部署或客户发布。
+- 剩余限制：未做 Android 实机（撤销/锁定/网络切换/身份传播）验证；D1 迁移未在生产执行；节点 sysctl 与 cadence drop-in 仅入库，未下发到节点。路由/防泄漏与迁移合入前需独立审查。
