@@ -29,6 +29,7 @@ jobs:
       services: ${{ steps.filter.outputs.services }}
       sing_box: ${{ steps.filter.outputs.sing_box }}
       connect_bench: ${{ steps.filter.outputs.connect_bench }}
+      ios: ${{ steps.filter.outputs.ios }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -44,6 +45,12 @@ jobs:
         run: |
           node --test tooling/scripts/tests/routing-domains-sync.test.mjs
           node tooling/scripts/sync-routing-domains.mjs --check
+      # Mobile copies are generated from the desktop list. Their own CI is not
+      # on every pull request, so a desktop-only edit would otherwise drift.
+      - name: Mobile routing contracts
+        run: |
+          python3 apps/ios/tools/sync-desktop-routing.py --check
+          python3 apps/android/scripts/routing/sync-desktop-routing.py --desktop "$GITHUB_WORKSPACE" --check
       - name: Detect changed paths
         id: filter
         run: node tooling/scripts/ci-gate-changes.mjs detect
@@ -78,9 +85,16 @@ jobs:
     if: needs.changes.outputs.connect_bench == 'true'
     uses: ./.github/workflows/connect-bench.yml
 
+  ios:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    uses: ./.github/workflows/ios-ci.yml
+    with:
+      apple: false
+
   ci-gate:
     name: ci-gate
-    needs: [changes, macos, windows, services, sing_box, connect_bench]
+    needs: [changes, macos, windows, services, sing_box, connect_bench, ios]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -104,4 +118,6 @@ jobs:
           SING_BOX_SHOULD: ${{ needs.changes.outputs.sing_box }}
           CONNECT_BENCH: ${{ needs.connect_bench.result }}
           CONNECT_BENCH_SHOULD: ${{ needs.changes.outputs.connect_bench }}
+          IOS: ${{ needs.ios.result }}
+          IOS_SHOULD: ${{ needs.changes.outputs.ios }}
         run: node tooling/scripts/ci-gate-changes.mjs aggregate
