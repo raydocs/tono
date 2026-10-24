@@ -237,8 +237,10 @@ class BoxPlatform(
                     }
                 })
             if (!done.await(12, TimeUnit.SECONDS)) {
-                cancel.cancel()
-                done.complete { ctx.errnoCode(OsConstants.ETIMEDOUT) }
+                done.complete {
+                    cancel.cancel()
+                    ctx.errnoCode(OsConstants.ETIMEDOUT)
+                }
             }
         }
 

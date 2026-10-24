@@ -108,6 +108,19 @@ class HomeInteractionTest {
         assertEquals("connect", tapPrimaryIn(UiFixtures.idle.copy(phase = Phase.NEEDS_PERMISSION, reasonCode = "DENIED")))
     }
 
+    @Test fun recheckingKeepsDisconnectRatherThanOfferingCancel() {
+        val ledger = com.raydocs.tono.mobile.engine.TunnelLedger()
+        val preparing = ledger.begin(UiFixtures.idle, Phase.PREPARING)
+        val started = ledger.started(preparing, ledger.attempt, true, preparing.selectedNode, preparing.mode, 1_000)!!
+        val ok = com.raydocs.tono.mobile.engine.ExitProbe(com.raydocs.tono.mobile.engine.ProbeState.OK, "JP")
+        val up = ledger.probed(started, ledger.attempt, ok, ok)!!
+        snapshot = ledger.rechecking(up)!!
+        show()
+        compose.onNodeWithText(str(R.string.action_disconnect)).assertExists()
+        compose.onAllNodesWithText(str(R.string.action_cancel)).assertCountEquals(0)
+        compose.onNodeWithText(str(R.string.status_rechecking)).assertExists()
+    }
+
     @Test fun primaryIsAButtonWithStateAndIsDisabledWhileDisconnecting() {
         show()
         snapshot = UiFixtures.idle.copy(phase = Phase.CONNECTING)

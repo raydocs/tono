@@ -92,6 +92,8 @@ class TonoVpnService : VpnService() {
     private val probeRequests = ProbeEpoch<Network>()
     private lateinit var apiBase: String
     private var localTestServer = false
+    /** A failed disk write must not undo this instance's explicit stop intent. Engine thread only. */
+    private var explicitlyStopped = false
 
     override fun onCreate() {
         super.onCreate()
@@ -139,11 +141,17 @@ class TonoVpnService : VpnService() {
         engine.execute {
             val lockdown = lockdownNow()
             catalogWait.incrementAndGet()
-            stopCore()
-            store.update { it.copy(wantConnected = false) }
-            update { ledger.end(it, Phase.NEEDS_PERMISSION, "REVOKED") }
-            leaveForeground()
-            postRevoked(lockdown)
+            explicitlyStopped = true
+            stopAndPersist(
+                stop = {
+                    stopCore()
+                    update { ledger.end(it, Phase.NEEDS_PERMISSION, "REVOKED") }
+                    leaveForeground()
+                    postRevoked(lockdown)
+                },
+                persist = { store.update { it.copy(wantConnected = false) } },
+                warn = { warnStopPersistence() },
+            )
         }
     }
 
@@ -400,6 +408,8 @@ class TonoVpnService : VpnService() {
     // ---- tunnel ------------------------------------------------------------------------------
 
     private fun connect(userInitiated: Boolean) {
+        if (!userInitiated && explicitlyStopped) { leaveForeground(); return }
+        if (userInitiated) explicitlyStopped = false
         val current = snapshot.get()
         if (current.phase == Phase.PREPARING || current.phase == Phase.CONNECTING) return
         if (store.refreshToken() == null) {
@@ -500,17 +510,25 @@ class TonoVpnService : VpnService() {
 
     private fun disconnect(reason: String?) {
         catalogWait.incrementAndGet()
+        explicitlyStopped = true
+        val signedIn = snapshot.get().phase != Phase.SIGNED_OUT
         stopAndPersist(
             stop = {
                 if (snapshot.get().phase != Phase.SIGNED_OUT) update { ledger.begin(it, Phase.DISCONNECTING) }
                 stopCore()
                 leaveForeground()
+                update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
             },
             persist = { store.update { it.copy(wantConnected = false) } },
-            warn = { Log.w(TAG, "stop intent could not be saved") },
+            warn = { warnStopPersistence() },
         )
-        val signedIn = store.refreshToken() != null
-        update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
+    }
+
+    private fun warnStopPersistence() {
+        Log.w(TAG, "stop intent could not be saved")
+        android.os.Handler(mainLooper).post {
+            android.widget.Toast.makeText(this, R.string.stop_persistence_warning, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun fail(e: Throwable, userInitiated: Boolean) {

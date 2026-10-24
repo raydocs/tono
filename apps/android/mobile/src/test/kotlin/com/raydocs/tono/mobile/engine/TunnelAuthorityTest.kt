@@ -171,17 +171,6 @@ class TunnelAuthorityTest {
         assertFalse(decoded.tunnelUp)
         assertNull(decoded.applied)
     }
-    @Test fun recheckingWithdrawsConnectedUntilTheNewExitResultsArrive() {
-        val ledger = TunnelLedger()
-        val up = connected(ledger)
-        val checking = ledger.rechecking(up)!!
-        assertEquals(Phase.CONNECTING, checking.phase)
-        assertFalse(checking.tunnelUp)
-        assertNull(checking.cloudProbe.location)
-        val finished = ledger.probed(checking, ledger.attempt, ok, homeOk)!!
-        assertTrue(finished.tunnelUp)
-    }
-
     @Test fun lossOfUnderlyingNetworkWithdrawsBothSuccessfulExitClaims() {
         val ledger = TunnelLedger()
         val up = connected(ledger)
