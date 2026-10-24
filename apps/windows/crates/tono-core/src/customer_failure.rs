@@ -149,7 +149,7 @@ pub fn auth_support_prefix(err: &ApiError) -> &'static str {
             CustomerFailureCode::AuthClock.as_str()
         }
         ApiError::Transport { kind, message } => classify_auth_transport(*kind, message).as_str(),
-        ApiError::RateLimited => CustomerFailureCode::AuthRateLimited.as_str(),
+        ApiError::RateLimited { .. } => CustomerFailureCode::AuthRateLimited.as_str(),
         ApiError::DeviceLimit => CustomerFailureCode::AuthDeviceLimit.as_str(),
         ApiError::Unauthorized => CustomerFailureCode::AuthUnauthorized.as_str(),
         ApiError::InvalidOrExpiredCode => CustomerFailureCode::AuthInvalidCode.as_str(),
@@ -542,7 +542,7 @@ mod tests {
     #[test]
     fn auth_rate_limit_keeps_its_token() {
         assert_eq!(
-            auth_support_prefix(&ApiError::RateLimited),
+            auth_support_prefix(&ApiError::RateLimited { retry_after_secs: None }),
             "TONO_AUTH_RATE_LIMITED"
         );
         assert_eq!(CustomerFailureCode::AuthRateLimited.stage(), FailureStage::Auth);

@@ -355,7 +355,7 @@ async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
         match result {
             Ok(()) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
             Err(err) if telemetry_outbox::should_queue(&err) => {
-                telemetry_outbox::postpone(state.audit().settings_dir(), &item.kind, &item.body, epoch_ms());
+                telemetry_outbox::postpone(state.audit().settings_dir(), &item.kind, &item.body, epoch_ms(), None);
             }
             Err(_) => telemetry_outbox::complete(state.audit().settings_dir(), &item.kind, &item.body),
         }

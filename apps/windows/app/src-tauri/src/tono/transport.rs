@@ -992,7 +992,7 @@ impl TonoTransport {
             }
             body.extend_from_slice(&chunk);
         }
-        Ok(ApiResponse { status, body })
+        Ok(ApiResponse { retry_after_secs: None, status, body })
     }
 }
 

@@ -21,7 +21,7 @@ pub fn should_queue(err: &ApiError) -> bool {
     match err {
         // A timeout may have been delivered. Do not post it again.
         ApiError::Transport { kind: TransportKind::Timeout, .. } => false,
-        ApiError::Transport { .. } | ApiError::NotFound | ApiError::RateLimited => true,
+        ApiError::Transport { .. } | ApiError::NotFound | ApiError::RateLimited { .. } => true,
         ApiError::Server { status, .. } if *status == 404 || *status == 429 || *status >= 500 => true,
         _ => false,
     }
@@ -137,7 +137,7 @@ pub fn retain_kind(dir: &Path, kind: &str) {
     }
 }
 
-pub fn postpone(dir: &Path, kind: &str, body: &str, now_ms: i64) {
+pub fn postpone(dir: &Path, kind: &str, body: &str, now_ms: i64, _retry_after_secs: Option<u64>) {
     let _guard = OUTBOX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     for queue in ["p0", "ordinary"] {
         let mut file = load(dir, queue);
@@ -183,8 +183,8 @@ mod tests {
     fn rate_limited_upload_is_retained_until_acknowledged() {
         let dir = temp();
         enqueue(&dir.path, "failure", "rate-limited-report", 1000);
-        assert!(should_queue(&ApiError::RateLimited), "HTTP 429 is temporary, not an acknowledgement");
-        postpone(&dir.path, "failure", "rate-limited-report", 1000);
+        assert!(should_queue(&ApiError::RateLimited { retry_after_secs: None }), "HTTP 429 is temporary, not an acknowledgement");
+        postpone(&dir.path, "failure", "rate-limited-report", 1000, None);
         assert!(due(&dir.path, 1000).is_empty());
         assert!(due(&dir.path, 60_999).is_empty());
         assert_eq!(due(&dir.path, 61_000)[0].attempts, 1);
@@ -204,7 +204,7 @@ mod tests {
         enqueue(&dir.path, "failure", "critical", 0);
         complete(&dir.path, "failure", "critical");
         assert!(due(&dir.path, 0).iter().any(|item| item.kind == "p0" && item.body == "critical"));
-        postpone(&dir.path, "p0", "critical", 0);
+        postpone(&dir.path, "p0", "critical", 0, None);
         assert!(due(&dir.path, 0).iter().all(|item| item.kind != "p0"));
         assert!(due(&dir.path, 60_000).iter().any(|item| item.kind == "p0"));
     }
@@ -249,12 +249,21 @@ mod tests {
     }
 
     #[test]
+    fn retry_after_is_a_minimum_even_when_longer_than_local_backoff() {
+        let dir = temp();
+        enqueue(&dir.path, "p0", "rate-limited-p0", 1000);
+        postpone(&dir.path, "p0", "rate-limited-p0", 1000, Some(7200));
+        assert!(due(&dir.path, 7_200_999).is_empty(), "must not retry before the server's deadline");
+        assert_eq!(due(&dir.path, 7_201_000).len(), 1);
+    }
+
+    #[test]
     fn a_failed_post_is_retried_then_dropped_after_ack() {
         let dir = temp();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
         enqueue(&dir.path, "failure", "{\"schemaVersion\":1}", now);
         assert_eq!(due(&dir.path, now).len(), 1);
-        postpone(&dir.path, "failure", "{\"schemaVersion\":1}", now);
+        postpone(&dir.path, "failure", "{\"schemaVersion\":1}", now, None);
         assert!(due(&dir.path, now).is_empty(), "backoff hides the item until next_at");
         assert_eq!(due(&dir.path, now + 120_000).len(), 1);
         complete(&dir.path, "failure", "{\"schemaVersion\":1}");

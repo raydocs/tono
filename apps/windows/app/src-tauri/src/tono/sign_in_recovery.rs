@@ -147,7 +147,7 @@ pub fn cause_of(err: &ApiError) -> Option<SignInFailureCause> {
         | ApiError::InvalidOrExpiredCode
         | ApiError::Forbidden
         | ApiError::DeviceLimit
-        | ApiError::RateLimited => None,
+        | ApiError::RateLimited { .. } => None,
     }
 }
 

@@ -769,7 +769,7 @@ mod rejected_session_tests {
     impl HttpTransport for Rejecting {
         async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
             self.0.lock().unwrap().push(request.url);
-            Ok(ApiResponse { status: 401, body: br#"{"error":{"message":"Session is no longer active","code":"UNAUTHORIZED"}}"#.to_vec() })
+            Ok(ApiResponse { retry_after_secs: None, status: 401, body: br#"{"error":{"message":"Session is no longer active","code":"UNAUTHORIZED"}}"#.to_vec() })
         }
     }
 
