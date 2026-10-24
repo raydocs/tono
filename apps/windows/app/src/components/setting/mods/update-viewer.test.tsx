@@ -103,8 +103,12 @@ describe('Windows Service-owned update caller', () => {
     const error = new Error('Service refused: protection retained')
     await act(async () => refuse(error))
     await waitFor(() =>
-      expect(screen.getByRole('alert').textContent).toBe(error.message),
+      expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(
+        'tono.update.refused',
+      ),
     )
+    expect(screen.getByRole('alert').textContent).not.toBe(error.message)
+    expect(screen.getByText(error.message)).toBeDefined()
     expect(screen.getByRole('dialog').contains(screen.getByRole('alert'))).toBe(
       true,
     )
@@ -118,10 +122,14 @@ describe('Windows Service-owned update caller', () => {
       }),
     ).toBeNull()
     fireEvent.click(
-      screen.getByRole('button', { name: 'shared.actions.cancel' }),
+      screen.getByRole('button', {
+        name: 'settings.modals.update.actions.later',
+      }),
     )
     act(() => ref.current!.open())
-    expect(screen.getByRole('alert').textContent).toBe(error.message)
+    expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(
+      'tono.update.refused',
+    )
     expect(
       screen.queryByRole('button', {
         name: 'settings.modals.update.actions.update',
@@ -131,6 +139,29 @@ describe('Windows Service-owned update caller', () => {
     expect(mocks.download).not.toHaveBeenCalled()
     expect(mocks.install).not.toHaveBeenCalled()
     expect(mocks.downloadAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('keeps Update available after a network failure and shows a human sentence', async () => {
+    let refuse!: (error: Error) => void
+    mocks.nativeInstall.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        refuse = reject
+      }),
+    )
+    clickUpdate()
+    const error = new Error('Protected update stopped: connection timed out')
+    await act(async () => refuse(error))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(
+        'tono.update.network',
+      ),
+    )
+    expect(screen.getByText(error.message)).toBeDefined()
+    expect(
+      screen.getByRole('button', {
+        name: 'settings.modals.update.actions.update',
+      }),
+    ).toBeDefined()
   })
 
   it('cancels a download in flight and leaves the same offer available again', async () => {

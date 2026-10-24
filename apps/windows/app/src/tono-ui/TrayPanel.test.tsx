@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { invoke } from '@tauri-apps/api/core'
+import { emit } from '@tauri-apps/api/event'
 import {
   act,
   cleanup,
@@ -36,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   tonoDisconnect: vi.fn(),
   live: false,
   cached: false,
+  updateOffer: null as { version: string; manifestSha256: string } | null,
 }))
 
 vi.mock('@/hooks/use-tono', async (importOriginal) => ({
@@ -61,6 +64,10 @@ vi.mock('@/hooks/use-traffic-data', () => ({
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
+vi.mock('@tauri-apps/api/event', () => ({ emit: vi.fn() }))
+vi.mock('@/hooks/use-update', () => ({
+  useUpdate: () => ({ updateInfo: mocks.updateOffer }),
+}))
 
 vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
@@ -127,6 +134,8 @@ beforeEach(() => {
   mocks.status = makeStatus()
   mocks.live = false
   mocks.cached = false
+  mocks.updateOffer = null
+  localStorage.clear()
   mocks.mutateTonoStatus.mockReset().mockResolvedValue(undefined)
   mocks.tonoServers.mockReset().mockResolvedValue(catalogWithHy2())
   mocks.tonoConnectProgress.mockReset().mockResolvedValue({
@@ -516,4 +525,24 @@ it('new-look tray names a released failed attempt as the home does', async () =>
     await screen.findByRole('heading', { name: "Couldn't connect" }),
   ).toBeDefined()
   expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined()
+})
+
+it('shows a new version in the tray with Update now and Later', async () => {
+  setNewAppearance(true)
+  mocks.updateOffer = {
+    version: '0.0.80',
+    manifestSha256: 'ab'.repeat(32),
+  }
+  render(<TrayPanel />, { wrapper: freshSWR })
+  expect((await screen.findByRole('status')).textContent).toContain('0.0.80')
+  fireEvent.click(screen.getByRole('button', { name: 'Later' }))
+  expect(screen.queryByRole('status')).toBeNull()
+  mocks.updateOffer = {
+    version: '0.0.80',
+    manifestSha256: 'cd'.repeat(32),
+  }
+  render(<TrayPanel />, { wrapper: freshSWR })
+  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+  expect(invoke).toHaveBeenCalledWith('tray_flyout_open_dashboard')
+  expect(emit).toHaveBeenCalledWith('tono://show-update')
 })
