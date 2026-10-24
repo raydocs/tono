@@ -1802,11 +1802,12 @@ nonisolated struct HelperManager {
 
     // MARK: - Bounded Unix-socket HTTP client
 
-    private static func sendRequest(
+    static func sendRequest(
         method: String,
         path: String,
         body: Data? = nil,
-        socket socketPath: String = HelperManager.socketPath
+        socket socketPath: String = HelperManager.socketPath,
+        connected: (Int32) throws -> Void = { _ in }
     ) throws -> (status: Int, body: Data) {
         let generationLine = socketPath == HelperManager.socketPath
             ? try sessionGenerationHeader(method: method, path: path)
@@ -1847,6 +1848,8 @@ nonisolated struct HelperManager {
         guard connected == 0 else {
             throw socketPath == HelperManager.socketPath ? connectFailure() : HelperIPCError.connectFailed
         }
+
+        try connected(fd)
 
         let payload = body ?? Data()
         var request = Data(
