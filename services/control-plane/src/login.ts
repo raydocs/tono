@@ -24,6 +24,13 @@ function fromApiRelay(req: Request): boolean {
   return API_RELAYS.some((relay) => relay.host === clientIp(req));
 }
 
+// Subject limits prevent credential guessing; this shared backstop bounds D1
+// challenge/rate-limit writes through the public relay across all login kinds.
+async function rateLimitRelayAuth(e: Env, req: Request, windowSeconds: number) {
+  await consumeRateLimit(e, `rl:${await sha256(`relay-auth:ip:${clientIp(req)}`)}`,
+    envInt(e, 'RATE_LIMIT_RELAY_AUTH_IP', 200), windowSeconds);
+}
+
 // --- Rate limiting (D1) -------------------------------------------------------
 
 export async function rateLimitEmailStart(e: Env, req: Request, emailAddr: string) {
@@ -31,7 +38,9 @@ export async function rateLimitEmailStart(e: Env, req: Request, emailAddr: strin
   const ipLimit = envInt(e, 'RATE_LIMIT_EMAIL_START_IP', 20);
   const emailLimit = envInt(e, 'RATE_LIMIT_EMAIL_START_EMAIL', 5);
   const ip = clientIp(req);
-  if (!fromApiRelay(req)) {
+  if (fromApiRelay(req)) {
+    await rateLimitRelayAuth(e, req, windowSeconds);
+  } else {
     await consumeRateLimit(e, `rl:${await sha256(`email-start:ip:${ip}`)}`, ipLimit, windowSeconds);
   }
   await consumeRateLimit(e, `rl:${await sha256(`email-start:email:${emailAddr}`)}`, emailLimit, windowSeconds);
@@ -56,7 +65,9 @@ export async function rateLimitChallenge(
       : 'RATE_LIMIT_OIDC_VERIFY_CHALLENGE',
     5,
   );
-  if (!fromApiRelay(req)) {
+  if (fromApiRelay(req)) {
+    await rateLimitRelayAuth(e, req, windowSeconds);
+  } else {
     await consumeRateLimit(
       e,
       `rl:${await sha256(`${kind}:ip:${clientIp(req)}`)}`,
@@ -74,7 +85,9 @@ export async function rateLimitChallenge(
 
 export async function rateLimitOidcStart(e: Env, req: Request, installationId: string) {
   const windowSeconds = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
-  if (!fromApiRelay(req)) {
+  if (fromApiRelay(req)) {
+    await rateLimitRelayAuth(e, req, windowSeconds);
+  } else {
     await consumeRateLimit(
       e,
       `rl:${await sha256(`oidc-start:ip:${clientIp(req)}`)}`,

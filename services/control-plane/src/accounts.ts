@@ -16,10 +16,10 @@ export function ineligible(u: Row, t = now()) {
 export function requireAccountEntitlement(u: Row, t = now()) {
   if (u.status !== 'active') throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
   if (u.expires_at !== null && u.expires_at <= t) {
-    throw new ApiError(403, 'PLAN_EXPIRED', 'Your plan has expired; renew or contact your family');
+    throw new ApiError(403, 'ACCOUNT_EXPIRED', 'Your plan has expired; renew or contact your family');
   }
   if (u.quota_bytes !== null && u.usage_bytes >= u.quota_bytes) {
-    throw new ApiError(403, 'QUOTA_EXHAUSTED', 'Your data allowance is used up; renew or contact your family');
+    throw new ApiError(403, 'QUOTA_EXCEEDED', 'Your data allowance is used up; renew or contact your family');
   }
 }
 

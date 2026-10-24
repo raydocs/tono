@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { type Env } from '../src/env';
-import { enforceUser } from '../src/devices';
+import { enforceUser, ensureDevice } from '../src/devices';
 import macClient from '../../../apps/macos/Tono/Services/TonoAPIClient.swift?raw';
 import windowsClient from '../../../apps/windows/crates/tono-core/src/auth.rs?raw';
 import { api, json, createAccount, emailSignIn, useWorkerHarness } from './worker-harness';
@@ -86,4 +86,25 @@ describe('reviewed desktop compatibility and reactivation boundaries', () => {
   it('retires old sessions atomically when pending reactivation is followed by token insertion failure', async () => {
     await rejectsPreReactivationSession(true);
   });
+  it('rolls back session retirement with a failed reactivation batch without reviving authorization', async () => {
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    const account = await createAccount('reactivation-batch-rollback');
+    await env.DB.prepare('UPDATE users SET expires_at = 1 WHERE id = ?').bind(account.user.id).run();
+    await enforceUser(env as unknown as Env, account.user.id, false);
+    await env.DB.prepare('UPDATE users SET expires_at = NULL WHERE id = ?').bind(account.user.id).run();
+    await env.DB.prepare(`CREATE TRIGGER test_fail_activation BEFORE UPDATE OF status ON devices
+      WHEN OLD.id = '${account.device.id}' AND OLD.status = 'revoked' AND NEW.status = 'active'
+      BEGIN SELECT RAISE(ABORT, 'TEST_REACTIVATION_ABORT'); END`).run();
+    await expect(ensureDevice(env as unknown as Env, account.user.id, 'Phone', 'reactivation-batch-rollback-installation-one'))
+      .rejects.toThrow('TEST_REACTIVATION_ABORT');
+    expect(await env.DB.prepare('SELECT status, entitlement_suspended FROM devices WHERE id = ?')
+      .bind(account.device.id).first()).toEqual({ status: 'revoked', entitlement_suspended: 1 });
+    expect((await env.DB.prepare('SELECT COUNT(*) n FROM sessions WHERE device_id = ? AND revoked_at IS NULL')
+      .bind(account.device.id).first<any>()).n).toBe(1);
+    expect((await me(account.accessToken)).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
+    expect(await env.DB.prepare('SELECT 1 FROM device_exit_credentials WHERE device_id = ?')
+      .bind(account.device.id).first()).toBeNull();
+  });
+
 });

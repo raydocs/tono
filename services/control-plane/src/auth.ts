@@ -50,7 +50,7 @@ export async function auth(req: Request, e: Env) {
     quota_bytes: s.quota_bytes, usage_bytes: s.usage_bytes,
   }, t);
   if (s.entitlement_suspended) {
-    throw new ApiError(403, 'DEVICE_REAUTH_REQUIRED', 'Verify sign-in again to restore this device');
+    throw new ApiError(401, 'UNAUTHORIZED', 'Device authorization was withdrawn; sign in again to restore this device');
   }
   return {
     userId: String(s.user_id),

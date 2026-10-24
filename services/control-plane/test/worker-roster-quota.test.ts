@@ -181,10 +181,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(usage.status).toBe(200);
     const denied = await api('me', { headers: { authorization: `Bearer ${account.accessToken}` } });
     expect(denied.status).toBe(403);
-    expect(await denied.json()).toMatchObject({ error: { code: 'QUOTA_EXHAUSTED' } });
+    expect(await denied.json()).toMatchObject({ error: { code: 'QUOTA_EXCEEDED' } });
     const refresh = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
     expect(refresh.status).toBe(403);
-    expect(await refresh.json()).toMatchObject({ error: { code: 'QUOTA_EXHAUSTED' } });
+    expect(await refresh.json()).toMatchObject({ error: { code: 'QUOTA_EXCEEDED' } });
     expect((await env.DB.prepare('SELECT COUNT(*) n FROM sessions WHERE device_id = ? AND revoked_at IS NULL')
       .bind(account.device.id).first<any>()).n).toBe(1);
     expect(await env.DB.prepare('SELECT 1 FROM device_exit_credentials WHERE device_id = ?')
@@ -237,15 +237,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const expired = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
     expect(expired.status).toBe(403);
-    expect(await expired.json()).toMatchObject({ error: { code: 'PLAN_EXPIRED' } });
+    expect(await expired.json()).toMatchObject({ error: { code: 'ACCOUNT_EXPIRED' } });
 
     const renewed = await admin(`users/${account.user.id}`, {
       expiresAt: Math.floor(Date.now() / 1000) + 30 * 86_400,
     }, 'PATCH');
     expect(renewed.status).toBe(200);
     const needsVerification = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
-    expect(needsVerification.status).toBe(403);
-    expect(await needsVerification.json()).toMatchObject({ error: { code: 'DEVICE_REAUTH_REQUIRED' } });
+    expect(needsVerification.status).toBe(401);
+    expect(await needsVerification.json()).toMatchObject({ error: { code: 'INVALID_REFRESH_TOKEN' } });
     expect((await credentials()).count).toBe(0);
     expect((await env.DB.prepare('SELECT COUNT(*) n FROM sessions WHERE device_id = ? AND revoked_at IS NULL')
       .bind(account.device.id).first<any>()).n).toBe(1);

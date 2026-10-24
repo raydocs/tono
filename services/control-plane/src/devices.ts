@@ -205,6 +205,16 @@ export async function ensureDevice(e: Env, user: string, name: string, installat
     ];
 
     if (d) {
+      // Retire the suspended identity before reactivation, in the same batch.
+      // A failure after ensureDevice (recording/enrollment/token insertion)
+      // must never revive an old refresh token. Do not retire a concurrent
+      // winner's sessions if the device is already active/pending by now.
+      statements.push(e.DB.prepare(
+        `UPDATE sessions SET revoked_at = ?
+         WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL
+           AND EXISTS (SELECT 1 FROM devices
+                       WHERE id = ? AND user_id = ? AND installation_id = ? AND status = 'revoked')`,
+      ).bind(tNow, user, did, did, user, installation));
       statements.push(enrollmentEnabled
         ? e.DB.prepare(
           `UPDATE devices SET

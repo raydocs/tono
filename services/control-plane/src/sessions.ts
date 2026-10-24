@@ -137,7 +137,7 @@ export async function refreshSession(e: Env, req: Request, raw: string) {
     quota_bytes: s.quota_bytes, usage_bytes: s.usage_bytes,
   }, t);
   if (s.entitlement_suspended) {
-    throw new ApiError(403, 'DEVICE_REAUTH_REQUIRED', 'Verify sign-in again to restore this device');
+    throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Device authorization was withdrawn; sign in again to restore this device');
   }
   const issued = await tokens(e, s.user_id, s.device_id, s.installation_id, {
     from: s.id,

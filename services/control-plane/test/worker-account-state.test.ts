@@ -14,12 +14,12 @@ describe('account state is not authentication failure', () => {
     const me = () => api('me', { headers: { authorization: `Bearer ${account.accessToken}` } });
     const response = await me();
     expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: { code: 'PLAN_EXPIRED' } });
+    expect(await response.json()).toMatchObject({ error: { code: 'ACCOUNT_EXPIRED' } });
     await enforceUser(env as unknown as Env, account.user.id, false);
     expect((await me()).status).toBe(403);
     const refreshed = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
     expect(refreshed.status).toBe(403);
-    expect(await refreshed.json()).toMatchObject({ error: { code: 'PLAN_EXPIRED' } });
+    expect(await refreshed.json()).toMatchObject({ error: { code: 'ACCOUNT_EXPIRED' } });
     const session = await env.DB.prepare('SELECT revoked_at FROM sessions WHERE user_id = ? AND revoked_at IS NULL')
       .bind(account.user.id).first();
     expect(session).not.toBeNull();
@@ -27,8 +27,8 @@ describe('account state is not authentication failure', () => {
       .bind(account.device.id).first()).toBeNull();
     await env.DB.prepare('UPDATE users SET expires_at = NULL WHERE id = ?').bind(account.user.id).run();
     const renewed = await me();
-    expect(renewed.status).toBe(403);
-    expect(await renewed.json()).toMatchObject({ error: { code: 'DEVICE_REAUTH_REQUIRED' } });
+    expect(renewed.status).toBe(401);
+    expect(await renewed.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } });
     const signedIn = await emailSignIn({ email: account.email, deviceName: 'Phone', installationId: 'expired-contract-installation-one' });
     expect(signedIn.status).toBe(200);
     const restored = await signedIn.json() as any;
@@ -42,15 +42,15 @@ describe('account state is not authentication failure', () => {
     await env.DB.prepare('UPDATE users SET quota_bytes = 1, usage_bytes = 1 WHERE id = ?').bind(account.user.id).run();
     const response = await api('me', { headers: { authorization: `Bearer ${account.accessToken}` } });
     expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: { code: 'QUOTA_EXHAUSTED' } });
+    expect(await response.json()).toMatchObject({ error: { code: 'QUOTA_EXCEEDED' } });
     const refreshed = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
     expect(refreshed.status).toBe(403);
-    expect(await refreshed.json()).toMatchObject({ error: { code: 'QUOTA_EXHAUSTED' } });
+    expect(await refreshed.json()).toMatchObject({ error: { code: 'QUOTA_EXCEEDED' } });
     const start = await startEmailSignIn({ email: account.email, deviceName: 'Phone', installationId: 'quota-contract-phone' });
     expect(start.code).toMatch(/^\d{6}$/);
     const verified = await api('auth/email/verify', json({ challengeId: start.challengeId, code: start.code }));
     expect(verified.status).toBe(403);
-    expect(await verified.json()).toMatchObject({ error: { code: 'QUOTA_EXHAUSTED' } });
+    expect(await verified.json()).toMatchObject({ error: { code: 'QUOTA_EXCEEDED' } });
   });
 
   it('keeps explicit device revocation authoritative even during account suspension', async () => {
