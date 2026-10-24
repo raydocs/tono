@@ -166,7 +166,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       .first()).toEqual({ usage_bytes: 1680 });
   });
 
-  it('revokes sessions and devices as soon as a usage report reaches quota', async () => {
+  it('revokes network authorization at quota while preserving the account session', async () => {
     const account = await createAccount('quota');
     resetMockInventory(account.device.id, account.enrollment.hostname);
     expect((await confirm(account)).status).toBe(200);
@@ -179,9 +179,21 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       observedAt: Math.floor(Date.now() / 1000),
     }] }, EXIT_NODE_TOKENS['exit-default']));
     expect(usage.status).toBe(200);
-    expect((await api('me', { headers: { authorization: `Bearer ${account.accessToken}` } })).status).toBe(401);
-    const device = await env.DB.prepare('SELECT status FROM devices WHERE id=?').bind(account.device.id).first<any>();
-    expect(device.status).toBe('revoked');
+    const denied = await api('me', { headers: { authorization: `Bearer ${account.accessToken}` } });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ error: { code: 'QUOTA_EXHAUSTED' } });
+    const refresh = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(refresh.status).toBe(403);
+    expect(await refresh.json()).toMatchObject({ error: { code: 'QUOTA_EXHAUSTED' } });
+    expect((await env.DB.prepare('SELECT COUNT(*) n FROM sessions WHERE device_id = ? AND revoked_at IS NULL')
+      .bind(account.device.id).first<any>()).n).toBe(1);
+    expect(await env.DB.prepare('SELECT 1 FROM device_exit_credentials WHERE device_id = ?')
+      .bind(account.device.id).first()).toBeNull();
+    const roster = await api('home/exit-identities', { headers: { authorization: `Bearer ${HOME_TOKEN}` } });
+    expect(roster.status).toBe(200);
+    expect((await roster.json() as any).identities.map((entry: any) => entry.userId)).not.toContain(account.user.id);
+    const device = await env.DB.prepare('SELECT status, entitlement_suspended FROM devices WHERE id=?').bind(account.device.id).first<any>();
+    expect(device).toEqual({ status: 'revoked', entitlement_suspended: 1 });
   });
 
   it('sets, updates, and clears expiresAt through the admin PATCH route', async () => {
@@ -207,9 +219,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(row.expires_at).toBeNull();
   });
 
-  // Provisional policy (2026-09-24): expiry revokes every device, session and
-  // exit credential; renewing restores nothing by itself, and each device
-  // signing in again does. The ops console copy promises exactly this.
+  // Entitlement blocks preserve account sessions, not network authorization.
+  // Renewal alone still cannot restore an identity revoked by enforcement.
   it('expiry revokes every device within a cron tick and only a fresh sign-in restores service after renewal', async () => {
     (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
     const account = await createAccount('expiry-renew');
@@ -224,11 +235,20 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       .toBe('revoked');
     expect((await credentials()).count).toBe(0);
 
+    const expired = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(expired.status).toBe(403);
+    expect(await expired.json()).toMatchObject({ error: { code: 'PLAN_EXPIRED' } });
+
     const renewed = await admin(`users/${account.user.id}`, {
       expiresAt: Math.floor(Date.now() / 1000) + 30 * 86_400,
     }, 'PATCH');
     expect(renewed.status).toBe(200);
-    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
+    const needsVerification = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(needsVerification.status).toBe(403);
+    expect(await needsVerification.json()).toMatchObject({ error: { code: 'DEVICE_REAUTH_REQUIRED' } });
+    expect((await credentials()).count).toBe(0);
+    expect((await env.DB.prepare('SELECT COUNT(*) n FROM sessions WHERE device_id = ? AND revoked_at IS NULL')
+      .bind(account.device.id).first<any>()).n).toBe(1);
 
     const again = await emailSignIn({
       email: account.email,
@@ -240,6 +260,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(signedIn.device.id).toBe(account.device.id);
     expect((await api('me', { headers: { authorization: `Bearer ${signedIn.accessToken}` } })).status).toBe(200);
     expect((await credentials()).count).toBe(1);
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
   });
 
   it('rejects invalid expiresAt values with 400', async () => {

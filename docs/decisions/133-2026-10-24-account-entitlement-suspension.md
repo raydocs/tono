@@ -5,3 +5,5 @@
 - Applied in: `fix/t6-control-plane`；错误码契约 [control-plane-error-contract](../control-plane-error-contract.md)。
 
 旧的 `worker-roster-quota.test.ts:182,231` 明确断言套餐/续费后的旧 refresh 返回 401，与本任务的“不得登出”要求冲突。本线程遵守“不改既有测试期望”，保留失败并交由编排者协调，不以特殊客户端版本、测试分支或状态码伪装绕过它们。
+
+2026-10-24 CI续修：上段描述的是历史head的阻塞。用户随后要求修复CI；本轮按已要求的账户契约同步集成用例，并增加精确error.code、会话保留、device/credential撤销、roster排除和新验证前后授权检查。不是把安全拒绝改成放行；生产授权逻辑未改。旧失败run及新旧源码RED/GREEN见验证记录。

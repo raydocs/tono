@@ -13,3 +13,9 @@
 - RED：纠正新logout测试fixture后的 `f1da98c94` 测试配原429e23427源码，3 failed/2 passed；GREEN新回归5 passed，含冻结时钟截止与受控并发。typecheck通过。详情/有限重放竞争风险见[验证续记](../reports/t6-control-plane-verification-2026-10-24.md#追加-worker-refresh-second-replay)。
 - 原one-replay测试明确要求第二次401，与追加需求相反，未改期望；扩大回归43 passed/1 failed，不是全绿。独立安全/Claude审查和真实连续响应丢失链路未验；无新migration、无新包、未合并/部署。
 - 最终续验：五文件17 passed；完整suite为1069 passed/3 failed（70文件），三条均为上述未改动旧规范冲突，不是全绿。只补交付文档后推送同一PR。
+
+### 2026-10-24 CI 续修 · 集成契约同步
+- 定位 run40082806706：三条已记录旧契约断言导致control-plane失败，ci-gate连带失败，非基础设施故障；不对旧run做无效重跑。
+- 仅改两份集成测试，按已要求的403账户状态/原窗口多次恢复契约同步，同时补强credential撤销、roster排除、仅一live session、旧token拒绝及正常轮换/过期边界。生产安全逻辑、测试门槛和超时均不变。
+- 新契约对原322f的auth/sessions/devices源码真实RED三项；恢复当前实现窄回归49 passed。历史失败证据保留；最新完整结果及普通push见验证续记，无合并/部署。
+- 本轮最终本地：70文件/1072测试全部通过，覆盖率门槛通过；typecheck及diff检查通过。本轮无生产src改动；新head远端CI尚待完成，不沿用失败run为通过证据。

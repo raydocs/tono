@@ -81,3 +81,24 @@ npm test
 5. 未完成独立安全审查，需编排者在合并前安排Claude交叉审查；不合并、不部署。新令牌不入日志/文档，只存hash。
 
 最终实现 `162f96549` 的完整 `npm test` 原始输出：`Test Files 2 failed | 68 passed (70)`；`Tests 3 failed | 1069 passed (1072)`，116.02秒。恰为之前两条套餐401契约冲突与旧one-replay契约冲突；没有隐藏或跳过。五个新增/相关窄文件重跑 `Tests 17 passed (17)`；`git diff --check` 通过。
+
+## CI 40082806706 续修：同步集成契约，保留并补强安全断言
+
+- 用户要求排查 head `f29d3aad5` 的失败。已运行 `gh pr checks 1738`、`gh run view 40082806706 --log-failed`。
+- 真实 CI RED：[run 40082806706](https://github.com/raydocs/tono/actions/runs/40082806706)，`services / control-plane` 退出1，`3 failed | 1069 passed (1072)`；精确失败为 `worker-devices.test.ts:160`（实际200、旧预期401），`worker-roster-quota.test.ts:182,231`（实际403、旧预期401）。`ci-gate` 日志仅因 `SERVICES=failure` 聚合失败。不是网络/runner基础设施抖动，**不 rerun 旧 run**。
+- 本轮只同步两份集成测试到用户已经要求的账户/重放契约，**生产代码、限流、600秒窗口、TLS、PF/WFP、账户/设备隔离、CI门槛均未改**，也没有容忍多个状态码、删测试、skip或扩大超时。
+- quota 集成：精确403 `QUOTA_EXHAUSTED`，access和refresh均拒绝，session保持1个未撤销，device仍revoked且有暂停标记，exit credential为空、exit roster排除该账户。
+- expiry/renew集成：到期精确403 `PLAN_EXPIRED`；续费精确403 `DEVICE_REAUTH_REQUIRED`、网络credential仍为0、原账户session保留；新验证后才恢复网络credential和可用access，旧refresh必须401。
+- replay集成：原T0多次恢复精确200；root原rotated_at不变且指向最新session；两级未交付的access/refresh必须401、仅1个live session；正常轮换后T0必须401、窗口过期旧refresh必须401，新session仍可用。原有设备撤销/新登录/logout负向用例保持。
+- 新契约的额外真实RED：只暂换本线程拥有的 `src/auth.ts`、`src/sessions.ts`、`src/devices.ts` 为 `git show 322f48c6f:<path>`，退出trap逐一恢复，其余生产源码不动；运行下面的三条集成场景，原始输出 `Tests 3 failed | 38 skipped (41)`。三条匹配用例均在真实状态断言失败（401≠200、401≠403）；38条未匹配用例不是RED证据。
+
+```sh
+npx vitest run test/worker-devices.test.ts test/worker-roster-quota.test.ts -t 'recovers repeated response loss|revokes network authorization at quota|expiry revokes every device'
+npx vitest run test/worker-devices.test.ts test/worker-roster-quota.test.ts test/worker-refresh-replay.test.ts test/worker-account-state.test.ts
+npm run typecheck
+npm test
+```
+
+- 恢复当前实现后的窄GREEN：`Test Files 4 passed (4)`，`Tests 49 passed (49)`。typecheck/全量结果在本轮交付下补录。先前各节的“保留旧契约失败”是对应历史head的真实证据，不改写为当时已经通过。
+
+本轮最终本地GREEN（同一待提交树，无后续代码改动）：`npm test` 退出0，`Test Files 70 passed (70)`、`Tests 1072 passed (1072)`，83.22秒；istanbul门槛通过（Statements88.93%、Branches83.83%、Functions90.47%、Lines93.39%）。`npm run typecheck` 通过（520/521、admin76/99），`git diff --check` 通过。生产 `src/` 无本轮diff。新远端CI需等普通push后验证，未把本地结果当作CI绿灯。
