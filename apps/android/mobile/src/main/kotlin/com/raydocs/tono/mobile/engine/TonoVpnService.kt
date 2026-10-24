@@ -514,7 +514,7 @@ class TonoVpnService : VpnService() {
         val signedIn = snapshot.get().phase != Phase.SIGNED_OUT
         stopAndPersist(
             stop = {
-                if (snapshot.get().phase != Phase.SIGNED_OUT) update { ledger.begin(it, Phase.DISCONNECTING) }
+                // No disk or surface publication may stand between the stop request and TUN close.
                 stopCore()
                 leaveForeground()
                 update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
