@@ -13,6 +13,9 @@ public struct TunnelIntentLedger: Equatable, Sendable {
     /// The user's last explicit switch was off (Disconnect, Cancel, sign-out) and no session came up
     /// since: a stop the tunnel reports or recorded after it is the user's, never a failure.
     public private(set) var stoppedByUser = false
+    /// A Cancel made while the start was handed to the system and Network Extension had reported
+    /// nothing yet: if that start turns out not to have reached the system, no stop will come.
+    private var cancelledStart = false
 
     public init() {}
 
@@ -30,15 +33,23 @@ public struct TunnelIntentLedger: Equatable, Sendable {
     /// The start is handed to the system.
     public mutating func starting() { userStarting = true }
 
-    /// The start ended before reaching the system (superseded, refused, declined).
-    public mutating func startEnded() { userStarting = false }
+    /// The start ended before reaching the system (superseded, refused, declined): no stop of it
+    /// will come, so a Cancel made meanwhile expects none.
+    public mutating func startEnded() {
+        if cancelledStart { userStopping = false }
+        cancelledStart = false
+        userStarting = false
+    }
 
     /// Explicit disconnect or Cancel. `tunnel` is Network Extension's status when the user pressed it.
-    /// The user's own stop never shows a failure.
+    /// The user's own stop never shows a failure. A start already handed to the system may not have
+    /// reported connecting yet: its stop is expected too.
     public mutating func userStops(tunnel: TunnelStatus) {
         failure = nil
+        let running = tunnel != .disconnected && tunnel != .invalid
+        cancelledStart = userStarting && !running
+        userStopping = running || userStarting
         userStarting = false
-        userStopping = tunnel != .disconnected && tunnel != .invalid
         stoppedByUser = true
     }
 
@@ -87,6 +98,7 @@ public struct TunnelIntentLedger: Equatable, Sendable {
             }
             userStarting = false
             userStopping = false
+            cancelledStart = false
             return stop
         default:
             return nil

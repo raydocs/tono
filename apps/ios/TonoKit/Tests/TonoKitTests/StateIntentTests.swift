@@ -13,6 +13,8 @@ final class StateIntentTests: XCTestCase {
         case connect
         /// The user switched on; a later switch superseded the start before it reached the system.
         case connectSuperseded
+        /// The start handed over by `.connect` returned superseded (a Cancel took over first).
+        case startSuperseded
         case disconnect
         case signOut, signedOut
         /// Network Extension's status.
@@ -68,6 +70,11 @@ final class StateIntentTests: XCTestCase {
             steps: [.connect, .disconnect, .ne(.connecting), .tunnelFails("CORE_START"), .report(session: "s1", running: false),
                     .ne(.disconnected)],
             app: .idle, widget: .off),
+        Row(name: "a cancelled start that never reached the system leaves no stop expected for the next session",
+            steps: [.connect, .disconnect, .startSuperseded,
+                    .connect, .ne(.connecting), .ne(.connected), .report(session: "s1", running: true),
+                    .tunnelFails("CORE_STOPPED"), .report(session: "s1", running: false), .ne(.disconnected)],
+            app: .failed, widget: .failed),
         Row(name: "cancel before the start reached the system",
             steps: [.connectSuperseded, .disconnect, .ne(.disconnected)],
             app: .idle, widget: .off),
@@ -121,6 +128,8 @@ final class StateIntentTests: XCTestCase {
             case .connectSuperseded:
                 ledger.userWantsOn()
                 ledger.starting()
+                ledger.startEnded()
+            case .startSuperseded:
                 ledger.startEnded()
             case .disconnect:
                 ledger.userStops(tunnel: tunnel)
