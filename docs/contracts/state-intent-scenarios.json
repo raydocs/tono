@@ -35,9 +35,9 @@
       },
       "platforms": {
         "ios": {
-          "enforcement": "expected-failure",
+          "enforcement": "enabled",
           "owner": "T1",
-          "note": "SharedStatus.governs lets a later CORE_STOPPED beat replace the user's off note."
+          "note": "Enabled by #1741: SharedStatus.governs keeps an off note over a later negative report from a start opened before it; StateIntentTests covers the app side."
         },
         "android": {
           "enforcement": "enabled",
@@ -277,9 +277,9 @@
       },
       "platforms": {
         "ios": {
-          "enforcement": "expected-failure",
+          "enforcement": "enabled",
           "owner": "T1",
-          "note": "A later stopped tunnel report with no failure overrides the signed-out note and reads as off."
+          "note": "Enabled by #1741: a signed-out note is not overridden by the stopping tunnel's later report; signOut also republishes at the end."
         },
         "android": {
           "enforcement": "todo",
@@ -571,9 +571,9 @@
       },
       "platforms": {
         "ios": {
-          "enforcement": "todo",
+          "enforcement": "enabled",
           "owner": "T1",
-          "note": "The stale failure lives in AppModel, not in ConnectionState.derive. No probe here."
+          "note": "Enabled by #1741: TunnelIntentLedger clears the stale failure when the session reaches connected again."
         },
         "android": {
           "enforcement": "todo",
@@ -668,9 +668,9 @@
       },
       "platforms": {
         "ios": {
-          "enforcement": "todo",
+          "enforcement": "enabled",
           "owner": "T1",
-          "note": "IOS-1672-R1-CANCEL-LATE-START. No TonoKit probe wired in this thread."
+          "note": "Enabled by #1741 (display side): TunnelIntentLedger expects the stop of a start cancelled before NE reports connecting. System side: TunnelStartCoordinatorTests (IOS-1672-R1-CANCEL-LATE-START, fixed in e24adbc21)."
         },
         "android": {
           "enforcement": "enabled",

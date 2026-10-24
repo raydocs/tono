@@ -20,6 +20,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// The inputs sing-box was last started from and whether a graph runs. A refused rebuild can
     /// leave none running; the heartbeat then says so instead of "on". Guarded by `serviceLock`.
     private var graph = TunnelGraph()
+    /// The underlying IPv6 the last graph build used. Guarded by `serviceLock`.
+    private var lastBuildIPv6: Bool?
     #if os(iOS)
     private var screenObserver: ScreenStateObserver?
     #endif
@@ -38,6 +40,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// answer says no graph runs. Its own lock, so the core's callback never waits on `serviceLock`.
     private let stopLock = NSLock()
     private var coreStopCode: String?
+    /// Set when the system asked this provider to stop (`stopTunnel`): sing-box closing its service
+    /// from then on is that stop, not a core failure. Guarded by `stopLock`.
+    private var stopping = false
 
     override init() {
         LibboxPrepareCrashSignalHandlers()
@@ -52,6 +57,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         serviceLock.unlock()
         stopLock.lock()
         coreStopCode = nil
+        stopping = false
         stopLock.unlock()
         SharedFiles.clearFailure()
         underlying.start()
@@ -70,6 +76,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             throw fail("CORE_START", error.localizedDescription)
         }
         underlying.onIPv6Change = { [weak self] _ in self?.reloadInPlace(reason: "underlying IPv6 changed") }
+        // A change between the build and the line above had no one to tell: rebuild for it now.
+        if underlying.hasGlobalIPv6 != builtIPv6() { reloadInPlace(reason: "underlying IPv6 changed during start") }
         #if os(iOS)
         if let commandServer { screenObserver = ScreenStateObserver(commandServer: commandServer) }
         #endif
@@ -111,6 +119,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
         Self.log.info("tunnel stopping, reason \(reason.rawValue, privacy: .public)")
+        stopLock.lock()
+        stopping = true
+        stopLock.unlock()
         #if os(iOS)
         screenObserver?.cancel()
         screenObserver = nil
@@ -222,8 +233,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     /// Admission and the config build fail before libbox is touched: a running graph stays intact.
+    /// Called with `serviceLock` held.
     private func build(_ inputs: TunnelInputs) throws -> String {
-        try inputs.makeConfig(underlyingIPv6: underlying.hasGlobalIPv6, cacheFilePath: SharedFiles.cacheDB.path)
+        let ipv6 = underlying.hasGlobalIPv6
+        lastBuildIPv6 = ipv6
+        return try inputs.makeConfig(underlyingIPv6: ipv6, cacheFilePath: SharedFiles.cacheDB.path)
+    }
+
+    private func builtIPv6() -> Bool? {
+        serviceLock.lock()
+        defer { serviceLock.unlock() }
+        return lastBuildIPv6
     }
 
     /// libbox's StartOrReloadService closes the running graph before it builds this one.
@@ -291,11 +311,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// latch makes every later record and answer say so, and the stop is written to the shared status
     /// before the tunnel is cancelled (iOS ends the process in its own time). Written from the reload
     /// queue so this callback never waits on `serviceLock`, which its caller may hold.
+    /// During `stopTunnel` the service closing is that stop: nothing is recorded and nothing cancelled.
     func coreStopped() {
-        SharedFiles.recordFailure(TunnelFailure(code: "CORE_STOPPED", message: "sing-box stopped the service", at: Date()))
         stopLock.lock()
+        if stopping {
+            stopLock.unlock()
+            Self.log.info("service closed while stopping")
+            return
+        }
         coreStopCode = "CORE_STOPPED"
         stopLock.unlock()
+        SharedFiles.recordFailure(TunnelFailure(code: "CORE_STOPPED", message: "sing-box stopped the service", at: Date()))
         reloadQueue.async { [weak self] in
             guard let self else { return }
             self.writeStatus(running: false)
