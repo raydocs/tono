@@ -142,6 +142,38 @@ class TunnelAuthorityTest {
         assertNull("nothing to recheck without a confirmed tunnel", ledger.rechecking(base))
     }
 
+    @Test fun recheckingDoesNotTurnAWorkingTunnelIntoACancellableConnectionAttempt() {
+        val ledger = TunnelLedger()
+        val up = connected(ledger)
+        val checking = ledger.rechecking(up)!!
+        assertEquals(Phase.CONNECTED, checking.phase)
+        assertTrue(checking.tunnelUp)
+        assertEquals(up.attempt, checking.attempt)
+        assertEquals(up.applied, checking.applied)
+        assertEquals(ProbeState.CHECKING, checking.cloudProbe.state)
+        val failed = ExitProbe(ProbeState.FAILED)
+        val degraded = ledger.probed(checking, ledger.attempt, failed, homeOk)!!
+        assertEquals(Phase.DEGRADED, ledger.rechecking(degraded)!!.phase)
+    }
+
+    @Test fun queuedCoreStopCannotOverrideAUserStopOrStopANewerConnection() {
+        val ledger = TunnelLedger()
+        var state = connected(ledger)
+        val oldAttempt = state.attempt
+        val callbacks = java.util.ArrayDeque<() -> Unit>()
+        callbacks.add { assertFalse(ledger.acceptsCoreStop(state, oldAttempt)) }
+        // Production closes the TUN before publishing DISCONNECTING, then ends in IDLE.
+        state = ledger.begin(state, Phase.DISCONNECTING)
+        assertFalse("our own physical close is not an unexpected core stop", ledger.acceptsCoreStop(state, state.attempt))
+        state = ledger.end(state, Phase.IDLE, null)
+        assertFalse("a stopped attempt cannot turn into a failure", ledger.acceptsCoreStop(state, state.attempt))
+        callbacks.removeFirst().invoke()
+        callbacks.add { assertFalse(ledger.acceptsCoreStop(state, oldAttempt)) }
+        state = connected(ledger)
+        callbacks.removeFirst().invoke()
+        assertTrue("a current unexpected core stop is still actionable", ledger.acceptsCoreStop(state, state.attempt))
+    }
+
     @Test fun snapshotJsonCarriesTheConfirmationIdentity() {
         val s = connected(TunnelLedger()).copy(version = 12)
         assertEquals(s, EngineSnapshot.fromJson(s.toJson()))
@@ -157,17 +189,6 @@ class TunnelAuthorityTest {
         assertFalse(decoded.tunnelUp)
         assertNull(decoded.applied)
     }
-    @Test fun recheckingWithdrawsConnectedUntilTheNewExitResultsArrive() {
-        val ledger = TunnelLedger()
-        val up = connected(ledger)
-        val checking = ledger.rechecking(up)!!
-        assertEquals(Phase.CONNECTING, checking.phase)
-        assertFalse(checking.tunnelUp)
-        assertNull(checking.cloudProbe.location)
-        val finished = ledger.probed(checking, ledger.attempt, ok, homeOk)!!
-        assertTrue(finished.tunnelUp)
-    }
-
     @Test fun lossOfUnderlyingNetworkWithdrawsBothSuccessfulExitClaims() {
         val ledger = TunnelLedger()
         val up = connected(ledger)

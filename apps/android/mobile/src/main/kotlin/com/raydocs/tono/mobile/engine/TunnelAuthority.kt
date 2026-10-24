@@ -57,7 +57,7 @@ class TunnelLedger {
 
     fun isCurrent(gen: Long) = gen == attempt
 
-    /** A new attempt in [phase] (PREPARING to connect, CONNECTING to reload, DISCONNECTING to stop). */
+    /** A new attempt in [phase]: PREPARING to connect, CONNECTING to reload, DISCONNECTING after physical close. */
     fun begin(s: EngineSnapshot, phase: Phase): EngineSnapshot {
         attempt++
         return s.copy(phase = phase, reasonCode = null, attempt = attempt, applied = null, cloudProbe = ExitProbe(), homeProbe = ExitProbe())
@@ -90,7 +90,11 @@ class TunnelLedger {
 
     /** Asks the exits again on a confirmed tunnel; the last verdicts are not kept as current. Null if none is confirmed. */
     fun rechecking(s: EngineSnapshot): EngineSnapshot? =
-        if (!TunnelAuthority.confirmed(s)) null else s.copy(phase = Phase.CONNECTING, reasonCode = null, cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING))
+        if (!TunnelAuthority.confirmed(s)) null else s.copy(reasonCode = null, cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING))
+
+    /** Whether a queued core-stop callback still belongs to the live attempt. */
+    fun acceptsCoreStop(s: EngineSnapshot, gen: Long): Boolean =
+        isCurrent(gen) && s.attempt == gen && s.phase in setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED)
 
     /** Ends the current attempt in a resting [phase]; no tunnel is confirmed afterwards. */
     fun end(s: EngineSnapshot, phase: Phase, reasonCode: String?): EngineSnapshot {

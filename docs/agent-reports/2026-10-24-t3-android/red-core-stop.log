@@ -1,0 +1,14 @@
+JUnit version 4.13.2
+...........E..............................................
+Time: 0.131
+There was 1 failure:
+1) queuedCoreStopCannotOverrideAUserStopOrStopANewerConnection(com.raydocs.tono.mobile.engine.TunnelAuthorityTest)
+java.lang.AssertionError: closing our own core is not a failure
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertFalse(Assert.java:65)
+	at com.raydocs.tono.mobile.engine.TunnelAuthorityTest.queuedCoreStopCannotOverrideAUserStopOrStopANewerConnection(TunnelAuthorityTest.kt:166)
+
+FAILURES!!!
+Tests run: 57,  Failures: 1
+

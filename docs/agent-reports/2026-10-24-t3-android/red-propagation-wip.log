@@ -1,0 +1,13 @@
+JUnit version 4.13.2
+.E.........................................................
+Time: 0.143
+There was 1 failure:
+1) catalogPropagationWaitIsBoundedOwnedAndNeverReplaysRefreshPost(com.raydocs.tono.mobile.engine.CatalogPreparationTest)
+java.lang.AssertionError: explicit catalog propagation must wait, not finish on the first 503
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.raydocs.tono.mobile.engine.CatalogPreparationTest.catalogPropagationWaitIsBoundedOwnedAndNeverReplaysRefreshPost(CatalogPreparationTest.kt:17)
+
+FAILURES!!!
+Tests run: 58,  Failures: 1
+

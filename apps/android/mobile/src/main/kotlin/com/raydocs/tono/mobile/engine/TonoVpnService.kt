@@ -139,11 +139,16 @@ class TonoVpnService : VpnService() {
         engine.execute {
             val lockdown = lockdownNow()
             catalogWait.incrementAndGet()
-            stopCore()
-            store.update { it.copy(wantConnected = false) }
-            update { ledger.end(it, Phase.NEEDS_PERMISSION, "REVOKED") }
-            leaveForeground()
-            postRevoked(lockdown)
+            stopAndPersist(
+                stop = {
+                    stopCore()
+                    update { ledger.end(it, Phase.NEEDS_PERMISSION, "REVOKED") }
+                    leaveForeground()
+                    postRevoked(lockdown)
+                },
+                persist = { store.update { it.copy(wantConnected = false) } },
+                warn = { warnStopPersistence() },
+            )
         }
     }
 
@@ -500,12 +505,25 @@ class TonoVpnService : VpnService() {
 
     private fun disconnect(reason: String?) {
         catalogWait.incrementAndGet()
-        store.update { it.copy(wantConnected = false) }
-        if (snapshot.get().phase != Phase.SIGNED_OUT) update { ledger.begin(it, Phase.DISCONNECTING) }
-        stopCore()
-        leaveForeground()
-        val signedIn = store.refreshToken() != null
-        update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
+        val signedIn = snapshot.get().phase != Phase.SIGNED_OUT
+        stopAndPersist(
+            stop = {
+                // No disk or surface publication may stand between the stop request and TUN close.
+                stopCore()
+                if (signedIn) update { ledger.begin(it, Phase.DISCONNECTING) }
+                leaveForeground()
+                update { ledger.end(it, if (signedIn) Phase.IDLE else Phase.SIGNED_OUT, reason) }
+            },
+            persist = { store.update { it.copy(wantConnected = false) } },
+            warn = { warnStopPersistence() },
+        )
+    }
+
+    private fun warnStopPersistence() {
+        Log.w(TAG, "stop intent could not be saved")
+        android.os.Handler(mainLooper).post {
+            android.widget.Toast.makeText(this, R.string.stop_persistence_warning, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun fail(e: Throwable, userInitiated: Boolean) {
@@ -627,7 +645,16 @@ class TonoVpnService : VpnService() {
             commandServerSecret = EngineStore.randomHex(16)
         })
         val server = Libbox.newCommandServer(object : CommandServerHandler {
-            override fun serviceStop() { engine.execute { disconnect(reason = "CORE_STOPPED"); postStopped("CORE_STOPPED") } }
+            override fun serviceStop() {
+                // Pinned libbox invokes this for ManagedService.StopService RPC, not a core exit.
+                val gen = snapshot.get().attempt
+                engine.execute {
+                    if (ledger.acceptsCoreStop(snapshot.get(), gen)) {
+                        disconnect(reason = "CORE_STOPPED")
+                        postStopped("CORE_STOPPED")
+                    }
+                }
+            }
             override fun serviceReload() { engine.execute { reloadIfRunning() } }
             override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus()
             override fun setSystemProxyEnabled(enabled: Boolean) {}

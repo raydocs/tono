@@ -1,0 +1,3 @@
+<resources>
+    <string name="stop_persistence_warning">Tono stopped, but could not save your choice. Android may reconnect after a restart. Check Always-on VPN in system settings.</string>
+</resources>

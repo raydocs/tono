@@ -1,0 +1,3 @@
+<resources>
+    <string name="stop_persistence_warning">Tono 已停止，但未能保存。重启后系统可能重新连接，请检查系统设置中的“始终开启 VPN”。</string>
+</resources>
