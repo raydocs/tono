@@ -107,6 +107,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var showOnboarding: Bool = !Preferences.onboarded
     /// Shown before the first iOS "Add VPN Configurations" prompt (and after a declined one).
     @Published var showVPNPrimer = false
+    @Published var showAccountReleaseFailure = false
     /// No usable network path right now (shown under the title; connecting stays possible).
     @Published private(set) var offline = false
     /// The catalog request in flight (the line picker shows a loading state instead of "no lines").
@@ -266,6 +267,9 @@ final class AppModel: ObservableObject {
             Preferences.email = reported ?? login.email
             email = Preferences.email
             signedIn = true
+            accountRelease = nil
+            showAccountReleaseFailure = false
+            if SharedFiles.loadFailure()?.source == "account" { SharedFiles.clearFailure() }
             failure = nil
             login = LoginState()
             recompute()
@@ -288,6 +292,8 @@ final class AppModel: ObservableObject {
         TunnelController.lifecycle.cancelPendingStart()
         accountEpoch &+= 1
         signedIn = false
+        accountRelease = nil
+        showAccountReleaseFailure = false
         wantOn = false
         userStarting = false
         preparing = false
@@ -736,6 +742,7 @@ final class AppModel: ObservableObject {
                 }
                 guard epoch == accountEpoch, signedIn, !signingOut else { return false }
                 accountRelease = receipt
+                showAccountReleaseFailure = receipt?.releaseFailed == true
                 failure = receipt?.reason ?? AccountErrors.reasonCode(error)
                 if let receipt {
                     SharedFiles.recordFailure(TunnelFailure(code: receipt.reason, message: "account network release requested",

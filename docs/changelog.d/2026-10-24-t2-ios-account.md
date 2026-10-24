@@ -13,3 +13,4 @@
 
 - 2026-10-24 B1 续修：账户拒绝先关闭 On Demand 并请求停隧道，保留账户和NE配置；不清inputs、不调用serviceClose。账户停止收据带source/accountEpoch/at；保存或读回失败仍stop并明确要求系统VPN手动关闭，不声称已恢复。兼容T6最终403 ACCOUNT_EXPIRED/QUOTA_EXCEEDED与历史别名。新增AccountNetworkReleaseTests；RED/GREEN与原生编译结果在PR验证评论逐项记录。依赖#1741先合，以免扩展将主动停止再记为CORE_STOPPED。真实NE停止、On Demand持久化及移动网络仍未验证。
 - B1 RED 证据：`b38ce2f7a` / [run40085931165 job120848944236](https://github.com/raydocs/tono/actions/runs/40085931165/job/120848944236)，147 tests / 13 assertion failures；账户拒绝事件数组实际 `[]`，期望 `[disarm, stop]`，隧道/On Demand 仍开。修复同时将账户失败的source/accountEpoch持久化至既有failure文件（旧字段保持兼容），避免仅留字符串而丢失归因。
+- B1 初次 GREEN：`9e23c1204` / [run40086218181 job120849588201](https://github.com/raydocs/tono/actions/runs/40086218181/job/120849588201)，148 tests / 0 failures，AccountNetworkReleaseTests 5项通过；后续同job仍在已复现的基线ipinfo.io DNS harness失败。续补：持久化失败的提示用独立alert呈现，不依赖NE已断开；新增旧failure文件解码兼容测试，新登录清理旧账户停止提示。

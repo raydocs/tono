@@ -237,3 +237,4 @@
 "short_USER_DISABLED" = "Account disabled";
 "reason_ACCOUNT_RELEASE_FAILED" = "Tono could not confirm automatic reconnection is off. Open iPhone Settings → VPN and turn Tono off to restore your network. Your account and VPN configuration have been kept.";
 "short_ACCOUNT_RELEASE_FAILED" = "Turn Tono off in iPhone VPN settings";
+"account_release_acknowledge" = "OK";

@@ -62,6 +62,13 @@ struct HomeView: View {
             // Sort priorities only order siblings inside one accessibility container.
             .accessibilityElement(children: .contain)
         }
+        // A failed On Demand save must be visible even before NE finishes disconnecting;
+        // the ordinary phase reason is not shown while the system still reports connected.
+        .alert(L.t("short_ACCOUNT_RELEASE_FAILED"), isPresented: $model.showAccountReleaseFailure) {
+            Button(L.t("account_release_acknowledge"), role: .cancel) {}
+        } message: {
+            Text(L.t("reason_ACCOUNT_RELEASE_FAILED"))
+        }
         .sheet(isPresented: $showLines) {
             LinesSheet().environmentObject(model).tonoAccessibility()
                 .zoomTransition("lines", in: zoom, enabled: !reduceMotion)

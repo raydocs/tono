@@ -64,6 +64,14 @@ final class AccountNetworkReleaseTests: XCTestCase {
         XCTAssertFalse(AccountErrors.isSessionEnded(APIError(status: 403, code: "QUOTA_EXCEEDED", message: "quota")))
     }
 
+    func testLegacyFailureFileWithoutAccountMetadataStillDecodes() {
+        let body = Data(#"{"code":"CORE_START","message":"failed","at":1800000000}"#.utf8)
+        let failure = TunnelFailure.decode(body)
+        XCTAssertEqual(failure?.code, "CORE_START")
+        XCTAssertNil(failure?.source)
+        XCTAssertNil(failure?.accountEpoch)
+    }
+
     @MainActor
     func testOrdinaryNetworkErrorDoesNotStopAnExistingTunnel() async {
         var releases = 0
