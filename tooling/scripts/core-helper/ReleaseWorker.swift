@@ -98,6 +98,13 @@ enum ReleaseWorker {
             update { $0.failures = ($0.failures ?? []) + [note] }
         }
 
+        func terminalOutcome(components: [ReleaseReport.Component], stuck: [Int32]) -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            return ReleaseReport.outcome(components: components, stuck: stuck, finished: true,
+                                         failures: report.failures ?? [])
+        }
+
         /// Writes the current report. Unfinished components, failed steps
         /// and an unfinished worker make the outcome unknown, never restored.
         func emit(finished: Bool) {
@@ -275,7 +282,8 @@ enum ReleaseWorker {
         if let updateDisconnect {
             do {
                 try ReleaseStop.markUpdateDisconnectVerified(
-                    storage: UpdateStorage(), expected: updateDisconnect, components: settled
+                    storage: UpdateStorage(), expected: updateDisconnect, components: settled,
+                    outcome: reporter.terminalOutcome(components: settled, stuck: stuckNow.map(\.pid))
                 )
             } catch {
                 reporter.fail("Could not record the pending update's verified disconnect: \(error)")
@@ -587,12 +595,11 @@ enum ReleaseStop {
     }
 
     static func markUpdateDisconnectVerified(storage: UpdateStorage, expected: UpdateDisconnectIdentity,
-                                            components: [ReleaseReport.Component]) throws {
+                                            components: [ReleaseReport.Component], outcome: String = "restored") throws {
         // A first read alone cannot exclude a late PF/DNS/Core writer. The
         // worker passes only the terminal settlement, never cleanup intent.
-        guard ["pf", "core", "dns"].allSatisfy({ name in
-            let readings = components.filter { $0.name == name }
-            return readings.count == 1 && readings[0].readback == "restored" && readings[0].risk == "settled"
+        guard PreemptiveUpdateDisconnectProof.permits(outcome: outcome, components: components.map {
+            .init(name: $0.name, readback: $0.readback, risk: $0.risk)
         }) else { return }
         try storage.locked(timeout: 3) {
             var ledger = try storage.load()

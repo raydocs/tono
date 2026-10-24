@@ -38,6 +38,7 @@ set -- \
   "$repo_dir/apps/macos/Tono/Models/UpdateContractV1.swift" \
   "$repo_dir/apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift" \
   "$repo_dir/apps/macos/Tono/Core/HelperDisarmAuthority.swift" \
+  "$repo_dir/apps/macos/Tono/Core/PreemptiveUpdateDisconnectProof.swift" \
   "$repo_dir/apps/macos/Tono/Core/ControlPlaneRelays.swift" \
   "$repo_dir/apps/macos/Tono/Core/ThreeTierRoutingContract.swift" \
   "$repo_dir/tooling/scripts/helper-shared/PeerAuthorization.swift" \
