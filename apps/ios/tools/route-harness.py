@@ -330,25 +330,57 @@ def main():
     for host in ("x.com.example.net", "unrelated.akamaized.net"):
         expect(host, ordinary)
 
-    print("== zero-leak DNS checks (A -> fakeip, HTTPS/SVCB/TXT/SRV/CAA -> predefined NOERROR, zero local DNS leak)")
-    local_dns.seen.clear()
-    for qname in ("claude.ai", "www.gstatic.com", "web.whatsapp.com", "x.com", "telegram.org", "huggingface.co", "ipinfo.io"):
+    # Protected / Home / Cloud names are FakeIP in every mode. ipinfo.io is not on those
+    # lists: stable's catch-all still FakeIPs it, and three-tier sends it to the local
+    # resolver (same contract as www.baidu.com). The stub answers A with 93.184.216.34,
+    # so that address means "this query left the process", not a public resolver.
+    protected_dns = ("claude.ai", "www.gstatic.com", "web.whatsapp.com", "x.com", "telegram.org", "huggingface.co")
+    unmatched_dns = "ipinfo.io"
+    other_qtypes = (("HTTPS", 65), ("SVCB", 64), ("TXT", 16), ("SRV", 33), ("CAA", 257))
+
+    def expect_fakeip(qname):
         rcode_a, an_a, ip_a = query_dns(qname, 1)  # A
         ok_a = rcode_a == 0 and an_a == 1 and ip_a is not None and ip_a.startswith("198.18.")
         print(f"{'ok  ' if ok_a else 'FAIL'} DNS A    {qname:33} -> rcode={rcode_a} an={an_a} ip={ip_a}")
         if not ok_a:
             failures.append(f"dns-A:{qname}")
-        for qtype_name, qtype_num in (("HTTPS", 65), ("SVCB", 64), ("TXT", 16), ("SRV", 33), ("CAA", 257)):
+        for qtype_name, qtype_num in other_qtypes:
             rcode_q, an_q, _ = query_dns(qname, qtype_num)
             ok_q = rcode_q == 0 and an_q == 0
             if not ok_q:
                 print(f"FAIL DNS {qtype_name:5} {qname:33} -> rcode={rcode_q} an={an_q} (want rcode=0 an=0)")
                 failures.append(f"dns-{qtype_name}:{qname}")
-    if local_dns.seen:
-        print(f"FAIL local DNS leaked protected queries: {local_dns.seen}")
-        failures.append(f"dns-leak:{local_dns.seen}")
+
+    print("== zero-leak DNS checks (protected names: A -> fakeip, other types -> predefined NOERROR)")
+    local_dns.seen.clear()
+    for qname in protected_dns:
+        expect_fakeip(qname)
+    if ordinary == "direct":
+        rcode_a, an_a, ip_a = query_dns(unmatched_dns, 1)
+        ok_a = rcode_a == 0 and an_a == 1 and ip_a == "93.184.216.34"
+        print(f"{'ok  ' if ok_a else 'FAIL'} DNS A    {unmatched_dns:33} -> rcode={rcode_a} an={an_a} ip={ip_a} (three-tier local)")
+        if not ok_a:
+            failures.append(f"dns-A:{unmatched_dns}")
+        for qtype_name, qtype_num in other_qtypes:
+            rcode_q, an_q, _ = query_dns(unmatched_dns, qtype_num)
+            ok_q = rcode_q == 0 and an_q == 0
+            if not ok_q:
+                print(f"FAIL DNS {qtype_name:5} {unmatched_dns:33} -> rcode={rcode_q} an={an_q} (want rcode=0 an=0)")
+                failures.append(f"dns-{qtype_name}:{unmatched_dns}")
+        expected_local = [(unmatched_dns, 1)] + [(unmatched_dns, qtype_num) for _, qtype_num in other_qtypes]
+        protected_leaks = [item for item in local_dns.seen if item[0] != unmatched_dns]
+        if protected_leaks or local_dns.seen != expected_local:
+            print(f"FAIL local DNS query set: {local_dns.seen} (want only {expected_local})")
+            failures.append(f"dns-leak:{local_dns.seen}")
+        else:
+            print(f"ok   three-tier local DNS saw only {unmatched_dns} ({len(local_dns.seen)} queries); protected names stayed FakeIP")
     else:
-        print("ok   local DNS saw 0 protected/Home/Cloud queries across A/HTTPS/SVCB/TXT/SRV/CAA")
+        expect_fakeip(unmatched_dns)
+        if local_dns.seen:
+            print(f"FAIL local DNS leaked protected queries: {local_dns.seen}")
+            failures.append(f"dns-leak:{local_dns.seen}")
+        else:
+            print("ok   local DNS saw 0 protected/Home/Cloud/catch-all queries across A/HTTPS/SVCB/TXT/SRV/CAA")
 
     print(f"   home saw via cloud relay: {home.seen[:3]} … cloud saw: {[s for s in cloud.seen if '21081' in s][:1]}")
     print("== Home stand-in down")
