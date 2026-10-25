@@ -47,7 +47,7 @@ httparse = "1.10"
 http = "1.4"
 bytes = { version = "1.11" }
 tracing = "0.1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 pin-project-lite = "0.2"
 toml = "1.1"
 rand = "0.10"
