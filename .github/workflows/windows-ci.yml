@@ -129,7 +129,7 @@ jobs:
       # No second actions/cache on the same directories.
       - name: Cache Cargo dependencies
         id: rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows-core
           cache-workspace-crates: "true"
@@ -152,7 +152,7 @@ jobs:
         # cannot detect drift in the vendored crate's independent lockfile.
         run: cargo fetch --locked --manifest-path apps/windows/vendor/kode-bridge/Cargo.toml
 
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: nextest
 
@@ -243,7 +243,7 @@ jobs:
           const fs = require('fs')
           const yaml = fs.readFileSync('../../../.github/workflows/windows-ci.yml', 'utf8')
           // Needles are split so this step's own source is not a match.
-          const pin = 'Swatinem/rust-cache@' + '6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+          const pin = 'Swatinem/rust-cache@' + 'd1527c8f67ef9af357290475d4af4b0fab8f12e0'
           const uses = yaml.split('\n').filter((line) => line.includes(pin))
           if (uses.length !== 3) throw new Error('expected 3 rust-cache uses, got ' + uses.length)
           for (const id of ['windows-core', 'windows-app-rust', 'windows-service']) {
@@ -313,7 +313,7 @@ jobs:
 
       - name: Cache Cargo dependencies
         id: rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows-app-rust
           cache-workspace-crates: "true"
@@ -428,7 +428,7 @@ jobs:
 
       - name: Cache Cargo dependencies
         id: rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows-service
           cache-workspace-crates: "true"
