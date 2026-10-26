@@ -142,28 +142,46 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(activeIds).toContain(dev3.device.id);
   });
 
-  it('honours one replay of a just-rotated refresh token whose response was lost', async () => {
+  it('recovers repeated response loss only within the original refresh grace and rejects superseded tokens', async () => {
     const account = await createAccount('refresh-replay');
     const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
     const lost = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
     expect(lost.status).toBe(200);
     const undelivered = await lost.json() as any;
+    const sha = await sha256(account.refreshToken);
+    const root = () => env.DB.prepare('SELECT rotated_at, successor_id FROM sessions WHERE refresh_hash = ?')
+      .bind(sha).first<any>();
+    const original = await root();
 
     const replay = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
     expect(replay.status).toBe(200);
-    const recovered = await replay.json() as any;
-    expect((await api('me', bearer(recovered.accessToken))).status).toBe(200);
-    // One live session per chain: the successor the client never received is superseded.
+    const firstRecovery = await replay.json() as any;
+    expect((await api('me', bearer(firstRecovery.accessToken))).status).toBe(200);
+    // The original successor never received by the client remains unauthorized.
     expect((await api('me', bearer(undelivered.accessToken))).status).toBe(401);
     expect((await api('auth/refresh', json({ refreshToken: undelivered.refreshToken }))).status).toBe(401);
-    // A second replay is reuse, not recovery.
-    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
 
-    // Outside the grace window a replay stays rejected.
-    expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(200);
+    const secondReplay = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(secondReplay.status).toBe(200);
+    const recovered = await secondReplay.json() as any;
+    const latest = await env.DB.prepare('SELECT id FROM sessions WHERE refresh_hash = ?')
+      .bind(await sha256(recovered.refreshToken)).first<any>();
+    expect(await root()).toEqual({ rotated_at: original.rotated_at, successor_id: latest.id });
+    expect((await api('me', bearer(firstRecovery.accessToken))).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: firstRecovery.refreshToken }))).status).toBe(401);
+    expect((await api('me', bearer(recovered.accessToken))).status).toBe(200);
+    expect((await env.DB.prepare('SELECT COUNT(*) n FROM sessions WHERE device_id = ? AND revoked_at IS NULL')
+      .bind(account.device.id).first<any>()).n).toBe(1);
+
+    // Normal advancement closes the old root; an elapsed window remains closed.
+    const advance = await api('auth/refresh', json({ refreshToken: recovered.refreshToken }));
+    expect(advance.status).toBe(200);
+    const current = await advance.json() as any;
+    expect((await api('auth/refresh', json({ refreshToken: account.refreshToken }))).status).toBe(401);
     await env.DB.prepare('UPDATE sessions SET rotated_at = rotated_at - 3600 WHERE user_id = ? AND rotated_at IS NOT NULL')
       .bind(account.user.id).run();
     expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
+    expect((await api('me', bearer(current.accessToken))).status).toBe(200);
   });
 
   it('revokes earlier refresh tokens on the same device at refresh, the next sign-in, and logout', async () => {

@@ -101,7 +101,9 @@ export async function enforceAll(e: Env, deps: ScheduledDeps) {
          AND (EXISTS (SELECT 1 FROM devices
                       WHERE devices.user_id = users.id AND devices.status IN ('active', 'pending'))
               OR EXISTS (SELECT 1 FROM sessions
-                         WHERE sessions.user_id = users.id AND sessions.revoked_at IS NULL))
+                         JOIN devices session_device ON session_device.id = sessions.device_id
+                         WHERE sessions.user_id = users.id AND sessions.revoked_at IS NULL
+                           AND (users.status != 'active' OR session_device.entitlement_suspended = 0)))
        LIMIT ?`,
     ).bind(t, ENFORCE_USERS_PER_TICK).all<Row>();
     for (const u of q.results) {

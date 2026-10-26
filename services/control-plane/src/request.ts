@@ -18,7 +18,11 @@ export const error = (e: unknown) => {
   return Response.json({
     error: { code: x.code, message: x.message },
     ...(x.extra ?? {}),
-  }, { status: x.status });
+  }, {
+    status: x.status,
+    ...(x.status === 429 && Number.isSafeInteger(x.extra?.retryAfterSeconds)
+      ? { headers: { 'Retry-After': String(x.extra!.retryAfterSeconds) } } : {}),
+  });
 };
 
 /**

@@ -11,7 +11,6 @@ import {
   accountForOidcIdentity,
   accountForVerifiedEmail,
   directSignupAllowed,
-  ineligible,
 } from './accounts';
 import { AccessVerificationError, verifyAccessRequest } from './access';
 import { opsConsoleRedirect } from './ops-console-route';
@@ -195,7 +194,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     // Disabled existing users remain ineligible and receive the same public
     // response shape as every other request.
     const eligible = existing
-      ? !ineligible(existing)
+      ? existing.status === 'active'
       : await directSignupAllowed(e, submittedEmail);
 
     const challenge = id();
