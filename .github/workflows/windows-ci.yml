@@ -243,7 +243,7 @@ jobs:
           const fs = require('fs')
           const yaml = fs.readFileSync('../../../.github/workflows/windows-ci.yml', 'utf8')
           // Needles are split so this step's own source is not a match.
-          const pin = 'Swatinem/rust-cache@' + '6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+          const pin = 'Swatinem/rust-cache@' + 'd1527c8f67ef9af357290475d4af4b0fab8f12e0'
           const uses = yaml.split('\n').filter((line) => line.includes(pin))
           if (uses.length !== 3) throw new Error('expected 3 rust-cache uses, got ' + uses.length)
           for (const id of ['windows-core', 'windows-app-rust', 'windows-service']) {
