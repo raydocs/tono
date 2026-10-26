@@ -7,11 +7,6 @@ on:
         description: Successful Windows candidate installer run (empty selects latest on this branch)
         type: string
         required: false
-  push:
-    branches: ['stability/desktop-0.0.72-20260908']
-    paths:
-      - .github/workflows/windows-installer-smoke.yml
-      - tooling/scripts/test-windows-candidate-install.ps1
 
 permissions:
   contents: read
