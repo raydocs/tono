@@ -79,7 +79,9 @@ jobs:
   # reported success. This job carries no condition, so a wrong ref goes red.
   branch:
     needs: qualify
-    runs-on: macos-26
+    # Plain shell: it needs no Mac, and a macos-26 runner can take an hour to arrive
+    # (run 39699940479 queued this job for 52 minutes) before the build may start.
+    runs-on: ubuntu-24.04
     steps:
       - name: Refuse a ref that is not the release line
         env:

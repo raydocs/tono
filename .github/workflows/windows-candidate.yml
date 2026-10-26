@@ -8,18 +8,6 @@ on:
         required: true
         type: string
   workflow_dispatch:
-  push:
-    branches:
-      - 'stability/desktop-0.0.72-20260908'
-      # Ship-plan Encrypted DNS + connecting-pill candidate for G1.1.
-      # Path filter: touching this file (or windows-core.yml) starts a candidate.
-      # Rebuild 2026-09-11: Backup UDP column + catalog X-Tono-Accept: hy2.
-      # Remove the extra branch after G1.1.
-      - 'cursor/ship-plan-first-publish-d57f'
-    paths:
-      - .github/workflows/windows-candidate.yml
-      - .github/workflows/windows-core.yml
-      - tooling/scripts/prepare-windows-sing-box.sh
 
 permissions:
   contents: read
