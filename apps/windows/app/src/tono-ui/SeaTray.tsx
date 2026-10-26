@@ -23,6 +23,7 @@ export const SeaTray = ({
   ai,
   error,
   backup,
+  update,
   picker,
   onOpen,
   onQuit,
@@ -41,6 +42,7 @@ export const SeaTray = ({
   ai: boolean
   error: string | null
   backup: ReactNode
+  update: ReactNode
   picker: ReactNode
   onOpen: () => void
   onQuit: () => void
@@ -50,10 +52,11 @@ export const SeaTray = ({
   // backup row, an error) takes the place of a quick pick so the footer never
   // scrolls away. The rate line plus two picks overflowed while connected.
   const info = Boolean(traffic) || ai
-  const picks = Math.max(
-    0,
-    2 - (info ? 1 : 0) - (backup ? 1 : 0) - (error ? 1 : 0),
-  )
+  // A new-version row replaces the quick picks. The flyout is 232px; the
+  // footer has to stay on screen, and Update now / Later are the choice.
+  const picks = update
+    ? 0
+    : Math.max(0, 2 - (info ? 1 : 0) - (backup ? 1 : 0) - (error ? 1 : 0))
   return (
     <div
       className="sea-tray"
@@ -87,6 +90,7 @@ export const SeaTray = ({
         >
           {action}
         </button>
+        {update}
         <fieldset className="sea-tray-choices">
           <legend className="tono-sr-only">{t('tono.tray.pickNode')}</legend>
           {quick.slice(0, picks).map((server) => (

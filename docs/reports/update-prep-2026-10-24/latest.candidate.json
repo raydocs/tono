@@ -1,0 +1,15 @@
+{
+  "version": "0.0.80",
+  "notes": "DRY RUN — not a release. Do not upload. The signature is a placeholder, and the URL is not a package.",
+  "pub_date": "2026-10-24T00:00:00.000Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "UNSIGNED-DRY-RUN",
+      "url": "https://example.invalid/tono-dry-run/Tono_0.0.80_x64-setup.exe"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "UNSIGNED-DRY-RUN",
+      "url": "https://example.invalid/tono-dry-run/Tono_0.0.80_x64-setup.exe"
+    }
+  }
+}

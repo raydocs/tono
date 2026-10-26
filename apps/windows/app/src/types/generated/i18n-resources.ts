@@ -542,6 +542,7 @@ export interface TranslationResources {
         update: {
           actions: {
             goToRelease: string
+            later: string
             update: string
           }
           alerts: {
@@ -1779,6 +1780,19 @@ export interface TranslationResources {
         quit: string
         retry: string
         useRoute: string
+      }
+      update: {
+        checkUnknown: string
+        later: string
+        needsAttention: string
+        network: string
+        notCompleted: string
+        notNewer: string
+        refused: string
+        signatureRefused: string
+        technicalDetails: string
+        trayAvailable: string
+        updateNow: string
       }
     }
   }
