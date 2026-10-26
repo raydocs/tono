@@ -2,6 +2,7 @@
 // that file stays under the line cap.
 
 import { decryptCatalog } from '../crypto';
+import { EXIT_SIDE_SQL, exitUnreachableUsers } from './verdict-exit-fails';
 import { type Env, type Row, requiredCatalogKey } from '../env';
 import { catalogBaseName, splitManagedCatalogProxies } from '../catalog-yaml';
 import { loadPriorNodeStates } from './evaluate';
@@ -19,7 +20,6 @@ const FAIL_WINDOW = 30 * 60;
 const DAY = 86_400;
 const SPIKE_MIN = 10;
 const SPIKE_RATIO = 3;
-const HANDSHAKE_SQL = `(stage IN ('handshake', 'dial', 'tls') OR lower(COALESCE(stage, '')) LIKE '%handshake%')`;
 
 export type CustomerScope = 'all' | 'none' | { userId: string };
 
@@ -151,23 +151,35 @@ function delaysFromPayload(payload: Row, receivedAtSec: number) {
 
 async function loadFails30m(db: D1Database, nowSec: number): Promise<Map<string, NodeFails30m>> {
   try {
-    const rows = await db.prepare(
-      `SELECT node,
-              SUM(CASE WHEN kind IN ('connectBegin', 'connectOk', 'connectFail') THEN 1 ELSE 0 END) AS attempts,
-              SUM(CASE WHEN kind = 'connectFail' THEN 1 ELSE 0 END) AS failures,
-              COUNT(DISTINCT CASE WHEN kind = 'connectFail' THEN user_id END) AS distinct_users,
-              COUNT(DISTINCT CASE WHEN kind = 'connectFail' AND ${HANDSHAKE_SQL} THEN user_id END) AS handshake_users
-       FROM connection_events
-       WHERE received_at >= ? AND node IS NOT NULL AND node != ''
-       GROUP BY node`,
-    ).bind(nowSec - FAIL_WINDOW).all<Row>();
+    const since = nowSec - FAIL_WINDOW;
+    const [rows, exitFails] = await Promise.all([
+      db.prepare(
+        `SELECT node,
+                SUM(CASE WHEN kind IN ('connectBegin', 'connectOk', 'connectFail') THEN 1 ELSE 0 END) AS attempts,
+                SUM(CASE WHEN kind = 'connectFail' THEN 1 ELSE 0 END) AS failures,
+                COUNT(DISTINCT CASE WHEN kind = 'connectFail' THEN user_id END) AS distinct_users
+         FROM connection_events
+         WHERE received_at >= ? AND node IS NOT NULL AND node != ''
+         GROUP BY node`,
+      ).bind(since).all<Row>(),
+      db.prepare(
+        `SELECT DISTINCT node, user_id
+         FROM connection_events
+         WHERE received_at >= ? AND node IS NOT NULL AND node != ''
+           AND kind = 'connectFail' AND ${EXIT_SIDE_SQL}`,
+      ).bind(since).all<Row>(),
+    ]);
+    const unreachable = exitUnreachableUsers(
+      (exitFails.results ?? []).map((row) => ({ node: String(row.node), userId: String(row.user_id) })),
+    );
     const out = new Map<string, NodeFails30m>();
     for (const row of rows.results ?? []) {
-      out.set(String(row.node), {
+      const node = String(row.node);
+      out.set(node, {
         attempts: Number(row.attempts) || 0,
         failures: Number(row.failures) || 0,
         distinctUsers: Number(row.distinct_users) || 0,
-        handshakeDistinctUsers: Number(row.handshake_users) || 0,
+        handshakeDistinctUsers: unreachable.get(node) ?? 0,
       });
     }
     return out;
