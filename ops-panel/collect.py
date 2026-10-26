@@ -234,6 +234,73 @@ def probe_target(quality: dict, node: dict) -> str | None:
     return public_ip(quality.get("public_ip")) or public_ip(node.get("host"))
 
 
+# A mainland agent proves its own path before its verdicts count: one dial to a
+# host every mainland user reaches (AliDNS DoH). An agent that cannot reach it
+# would read the whole fleet as 疑似被墙, which is what the sole agent did from
+# 2026-10-08 to 10-26: every dial failed, so all 17 nodes on five providers were
+# "blocked" for eighteen days while customers kept connecting through them.
+CANARY_HOST = "223.5.5.5"
+CANARY_PORT = 443
+
+
+def agent_tcp_probe(agent: dict, target: str, port: int) -> dict | None:
+    """One TCP dial to target:port from one mainland agent; None for an unusable entry.
+
+    `outcome` is "ok" or "fail" only when the dial ran on the agent and printed
+    its exit code. An SSH that timed out, was refused or did not authenticate
+    never dialled, so it is "probe_did_not_run": no evidence about the target
+    either way. `code` is the dial's exit code, or ssh's when it never ran.
+    """
+    name = str(agent.get("name") or agent.get("host") or "agent")
+    host = str(agent.get("host") or "")
+    ssh_port = int(agent.get("port") or 22)
+    password = str(agent.get("password") or "")
+    if not host or not password:
+        return None
+    # Bash /dev/tcp is enough; no extra packages on agent.
+    # Target and port are positional arguments to bash -c, not script text.
+    remote = (
+        "timeout 5 bash -c 'echo >/dev/tcp/$0/$1' "
+        f"{shlex.quote(target)} {int(port)} >/dev/null 2>&1; echo EXIT:$?"
+    )
+    env = os.environ.copy()
+    env["SSHPASS"] = password
+    cmd = [*ssh_password_argv(host, ssh_port, 12), remote]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=25, env=env)
+        text = (p.stdout or "") + (p.stderr or "")
+        code = p.returncode
+    except Exception as e:
+        text = type(e).__name__
+        code = -1
+    m = re.search(r"EXIT:(\d+)", text)
+    if m is None:
+        outcome = "host_key_unverified" if HOST_KEY_FAILED in text else "probe_did_not_run"
+        return {"name": name, "host": host, "outcome": outcome, "code": code}
+    code = int(m.group(1))
+    return {"name": name, "host": host, "outcome": "ok" if code == 0 else "fail", "code": code}
+
+
+def healthy_cn_agents(
+    agents: list[dict], canary_host: str = CANARY_HOST, canary_port: int = CANARY_PORT,
+) -> list[dict]:
+    """The agents whose canary dial succeeded; the others sit this sweep out."""
+    healthy = []
+    for agent in agents[:6]:
+        r = agent_tcp_probe(agent, canary_host, canary_port)
+        if r is None:
+            continue
+        if r["outcome"] == "ok":
+            healthy.append(agent)
+        else:
+            log(
+                f"  mainland agent {r['name']} left out of this sweep: "
+                f"canary {canary_host}:{canary_port} {r['outcome']} (code {r['code']})"
+            )
+        time.sleep(0.4)
+    return healthy
+
+
 def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None:
     """Authoritative mainland probe: SSH to CT/CU/CM hosts and TCP-connect to target:port."""
     if not agents:
@@ -245,41 +312,27 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
     detail = {}
     ok_n = fail_n = 0
     for agent in agents[:6]:
-        name = str(agent.get("name") or agent.get("host") or "agent")
-        host = str(agent.get("host") or "")
-        ssh_port = int(agent.get("port") or 22)
-        password = str(agent.get("password") or "")
-        if not host or not password:
+        r = agent_tcp_probe(agent, target, port)
+        if r is None:
             continue
-        # Bash /dev/tcp is enough; no extra packages on agent.
-        # Target and port are positional arguments to bash -c, not script text.
-        remote = (
-            "timeout 5 bash -c 'echo >/dev/tcp/$0/$1' "
-            f"{shlex.quote(target)} {int(port)} >/dev/null 2>&1; echo EXIT:$?"
-        )
-        env = os.environ.copy()
-        env["SSHPASS"] = password
-        cmd = [*ssh_password_argv(host, ssh_port, 12), remote]
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=25, env=env)
-            text = (p.stdout or "") + (p.stderr or "")
-            m = re.search(r"EXIT:(\d+)", text)
-            code = int(m.group(1)) if m else p.returncode
-            success = code == 0
-        except Exception as e:
-            success = False
-            code = -1
-            text = type(e).__name__
-        if HOST_KEY_FAILED in text and "EXIT:" not in text:
+        name, host, code = r["name"], r["host"], r["code"]
+        if r["outcome"] == "host_key_unverified":
             # The probe never ran, so this is not evidence the target is blocked.
             log(f"  mainland probe {name}: host key not pinned in {KNOWN_HOSTS}")
             detail[name] = {"ok": False, "code": code, "host": host, "error": "host_key_unverified"}
-            continue
-        detail[name] = {"ok": success, "code": code, "host": host}
-        if success:
-            ok_n += 1
+        elif r["outcome"] == "probe_did_not_run":
+            # Same: ssh never reached the dial (timeout, refused, auth), so the
+            # target was not tested. Counting it as a failure is how one dead
+            # agent reads every node as blocked.
+            log(f"  mainland probe {name}: ssh did not run the dial (code {code}); not counted")
+            detail[name] = {"ok": False, "code": code, "host": host, "error": "probe_did_not_run"}
         else:
-            fail_n += 1
+            success = r["outcome"] == "ok"
+            detail[name] = {"ok": success, "code": code, "host": host}
+            if success:
+                ok_n += 1
+            else:
+                fail_n += 1
         time.sleep(0.4)
 
     total = ok_n + fail_n
@@ -305,8 +358,15 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
     }
 
 
-def classify_block(cn: dict | None, asia: dict, overseas: dict) -> dict:
-    """Produce final block object for UI."""
+def classify_block(
+    cn: dict | None, asia: dict, overseas: dict, mainland_note: str | None = None,
+) -> dict:
+    """Produce final block object for UI.
+
+    `mainland_note` says why there is no mainland verdict when agents are
+    configured (every agent failed its canary); the default note is for a
+    hub with no agents at all.
+    """
     ov_ok = bool(overseas.get("ok") and overseas.get("rate", 0) >= 0.5)
     asia_ok = bool(asia.get("ok") and asia.get("rate", 0) >= 0.5)
     asia_all_fail = bool(asia.get("ok") and asia.get("total", 0) > 0 and asia.get("success", 0) == 0)
@@ -344,7 +404,7 @@ def classify_block(cn: dict | None, asia: dict, overseas: dict) -> dict:
         "label": label,
         "mainland": {
             "status": "UNPROBED",
-            "note": "未配置 mainland_probes；无法做电信/联通/移动权威探测",
+            "note": mainland_note or "未配置 mainland_probes；无法做电信/联通/移动权威探测",
             "source": "none",
         },
         "asia_edge": asia,
@@ -685,6 +745,16 @@ def load_config() -> tuple[list[dict], list[dict]]:
     return nodes, agents
 
 
+def load_canary() -> tuple[str, int]:
+    """`mainland_canary: {host, port}` in nodes.secrets.json, else the AliDNS default."""
+    raw = json.loads(SECRETS.read_text(encoding="utf-8"))
+    canary = raw.get("mainland_canary") if isinstance(raw, dict) else None
+    host = public_ip(canary.get("host")) if isinstance(canary, dict) else None
+    if host is None:
+        return CANARY_HOST, CANARY_PORT
+    return host, int(canary.get("port") or CANARY_PORT)
+
+
 def agents_only() -> None:
     """Fast partial push for the 1-5 min timer: Komari nodes list only, no SSH."""
     BASE.mkdir(parents=True, exist_ok=True)
@@ -721,7 +791,15 @@ def main() -> None:
     if not nodes_cfg:
         log("no nodes in secrets")
         return
-    log(f"cn_agents={len(cn_agents)} nodes={len(nodes_cfg)}")
+    configured = len(cn_agents)
+    if cn_agents:
+        canary_host, canary_port = load_canary()
+        cn_agents = healthy_cn_agents(cn_agents, canary_host, canary_port)
+    log(f"cn_agents={len(cn_agents)}/{configured} nodes={len(nodes_cfg)}")
+    mainland_note = None
+    if configured and not cn_agents:
+        mainland_note = "大陆探针全部未通过自检（连不上 canary）；本轮不判定被墙"
+        log("  " + mainland_note)
 
     out_nodes = []
     for node in nodes_cfg:
@@ -739,7 +817,7 @@ def main() -> None:
             asia = check_host_tcp_nodes(ip, ASIA_EDGE_NODES, port=443)
             time.sleep(0.5)
             cn = probe_cn_agents(ip, cn_agents, port=443)
-        block = classify_block(cn, asia, overseas)
+        block = classify_block(cn, asia, overseas, mainland_note=mainland_note)
         q["block"] = block
         # Keep legacy field for older UI: status is still the machine-readable code.
         out_nodes.append(q)

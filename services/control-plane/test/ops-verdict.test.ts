@@ -653,3 +653,53 @@ describe('replay', () => {
     expect(row!.wouldOpenKind).toBe('node-blocked');
   });
 });
+
+import { BLOCK_SUSPECT_MIN_NODES, blockEvidenceSuspect } from '../src/ops/verdict';
+
+describe('sweep-wide block evidence', () => {
+  const blockedNode = (name: string, over: Partial<NodeVerdictInput> = {}) =>
+    node({ name, blockStatus: 'LIKELY_BLOCKED', ...over });
+
+  it('a sweep that reads every judged node as blocked is probe failure, not evidence', () => {
+    const out = evaluate(world({ nodes: [blockedNode('a'), blockedNode('b'), blockedNode('c')] }));
+    for (const n of out.nodes) {
+      expect(n.verdict, n.name).toBe('ok');
+      expect(n.candidateVerdict, n.name).not.toBe('blocked');
+      expect(n.evidence.blockEvidence, n.name).toBeDefined();
+    }
+    expect(out.desires.some((d) => d.kind === 'node-blocked')).toBe(false);
+  });
+
+  it('one node the agents could reach keeps the others\' LIKELY_BLOCKED as evidence', () => {
+    const out = evaluate(world({
+      nodes: [blockedNode('a'), blockedNode('b'), node({ name: 'c', blockStatus: 'OK' })],
+    }));
+    expect(out.nodes.filter((n) => n.candidateVerdict === 'blocked').map((n) => n.name)).toEqual(['a', 'b']);
+    expect(out.nodes.find((n) => n.name === 'a')?.evidence.blockEvidence).toBeUndefined();
+  });
+
+  it('below the smallest fleet, "all blocked" is still evidence', () => {
+    const out = evaluate(world({ nodes: [blockedNode('a'), blockedNode('b')] }));
+    expect(out.nodes.every((n) => n.candidateVerdict === 'blocked')).toBe(true);
+  });
+
+  it('a node committed blocked by such a sweep exits once a customer connected after it', () => {
+    const prior: NodePrior = {
+      verdict: 'blocked', candidateVerdict: 'blocked', candidateStreak: 0, candidateSince: null, changedAt: NOW - 86400,
+    };
+    const out = evaluate(world({
+      nodes: ['a', 'b', 'c'].map((name) => blockedNode(name, { prior, lastCustomerOkAt: NOW - 30 })),
+    }));
+    expect(out.nodes.map((n) => n.verdict)).toEqual(['ok', 'ok', 'ok']);
+  });
+
+  it('only nodes with a mainland verdict count toward the fleet', () => {
+    expect(blockEvidenceSuspect([
+      { blockStatus: 'LIKELY_BLOCKED' }, { blockStatus: null }, { blockStatus: 'EDGE_OK' }, { blockStatus: 'DOWN' },
+    ])).toBe(false);
+    expect(blockEvidenceSuspect([
+      { blockStatus: 'LIKELY_BLOCKED' }, { blockStatus: 'LIKELY_BLOCKED' }, { blockStatus: 'LIKELY_BLOCKED' }, { blockStatus: null },
+    ])).toBe(true);
+    expect(BLOCK_SUSPECT_MIN_NODES).toBe(3);
+  });
+});
