@@ -276,18 +276,19 @@ func nodeCityTitle(_ displayName: String) -> String {
     return String(localized: String.LocalizationValue(city))
 }
 
-/// Settings / "choose another route" title: hy2 includes the codename so two
-/// same-city backups are not identical cards.
+/// Settings / "choose another route" title. Every line includes its codename
+/// so same-city lines are not identical rows: a customer told to pick
+/// "Los Angeles · Westwood" could not find it among several "洛杉矶" rows.
 func nodeRouteTitle(for wireName: String) -> String {
     let parsed = ConfigParser.extractFlag(from: wireName)
     let display = ProxyNode.displayName(for: parsed.cleanName)
     let city = nodeCityTitle(display)
-    guard ProxyNode.isHy2CatalogName(parsed.cleanName) else { return city }
-    let backup = String(localized: "Backup channel")
+    var title = city
     if let codename = nodeCityParts(display).codename, !codename.isEmpty {
-        return "\(city) · \(codename) · \(backup)"
+        title += " · \(codename)"
     }
-    return "\(city) · \(backup)"
+    guard ProxyNode.isHy2CatalogName(parsed.cleanName) else { return title }
+    return "\(title) · \(String(localized: "Backup channel"))"
 }
 
 func nodeRouteTitle(_ node: ProxyNode) -> String {
