@@ -2,8 +2,10 @@
 
 Cloud-managed VPN (product identity is Tono, not Clash Verge or LiquidClash): clients pull a per-device exit catalog and a signed traffic policy, then dial VLESS
 Reality nodes. Maps: [docs/README.md](docs/README.md), [docs/architecture.md](docs/architecture.md) (deployables, code map, do-not list).
-[docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.75 (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
+[docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns the customer release gates (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
 ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 item 10 fixes merge.
+Version numbers change daily: read the current release and candidate from SHIP_PLAN and
+[docs/RELEASE_LINES.md](docs/RELEASE_LINES.md); this file never names one.
 Before a fix, a review or a merge, read [docs/LESSONS.md](docs/LESSONS.md) (mistakes the nightly retro found) and the
 promoted lessons at the end of this file.
 
@@ -23,25 +25,15 @@ These conditions are the approval: when they hold, act; do not stop to ask.
 
 **1. Merge** through the merge queue. Auto-merge is on for `main`. The only required status check is `ci-gate`. Merges use merge commits. Enable auto-merge with `gh pr merge --auto --merge --match-head-commit <checked head SHA>` on a ready, non-draft PR when the conditions below hold, so a later push cannot merge unchecked. Then do not wait on CI: start the next item and come back when a check fails or a merge-order dependency clears. Do not enable it on a UI PR or a PR that needs real-hardware testing. On a conflict or a helper-version collision, rebase onto current `main` and set `HelperProtocolVersion.current` (`apps/macos/Tono/Core/HelperProtocolVersion.swift`) to main's value plus `0.0.1`.
 - `ci-gate` is green on the exact head SHA. It calls the path-filtered workflows and passes when each relevant job succeeded or was skipped because its paths were not touched. A missing `ci-gate` run is not green; dispatch `ci-gate`. Do not also dispatch those workflows on the pull request (they would run a second time). Docs-only and uncovered paths: [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md#which-workflow-must-be-green-for-a-pr).
-- Ordinary work (copy, docs, UI, a normal bug or feature outside the risks below): the main session checks the
-  diff and runs the narrowest relevant test. No planning agent, external review or second model
-  checking a report.
-- High-risk changes (money, credentials/permissions, PF/WFP fail-closed behavior, privileged paths, concurrency/
-  lifecycle, migrations, routing or release trust), or an owner-requested review: an independent Codex high review
-  of the current diff must finish before merge/deploy. Run it in the background with named invariants and a
-  coverage checklist; it never blocks implementation, tests or a draft PR. Record the covered SHA, scope,
-  findings and verification in a PR comment. Pending, timed-out, incomplete or stale coverage is not a pass.
-  Stop rule: only major or worse blocks. Minors get one fix round; any still open after it are recorded
-  open in `docs/findings.d/` (product defects) or in the PR body's limitations (engineering/test/docs items the ledger excludes),
-  then merge. At least major: loosening fail-closed PF/WFP, a leak, privilege escalation, cross-account mixing, or showing
-  protected when protection is released (the ledger's 高 impact).
+- Every change, high-risk or not: the main session checks the diff and runs the narrowest relevant test.
+  No planning agent, external review or second model checking a report (see Review policy below).
+  High-risk changes (money, credentials/permissions, PF/WFP fail-closed behavior, privileged paths, concurrency/
+  lifecycle, migrations, routing or release trust) name the risk and the invariant they keep in the PR body.
 - No unresolved review threads (GraphQL `reviewThreads.isResolved`), no `CHANGES_REQUESTED`.
 - The merge order in the PR body ("Stacked on #N", "Merge after #N" or a `## Merge order` section)
   holds: wait for N; stacked PRs merge base-first, then `gh pr edit --base main`.
-- Before deploying a merged batch, check the integration delta and relevant regression tests. Reuse recorded
-  review coverage of exact PR heads; do not re-review the whole batch by default. Review only new high-risk
-  merge-resolution/integration changes and uncovered high-risk commits (direct commits count), recording the
-  range and reused coverage. Do not deploy uncovered high-risk changes; this does not relax any release gate.
+- Before deploying a merged batch, check the integration delta and relevant regression tests. This does not
+  relax any release gate.
 
 **2. Deploy and publish.** Control plane: in the maintainer's `main` checkout bound to the `tono` wrangler
 profile, `git pull --ff-only`, export D1 before every production deploy (ops plan §2 item 7), then
@@ -52,8 +44,9 @@ explicit task ([docs/ops/restore-production.md](docs/ops/restore-production.md))
 value for a Tono-controlled secret the task names for creation or rotation (coordinate its consumers first);
 never fabricate third-party credentials or print or commit a secret. Rollback: `npx wrangler rollback` per Worker.
 
-Customer channel publish only after the owner has written `[x]` for G1, G2 and G3 in SHIP_PLAN §6
-(for 0.0.75 only: G1 and G2; G3 moves to 0.0.76 by owner decision [019](docs/decisions/019-2026-09-26-release-0074-defers-g3.md), carried to 0.0.75 by [decision 061](docs/decisions/061-2026-10-05-release-is-0075.md)) with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
+Customer channel publish only after the owner has written `[x]` in SHIP_PLAN §6 for every gate the
+current release requires (G1, G2 and G3 unless an owner decision linked from SHIP_PLAN waives one for that
+release) with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
 hashes); publish only that candidate. Any other SHA or version needs new owner evidence, except rebuilding
 a published good source as a higher build for rollback. Then G4 is the agent's, in SHIP_PLAN §5 order
 (G4.2 on the owner's devices first; G4.3 needs the release row's `verifiedAt`); steps, both Windows
@@ -62,6 +55,13 @@ environment approvals, the Mac Studio-only proven macOS path and rollback: [docs
 **3. Product decisions with no owner answer:** choose the stricter, non-leaking option (append
 over replace, default off, keep hy2 stripped, never remove a node or disable a user unless the task says so;
 a credential suspected compromised is disabled at once), record it as a new file under [docs/decisions/](docs/decisions/README.md) with status `provisional`, and continue. Read them with `node tooling/scripts/records.mjs decisions`. Do not append to [docs/DECISIONS.md](docs/DECISIONS.md); that file is the index.
+
+## Review policy
+
+Independent review is paused by the owner (2026-10-26, [decision 136](docs/decisions/136-2026-10-26-review-paused.md)):
+no Codex, Grok, Claude or other second-model review is required before merge or deploy, including high-risk
+changes, and its absence does not keep a PR in draft. This overrides the global review defaults until the
+owner lifts it. A review runs only when the owner asks for one on a specific PR.
 
 ## Verification
 
@@ -88,6 +88,10 @@ status in that fragment, or in the ledger row if the ID has none. Delete stale d
 Lines `release/macos`, `release/windows`, `main` (sole production Worker source; merge commits, no rewrite): [docs/RELEASE_LINES.md](docs/RELEASE_LINES.md).
 Merged branches are deleted (D10-A): `node tooling/scripts/prune-merged-branches.mjs remote|worktrees` (dry-run; `--apply` acts, never `--force`)
 removes only branches whose tip is on main and merged worktrees with a clean tree; the weekly workflow applies the remote part.
+Delete the rest by hand once they are not needed (owner, 2026-10-26), without a backup: branches of closed or
+merged PRs, branches with no PR (finished RED/evidence branches, abandoned experiments), and their local
+branches and worktrees. A branch whose open PR can merge under the conditions above is merged instead. Keep
+`main`, `release/*`, `stability/*`, `gh-readonly-queue/*`, open-PR branches and the evidence branches of open PRs.
 
 ## Promoted lessons
 
