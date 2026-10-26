@@ -189,7 +189,24 @@ type SnapshotCtx = {
   nowSec: number;
   qualitySweepAt: number | null;
   agentsSnapshotAt: number | null;
+  /** See blockEvidenceSuspect; absent (replay, single-node calls) means trusted. */
+  blockEvidenceSuspect?: boolean;
 };
+
+// The mainland sweep is one hub dialling every node from the same few agents.
+// When every node it judged says LIKELY_BLOCKED, the agents could not dial
+// out; the fleet was not dialled. From 2026-10-08 to 10-26 the one agent whose
+// every dial failed read 17 nodes on five providers as 疑似被墙 for eighteen
+// days while customers connected through them. Such a sweep is not block
+// evidence. Three judged nodes is the smallest fleet where "all" means much.
+export const BLOCK_SUSPECT_MIN_NODES = 3;
+const MAINLAND_JUDGED = new Set(['OK', 'LIKELY_BLOCKED', 'DEGRADED']);
+
+export function blockEvidenceSuspect(nodes: readonly Pick<NodeVerdictInput, 'blockStatus'>[]): boolean {
+  const judged = nodes.filter((node) => node.blockStatus != null && MAINLAND_JUDGED.has(node.blockStatus));
+  if (judged.length < BLOCK_SUSPECT_MIN_NODES) return false;
+  return judged.every((node) => node.blockStatus === 'LIKELY_BLOCKED');
+}
 
 const CARRIER_KEYS = ['unicom', 'telecom', 'mobile'] as const;
 
@@ -251,7 +268,7 @@ function reasonFor(verdict: NodeVerdict, cause: DegradedCause | null): string {
 /** Raw precedence, first match. Down includes the agent-silent enter gate. */
 export function observedVerdict(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdict {
   if (unreachable(node) && agentSilent(node.agentObservedAt, ctx.nowSec)) return 'down';
-  if (node.ok === true && node.blockStatus === 'LIKELY_BLOCKED') return 'blocked';
+  if (node.ok === true && node.blockStatus === 'LIKELY_BLOCKED' && !ctx.blockEvidenceSuspect) return 'blocked';
   if (node.catalogListed === true && node.agentObservedAt == null) return 'no_probe';
   if (degradedCause(node)) return 'degraded';
   // Sweep unreachable, Komari heard from the box within 15 minutes: neither
@@ -351,6 +368,9 @@ function evaluateNode(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdictResu
       errorSpike: node.errorSpike,
       handshakeDistinctUsers: node.fails30m.handshakeDistinctUsers,
       ...(uncovered ? { coverage: '大陆探测没有覆盖这台机器' } : {}),
+      ...(ctx.blockEvidenceSuspect && node.blockStatus === 'LIKELY_BLOCKED'
+        ? { blockEvidence: '本轮巡检判定每台都疑似被墙，按探针故障处理，不作被墙证据' }
+        : {}),
     },
   };
 }
@@ -391,6 +411,7 @@ export function evaluate(input: VerdictInput): VerdictOutput {
     nowSec: input.nowSec,
     qualitySweepAt: input.qualitySweepAt,
     agentsSnapshotAt: input.agentsSnapshotAt,
+    blockEvidenceSuspect: blockEvidenceSuspect(input.nodes),
   };
   const nodes = input.nodes.map((node) => evaluateNode(node, ctx));
   // A retired machine is a lifecycle fact, not an incident: it is expected to

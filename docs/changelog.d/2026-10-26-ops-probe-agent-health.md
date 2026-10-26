@@ -1,0 +1,12 @@
+## 2026-10-26 · 大陆探针自检与「整轮全部疑似被墙」不作证据
+- 归属：ops 节点判定（`ops-panel/collect.py` 巡检、控制面 `services/control-plane/src/ops/verdict.ts`）；影响 ops 面板的节点裁决、`node-blocked` 事件与客户目录可见的节点状态。
+- 来源：基线 `origin/main`（2026-10-26）→ 本 PR；分支 `fix/ops-verdict-stale-block-status`；是否已合 main 见 PR。
+- 缺陷修复：
+  - 原失败场景：巡检对每个节点从每个大陆探针 SSH 过去 TCP 拨 :443。SSH 本身超时、被拒或认证失败时，拨号根本没跑，却按「拨号失败」计入 ≥2/3 失败 ⇒ `LIKELY_BLOCKED`。生产只有一个探针，自 2026-10-08 16:55 起它每次拨号都失败，全部 17 台（五家机房）在同一秒变成「疑似被墙」并保持 18 天，期间客户一直通过这些节点正常连接；D1 `operations_quality_samples` 十天内每条样本都是 `LIKELY_BLOCKED`，`operations_live_snapshot` 里 `mainland.total=1, fail=1`。
+  - 改后行为（巡检）：只有在探针上真正跑完并打印出 `EXIT:<code>` 的拨号才是证据；没跑到拨号的 SSH 记为 `probe_did_not_run`，不计票（与原有 `host_key_unverified` 同一处理）。每轮开始前每个探针先拨一次 canary（默认 AliDNS `223.5.5.5:443`，可在 `nodes.secrets.json` 用 `mainland_canary: {host, port}` 覆盖），拨不通的探针本轮不参与；全部探针不通时不给出大陆裁决，`block.mainland.note` 写明「大陆探针全部未通过自检」。
+  - 改后行为（控制面）：一轮巡检里有大陆裁决（OK / LIKELY_BLOCKED / DEGRADED）的节点 ≥3 台且全部是 `LIKELY_BLOCKED` 时，这轮不作被墙证据：`observedVerdict` 不返回 `blocked`，节点 evidence 加 `blockEvidence` 说明；已被这种巡检判成 blocked 的节点按既有迟滞退出（巡检后有客户连通即一轮退出，否则两轮）。单台或两台全 blocked 行为不变。回放（`replay.ts`）是单节点视角，不带这个判断。
+- 新增/优化：无。
+- 工程与测试：`ops-panel/tests/test_collect.py` 新增 `MainlandAgentTests`（8 条：SSH 超时/拒绝/认证失败不计票、超时异常不计票、真实拨号失败才是 blocked 票、未跑探针让位给其余探针、host-key 仍单独记、canary 剔除、canary 目标正确、无健康探针时的 note）；`services/control-plane/test/ops-verdict.test.ts` 新增 `sweep-wide block evidence`（5 条）。
+- 验证：本机（macOS，worktree 于 `origin/main`）`python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'` 38 通过；`vitest run test/ops-verdict.test.ts test/ops-evaluate.test.ts test/ops-verdict-run.test.ts test/ops-ingest-hooks.test.ts` 通过；`tsc --noEmit` 通过。未执行：hub 实机巡检（需要部署 `collect.py` 到 ops 主机）、控制面部署。
+- 候选/发布：仅源码，无新包；控制面需所有者部署（`tooling/scripts/deploy-control-plane-main.sh`），ops 主机需更新 `collect.py` 后下一轮 12 小时巡检生效。
+- 剩余限制：探针本身为什么从 10-08 起拨不通（主机下线、口令过期或出口被封）要在 ops 主机上看巡检日志确认，本 PR 只保证它不再把整个机队判成被墙；`Los Angeles · Westwood` 等在售节点仍无探针覆盖；真实的全国级整体封锁与探针故障在巡检数据上无法区分，届时以客户失败（`customer_fail`、握手失败用户数）为准。
