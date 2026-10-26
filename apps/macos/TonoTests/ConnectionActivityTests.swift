@@ -155,7 +155,7 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertFalse(ProxyNode.hy2UdpIsVendorBlocked("Los Angeles · Sunset · hy2"))
         XCTAssertTrue(ProxyNode.isHy2CatalogName("Tokyo · Sakura · hy2"))
         XCTAssertFalse(ProxyNode.isHy2CatalogName("Tokyo · Sakura"))
-        XCTAssertEqual(nodeRouteTitle(for: "Tokyo · Sakura"), nodeCityTitle("Tokyo · Sakura"))
+        XCTAssertEqual(nodeRouteTitle(for: "Tokyo · Sakura"), "\(nodeCityTitle("Tokyo · Sakura")) · Sakura")
         XCTAssertEqual(
             nodeRouteTitle(for: "Tokyo · Sakura · hy2"),
             "\(nodeCityTitle("Tokyo · Sakura")) · Sakura · \(String(localized: "Backup channel"))"
