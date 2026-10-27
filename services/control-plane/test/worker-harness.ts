@@ -200,6 +200,7 @@ export async function startEmailSignIn(body: {
   const payload = await response.json() as any;
   return {
     response,
+    payload,
     challengeId: payload.challengeId as string,
     code: emailCodes.get(payload.challengeId as string),
   };

@@ -494,7 +494,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const methods = await api('auth/methods');
     expect(methods.status).toBe(200);
     expect(await methods.json()).toEqual({
-      email: { enabled: true, publicSignup: false },
+      email: { enabled: true, publicSignup: false, deliveryDegraded: false },
       apple: { enabled: true },
       google: { enabled: true, clientId: GOOGLE_AUDIENCE },
     });
