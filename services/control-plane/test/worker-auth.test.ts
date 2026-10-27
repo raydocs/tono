@@ -223,7 +223,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     (env as unknown as Env).PUBLIC_SIGNUP = 'true';
     try {
-      expect((await (await api('auth/methods')).json() as any).email.publicSignup).toBe(true);
+      expect((await (await api('auth/methods')).json() as any).email)
+        .toMatchObject({ publicSignup: true, signupPaused: false });
 
       for (const attempt of ['first', 'again']) {
         const refused = await signIn(stranger, `open-signup-${attempt}`);
@@ -267,9 +268,12 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(first.code).toMatch(/^\d{6}$/);
       expect(second.response.status).toBe(202);
       expect(second.code).toBeUndefined();
-      // The spent budget is global state, told to every caller alike.
-      expect(second.payload.publicSignup).toBe(false);
-      expect((await (await api('auth/methods')).json() as any).email.publicSignup).toBe(false);
+      // The spent budget is global state, told to every caller alike, and
+      // it pauses open registration rather than turning it into invite-only.
+      expect(first.payload).toMatchObject({ publicSignup: true, signupPaused: true });
+      expect(second.payload).toMatchObject({ publicSignup: true, signupPaused: true });
+      expect((await (await api('auth/methods')).json() as any).email)
+        .toMatchObject({ publicSignup: true, signupPaused: true });
       // Existing accounts are outside the budget.
       const known = await createAccount('cap-known');
       expect((await startEmailSignIn({

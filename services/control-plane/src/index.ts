@@ -242,7 +242,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     return Response.json(
       {
         challengeId: challenge,
-        expiresIn: ttl, publicSignup: (await emailSignupStatus(e)).publicSignup,
+        expiresIn: ttl, ...await emailSignupStatus(e),
         message: 'If this email is eligible, a sign-in code has been sent.',
       },
       { status: 202 },

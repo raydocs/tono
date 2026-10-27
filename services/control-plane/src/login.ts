@@ -129,10 +129,11 @@ export async function publicSignupCodeAllowed(e: Env): Promise<boolean> {
 
 /**
  * Global sign-in mail state for clients' copy, the same for every caller and
- * never about one address: `publicSignup` is open registration with today's
- * new-address budget not yet spent (once spent, "a code is on its way if this
- * address has an account" is the honest line); `deliveryDegraded` is a recent
- * provider-side failure that no accepted delivery has cleared since.
+ * never about one address: `publicSignup` is the registration mode (false is
+ * invite-only); `signupPaused` is open registration with today's new-address
+ * budget spent, when only existing accounts and invitations get a code;
+ * `deliveryDegraded` is a recent provider-side failure that no accepted
+ * delivery has cleared since.
  */
 export async function emailSignupStatus(e: Env) {
   const t = now();
@@ -142,12 +143,12 @@ export async function emailSignupStatus(e: Env) {
   ).bind(budgetKey, EMAIL_DELIVERY_DOWN_KEY).all<Row>()).results;
   const budget = rows.find((row) => row.key === budgetKey);
   const down = rows.find((row) => row.key === EMAIL_DELIVERY_DOWN_KEY);
+  const open = publicSignupEnabled(e);
   return {
-    publicSignup: publicSignupEnabled(e) && (
-      !budget ||
-      Number(budget.window_start) <= t - PUBLIC_SIGNUP_BUDGET_SECONDS ||
-      Number(budget.count) < envInt(e, 'PUBLIC_SIGNUP_CODES_PER_DAY', 200)
-    ),
+    publicSignup: open,
+    signupPaused: open && !!budget &&
+      Number(budget.window_start) > t - PUBLIC_SIGNUP_BUDGET_SECONDS &&
+      Number(budget.count) >= envInt(e, 'PUBLIC_SIGNUP_CODES_PER_DAY', 200),
     deliveryDegraded: !!down && Number(down.window_start) > t - EMAIL_DELIVERY_DOWN_SECONDS,
   };
 }
