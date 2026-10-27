@@ -322,7 +322,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
-  it('links Apple to an external-mailbox account only after an email code on the same installation (decision 139)', async () => {
+  it('links Apple to an external-mailbox account only after an email code on the same installation (decision 141)', async () => {
     const account = await createAccount('apple-link');
     const appleVerify = async (installationId: string, email = account.email) => {
       const challenge = await (await api('auth/oidc/challenge', json({
@@ -363,6 +363,55 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const signedIn = await appleVerify('apple-link-installation-four');
     expect(signedIn.status).toBe(200);
     expect((await signedIn.json() as any).user.id).toBe(account.user.id);
+  });
+
+  it('never attaches a provider account on a refused, late, or conflicting link (decision 141)', async () => {
+    const appleRefusal = async (subject: string, email: string, installationId: string) => {
+      const challenge = await (await api('auth/oidc/challenge', json({
+        provider: 'apple', deviceName: 'Apple Mac', installationId,
+      }))).json() as any;
+      const idToken = await oidcToken('apple', challenge.nonce, { subject, email });
+      const refused = await api('auth/oidc/verify', json({ provider: 'apple', challengeId: challenge.challengeId, idToken }));
+      expect(refused.status).toBe(401);
+      return (await refused.json() as any).linkTicket as string;
+    };
+    const codeWithTicket = async (email: string, installationId: string, linkTicket: string) => {
+      const started = await startEmailSignIn({ email, deviceName: 'Apple Mac', installationId });
+      return api('auth/email/verify', json({ challengeId: started.challengeId, code: started.code, linkTicket }));
+    };
+    const owner = async (subject: string) => (await env.DB.prepare(
+      "SELECT user_id FROM auth_identities WHERE provider = 'apple' AND subject = ?",
+    ).bind(subject).first<any>())?.user_id;
+
+    // A sign-in refused after the code (here this installation's enrollment
+    // cooldown; a device limit is the same) links nothing.
+    const cooled = await createAccount('apple-cooldown');
+    const ticket = await appleRefusal('apple-cooldown-subject', cooled.email, 'apple-cooldown-installation-one');
+    const refused = await codeWithTicket(cooled.email, 'apple-cooldown-installation-one', ticket);
+    expect((await refused.json() as any).error?.code).toBe('ENROLLMENT_COOLDOWN');
+    expect(await owner('apple-cooldown-subject')).toBeUndefined();
+
+    // A ticket past its ten minutes is expired.
+    const account = await createAccount('apple-late');
+    const late = await appleRefusal('apple-late-subject', account.email, 'apple-late-installation');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 601_000);
+    try {
+      const expired = await codeWithTicket(account.email, 'apple-late-installation', late);
+      expect((await expired.json() as any).identityLink).toEqual({ status: 'expired' });
+    } finally {
+      clock.mockRestore();
+    }
+    expect(await owner('apple-late-subject')).toBeUndefined();
+
+    // An account that already has an Apple ID keeps it; a second one is a conflict.
+    const first = await appleRefusal('apple-first-subject', account.email, 'apple-first-installation');
+    const firstLink = await (await codeWithTicket(account.email, 'apple-first-installation', first)).json() as any;
+    expect(firstLink).toMatchObject({ identityLink: { provider: 'apple', status: 'linked' } });
+    const second = await appleRefusal('apple-second-subject', account.email, 'apple-second-installation');
+    expect((await (await codeWithTicket(account.email, 'apple-second-installation', second)).json() as any)
+      .identityLink).toEqual({ provider: 'apple', status: 'conflict' });
+    expect(await owner('apple-first-subject')).toBe(account.user.id);
+    expect(await owner('apple-second-subject')).toBeUndefined();
   });
 
   it('accepts an ID token for any configured client of the provider, and only those', async () => {

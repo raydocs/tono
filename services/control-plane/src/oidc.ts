@@ -178,7 +178,7 @@ const APPLE_MAILBOX_DOMAINS = new Set(['icloud.com', 'me.com', 'mac.com', 'priva
 
 /**
  * Whether the provider itself is the authority for the mailbox behind a
- * verified `email` claim (decisions 072, 139). Google: consumer Gmail, or a
+ * verified `email` claim (decisions 072, 141). Google: consumer Gmail, or a
  * Workspace account whose `hd` equals the address domain. Apple: iCloud
  * addresses and Hide My Email relays. Any other address is only "verified
  * once": a Google or Apple account backed by an external mailbox keeps

@@ -1,10 +1,11 @@
 // Apple and Google sign-in: nonce challenges, ID-token verification, and the
 // link ticket that attaches a provider identity to an account only after the
-// user also proves that account with an email code (decision 139).
+// user also proves that account with an email code (decision 141).
 import { hmacSha256, jwtSign, jwtVerify, randomToken, sha256 } from './crypto';
 import { OidcVerificationError, type OidcIdentity, type OidcProvider, verifyOidcIdToken } from './oidc';
 import { accountForOidcIdentity } from './accounts';
 import { ApiError } from './errors';
+import { acceptedClientBody } from './client-identity';
 import { type Env, type Row, str, envInt, requiredSecret, now, id } from './env';
 import { body } from './request';
 import {
@@ -36,7 +37,7 @@ export async function oidcRoute(
   m: string,
 ): Promise<Response | undefined> {
   if (p === '/api/v1/auth/oidc/challenge' && m === 'POST') {
-    const b = await body(req, 8 * 1024);
+    const b = acceptedClientBody(await body(req, 8 * 1024));
     const provider = oidcProvider(b.provider);
     const name = str(b.deviceName, 'deviceName', 1, 100);
     const inst = str(b.installationId, 'installationId', 8, 200);
@@ -61,7 +62,7 @@ export async function oidcRoute(
   }
 
   if (p === '/api/v1/auth/oidc/verify' && m === 'POST') {
-    const b = await body(req, 24 * 1024);
+    const b = acceptedClientBody(await body(req, 24 * 1024));
     const provider = oidcProvider(b.provider);
     const challenge = challengeID(b.challengeId);
     const idToken = str(b.idToken, 'idToken', 100, 16_384);
@@ -125,7 +126,7 @@ export async function oidcRoute(
       throw refusal;
     }
     return Response.json(await completePasswordlessAuth(
-      e, req, user, String(reserved.device_name), String(reserved.installation_id),
+      e, req, user, String(reserved.device_name), String(reserved.installation_id), b,
     ));
   }
 
