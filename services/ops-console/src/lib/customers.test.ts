@@ -249,6 +249,13 @@ describe('the reply draft', () => {
     expect(explainCode('CORE_EXIT_UNREACHABLE')).not.toBe(copy.codeWord.UNKNOWN);
   });
 
+  it('explains the 0.0.81 codes: the exit that never answered and the engine that quit', () => {
+    expect(explainCode('TONO_EXIT_UNREACHABLE')).toBe(copy.codeWord.TONO_EXIT_UNREACHABLE);
+    expect(explainCode('TONO_EXIT_UNREACHABLE')).toContain('换节点');
+    expect(explainCode('TONO_CORE_EXITED')).toBe(copy.codeWord.TONO_CORE_EXITED);
+    expect(explainCode('TONO_CORE_EXITED')).not.toBe(copy.codeWord.UNKNOWN);
+  });
+
   it('says the Windows service-down code in a sentence, not the raw code', () => {
     expect(explainCode('TONO_SERVICE_NOT_RUNNING')).toBe(copy.codeWord.TONO_SERVICE_NOT_RUNNING);
     expect(explainCode('TONO_SERVICE_NOT_RUNNING')).not.toBe('TONO_SERVICE_NOT_RUNNING');

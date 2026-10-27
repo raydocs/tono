@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exitUnreachableUsers } from '../src/ops/verdict-exit-fails';
+import { EXIT_SIDE_SQL, exitUnreachableUsers } from '../src/ops/verdict-exit-fails';
 
 describe('exit-side failures counted per node', () => {
   it('counts a user for the one node they could not reach', () => {
@@ -31,5 +31,25 @@ describe('exit-side failures counted per node', () => {
 
   it('is empty with no failures', () => {
     expect(exitUnreachableUsers([]).size).toBe(0);
+  });
+});
+
+describe('which failures count as exit-side', () => {
+  it('names every client code that means the exit never answered', () => {
+    // Windows after the lock, Windows before any tunnel, macOS after the lock.
+    for (const code of [
+      'TONO_NODE_OR_CORE_UNREACHABLE',
+      'TONO_EXIT_UNREACHABLE',
+      'CORE_EXIT_UNREACHABLE',
+    ]) {
+      expect(EXIT_SIDE_SQL).toContain(`'${code}'`);
+    }
+    expect(EXIT_SIDE_SQL).toContain("LIKE 'tcp connect to the selected exit%'");
+  });
+
+  it('does not count the client-side codes', () => {
+    for (const code of ['TUN_ROUTE_UNAVAILABLE', 'TONO_CORE_EXITED', 'PROTECTED_DNS_NOT_READY']) {
+      expect(EXIT_SIDE_SQL).not.toContain(code);
+    }
   });
 });
