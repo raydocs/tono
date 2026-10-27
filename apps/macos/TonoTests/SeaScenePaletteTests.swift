@@ -67,8 +67,14 @@ final class SeaScenePaletteTests: XCTestCase {
         view.setFrameSize(CGSize(width: 370, height: 240))
         view.layout()
         XCTAssertTrue(scene.sublayers?.first === afterDrag, "full-screen resize layouts share the same debounce")
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertFalse(scene.sublayers?.first === afterDrag)
+        // The 150 ms debounce is a main-actor Task. A fixed 300 ms sleep raced it on a loaded
+        // runner, where its start job can queue behind other main-actor work: wait for the
+        // rebuild instead, bounded so a debounce that never fires still fails.
+        let deadline = ContinuousClock.now + .seconds(10)
+        while scene.sublayers?.first === afterDrag, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(scene.sublayers?.first === afterDrag, "the settled size must rebake once the debounce fires")
         let finalSky = try XCTUnwrap(scene.sublayers?.first)
         XCTAssertEqual(finalSky.bounds.width, 370)
         XCTAssertEqual(finalSky.bounds.height, 132, accuracy: 0.000001)
