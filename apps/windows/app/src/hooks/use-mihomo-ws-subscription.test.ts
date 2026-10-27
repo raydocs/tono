@@ -14,6 +14,7 @@ const socket = (close = vi.fn(async () => {})) =>
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 describe('shared Mihomo WebSocket recovery', () => {
@@ -201,5 +202,46 @@ describe('shared Mihomo WebSocket recovery', () => {
     expect(first.close).toHaveBeenCalledOnce()
     expect(entry.ws).toBe(second)
     expect(second.close).not.toHaveBeenCalled()
+  })
+
+  it('keeps retrying a refused controller with growing delays and resets once it answers', async () => {
+    // Core restarting across a network switch: the controller refuses for a while, then answers.
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0.5) // zero jitter
+    const first = socket()
+    const second = socket()
+    const refused = () => Promise.reject(new Error('connection refused'))
+    const connect = vi
+      .fn<() => Promise<MihomoWebSocket>>()
+      .mockImplementationOnce(refused)
+      .mockImplementationOnce(refused)
+      .mockImplementationOnce(refused)
+      .mockImplementationOnce(refused)
+      .mockImplementationOnce(refused)
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+    const entry = createSharedSubscriptionEntry(connect)
+    entry.owners.add({ handleMessage: vi.fn(), isMounted: () => true })
+
+    const expectNextAttemptAfter = async (delayMs: number) => {
+      const calls = connect.mock.calls.length
+      await vi.advanceTimersByTimeAsync(delayMs - 1)
+      expect(connect).toHaveBeenCalledTimes(calls)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(connect).toHaveBeenCalledTimes(calls + 1)
+    }
+
+    await entry.connectWs()
+    expect(entry.ws).toBeNull()
+    for (const delayMs of [1000, 2000, 5000, 10000, 10000]) {
+      await expectNextAttemptAfter(delayMs)
+    }
+    expect(entry.ws).toBe(first)
+    expect(entry.reconnectTimer).toBeNull()
+
+    // The next drop starts from the shortest delay, not the outage's 10s ceiling.
+    await entry.scheduleReconnect()
+    await expectNextAttemptAfter(1000)
+    expect(entry.ws).toBe(second)
   })
 })

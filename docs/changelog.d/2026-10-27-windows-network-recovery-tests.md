@@ -1,0 +1,11 @@
+## 2026-10-27 · Windows 前端断线恢复回归测试
+- 归属：G1（已连接=能用；仪表盘/Activity 不再卡在重试）；Windows 前端 `apps/windows/app/src/hooks`。
+- 来源：基线 origin/main `316d065`；分支 `test/windows-network-recovery-regressions`；仅测试，无产品代码改动。
+- 缺陷修复：无。
+- 新增/优化：无产品行为变化。
+- 工程与测试：
+  - `use-mihomo-ws-subscription.test.ts`：Core 在网络切换中重启、控制器连续拒绝连接时，共享 WebSocket 按 1s/2s/5s/10s/10s 退避持续重连；连上后下一次断线从 1s 重新开始，而不是沿用 10s 上限。
+  - `use-tono.test.tsx`：`useTonoStatus` 在状态监听注册完成后再读一次状态；首次读取与注册之间发生的 Connecting→Connected 不会丢到下一次 5s 轮询。
+- 验证：orb（Linux，Node 24.18）`apps/windows/app`：`npx vitest run` 61 文件 439 测试通过；`npx tsc --noEmit` 通过；两个新测试在对应实现被临时破坏时失败（去掉 `reconnectAttempt = 0`：`expected vi.fn() to be called 7 times, but got 6 times`；去掉 `onSubscribed` 重读：`expected undefined to be type of 'function'`）。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：未运行 macOS XCTest、Windows `cargo test` 与 Tauri（本 orb 无对应工具链，按 AGENTS.md 不安装）；未在实机上验证网络切换。

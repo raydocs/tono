@@ -49,7 +49,9 @@ const readyPayload: TonoStatus = {
 
 const { tonoStatusMock, subscribeTonoStatusMock } = vi.hoisted(() => ({
   tonoStatusMock: vi.fn(),
-  subscribeTonoStatusMock: vi.fn((_handler: unknown) => () => {}),
+  subscribeTonoStatusMock: vi.fn(
+    (_handler: unknown, _onSubscribed?: () => void) => () => {},
+  ),
 }))
 
 vi.mock('@/services/tono', () => ({
@@ -128,5 +130,33 @@ describe('useTonoStatus', () => {
       expect(result.current.status?.accountState).toBe('ready'),
     )
     expect(result.current.status?.selectedServer).toBe('US West 1')
+  })
+
+  it('re-reads the status once the listener is live, so a transition before registration is not lost', async () => {
+    // A reconnect finishing between the first read and listener registration
+    // emits its only `tono://status` push into the gap.
+    let onLive: (() => void) | undefined
+    subscribeTonoStatusMock.mockImplementation(
+      (_handler: unknown, onSubscribed?: () => void) => {
+        onLive = onSubscribed
+        return () => {}
+      },
+    )
+    tonoStatusMock
+      .mockResolvedValueOnce({ ...readyPayload, uiState: 'connecting' })
+      .mockResolvedValue(readyPayload)
+
+    const { result } = renderHook(() => useTonoStatus(), { wrapper: freshSWR })
+
+    await waitFor(() =>
+      expect(result.current.status?.uiState).toBe('connecting'),
+    )
+    expect(onLive).toBeTypeOf('function')
+
+    act(() => onLive?.())
+
+    await waitFor(() =>
+      expect(result.current.status?.uiState).toBe('connected'),
+    )
   })
 })
