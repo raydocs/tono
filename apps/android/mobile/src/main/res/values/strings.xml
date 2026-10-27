@@ -183,4 +183,13 @@
     <string name="consent_stop">A key icon shows while it\'s on. Stop it here, from the notification or in Quick Settings.</string>
     <string name="consent_continue">Continue</string>
     <string name="consent_later">Not now</string>
+    <string name="signin_code_requested">A sign-in code was requested for %1$s. It usually arrives within a minute; check spam too.</string>
+    <string name="signin_code_sent_paused">If this email can already sign in to Tono, a code is on its way to %1$s. Check spam too. New sign-ups are full for today; new users, please try again tomorrow.</string>
+    <string name="signin_mail_degraded">Tono\'s email service is having trouble right now, so the code may be late or may not arrive. Try again in a few minutes.</string>
+    <string name="reason_ACCOUNT_EXPIRED">Your plan has expired. Renew it or ask a family member for help; you do not need to sign out.</string>
+    <string name="reason_QUOTA_EXCEEDED">You have used this period\'s data allowance. Renew it or ask a family member for help; you do not need to sign out.</string>
+    <string name="reason_ENTITLEMENT_REQUIRED">Your Tono account is ready, but it has no plan yet. Contact Tono to activate it, then sign in again.</string>
+    <string name="short_ACCOUNT_EXPIRED">Plan expired</string>
+    <string name="short_QUOTA_EXCEEDED">Data used up</string>
+    <string name="short_ENTITLEMENT_REQUIRED">No plan yet</string>
 </resources>

@@ -247,7 +247,7 @@ class TonoVpnService : VpnService() {
             engine.execute {
                 if (!loginRequests.accepts(request)) return@execute
                 result.onSuccess { body ->
-                    update { it.copy(login = LoginView(email = normalized, challengeId = body["challengeId"] as? String)) }
+                    update { it.copy(login = LoginView.requested(normalized, body)) }
                 }.onFailure { e ->
                     update { it.copy(login = it.login.copy(busy = false, errorCode = errorCode(e))) }
                 }

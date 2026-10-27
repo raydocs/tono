@@ -90,10 +90,20 @@ class EngineUnitTest {
         assertFalse(TonoVpnService.isSessionEnded(ApiException(401, "INVALID_OR_EXPIRED_CODE", "")))
     }
 
+    @Test fun codeRequestReadsTheGlobalRegistrationStateAndOlderServersAsInviteOnly() {
+        fun req(vararg pairs: Pair<String, Any?>) = LoginView.requested("a@b.c", mapOf("challengeId" to "ch-1", *pairs))
+        assertEquals(LoginView("a@b.c", "ch-1", signup = "open"), req("publicSignup" to true, "signupPaused" to false))
+        // A spent daily budget pauses open registration; it is not invite-only.
+        assertEquals("paused", req("publicSignup" to true, "signupPaused" to true).signup)
+        assertEquals(null, req("publicSignup" to false).signup)
+        assertEquals(LoginView("a@b.c", "ch-1"), req())
+        assertTrue(req("deliveryDegraded" to true).mailDegraded)
+    }
+
     @Test fun snapshotSurvivesTheProcessBoundary() {
         val s = EngineSnapshot(
             phase = Phase.DEGRADED, reasonCode = "HOME_UNREACHABLE", email = "a@b.c",
-            login = LoginView("a@b.c", "ch-1", busy = true, errorCode = null),
+            login = LoginView("a@b.c", "ch-1", busy = true, errorCode = null, signup = "paused", mailDegraded = true),
             nodes = listOf(NodeView("Tokyo · Dawn", "Tokyo", "Dawn", 87), NodeView("LA", "Los Angeles", "", null)),
             selectedNode = "LA", homeKind = HomeKind.CATALOG_NODE, homeLabel = "Home \"π\" x", mode = RoutingMode.STABLE,
             excludedPackages = listOf("com.example.bank"), connectedSinceMs = 1_760_000_000_123,

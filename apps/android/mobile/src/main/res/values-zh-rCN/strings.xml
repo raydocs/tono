@@ -182,4 +182,13 @@
     <string name="consent_stop">开启时状态栏显示钥匙图标。可在这里、通知或快捷设置中关闭。</string>
     <string name="consent_continue">继续</string>
     <string name="consent_later">以后再说</string>
+    <string name="signin_code_requested">已为 %1$s 申请验证码，通常一分钟内送达，也请查看垃圾箱。</string>
+    <string name="signin_code_sent_paused">如果该邮箱已经可以登录 Tono，验证码已发送到 %1$s，也请查看垃圾箱。今天的新用户注册名额已满，新用户请明天再试。</string>
+    <string name="signin_mail_degraded">Tono 的邮件服务暂时异常，验证码可能延迟或收不到。请过几分钟再试。</string>
+    <string name="reason_ACCOUNT_EXPIRED">套餐已到期。请续费或联系家人，无需退出登录。</string>
+    <string name="reason_QUOTA_EXCEEDED">本期流量已用完。请续费或联系家人，无需退出登录。</string>
+    <string name="reason_ENTITLEMENT_REQUIRED">账号已建好，但还没有开通套餐。请联系 Tono 开通后重新登录。</string>
+    <string name="short_ACCOUNT_EXPIRED">套餐已到期</string>
+    <string name="short_QUOTA_EXCEEDED">流量已用完</string>
+    <string name="short_ENTITLEMENT_REQUIRED">尚未开通套餐</string>
 </resources>
