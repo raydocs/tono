@@ -27,11 +27,17 @@ pub struct ProbeOrigin {
     pub expected_status: u16,
 }
 
-pub const PROBE_ORIGINS: [ProbeOrigin; 1] = [
+pub const PROBE_ORIGINS: [ProbeOrigin; 2] = [
     ProbeOrigin {
         label: "Google",
         // google.com now routes Home; keep the cloud-path proof independent.
         url: "https://www.gstatic.com/generate_204",
+        expected_status: 204,
+    },
+    ProbeOrigin {
+        label: "Cloudflare",
+        // Independent of gstatic: the tunnel is judged unhealthy only when both fail.
+        url: "https://cp.cloudflare.com/generate_204",
         expected_status: 204,
     },
 ];
@@ -480,6 +486,40 @@ mod tests {
         let (host, path) = parse_https_origin(PROBE_ORIGINS[0].url).unwrap();
         assert_eq!(host, "www.gstatic.com");
         assert_eq!(path, "/generate_204");
+        let (host, path) = parse_https_origin(PROBE_ORIGINS[1].url).unwrap();
+        assert_eq!(host, "cp.cloudflare.com");
+        assert_eq!(path, "/generate_204");
+    }
+
+    #[test]
+    fn origins_are_distinct_hosts_and_google_stays_first() {
+        assert_eq!(PROBE_ORIGINS[0].label, "Google");
+        assert_eq!(PROBE_ORIGINS[1].label, "Cloudflare");
+        assert_eq!(PROBE_ORIGINS[1].expected_status, 204);
+        let hosts: Vec<_> = PROBE_ORIGINS
+            .iter()
+            .map(|origin| parse_https_origin(origin.url).unwrap().0)
+            .collect();
+        assert_eq!(hosts.len(), 2);
+        assert_ne!(hosts[0], hosts[1]);
+    }
+
+    #[test]
+    fn failure_text_counts_both_origins() {
+        let failures: Vec<_> = PROBE_ORIGINS
+            .iter()
+            .map(|origin| ProbeOriginResult {
+                origin: origin.label.to_string(),
+                expected_status: origin.expected_status,
+                actual_status: None,
+                category: ProbeCategory::Tcp,
+                elapsed_ms: 1,
+                redacted_detail: "connect timed out".into(),
+            })
+            .collect();
+        let text = format_failures(&failures);
+        assert!(text.starts_with("all 2 independent protected TUN probes failed: "));
+        assert!(text.contains("Google (tcp)") && text.contains("Cloudflare (tcp)"));
     }
 
     #[test]

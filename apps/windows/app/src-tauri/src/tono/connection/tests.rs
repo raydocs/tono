@@ -630,9 +630,12 @@ fn tun_probe_origins_are_staggered_not_bursted() {
 
 #[test]
 fn real_data_plane_probes_the_cloud_path_not_home_google() {
-    assert_eq!(TUN_DATA_PLANE_PROBES.len(), 1);
+    assert_eq!(TUN_DATA_PLANE_PROBES.len(), 2);
     assert_eq!(TUN_DATA_PLANE_PROBES[0].url, "https://www.gstatic.com/generate_204");
     assert_eq!(TUN_DATA_PLANE_PROBES[0].expected_status, 204);
+    assert_eq!(TUN_DATA_PLANE_PROBES[1].label, "Cloudflare");
+    assert_eq!(TUN_DATA_PLANE_PROBES[1].url, "https://cp.cloudflare.com/generate_204");
+    assert_eq!(TUN_DATA_PLANE_PROBES[1].expected_status, 204);
     assert_eq!(super::probes::EXIT_PROBE_URL, "https://www.gstatic.com/generate_204");
     assert_eq!(super::probes::FAKE_IP_LOOKUP_HOST, "www.gstatic.com");
     assert_eq!(TUN_DATA_PLANE_PROBES, crate::tono::protected_probe::PROBE_ORIGINS);
@@ -645,9 +648,10 @@ fn real_data_plane_probes_the_cloud_path_not_home_google() {
 fn real_data_plane_failure_names_every_failed_origin() {
     let failures = vec![
         "Google: timeout".to_string(),
+        "Cloudflare: timeout".to_string(),
     ];
     let error = format_tun_probe_failures(&failures);
-    assert!(error.contains("all 1 independent"));
+    assert!(error.contains("all 2 independent"));
     for failure in failures {
         assert!(error.contains(&failure));
     }
