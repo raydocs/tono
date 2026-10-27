@@ -11,7 +11,7 @@
   5. Fewer than 2 attempts since the last converged round. A cause a restart does not fix (wrong inbound tag,
      broken API) stops after the second attempt instead of dropping the node every hour; an operator fixes it and
      the next converged round restores the budget.
-  After the restart the agent waits up to about 30 s (16 × 2 s) for the new process and reinstalls the roster and checks the revoked label is gone. It never acknowledges
+  After the restart the agent starts restore attempts for up to 30 s (every 2 s; an attempt already running can still take its own RPC timeouts, 30 s each, and a timed-out add skips the remaining adds) for the new process and reinstalls the roster and checks the revoked label is gone. It never acknowledges
   in that round.
 - Rejected:
   - (a) Restart on the first failed removal: one transient API error would drop every connection on the node.

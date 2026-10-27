@@ -103,9 +103,10 @@ CLIENT_LABEL_PREFIX = "u:"
 STUCK_REVOCATION_ROUNDS = 3
 XRAY_RESTART_INTERVAL_SECONDS = 60 * 60
 MAX_RESTARTS_UNCONVERGED = 2
-# Up to ~30 s for the API to come back before the roster is reinstalled; past
-# that the next timer round (60 s after this one ends) restores it.
-RESTART_SETTLE_ATTEMPTS = 16
+# No new restore attempt starts more than 30 s after systemctl returns; past
+# that the next timer round (60 s after this one ends) restores the roster.
+# One attempt already started can still run to its own RPC timeouts.
+RESTART_SETTLE_DEADLINE_SECONDS = 30
 RESTART_SETTLE_SECONDS = 2
 SYSTEMCTL = "/usr/bin/systemctl"
 XRAY_UNIT = "tono-xray.service"
@@ -1881,7 +1882,7 @@ def run_outage_round(path: Path, configured: str, binary: Path,
 def restart_for_stuck_revocation(
     path: Path, state: dict, observed_at: int, binary: Path, commands: dict[str, str],
     address: str, tag: str, roster: list[dict[str, str]], *, retire_shared_legacy: bool,
-    sleep=time.sleep,
+    sleep=time.sleep, clock=time.monotonic,
 ) -> str | None:
     """Opt-in: restart tono-xray once when a revocation keeps failing.
 
@@ -1939,9 +1940,12 @@ def restart_for_stuck_revocation(
     # every customer on the node is offline, so retry briefly rather than
     # leaving that to the next timer round.
     reason = "the start marker did not change"
-    for attempt in range(RESTART_SETTLE_ATTEMPTS):
+    deadline = clock() + RESTART_SETTLE_DEADLINE_SECONDS
+    attempt = 0
+    while attempt == 0 or clock() + RESTART_SETTLE_SECONDS <= deadline:
         if attempt:
             sleep(RESTART_SETTLE_SECONDS)
+        attempt += 1
         if xray_start_marker(binary) in (None, marker):
             continue
         try:
