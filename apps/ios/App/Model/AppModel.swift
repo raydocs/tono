@@ -68,6 +68,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var usingCachedCatalog = false
     @Published private(set) var cloudProbe = ExitProbe()
     @Published private(set) var homeProbe = ExitProbe()
+    /// False while the app is in the background (`onBackground`); a launch counts as on screen.
+    private var onScreen = true
     @Published private(set) var rx: Int64 = 0
     @Published private(set) var tx: Int64 = 0
     @Published private(set) var connectedSince: Date?
@@ -212,6 +214,8 @@ final class AppModel: ObservableObject {
         #if DEBUG
         if previewPhase != nil { return }
         #endif
+        onScreen = true
+        syncTraffic()
         await tunnel.load()
         // The tunnel's own report on file first (it may say ROUTES_STOPPED, or a newer beat), then
         // ask it what runs: the phase from before the app was suspended may be older than both.
@@ -221,6 +225,13 @@ final class AppModel: ObservableObject {
         if tunnelStatus == .connected, cloudProbe.state != .checking { runProbes() }
         retryPutBack()
         if ledger.foreground(tunnel: tunnelStatus, recordedFailure: SharedFiles.loadFailure()?.code) { recompute() }
+    }
+
+    /// Leaving the screen closes the statistics stream; the tunnel itself is untouched.
+    func onBackground() {
+        guard !isPreview else { return }
+        onScreen = false
+        syncTraffic()
     }
 
     // MARK: - Sign-in
@@ -831,10 +842,7 @@ final class AppModel: ObservableObject {
         }
         tunnelStatus = status
         connectedSince = status.isUp ? since : nil
-        // Statistics follows the shared explicit switch, not userStopping (a transient UI/failure
-        // classifier cleared by disconnected/invalid, and bypassed by external explicit starts).
-        traffic.updateTunnel(status, session: since, eligible: signedIn && !signingOut,
-                             startEpoch: TunnelController.lifecycle.statisticsStartEpoch)
+        syncTraffic()
         let down = status == .disconnected || status == .invalid
         let stop = ledger.tunnel(status, before: before, recordedFailure: down ? SharedFiles.loadFailure()?.code : nil)
         switch status {
@@ -853,6 +861,15 @@ final class AppModel: ObservableObject {
             break
         }
         recompute()
+    }
+
+    /// Statistics follows the shared explicit switch, not userStopping (a transient UI/failure
+    /// classifier cleared by disconnected/invalid, and bypassed by external explicit starts). They are
+    /// read only while the app is on screen: the stream makes the tunnel extension send a sample every
+    /// second, and in the background nobody sees it.
+    private func syncTraffic() {
+        traffic.updateTunnel(tunnelStatus, session: connectedSince, eligible: signedIn && !signingOut && onScreen,
+                             startEpoch: TunnelController.lifecycle.statisticsStartEpoch)
     }
 
     /// Asks the tunnel what it runs. Its stamped answer becomes the confirmation; no answer to the

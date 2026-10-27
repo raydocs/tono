@@ -25,6 +25,19 @@ object TonoNotifications {
     /** What an engine's ongoing notification claims, or null for a replacement (which claims nothing). */
     fun claim(n: Notification): Claim? = claimedPhase(n)?.let { Claim(it, n.extras.getString(EXTRA_SESSION) ?: "") }
 
+    /** What [ongoing] shows that can change: the phase it claims (and Cancel or Disconnect) and the instance. */
+    data class Posted(val phase: Phase, val session: String, val atElapsedMs: Long)
+
+    /**
+     * Whether the engine must post its ongoing notification again: its content changed, or it has
+     * not been posted for [com.raydocs.tono.mobile.surface.SurfaceRules.HEARTBEAT_MS] (so a watchdog
+     * replacement made while the engine still runs is undone as before, within a heartbeat). Title and
+     * text are fixed, so the speed and probe updates in between change nothing on it.
+     */
+    fun repostDue(posted: Posted?, phase: Phase, session: String, nowElapsedMs: Long): Boolean =
+        posted == null || posted.phase != phase || posted.session != session ||
+            nowElapsedMs - posted.atElapsedMs !in 0 until com.raydocs.tono.mobile.surface.SurfaceRules.HEARTBEAT_MS
+
     /** Ongoing while the tunnel runs: state, verified exits (or the line), and Disconnect. */
     fun ongoing(c: Context, snapshot: EngineSnapshot, open: PendingIntent, disconnect: PendingIntent): Notification {
         // The same rule as the app and the shared status: no tunnel-up title without a confirmation.

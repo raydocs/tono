@@ -29,6 +29,7 @@ struct TonoApp: App {
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { Task { await model.onForeground() } }
+            if phase == .background { model.onBackground() }
         }
     }
 }

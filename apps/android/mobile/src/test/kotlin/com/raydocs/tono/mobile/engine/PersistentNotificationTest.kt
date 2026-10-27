@@ -35,5 +35,17 @@ class PersistentNotificationTest {
         val notification = TonoNotifications.ongoing(app, UiFixtures.idle.copy(phase = Phase.CONNECTING), pi, pi)
         assertEquals(app.getString(R.string.action_cancel), notification.actions.single().title.toString())
     }
+    @Test fun ongoingNotificationIsRepostedOnChangeOrAfterAHeartbeatNotOnEveryTick() {
+        val posted = TonoNotifications.Posted(Phase.CONNECTED, "engine-a", atElapsedMs = 50_000)
+        // A speed tick one second later changes nothing the notification shows.
+        assertFalse(TonoNotifications.repostDue(posted, Phase.CONNECTED, "engine-a", 51_000))
+        assertFalse(TonoNotifications.repostDue(posted, Phase.CONNECTED, "engine-a", 59_999))
+        // A heartbeat later it is posted again, so a replacement made while the engine runs is undone.
+        assertTrue(TonoNotifications.repostDue(posted, Phase.CONNECTED, "engine-a", 60_000))
+        assertTrue(TonoNotifications.repostDue(posted, Phase.DEGRADED, "engine-a", 50_001))
+        assertTrue(TonoNotifications.repostDue(posted, Phase.CONNECTED, "engine-b", 50_001))
+        assertTrue(TonoNotifications.repostDue(posted, Phase.CONNECTED, "engine-a", 49_000))
+        assertTrue(TonoNotifications.repostDue(null, Phase.CONNECTING, "engine-a", 0))
+    }
 
 }
