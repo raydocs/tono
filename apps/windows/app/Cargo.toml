@@ -58,7 +58,7 @@ tono-client = { path = "crates/tono-client" }
 tauri-plugin-tono-sysinfo = { path = "crates/tauri-plugin-tono-sysinfo" }
 
 tauri = { version = "2.11.5" }
-tauri-plugin-clipboard-manager = "2.3.3"
+tauri-plugin-clipboard-manager = "2.5.0"
 parking_lot = { version = "0.12.5", features = ["hardware-lock-elision"] }
 anyhow = "1.0.104"
 criterion = { version = "0.8.2", features = ["async_tokio"] }
