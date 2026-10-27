@@ -247,7 +247,8 @@ final class ArmedFailureReleaseTests: XCTestCase {
     /// hy2 block, hy2 is dead, and the armed failure released protection.
     /// The unarmed loop never proves or dials the hy2 block (a TCP proof
     /// says nothing about UDP); it proves the same node's Reality TCP block
-    /// first and dials that. No other transport, no other node first.
+    /// and dials that. Sibling proofs run beside it (#1767) and never win
+    /// over it. No other transport.
     func testADeadHy2SelectionReconnectsOnTheSameNodesRealityBlock() async {
         let app = AppState()
         let reality = Fixture.realityNode(name: "Los Angeles · Canyon")
@@ -287,7 +288,7 @@ final class ArmedFailureReleaseTests: XCTestCase {
         app.scheduleUnarmedReconnect(sleep: { _ in })
         await app.connectionCoordinator.unarmedReconnectTask?.value
 
-        XCTAssertEqual(proved.names.first, reality.name, "the same node's Reality block is proved first")
+        XCTAssertTrue(proved.names.contains(reality.name), "the same node's Reality block is proved")
         XCTAssertFalse(proved.names.contains(hy2.name), "a TCP proof is never asked of the hy2 block")
         XCTAssertEqual(admittedName, reality.name, "the reconnect dials the node's Reality TCP block")
     }
