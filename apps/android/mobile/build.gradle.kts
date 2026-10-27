@@ -43,11 +43,32 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // EVIDENCE BRANCH ONLY (amp/android-size-probe): -Ptono.sizeProbe shrinks the test build with R8
+    // and splits it per ABI, to measure size and run the device suite against shrunk code. Not a release
+    // variant; nothing here is published.
+    val sizeProbe = project.hasProperty("tono.sizeProbe")
+    if (sizeProbe) {
+        splits {
+            abi {
+                isEnable = true
+                reset()
+                include("arm64-v8a", "x86_64")
+                isUniversalApk = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".test"
             versionNameSuffix = "-test"
             isDebuggable = true
+            if (sizeProbe) {
+                isMinifyEnabled = true
+                isShrinkResources = true
+                proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "size-probe-rules.pro")
+                testProguardFiles("size-probe-rules.pro")
+            }
         }
         release {
             isMinifyEnabled = false

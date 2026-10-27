@@ -57,7 +57,7 @@ jobs:
         run: python3 scripts/routing/sync-desktop-routing.py --desktop "$GITHUB_WORKSPACE" --check
       - name: Unit tests, lint, debug APK and instrumentation APK
         run: >
-          ./gradlew --no-daemon --stacktrace
+          ./gradlew --no-daemon --stacktrace -Ptono.sizeProbe
           :routing:testDebugUnitTest :mobile:testDebugUnitTest
           :mobile:lintDebug :mobile:assembleDebug :mobile:assembleDebugAndroidTest
       - name: Generated configs pass the pinned sing-box CLI check
@@ -68,7 +68,11 @@ jobs:
           version="$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' mobile/build.gradle.kts)"
           name="tono-mobile-${version}-test-${SOURCE_SHA::9}"
           mkdir -p out
-          cp mobile/build/outputs/apk/debug/mobile-debug.apk "out/$name.apk"
+          # Size probe (evidence branch): every split, then the universal one goes through the device suite.
+          for f in mobile/build/outputs/apk/debug/*.apk; do
+            echo "SIZE $(stat -c %s "$f") $(basename "$f") dex=$(unzip -lv "$f" | awk '/\.dex$/{s+=$3} END{print s}') so=$(unzip -lv "$f" | awk '/\.so$/{s+=$3} END{print s}')"
+          done | tee out-size.txt
+          cp mobile/build/outputs/apk/debug/mobile-universal-debug.apk "out/$name.apk"
           cp mobile/build/outputs/apk/androidTest/debug/mobile-debug-androidTest.apk out/instrumentation.apk
           (cd out && sha256sum "$name.apk" | tee "$name.apk.sha256")
           echo "source $SOURCE_SHA" >> "out/$name.apk.sha256"
@@ -92,6 +96,8 @@ jobs:
         with:
           name: android-test-reports
           path: |
+            apps/android/out-size.txt
+            apps/android/mobile/build/outputs/mapping/
             apps/android/routing/build/reports/
             apps/android/mobile/build/reports/
             apps/android/routing/build/test-results/
