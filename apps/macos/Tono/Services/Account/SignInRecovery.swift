@@ -69,10 +69,12 @@ nonisolated struct SignInRecovery: Equatable, Sendable {
         case .clockSkew: return .clock
         case .tlsIntercepted: return .interception
         case let .server(status, _): return status >= 500 ? .service : nil
-        case .invalidResponse, .notFound, .exitIdentityPropagating, .invalidConfiguration:
+        case .invalidResponse, .notFound, .exitIdentityPropagating, .invalidConfiguration,
+             .identityProviderUnavailable:
             return .service
         case .unauthorized, .forbidden, .deviceLimit, .entitlementBlocked, .rateLimited,
-             .invalidOrExpiredCode, .credentialPersistence, .credentialRecoveryRecord:
+             .invalidOrExpiredCode, .credentialPersistence, .credentialRecoveryRecord,
+             .providerMailboxUnverified, .identityVerificationFailed:
             return nil
         }
     }

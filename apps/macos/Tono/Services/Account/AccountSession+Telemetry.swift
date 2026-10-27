@@ -671,6 +671,8 @@ extension AccountSession {
         enrollmentAuthKey = nil
         enrollmentHostname = nil
         emailChallenge = nil
+        pendingIdentityLink = nil
+        identityLinkResult = nil
         signInRecoveryLedger.dismiss()
         deviceActionError = nil
         entitlementDetail = nil

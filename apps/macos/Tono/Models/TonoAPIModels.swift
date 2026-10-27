@@ -71,6 +71,14 @@ nonisolated struct TonoAuthResponse: Codable, Sendable {
     let user: TonoUser
     let device: TonoDevice?
     let enrollment: TonoEnrollment?
+    /// Present when an email-code sign-in carried a provider link ticket.
+    var identityLink: TonoIdentityLink? = nil
+}
+
+/// `auth/email/verify`'s answer to a link ticket (decision 141).
+nonisolated struct TonoIdentityLink: Codable, Sendable, Equatable {
+    let provider: String?
+    let status: String
 }
 
 /// The worker may wrap authentication payloads as `{ auth: ... }`; accept both
@@ -631,6 +639,8 @@ nonisolated struct TonoEmailChallengeResponse: Codable, Sendable, Equatable {
 nonisolated struct TonoEmailVerifyRequest: Codable, Sendable {
     let challengeId: String
     let code: String
+    /// Sent only after the user agreed to link (decision 141); omitted otherwise.
+    var linkTicket: String? = nil
 }
 
 nonisolated struct TonoOIDCChallengeRequest: Codable, Sendable {

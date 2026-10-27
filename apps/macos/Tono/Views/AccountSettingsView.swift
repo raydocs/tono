@@ -74,6 +74,11 @@ struct AccountSettingsCard: View {
                         Label(error, systemImage: "exclamationmark.circle")
                             .font(.system(size: 13)).foregroundStyle(SeaTheme.danger)
                     }
+                    if let note = identityLinkNote {
+                        Label(note.text, systemImage: note.icon)
+                            .font(.system(size: 13)).foregroundStyle(SeaTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if session.isAtDeviceLimit {
                         SeaTag(title: "\(session.deviceLimit)-device limit reached", kind: .attention)
                     }
@@ -119,6 +124,11 @@ struct AccountSettingsCard: View {
                         .font(.callout)
                         .foregroundStyle(TonoStatus.error)
                 }
+                if let note = identityLinkNote {
+                    Label(note.text, systemImage: note.icon)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if session.isAtDeviceLimit {
                     Label("\(session.deviceLimit)-device limit reached", systemImage: "info.circle")
                         .foregroundStyle(.orange)
@@ -127,6 +137,17 @@ struct AccountSettingsCard: View {
                 Button("Sign Out", role: .destructive) { Task { await session.logout() } }
             }.padding(8)
             }
+        }
+    }
+
+    /// The outcome of the Apple ID link this sign-in carried (decision 141).
+    /// Shown until sign-out; nothing here retries or changes the link.
+    private var identityLinkNote: (text: String, icon: String)? {
+        switch session.identityLinkResult?.status {
+        case "linked": (String(localized: "This Apple ID is now linked to this account. Next time you can sign in with Apple."), "checkmark.circle")
+        case "conflict": (String(localized: "The Apple ID was not linked: it already belongs to another Tono account, or this account already has a different Apple ID. Nothing was changed."), "info.circle")
+        case "expired": (String(localized: "The Apple ID was not linked because the request expired or was for another email. Sign in with Apple again to retry."), "info.circle")
+        default: nil
         }
     }
 
