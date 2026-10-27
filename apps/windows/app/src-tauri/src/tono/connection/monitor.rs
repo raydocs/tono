@@ -18,9 +18,9 @@ use crate::tono::{
     audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
     connection_health::{
-        CoreSample, HealthLegs, InPlaceVerdict, NetworkChangeOutcome, NetworkEventProbeEffect,
+        CoreSample, EVENT_REBUILD_CAP, HealthLegs, InPlaceVerdict, NetworkChangeOutcome, NetworkEventProbeEffect,
         NetworkEventProbePlan, UplinkRead, apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
-        core_identity_change_owned, exit_probe_due,
+        core_identity_change_owned, exit_probe_due, gate_event_rebuild,
         health_threshold_reached, in_place_verdict, kill_switch_unhealthy_for_monitor,
         monitor_requires_reconnect, network_change_audited, network_event_fires, next_network_events_counter,
         owned_direct_reload_in_flight,
@@ -898,6 +898,10 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     // Failed network-event proofs that have not yet been confirmed. One failure
     // keeps the core up; the next tick probes again even if Windows is quiet.
     let mut pending_event_probe_failures: u32 = 0;
+    // Instants of the event-driven rebuilds of the last hour, and whether the cap that stops a
+    // fourth one has already been reported for this episode.
+    let mut event_rebuilds: std::collections::VecDeque<std::time::Instant> = std::collections::VecDeque::new();
+    let mut event_rebuild_cap_reported = false;
     // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
     // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
@@ -1191,8 +1195,29 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             }
             apply_network_event_probe(plan, probed.unwrap_or(false), pending_event_probe_failures)
         };
+        let (effect, next_pending, rebuild_capped) =
+            gate_event_rebuild(effect, next_pending, &mut event_rebuilds, std::time::Instant::now());
         pending_event_probe_failures = next_pending;
-        if effect == NetworkEventProbeEffect::Hold {
+        if effect == NetworkEventProbeEffect::Rebuild {
+            event_rebuild_cap_reported = false;
+        }
+        if rebuild_capped {
+            // Show the hint on every capped probe; log and audit once per episode.
+            note_route_probe_failure(&state, &app).await;
+            if !event_rebuild_cap_reported {
+                event_rebuild_cap_reported = true;
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: network-change rebuild cap reached ({} per hour); keeping the tunnel and flagging the route as unstable",
+                    EVENT_REBUILD_CAP
+                );
+                state.audit().log(AuditEvent::HealthProbeFail {
+                    probe: "networkEventRebuildCap",
+                    error: format!("{EVENT_REBUILD_CAP} event-driven rebuilds in the last hour; holding the tunnel"),
+                });
+            }
+        } else if effect == NetworkEventProbeEffect::Hold {
             logging!(
                 info,
                 Type::Service,

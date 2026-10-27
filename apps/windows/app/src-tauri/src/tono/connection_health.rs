@@ -1,6 +1,7 @@
 //! Connected-lifetime health classification for the Windows connect monitor.
 
-use std::time::Duration;
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use tono_service_protocol::{
     DnsProtectionStatus, KillSwitchStatus, KillSwitchStatusMode, ServiceStatusSnapshot,
@@ -527,12 +528,62 @@ pub const fn apply_network_event_probe(
     }
 }
 
+/// Event-driven rebuilds allowed per [`EVENT_REBUILD_WINDOW`].
+///
+/// A flapping adapter fails event probes in pairs for hours (one 0.0.79 device logged 2295
+/// network-change events in a day), and each pair used to tear the tunnel down and rebuild it,
+/// leaving the user in a reconnect loop with no limit. Three rebuilds an hour still repair a real
+/// change; past that the tunnel is held and the route is flagged unstable so the user can switch
+/// node instead. The periodic health probe and the Service poll keep their own cooldowns.
+pub const EVENT_REBUILD_CAP: usize = 3;
+pub const EVENT_REBUILD_WINDOW: Duration = Duration::from_secs(60 * 60);
+
+/// Whether another event-driven rebuild fits the cap at `now`: fewer than
+/// [`EVENT_REBUILD_CAP`] recorded rebuilds are younger than [`EVENT_REBUILD_WINDOW`].
+pub fn event_rebuild_allowed(window: &VecDeque<Instant>, now: Instant) -> bool {
+    window
+        .iter()
+        .filter(|at| now.saturating_duration_since(**at) < EVENT_REBUILD_WINDOW)
+        .count()
+        < EVENT_REBUILD_CAP
+}
+
+/// Apply the rebuild cap to the outcome of [`apply_network_event_probe`]. A `Rebuild` that fits
+/// is recorded in `window` and passes through. One that does not becomes `Hold` with the failure
+/// counter reset, as after a rebuild, and the third value is `true` so the caller can say so.
+/// Entries older than the window are dropped on each call.
+pub fn gate_event_rebuild(
+    effect: NetworkEventProbeEffect,
+    pending_failures: u32,
+    window: &mut VecDeque<Instant>,
+    now: Instant,
+) -> (NetworkEventProbeEffect, u32, bool) {
+    while window
+        .front()
+        .is_some_and(|at| now.saturating_duration_since(*at) >= EVENT_REBUILD_WINDOW)
+    {
+        window.pop_front();
+    }
+    if effect != NetworkEventProbeEffect::Rebuild {
+        return (effect, pending_failures, false);
+    }
+    if event_rebuild_allowed(window, now) {
+        window.push_back(now);
+        (NetworkEventProbeEffect::Rebuild, 0, false)
+    } else {
+        (NetworkEventProbeEffect::Hold, 0, true)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        NetworkEventProbeEffect, NetworkEventProbePlan, apply_network_event_probe, exit_probe_due,
+        EVENT_REBUILD_CAP, EVENT_REBUILD_WINDOW, NetworkEventProbeEffect, NetworkEventProbePlan,
+        apply_network_event_probe, event_rebuild_allowed, exit_probe_due, gate_event_rebuild,
         may_recover_in_place, plan_network_event_probe,
     };
+    use std::collections::VecDeque;
+    use std::time::Instant;
     use std::time::Duration;
 
     #[test]
@@ -718,5 +769,73 @@ mod tests {
         let next_tick = Duration::from_secs(2);
         assert!(!exit_probe_due(next_tick, interval, 0));
         assert!(exit_probe_due(next_tick, interval, 1));
+    }
+
+    #[test]
+    fn three_event_rebuilds_in_the_hour_are_allowed_and_the_fourth_is_held() {
+        let start = Instant::now();
+        let mut window = VecDeque::new();
+        for i in 0..EVENT_REBUILD_CAP {
+            let now = start + Duration::from_secs(60 * i as u64);
+            assert_eq!(
+                gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, now),
+                (NetworkEventProbeEffect::Rebuild, 0, false),
+                "rebuild {i} fits the cap"
+            );
+        }
+        assert_eq!(window.len(), EVENT_REBUILD_CAP);
+        let now = start + Duration::from_secs(60 * 10);
+        assert!(!event_rebuild_allowed(&window, now));
+        assert_eq!(
+            gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, now),
+            (NetworkEventProbeEffect::Hold, 0, true)
+        );
+        assert_eq!(window.len(), EVENT_REBUILD_CAP, "a held rebuild is not recorded");
+    }
+
+    #[test]
+    fn an_event_rebuild_is_allowed_again_once_the_oldest_leaves_the_window() {
+        let start = Instant::now();
+        let mut window: VecDeque<Instant> = (0..EVENT_REBUILD_CAP)
+            .map(|i| start + Duration::from_secs(60 * i as u64))
+            .collect();
+        let just_inside = start + EVENT_REBUILD_WINDOW - Duration::from_secs(1);
+        assert!(!event_rebuild_allowed(&window, just_inside));
+        let oldest_out = start + EVENT_REBUILD_WINDOW;
+        assert!(event_rebuild_allowed(&window, oldest_out));
+        assert_eq!(
+            gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, oldest_out),
+            (NetworkEventProbeEffect::Rebuild, 0, false)
+        );
+        assert_eq!(window.len(), EVENT_REBUILD_CAP, "the expired entry was pruned, the new one added");
+    }
+
+    #[test]
+    fn a_capped_rebuild_resets_the_failure_counter() {
+        let now = Instant::now();
+        let mut window: VecDeque<Instant> = (0..EVENT_REBUILD_CAP).map(|_| now).collect();
+        let plan = plan_network_event_probe(false, false, false, false, false, 1, false);
+        let (effect, pending) = apply_network_event_probe(plan, true, 1);
+        assert_eq!(effect, NetworkEventProbeEffect::Rebuild);
+        assert_eq!(
+            gate_event_rebuild(effect, pending, &mut window, now),
+            (NetworkEventProbeEffect::Hold, 0, true)
+        );
+    }
+
+    #[test]
+    fn the_cap_leaves_other_event_probe_outcomes_alone() {
+        let now = Instant::now();
+        let mut window: VecDeque<Instant> = (0..EVENT_REBUILD_CAP).map(|_| now).collect();
+        for (effect, pending) in [
+            (NetworkEventProbeEffect::Hold, 1),
+            (NetworkEventProbeEffect::Proven, 0),
+            (NetworkEventProbeEffect::Unchanged, 1),
+        ] {
+            assert_eq!(
+                gate_event_rebuild(effect, pending, &mut window, now),
+                (effect, pending, false)
+            );
+        }
     }
 }
