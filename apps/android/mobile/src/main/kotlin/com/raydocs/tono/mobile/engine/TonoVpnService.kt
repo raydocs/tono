@@ -22,6 +22,7 @@ import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.ipc.ITonoEngine
 import com.raydocs.tono.mobile.ipc.ITonoEngineListener
 import com.raydocs.tono.mobile.surface.NotificationWatchdog
+import com.raydocs.tono.mobile.surface.SurfaceRules
 import com.raydocs.tono.mobile.surface.SystemSurfaces
 import com.raydocs.tono.routing.CatalogAdmission
 import com.raydocs.tono.routing.CatalogRejected
@@ -81,6 +82,8 @@ class TonoVpnService : VpnService() {
     private val accountWork = AccountWorkQueue({ io.execute(it) }, { engine.execute(it) })
     private var trafficTask: ScheduledFuture<*>? = null
     @Volatile private var foreground = false
+    /** The ongoing notification last posted (guarded by `this`); null once it is gone or replaced by startForeground. */
+    private var posted: TonoNotifications.Posted? = null
     /** Attempts and their confirmation (engine thread only); the single writer of [EngineSnapshot.applied]. */
     private val ledger = TunnelLedger()
     /** This service instance; stamps every snapshot, the shared status and the ongoing notification. */
@@ -584,20 +587,32 @@ class TonoVpnService : VpnService() {
         }
     }
 
+    /**
+     * The tunnel's tick (engine thread). With a screen registered it measures the speed every second.
+     * With none it only keeps the shared status's heartbeat (and the watchdog alarm it pushes back)
+     * at half [SurfaceRules.HEARTBEAT_MS], with no speed: nobody reads it, and each tick is a snapshot,
+     * a broadcast and a status check. A screen registering or leaving switches the cadence.
+     */
     private fun startTraffic() {
         trafficTask?.cancel(false)
+        val watched = listeners.registeredCallbackCount > 0
+        val periodMs = if (watched) 1_000L else SurfaceRules.HEARTBEAT_MS / 2
         val uid = Process.myUid()
         var lastRx = TrafficStats.getUidRxBytes(uid)
         var lastTx = TrafficStats.getUidTxBytes(uid)
         trafficTask = engine.scheduleWithFixedDelay({
+            if ((listeners.registeredCallbackCount > 0) != watched) { startTraffic(); return@scheduleWithFixedDelay }
             val rx = TrafficStats.getUidRxBytes(uid)
             val tx = TrafficStats.getUidTxBytes(uid)
             val s = snapshot.get()
             if (s.tunnelUp || s.phase == Phase.CONNECTING) {
-                update { it.copy(rxBytesPerSec = (rx - lastRx).coerceAtLeast(0), txBytesPerSec = (tx - lastTx).coerceAtLeast(0)) }
+                update {
+                    if (watched) it.copy(rxBytesPerSec = (rx - lastRx).coerceAtLeast(0), txBytesPerSec = (tx - lastTx).coerceAtLeast(0))
+                    else it.copy(rxBytesPerSec = 0, txBytesPerSec = 0)
+                }
             }
             lastRx = rx; lastTx = tx
-        }, 1, 1, TimeUnit.SECONDS)
+        }, periodMs, periodMs, TimeUnit.MILLISECONDS)
     }
 
     private fun measureLatency() {
@@ -718,18 +733,26 @@ class TonoVpnService : VpnService() {
         val n = buildNotification(snapshot.get().copy(phase = Phase.CONNECTING))
         if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(NOTIFICATION_ID, n)
+        synchronized(this) { posted = null }
         foreground = true
     }
 
     private fun leaveForeground() {
         if (!foreground) return
         stopForeground(STOP_FOREGROUND_REMOVE)
+        synchronized(this) { posted = null }
         foreground = false
         stopSelf()
     }
 
     private fun notify(s: EngineSnapshot) {
         if (s.phase !in setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED, Phase.DISCONNECTING)) return
+        // Every tick used to repost the same notification (an IPC to Android each second, screen off included).
+        val now = SystemClock.elapsedRealtime()
+        synchronized(this) {
+            if (!TonoNotifications.repostDue(posted, s.phase, s.session, now)) return
+            posted = TonoNotifications.Posted(s.phase, s.session, now)
+        }
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(s))
     }
 
@@ -739,6 +762,8 @@ class TonoVpnService : VpnService() {
         override fun register(listener: ITonoEngineListener) {
             listeners.register(listener)
             if (restored) runCatching { listener.onSnapshot(snapshot.get().toJson()) }
+            // A screen arrived: measure the speed now rather than at the next unwatched tick.
+            runCatching { engine.execute { if (trafficTask != null) startTraffic() } }
         }
 
         override fun snapshot(): String? = if (restored) snapshot.get().toJson() else null
