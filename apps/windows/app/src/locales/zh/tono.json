@@ -395,12 +395,13 @@
       "remoteSessionConnectRefused": "不能在远程桌面会话中连接：Tono 的保护会阻断这条远程连接，且无法远程恢复。请在这台电脑本机的屏幕和键盘上连接。",
       "browserDnsPreflight": "先关闭 Chrome 和 Edge，再重新连接。它们的安全 DNS 设置还没检查完。",
       "hy2Idle": "备用 UDP 通道空闲后断了，多半是家里的路由器清掉了闲置连接。Tono 会留在同一条线路上重试。支持码 TONO_CONNECT_HY2_IDLE。如果反复出现，请发诊断。",
-      "nodeUnreachable": "连接没有完成。",
+      "nodeUnreachable": "连接没有完成。再试一次；如果一直失败，换一台节点。",
       "exitUnreachable": "这台节点现在连不上，换一台试试。",
-      "tunDataPlaneBroken": "连接没有完成。",
+      "unclassified": "连接没有完成，原因 Tono 暂时无法判断。再试一次；如果一直失败，请带着支持码发送诊断。",
+      "tunDataPlaneBroken": "隧道已建立，但流量过不去。重新连接时会再检查一次隧道；如果一直失败，请发送诊断。",
       "tunIngressBroken": "线路是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
       "otherVpnPresent": "存在其他 VPN：这台电脑上还有别的 VPN 在运行，可能与 Tono 冲突。请先退出它，再重新连接。",
-      "protectedHttpsFailed": "连接没有完成。",
+      "protectedHttpsFailed": "和服务器的加密握手没有完成。再试一次；如果一直失败，试试备用通道或换个网络。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
@@ -411,7 +412,7 @@
       "releaseUnfinished": "Tono 已经自动恢复过一次网络，但上一次恢复仍没有完全结束，暂时不能连接。请稍等片刻再点「连接」；多次仍不行请联系客服。",
       "releaseNeedsRestart": "Tono 上次修改的网络设置还没能确认完成，需要重启一次电脑。重启后直接点「连接」即可。",
       "releaseRecordCorrupt": "Tono 读不到上一次恢复网络的记录，为安全起见暂时不能连接。请重启电脑；仍不行请联系客服。",
-      "staleGeneration": "这次连接是在恢复网络之前发起的，已作废。请重新连接。"
+      "staleGeneration": "这次连接已被更新的操作取代，已作废。请重新连接。"
     },
     "status": {
       "connecting": "连接中",

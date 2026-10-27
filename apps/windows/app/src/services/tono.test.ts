@@ -336,6 +336,41 @@ describe('connectErrorSuggestsServerSwitch', () => {
     )
   })
 
+  it('maps UNKNOWN_CLASSIFIED_FAILURE to a stable sentence with its support code', () => {
+    const error = new Error(
+      'UNKNOWN_CLASSIFIED_FAILURE: post-lock verification raised an error nobody classified',
+    )
+    expect(describeTonoActionError(error, (key) => `translated:${key}`)).toEqual({
+      message:
+        'translated:tono.dashboard.errors.unclassified (UNKNOWN_CLASSIFIED_FAILURE)',
+    })
+    expect(stableTonoErrorCode(error.message)).toBe('UNKNOWN_CLASSIFIED_FAILURE')
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+  })
+
+  it('suggests another server after a plain network failure on the way to the exit', () => {
+    for (const code of [
+      'TONO_CONNECT_DNS',
+      'TONO_CONNECT_TCP',
+      'TONO_CONNECT_QUIC',
+      'TONO_CONNECT_TIMEOUT',
+    ]) {
+      expect(connectErrorSuggestsServerSwitch(new Error(`${code}: dial failed`))).toBe(
+        true,
+      )
+    }
+    for (const code of [
+      'TONO_CONNECT_TLS',
+      'TONO_CONNECT_TUN',
+      'TONO_CONNECT_LOCAL_CONFLICT',
+      'TONO_CONNECT_CAPTIVE',
+    ]) {
+      expect(connectErrorSuggestsServerSwitch(new Error(`${code}: dial failed`))).toBe(
+        false,
+      )
+    }
+  })
+
   it('shows a support code and not a switch instruction when every probe dies at TLS', () => {
     const error = new Error(
       'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
