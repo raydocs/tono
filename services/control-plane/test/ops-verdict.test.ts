@@ -703,3 +703,62 @@ describe('sweep-wide block evidence', () => {
     expect(BLOCK_SUSPECT_MIN_NODES).toBe(3);
   });
 });
+
+describe('customers are the probes', () => {
+  const unprobed = (over: Partial<NodeVerdictInput> = {}) =>
+    node({ ok: null, blockStatus: null, ...over });
+
+  it('two customers who could not reach the exit make it blocked with no sweep at all', () => {
+    const out = evaluate(world({
+      qualitySweepAt: null,
+      nodes: [unprobed({ fails30m: fails({ attempts: 4, failures: 2, distinctUsers: 2, handshakeDistinctUsers: 2 }) })],
+    }));
+    expect(out.nodes.map((n) => [n.verdict, n.reason, n.label])).toEqual([['blocked', 'customer_unreachable', '多位客户连不上']]);
+    expect(out.desires.find((d) => d.kind === 'node-blocked')?.title).toBe('疑似被墙，仍在客户目录');
+  });
+
+  it('one customer is their own problem until a second one agrees', () => {
+    const out = evaluate(world({
+      qualitySweepAt: null,
+      nodes: [unprobed({ fails30m: fails({ attempts: 3, failures: 3, distinctUsers: 1, handshakeDistinctUsers: 1 }) })],
+    }));
+    expect(out.nodes.map((n) => [n.verdict === 'blocked', n.candidateVerdict === 'blocked'])).toEqual([[false, false]]);
+  });
+
+  it('the sweep\'s own verdict keeps the wall label', () => {
+    const first = evaluate(world({ nodes: [node({ blockStatus: 'LIKELY_BLOCKED' })] })).nodes.find(() => true)!;
+    const second = evaluate(world({
+      nodes: [node({ blockStatus: 'LIKELY_BLOCKED', prior: priorFrom(first) })],
+    })).nodes.map((n) => [n.verdict, n.reason, n.label]);
+    expect(second).toEqual([['blocked', 'likely_blocked', VERDICT_LABELS.blocked]]);
+  });
+
+  it('customer evidence wins over a sweep that reads the whole fleet as blocked', () => {
+    const blockedEverywhere = (name: string, over: Partial<NodeVerdictInput> = {}) =>
+      node({ name, blockStatus: 'LIKELY_BLOCKED', ...over });
+    const out = evaluate(world({
+      nodes: [
+        blockedEverywhere('a', { fails30m: fails({ attempts: 6, failures: 4, distinctUsers: 2, handshakeDistinctUsers: 2 }) }),
+        blockedEverywhere('b'),
+        blockedEverywhere('c'),
+      ],
+    }));
+    expect(out.nodes.map((n) => [n.name, n.verdict, n.reason])).toEqual([
+      ['a', 'blocked', 'customer_unreachable'], ['b', 'ok', 'ok'], ['c', 'ok', 'ok'],
+    ]);
+  });
+
+  it('leaves blocked two passes after the customers stop failing, sweep or no sweep', () => {
+    const prior: NodePrior = {
+      verdict: 'blocked', candidateVerdict: 'blocked', candidateStreak: 0, candidateSince: null, changedAt: NOW - 3600,
+    };
+    const first = evaluate(world({ qualitySweepAt: null, nodes: [unprobed({ prior })] })).nodes.find(() => true)!;
+    expect(first.verdict).toBe('blocked');
+    const second = evaluate(world({
+      qualitySweepAt: null,
+      nowSec: NOW + 300,
+      nodes: [unprobed({ prior: priorFrom(first) })],
+    })).nodes.map((n) => n.verdict);
+    expect(second).not.toEqual(['blocked']);
+  });
+});

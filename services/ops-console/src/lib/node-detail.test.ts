@@ -186,7 +186,7 @@ describe('why the word, in words the operator can act on', () => {
 
   it('turns every token the engine can write into a sentence', () => {
     const tokens = [
-      'unreachable', 'likely_blocked', 'agent_missing', 'machine_pressure',
+      'unreachable', 'likely_blocked', 'customer_unreachable', 'agent_missing', 'machine_pressure',
       'snapshot_stale', 'carrier_loss', 'customer_fail', 'error_spike', 'collector_stale',
     ];
     for (const token of tokens) {

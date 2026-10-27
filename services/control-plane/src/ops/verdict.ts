@@ -3,6 +3,14 @@ import { QUALITY_SWEEP_FRESH_SECONDS } from './freshness';
 // can walk hysteresis tick by tick. Labels for down/blocked/ok match today's
 // NODE_HEALTH_LABELS / fleetQualityStatus copy.
 
+import {
+  BLOCKED_LABELS,
+  type BlockedCause,
+  FAIL_USERS,
+  blockEvidenceSuspect,
+  blockedCause,
+  customersUnreachable,
+} from './verdict-blocked';
 import { customerDesires } from './verdict-customers';
 import {
   AGENT_SILENT_SECONDS,
@@ -23,7 +31,9 @@ export {
   type HysteresisRule,
 } from './verdict-hysteresis';
 
-export const VERDICT_RULES_VERSION = 2;
+export { BLOCK_SUSPECT_MIN_NODES, type BlockedCause, blockEvidenceSuspect } from './verdict-blocked';
+
+export const VERDICT_RULES_VERSION = 3;
 
 // The hub's mainland sweep is a twelve-hour SSH pass, so a sweep is not stale
 // until it has missed a whole cycle with margin; two hours read the fleet as
@@ -36,7 +46,6 @@ const PRESSURE_MEM = 0.95;
 const PRESSURE_DISK = 0.95;
 const FAIL_ATTEMPTS = 10;
 const FAIL_RATIO = 0.3;
-const FAIL_USERS = 2;
 /** Heartbeat cadence × 2: a customer on a retiring node is still on it. */
 export const RETIRE_DRAIN_SECONDS = 40 * 60;
 
@@ -49,7 +58,7 @@ export const VERDICT_PRECEDENCE: readonly NodeVerdict[] = NODE_VERDICTS;
 
 export const VERDICT_LABELS: Record<NodeVerdict, string> = {
   down: '整机失联',
-  blocked: '疑似被墙',
+  blocked: BLOCKED_LABELS.likely_blocked,
   no_probe: '无探针',
   degraded: '回程丢包',
   probe_unreachable: '探测不通（机器在线）',
@@ -65,6 +74,7 @@ const DEGRADED_LABELS = {
 } as const;
 
 export type DegradedCause = keyof typeof DEGRADED_LABELS;
+type NodeCause = DegradedCause | BlockedCause;
 
 export type CarrierSample = { lossPct: number | null; latencyMs: number | null; samples: number };
 export type CarrierMap = { unicom?: CarrierSample | null; telecom?: CarrierSample | null; mobile?: CarrierSample | null };
@@ -73,6 +83,7 @@ export type NodeFails30m = {
   attempts: number;
   failures: number;
   distinctUsers: number;
+  /** Users who could not reach this exit in the window and failed on no other node (verdict-facts). */
   handshakeDistinctUsers: number;
 };
 
@@ -193,21 +204,6 @@ type SnapshotCtx = {
   blockEvidenceSuspect?: boolean;
 };
 
-// The mainland sweep is one hub dialling every node from the same few agents.
-// When every node it judged says LIKELY_BLOCKED, the agents could not dial
-// out; the fleet was not dialled. From 2026-10-08 to 10-26 the one agent whose
-// every dial failed read 17 nodes on five providers as 疑似被墙 for eighteen
-// days while customers connected through them. Such a sweep is not block
-// evidence. Three judged nodes is the smallest fleet where "all" means much.
-export const BLOCK_SUSPECT_MIN_NODES = 3;
-const MAINLAND_JUDGED = new Set(['OK', 'LIKELY_BLOCKED', 'DEGRADED']);
-
-export function blockEvidenceSuspect(nodes: readonly Pick<NodeVerdictInput, 'blockStatus'>[]): boolean {
-  const judged = nodes.filter((node) => node.blockStatus != null && MAINLAND_JUDGED.has(node.blockStatus));
-  if (judged.length < BLOCK_SUSPECT_MIN_NODES) return false;
-  return judged.every((node) => node.blockStatus === 'LIKELY_BLOCKED');
-}
-
 const CARRIER_KEYS = ['unicom', 'telecom', 'mobile'] as const;
 
 function snapshotStale(at: number | null, nowSec: number, maxAge: number): boolean {
@@ -249,15 +245,22 @@ function degradedCause(node: NodeVerdictInput): DegradedCause | null {
   return null;
 }
 
-function labelFor(verdict: NodeVerdict, cause: DegradedCause | null): string {
-  if (verdict === 'degraded' && cause) return DEGRADED_LABELS[cause];
+function causeFor(verdict: NodeVerdict, node: NodeVerdictInput): NodeCause | null {
+  if (verdict === 'degraded') return degradedCause(node);
+  if (verdict === 'blocked') return blockedCause(node);
+  return null;
+}
+
+function labelFor(verdict: NodeVerdict, cause: NodeCause | null): string {
+  if (verdict === 'degraded' && cause && cause in DEGRADED_LABELS) return DEGRADED_LABELS[cause as DegradedCause];
+  if (verdict === 'blocked' && cause && cause in BLOCKED_LABELS) return BLOCKED_LABELS[cause as BlockedCause];
   return VERDICT_LABELS[verdict];
 }
 
-function reasonFor(verdict: NodeVerdict, cause: DegradedCause | null): string {
+function reasonFor(verdict: NodeVerdict, cause: NodeCause | null): string {
   if (verdict === 'degraded' && cause) return cause;
   if (verdict === 'down') return 'unreachable';
-  if (verdict === 'blocked') return 'likely_blocked';
+  if (verdict === 'blocked') return cause ?? 'likely_blocked';
   if (verdict === 'no_probe') return 'agent_missing';
   if (verdict === 'probe_unreachable') return '大陆探测不通，但机器在线；可能是入站挂了';
   if (verdict === 'pressure') return 'machine_pressure';
@@ -268,6 +271,11 @@ function reasonFor(verdict: NodeVerdict, cause: DegradedCause | null): string {
 /** Raw precedence, first match. Down includes the agent-silent enter gate. */
 export function observedVerdict(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdict {
   if (unreachable(node) && agentSilent(node.agentObservedAt, ctx.nowSec)) return 'down';
+  // Customers are the probes (owner, 2026-10-26): two of them unable to reach
+  // this exit inside the window, each failing nowhere else, is blocked on its
+  // own, with or without a mainland sweep. A sweep that already says the box
+  // is unreachable keeps its own story (down, or degraded with a live agent).
+  if (!unreachable(node) && customersUnreachable(node.fails30m)) return 'blocked';
   if (node.ok === true && node.blockStatus === 'LIKELY_BLOCKED' && !ctx.blockEvidenceSuspect) return 'blocked';
   if (node.catalogListed === true && node.agentObservedAt == null) return 'no_probe';
   if (degradedCause(node)) return 'degraded';
@@ -331,7 +339,7 @@ export function nodeSeverity(verdict: NodeVerdict): IncidentSeverity | null {
 function evaluateNode(node: NodeVerdictInput, ctx: SnapshotCtx): NodeVerdictResult {
   const observed = observedVerdict(node, ctx);
   const applied = applyHysteresis(observed, node, ctx);
-  const cause = applied.verdict === 'degraded' ? degradedCause(node) : null;
+  const cause = causeFor(applied.verdict, node);
   const previous = node.prior?.verdict ?? null;
   const changed = previous !== applied.verdict;
   const loss = lossyCarriers(node.carriers);

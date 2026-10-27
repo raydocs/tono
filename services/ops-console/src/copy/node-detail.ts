@@ -131,6 +131,7 @@ export const nodeDetailCopy = {
   nodeReason: {
     unreachable: '中控连不上这台机器，探针也没有声音',
     likely_blocked: '大陆三网都握不上手，像是被墙了',
+    customer_unreachable: '多位客户 30 分钟内连不上这台机器，而且只在这台失败，像是节点那头的问题',
     agent_missing: '这台机器在售，但上面没有探针',
     machine_pressure: '机器自己吃紧了：负载、内存或磁盘快满了',
     snapshot_stale: '最近一轮没有测到这台机器',

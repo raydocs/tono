@@ -1,0 +1,12 @@
+## 2026-10-26 · 客户就是探针：客户连不上节点直接判 blocked
+- 归属：ops 节点判定（`services/control-plane/src/ops/verdict.ts`、`verdict-facts.ts`）、ops 控制台文案；所有者 2026-10-26 决定不再采购大陆探针，节点可达性以客户的真实失败为准。
+- 来源：基线 `origin/main`（含 #1757）→ 本 PR；分支 `fix/ops-customers-are-the-probes`；`VERDICT_RULES_VERSION` 2 → 3。
+- 缺陷修复：
+  - 原失败场景：「握手失败用户数」只认 `stage IN ('handshake','dial','tls')`，而 Windows 客户端上报的 stage 是 `verifyingTraffic`、`preparing` 这类界面阶段。D1 近 7 天 308 条 `connectFail` 没有一条命中，所以这个本该让客户充当探针的信号在生产里恒为 0，`blocked` 只能靠巡检给出。
+  - 改后行为：`handshakeDistinctUsers` 改为「30 分钟内连不上这台节点、且没有在别的节点上也连不上的客户数」。节点侧失败的定义：旧 stage 之外，加 `code IN ('TONO_NODE_OR_CORE_UNREACHABLE','TONO_EXIT_UNREACHABLE')` 和 `error LIKE 'tcp connect to the selected exit%'`。在两台以上节点都连不上的客户是自己的网络或客户端问题，不给任何节点计票。
+  - 判定：这样的客户 ≥2 位时节点直接 `blocked`（迟滞原有的 `handshake_or_two` 门第一轮就进），不需要巡检；reason `customer_unreachable`，标签「多位客户连不上」，与巡检给出的 `likely_blocked`「疑似被墙」分开。巡检已判不可达（`ok=false`/DOWN/EDGE_FAIL）的节点保持原先的 down/degraded，不改成 blocked。退出按原迟滞：有巡检时客户连通即退出，没有巡检时两轮干净后退出。
+- 新增/优化：ops 控制台 `nodeReason` 新增 `customer_unreachable` 文案。
+- 工程与测试：`test/ops-verdict.test.ts` 新增 `customers are the probes`（5 条）；`test/ops-exit-unreachable.test.ts`（4 条）覆盖按节点计票的纯函数；控制台 `node-detail.test.ts` 的 token 列表加入新 reason。为守住 `src/ops` 每文件 500 行的预算，blocked 的两种来源移到 `verdict-blocked.ts`，节点侧失败的定义和计票移到 `verdict-exit-fails.ts`，行为不变。
+- 验证：本机 worktree，`vitest run` 相关套件通过，`tsc --noEmit` 通过；完整 `vitest run` Test Files  74 passed (74)       Tests  1098 passed (1098)；控制台 `node-detail.test.ts` 33 通过；`npm run typecheck`（ratchet 520/521）、`check:contract`、`check:budgets` 通过。未执行：控制面部署；D1 上 `TONO_EXIT_UNREACHABLE` 尚无数据（客户端还没有这个码，见剩余限制）。
+- 候选/发布：仅源码，无新包；控制面需所有者部署后生效。
+- 剩余限制：`TONO_NODE_OR_CORE_UNREACHABLE` 仍把「握手没到节点」和「本机 TUN 坏了」混在一起，按节点聚合与跨节点剔除只是在统计上压住它；客户端把「到节点的握手通没通」拆成独立的码（`TONO_EXIT_UNREACHABLE`）是另一个任务。全国性整体封锁下每位客户在多台节点上都失败，这个规则会把他们全部剔除，届时以 `customer_fail`（失败率）为准。
