@@ -552,11 +552,19 @@ pub fn event_rebuild_allowed(window: &VecDeque<Instant>, now: Instant) -> bool {
 /// is recorded in `window` and passes through. One that does not becomes `Hold` with the failure
 /// counter reset, as after a rebuild, and the third value is `true` so the caller can say so.
 /// Entries older than the window are dropped on each call.
+///
+/// While a node switch is still running, the rebuild would only be handed to that switch
+/// (`capture_health_context` answers `RecoveredInPlace` without touching the tunnel), so it is
+/// held instead: nothing is recorded in `window`, and the counter stays one short of a rebuild so
+/// every following tick probes again and the first failure after the switch rebuilds at once.
+/// Charging the cap for a rebuild that never ran used to spend one of the hour's three repairs
+/// and drop the counter to zero, leaving recovery to the 30 s periodic probe.
 pub fn gate_event_rebuild(
     effect: NetworkEventProbeEffect,
     pending_failures: u32,
     window: &mut VecDeque<Instant>,
     now: Instant,
+    switch_in_flight: bool,
 ) -> (NetworkEventProbeEffect, u32, bool) {
     while window
         .front()
@@ -566,6 +574,9 @@ pub fn gate_event_rebuild(
     }
     if effect != NetworkEventProbeEffect::Rebuild {
         return (effect, pending_failures, false);
+    }
+    if switch_in_flight {
+        return (NetworkEventProbeEffect::Hold, EVENT_PROBE_REBUILD_AFTER - 1, false);
     }
     if event_rebuild_allowed(window, now) {
         window.push_back(now);
@@ -778,7 +789,7 @@ mod tests {
         for i in 0..EVENT_REBUILD_CAP {
             let now = start + Duration::from_secs(60 * i as u64);
             assert_eq!(
-                gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, now),
+                gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, now, false),
                 (NetworkEventProbeEffect::Rebuild, 0, false),
                 "rebuild {i} fits the cap"
             );
@@ -787,7 +798,7 @@ mod tests {
         let now = start + Duration::from_secs(60 * 10);
         assert!(!event_rebuild_allowed(&window, now));
         assert_eq!(
-            gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, now),
+            gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, now, false),
             (NetworkEventProbeEffect::Hold, 0, true)
         );
         assert_eq!(window.len(), EVENT_REBUILD_CAP, "a held rebuild is not recorded");
@@ -804,7 +815,7 @@ mod tests {
         let oldest_out = start + EVENT_REBUILD_WINDOW;
         assert!(event_rebuild_allowed(&window, oldest_out));
         assert_eq!(
-            gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, oldest_out),
+            gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, oldest_out, false),
             (NetworkEventProbeEffect::Rebuild, 0, false)
         );
         assert_eq!(window.len(), EVENT_REBUILD_CAP, "the expired entry was pruned, the new one added");
@@ -818,9 +829,38 @@ mod tests {
         let (effect, pending) = apply_network_event_probe(plan, true, 1);
         assert_eq!(effect, NetworkEventProbeEffect::Rebuild);
         assert_eq!(
-            gate_event_rebuild(effect, pending, &mut window, now),
+            gate_event_rebuild(effect, pending, &mut window, now, false),
             (NetworkEventProbeEffect::Hold, 0, true)
         );
+    }
+
+    #[test]
+    fn a_rebuild_deferred_to_a_running_switch_spends_no_cap_and_keeps_reconfirming() {
+        let start = Instant::now();
+        let mut window = VecDeque::new();
+        // Two rebuilds already spent this hour; the wake failure lands during a switch.
+        for i in 0..EVENT_REBUILD_CAP - 1 {
+            let at = start + Duration::from_secs(i as u64);
+            gate_event_rebuild(NetworkEventProbeEffect::Rebuild, 0, &mut window, at, false);
+        }
+        let plan = plan_network_event_probe(true, true, false, false, false, 1, false);
+        let (effect, pending) = apply_network_event_probe(plan, true, 1);
+        assert_eq!(effect, NetworkEventProbeEffect::Rebuild);
+        let during = start + Duration::from_secs(60);
+        let (held, pending, capped) = gate_event_rebuild(effect, pending, &mut window, during, true);
+        assert_eq!((held, capped), (NetworkEventProbeEffect::Hold, false));
+        assert_eq!(window.len(), EVENT_REBUILD_CAP - 1, "the deferred rebuild is not charged");
+        // The next tick reconfirms without waiting for a new event or the periodic probe, and
+        // one more failure after the switch finishes rebuilds, inside the cap.
+        let plan = plan_network_event_probe(false, false, false, false, false, pending, false);
+        assert_eq!(plan, NetworkEventProbePlan::Probe);
+        let (effect, pending) = apply_network_event_probe(plan, true, pending);
+        let after = start + Duration::from_secs(62);
+        assert_eq!(
+            gate_event_rebuild(effect, pending, &mut window, after, false),
+            (NetworkEventProbeEffect::Rebuild, 0, false)
+        );
+        assert_eq!(window.len(), EVENT_REBUILD_CAP);
     }
 
     #[test]
@@ -833,7 +873,7 @@ mod tests {
             (NetworkEventProbeEffect::Unchanged, 1),
         ] {
             assert_eq!(
-                gate_event_rebuild(effect, pending, &mut window, now),
+                gate_event_rebuild(effect, pending, &mut window, now, false),
                 (effect, pending, false)
             );
         }

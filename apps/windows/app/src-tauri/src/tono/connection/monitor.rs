@@ -1195,8 +1195,19 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             }
             apply_network_event_probe(plan, probed.unwrap_or(false), pending_event_probe_failures)
         };
-        let (effect, next_pending, rebuild_capped) =
-            gate_event_rebuild(effect, next_pending, &mut event_rebuilds, std::time::Instant::now());
+        // Same test `capture_health_context` applies before it hands a rebuild to the switch.
+        let switch_in_flight = effect == NetworkEventProbeEffect::Rebuild
+            && state.lock().await.tasks.switch.as_ref().is_some_and(|task| !task.inner().is_finished());
+        let (effect, next_pending, rebuild_capped) = gate_event_rebuild(
+            effect, next_pending, &mut event_rebuilds, std::time::Instant::now(), switch_in_flight,
+        );
+        if switch_in_flight {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: network-change probe failed again while a node switch is running; leaving the tunnel to the switch and probing again next tick"
+            );
+        }
         pending_event_probe_failures = next_pending;
         if effect == NetworkEventProbeEffect::Rebuild {
             event_rebuild_cap_reported = false;
@@ -1220,7 +1231,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                     error: format!("{EVENT_REBUILD_CAP} event-driven rebuilds in the last hour; holding the tunnel"),
                 });
             }
-        } else if effect == NetworkEventProbeEffect::Hold {
+        } else if effect == NetworkEventProbeEffect::Hold && !switch_in_flight {
             logging!(
                 info,
                 Type::Service,
