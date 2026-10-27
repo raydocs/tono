@@ -39,7 +39,7 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .coreControllerUnavailable:
             return String(localized: "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.")
         case .coreExitUnreachable:
-            return String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.")
+            return String(localized: "This server did not answer. Pick another server and try again.")
         case .networkEnvironmentOffline:
             // Looked up rather than written in place: a physical-link
             // observation is what produces this code, and it reaches the

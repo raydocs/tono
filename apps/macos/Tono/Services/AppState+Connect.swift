@@ -3351,4 +3351,16 @@ enum ReleasedConnectFailureActions {
     ) -> Bool {
         hasFailureRecord && !protectionBlocked && !connecting && !disconnecting
     }
+
+    /// While protection stays blocked the retry row has no route picker. When
+    /// the selected exit did not answer, retrying the same server repeats the
+    /// failure, so the pick-another-server action is offered there too.
+    static func shouldOfferRouteWhileBlocked(
+        protectionBlocked: Bool,
+        connecting: Bool,
+        disconnecting: Bool,
+        code: ProtectedFailureCode?
+    ) -> Bool {
+        protectionBlocked && !connecting && !disconnecting && code == .coreExitUnreachable
+    }
 }

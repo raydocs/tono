@@ -6484,12 +6484,12 @@
         }
       }
     },
-    "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.": {
+    "This server did not answer. Pick another server and try again.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "连接没有完成。支持码 CORE_EXIT_UNREACHABLE。"
+            "value": "这台节点现在连不上，换一台试试。"
           }
         }
       }

@@ -1049,6 +1049,19 @@ private struct ConnectionProgressCard: View {
                     .controlSize(.small)
                 }
 
+                if ReleasedConnectFailureActions.shouldOfferRouteWhileBlocked(
+                    protectionBlocked: appState.isProtectionBlocked,
+                    connecting: appState.isConnecting,
+                    disconnecting: appState.isDisconnecting,
+                    code: appState.lastClassifiedFailure?.code
+                ) {
+                    Button("Choose another route") {
+                        appState.selectedPage = .proxies
+                    }
+                    .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
+                    .controlSize(.small)
+                }
+
                 if appState.shouldOfferManualBackupChannel() {
                     Button("Try backup channel") {
                         appState.tryBackupChannelManually()

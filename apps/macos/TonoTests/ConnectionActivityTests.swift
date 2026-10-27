@@ -247,8 +247,25 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertFalse(CatalogCityFailover.shouldRotate(after: nil))
         XCTAssertEqual(
             ProtectedFailureCode.coreExitUnreachable.userMessage,
-            String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.")
+            String(localized: "This server did not answer. Pick another server and try again.")
         )
+        // Blocked protection keeps the route picker for an unanswered exit only.
+        XCTAssertTrue(ReleasedConnectFailureActions.shouldOfferRouteWhileBlocked(
+            protectionBlocked: true, connecting: false, disconnecting: false,
+            code: .coreExitUnreachable
+        ))
+        XCTAssertFalse(ReleasedConnectFailureActions.shouldOfferRouteWhileBlocked(
+            protectionBlocked: true, connecting: false, disconnecting: false,
+            code: .tunRouteUnavailable
+        ))
+        XCTAssertFalse(ReleasedConnectFailureActions.shouldOfferRouteWhileBlocked(
+            protectionBlocked: true, connecting: true, disconnecting: false,
+            code: .coreExitUnreachable
+        ))
+        XCTAssertFalse(ReleasedConnectFailureActions.shouldOfferRouteWhileBlocked(
+            protectionBlocked: false, connecting: false, disconnecting: false,
+            code: .coreExitUnreachable
+        ))
         XCTAssertTrue(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: false))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: true))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: true, protectionBlocked: false))
