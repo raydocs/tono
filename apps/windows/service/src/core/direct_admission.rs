@@ -89,7 +89,8 @@ pub(crate) fn admit_sing_box_direct_rules(
         }
         if !sing_box_direct_shape(rule, &rules[..index], &direct) {
             return Err(format!(
-                "a rule to `{DIRECT_GROUP_NAME}` is not a compiler shape"
+                "a rule to `{DIRECT_GROUP_NAME}` is not a compiler shape: {}",
+                shape_refusal(rule)
             ));
         }
         match binding {
@@ -453,7 +454,14 @@ fn pin_ok(cidr: &str) -> bool {
     else {
         return false;
     };
-    address != Ipv4Addr::new(1, 1, 1, 1)
+    // A "this host", loopback, link-local, multicast or broadcast /32 is never one reviewed
+    // destination, whatever the rest of the rule says (#1280).
+    !address.is_unspecified()
+        && !address.is_loopback()
+        && !address.is_link_local()
+        && !address.is_multicast()
+        && !address.is_broadcast()
+        && address != Ipv4Addr::new(1, 1, 1, 1)
         && address != Ipv4Addr::new(8, 8, 8, 8)
         && !CLAUDE_HOME_IPV4_CIDRS
             .iter()
@@ -469,6 +477,72 @@ fn in_range(address: Ipv4Addr, range: &str) -> bool {
     };
     let mask = u32::MAX.checked_shl(32 - bits.min(32)).unwrap_or(0);
     u32::from(address) & mask == u32::from(network) & mask
+}
+
+/// Why an already refused sing-box DIRECT rule is not a compiler shape, for the audit log.
+/// Diagnosis only: `sing_box_direct_shape` decides, this never admits anything.
+fn shape_refusal(rule: &Value) -> &'static str {
+    const OTHER: &str = "rule keys, ports, outbound or pins are not a compiler shape";
+    let Some(rule) = rule.as_object() else {
+        return OTHER;
+    };
+    if let Some(regexes) = strs(rule, "process_path_regex") {
+        if regexes.iter().any(|regex| !has_literal_text(regex)) {
+            return "process pattern has no literal text";
+        }
+        if regexes.iter().any(|regex| !regex_ok(regex)) {
+            return "process pattern is not a compiler path regex";
+        }
+    }
+    let (destination, address) = match rule.get("rules").and_then(Value::as_array).map(Vec::as_slice) {
+        Some([destination, address]) => (destination.as_object(), address.as_object()),
+        _ => (None, Some(rule)),
+    };
+    if let Some(host) = destination.and_then(|map| one_str(map, "domain")) {
+        if !host_ok(host) {
+            return "domain is a wildcard, empty label, single label or protected host";
+        }
+    }
+    if let Some(cidr) = address.and_then(|map| one_str(map, "ip_cidr")) {
+        if !pin_ok(cidr) {
+            return "address is not one routable /32 (unspecified, loopback, link-local, multicast, broadcast, resolver or Anthropic range)";
+        }
+    }
+    OTHER
+}
+
+/// Whether a process pattern, after its `^` anchor, names at least one literal character: one
+/// outside the regex metacharacters `.*+?()[]{}|\^$`, where an escape such as `\.` counts as a
+/// literal and a negated class (`[^...]`) contributes none.
+fn has_literal_text(regex: &str) -> bool {
+    let mut chars = regex.strip_prefix('^').unwrap_or(regex).chars().peekable();
+    let mut class: Option<bool> = None; // Some(negated) while inside `[...]`
+    while let Some(character) = chars.next() {
+        match (character, class) {
+            ('\\', negated) => {
+                if chars.next().is_some() && negated != Some(true) {
+                    return true;
+                }
+            }
+            ('[', None) => {
+                let negated = chars.peek() == Some(&'^');
+                if negated {
+                    chars.next();
+                }
+                class = Some(negated);
+            }
+            (']', Some(_)) => class = None,
+            // `(?s)`, `(?i:`: flags are not text.
+            ('(', None) if chars.peek() == Some(&'?') => {
+                chars.next();
+                while chars.next_if(|flag| flag.is_ascii_alphabetic() || *flag == '-').is_some() {}
+            }
+            ('.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '^' | '$', _) => {}
+            (_, Some(true)) => {}
+            _ => return true,
+        }
+    }
+    false
 }
 
 /// A process-path regex only in the form `tono-core` `config::windows_path_regex` writes:
@@ -803,5 +877,75 @@ mod tests {
         };
         assert_eq!(admitted(exact("qq.com")), Ok(()));
         assert!(admitted(exact("com")).is_err());
+        for shape in ["", "*", "*.qq.com", "qq..com", ".qq.com", "qq.com.", "qq.123"] {
+            let error = admitted(exact(shape)).unwrap_err();
+            assert!(error.contains("domain is a wildcard"), "{shape}: {error}");
+        }
+    }
+
+    /// #1280: a /32 that is "this host", loopback, link-local, multicast or broadcast is no
+    /// reviewed destination, in the exact-host pin and in the media pin.
+    #[test]
+    fn a_non_routable_pin_is_not_a_compiler_shape() {
+        let pinned = |address: &str| {
+            json!({"type":"logical","mode":"and","rules":[
+                {"network":"tcp","port":443,"domain":["qq.com"]},{"ip_cidr":[format!("{address}/32")]}],
+                "action":"route","outbound":"Tono-China-Direct"})
+        };
+        assert_eq!(admitted(pinned("101.1.2.3")), Ok(()));
+        assert_eq!(admitted(media_rule("203.0.113.9", 8000)), Ok(()));
+        for address in [
+            "0.0.0.0",
+            "127.0.0.1",
+            "127.1.2.3",
+            "169.254.1.1",
+            "224.0.0.251",
+            "239.255.255.250",
+            "255.255.255.255",
+        ] {
+            let error = admitted(pinned(address)).unwrap_err();
+            assert!(error.contains("address is not one routable /32"), "{address}: {error}");
+            let error = admitted(media_rule(address, 8000)).unwrap_err();
+            assert!(error.contains("address is not one routable /32"), "{address}: {error}");
+        }
+        // Not a /32 at all.
+        assert!(admitted(json!({"type":"logical","mode":"and","rules":[
+            {"network":"tcp","port":443,"domain":["qq.com"]},{"ip_cidr":["0.0.0.0/0"]}],
+            "action":"route","outbound":"Tono-China-Direct"})).is_err());
+    }
+
+    /// #1280: the refusal says which rule refused the process pattern.
+    #[test]
+    fn a_process_pattern_refusal_names_its_rule() {
+        for no_literal in ["^", "^.*", "^.+", "^(.*)", r"^[^\\]*", "^(?s).*", "^.*$"] {
+            let error = admitted(process_rule(no_literal)).unwrap_err();
+            assert!(
+                error.contains("process pattern has no literal text"),
+                "{no_literal}: {error}"
+            );
+        }
+        // Literal text, but not the compiler's path form.
+        for loose in [r"^C:\\.*", r"^[Dd]:[\\/][Aa]", r"^Lark", "^.*lark"] {
+            let error = admitted(process_rule(loose)).unwrap_err();
+            assert!(
+                error.contains("process pattern is not a compiler path regex"),
+                "{loose}: {error}"
+            );
+        }
+        // The same gate on the media (UDP) shape.
+        let media = json!({"network":"udp","ip_cidr":["203.0.113.9/32"],"port":8000,
+            "process_path_regex":["^.*"],"action":"route","outbound":"Tono-China-Direct"});
+        assert!(admitted(media).unwrap_err().contains("process pattern has no literal text"));
+    }
+
+    #[test]
+    fn literal_text_is_counted_outside_metacharacters_and_negated_classes() {
+        use super::has_literal_text;
+        for none in ["^", "^.*", "^.+", "^(.*)", r"^[^\\]*", "^[^a]*", "^(?s).*", "^[]*"] {
+            assert!(!has_literal_text(none), "{none}");
+        }
+        for some in ["^a", r"^\.", r"^\\", "^[Dd]:", "^.*x", r"^C:\\Lark\\"] {
+            assert!(has_literal_text(some), "{some}");
+        }
     }
 }
