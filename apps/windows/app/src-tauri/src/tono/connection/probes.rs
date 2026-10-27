@@ -143,7 +143,11 @@ pub(super) async fn verify_post_lock(
 ) -> Result<KillSwitchStatus, StageFailure> {
     // §6.8 is one advisory measurement. It must not run beside the TUN probe:
     // unified-delay doubles `/delay`, and each sample is another Reality
-    // handshake on the same exit. Success does not wait for it.
+    // handshake on the same exit. Success does not wait for it. That holds for
+    // the success path and for round 1. The final round only exists after a
+    // round-1 failure, so it starts the advisory sample beside the diagnostic
+    // join: a failed connect then does not pay the 8 s advisory budget serially
+    // after the data-plane budget.
     set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
     let outcomes = {
         let inner = state.lock().await;
@@ -162,62 +166,57 @@ pub(super) async fn verify_post_lock(
         let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
         let tun_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "tun", outcomes: outcomes.clone() });
         let proxy_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "loopback", outcomes: outcomes.clone() });
-        let (data_plane, proxy_cross_check) = if final_round {
-            transaction
-                .wait("real TUN verification with proxy cross-check",
-                    tono_core::protected_connectivity::verify_with_diagnostic(
+        let measured_node = if final_round { state.lock().await.selected_node.clone() } else { None };
+        let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder {
+            round: round + 1,
+            path: "controller",
+            outcomes: outcomes.clone(),
+        });
+        let (data_plane, proxy_cross_check, advisory) = if final_round {
+            let outcome = transaction
+                .wait("real TUN verification with proxy cross-check and advisory exit measurement",
+                    verify_final_round(
                         verify_locked_data_plane(tun_recorder.as_ref()),
                         verify_mixed_proxy_data_plane(mixed_port, proxy_recorder.as_ref()),
+                        async {
+                            let began = std::time::Instant::now();
+                            let result = probe_exit_once(secret, controller_port).await;
+                            (result, began.elapsed().as_millis() as u64)
+                        },
                     ),
                 )
-                .await?
+                .await?;
+            (outcome.data_plane, outcome.proxy_cross_check, outcome.advisory)
         } else {
             (
                 transaction
                     .wait("real TUN data-plane verification", verify_locked_data_plane(tun_recorder.as_ref()))
                     .await?,
                 None,
+                None,
             )
         };
         let data_plane_error = data_plane.as_ref().err().cloned();
-        let controller_probe = if data_plane.is_ok() {
-            Ok(())
-        } else if final_round {
-            let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder {
-                round: round + 1,
-                path: "controller",
-                outcomes: outcomes.clone(),
-            });
-            let measured_node = state.lock().await.selected_node.clone();
-            transaction
-                .wait("advisory exit measurement", async {
-                    let began = std::time::Instant::now();
-                    let result = probe_exit_once(secret, controller_port).await;
-                    if let Some(recorder) = controller_recorder {
-                        recorder.record(
-                            "Google",
-                            result.is_ok(),
-                            "advisory",
-                            None,
-                            began.elapsed().as_millis() as u64,
-                        );
-                    }
-                    match result {
-                        Ok(delay) => {
-                            if delay > 0 {
-                                if let Some(node) = measured_node.as_deref() {
-                                    let mut inner = state.lock().await;
-                                    inner.record_exit_delay(node, delay);
-                                }
+        // `advisory` is only present when the data plane failed in the final round.
+        let controller_probe = match advisory {
+            None => Ok(()),
+            Some((result, elapsed_ms)) => {
+                if let Some(recorder) = controller_recorder {
+                    recorder.record("Google", result.is_ok(), "advisory", None, elapsed_ms);
+                }
+                match result {
+                    Ok(delay) => {
+                        if delay > 0 {
+                            if let Some(node) = measured_node.as_deref() {
+                                let mut inner = state.lock().await;
+                                inner.record_exit_delay(node, delay);
                             }
-                            Ok(())
                         }
-                        Err(error) => Err(error),
+                        Ok(())
                     }
-                })
-                .await?
-        } else {
-            Ok(())
+                    Err(error) => Err(error),
+                }
+            }
         };
 
         match classify_post_lock_verification(controller_probe.clone(), data_plane) {
@@ -291,6 +290,44 @@ pub(super) async fn verify_post_lock(
             .await?;
     }
     Err(StageFailure::error(last))
+}
+
+/// Result of the final verification round.
+pub(super) struct FinalRoundOutcome<T, A> {
+    pub(super) data_plane: Result<T, String>,
+    pub(super) proxy_cross_check: Option<Result<(), String>>,
+    /// The advisory sample, present only when the data plane failed. On data-plane success it is
+    /// dropped unused, so the verdict never depends on it.
+    pub(super) advisory: Option<A>,
+}
+
+/// Run the authoritative data-plane proof with its loopback diagnostic and the advisory sample
+/// at the same time, so a failed connect pays `max(data plane, advisory)` instead of their sum.
+/// On data-plane success the advisory future is dropped (no detached request outlives the
+/// proof), exactly as `verify_with_diagnostic` drops its diagnostic. The caller owns the
+/// deadline and cancellation of all three futures.
+pub(super) async fn verify_final_round<T, A>(
+    authoritative: impl std::future::Future<Output = Result<T, String>>,
+    diagnostic: impl std::future::Future<Output = Result<(), String>>,
+    advisory: impl std::future::Future<Output = A>,
+) -> FinalRoundOutcome<T, A> {
+    let verify = tono_core::protected_connectivity::verify_with_diagnostic(authoritative, diagnostic);
+    tokio::pin!(verify, advisory);
+    tokio::select! {
+        biased;
+        (data_plane, proxy_cross_check) = &mut verify => {
+            if data_plane.is_ok() {
+                FinalRoundOutcome { data_plane, proxy_cross_check, advisory: None }
+            } else {
+                FinalRoundOutcome { data_plane, proxy_cross_check, advisory: Some(advisory.await) }
+            }
+        }
+        sampled = &mut advisory => {
+            let (data_plane, proxy_cross_check) = verify.await;
+            let advisory = if data_plane.is_ok() { None } else { Some(sampled) };
+            FinalRoundOutcome { data_plane, proxy_cross_check, advisory }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -874,8 +911,88 @@ pub(super) fn format_tun_probe_failures(failures: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::verify_final_round;
+
     #[test]
     fn advisory_exit_probe_waits_until_the_first_page_can_start() {
         assert_eq!(super::ADVISORY_EXIT_PROBE_DEFER.as_millis(), 1500);
+    }
+
+    #[tokio::test]
+    async fn final_round_data_plane_success_does_not_use_or_wait_for_the_advisory_sample() {
+        let began = Instant::now();
+        let outcome = verify_final_round(
+            async {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                Ok::<_, String>("verified")
+            },
+            async { Ok(()) },
+            async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                "advisory"
+            },
+        )
+        .await;
+        assert_eq!(outcome.data_plane, Ok("verified"));
+        assert_eq!(outcome.advisory, None);
+        assert!(began.elapsed() < Duration::from_millis(300), "waited for the advisory sample");
+    }
+
+    #[tokio::test]
+    async fn final_round_data_plane_success_discards_an_advisory_sample_that_finished_first() {
+        let outcome = verify_final_round(
+            async {
+                tokio::time::sleep(Duration::from_millis(60)).await;
+                Ok::<_, String>("verified")
+            },
+            async { Ok(()) },
+            async { "advisory failed" },
+        )
+        .await;
+        assert_eq!(outcome.data_plane, Ok("verified"));
+        assert_eq!(outcome.advisory, None);
+    }
+
+    #[tokio::test]
+    async fn final_round_data_plane_failure_overlaps_the_advisory_sample() {
+        let began = Instant::now();
+        let outcome = verify_final_round(
+            async {
+                tokio::time::sleep(Duration::from_millis(60)).await;
+                Err::<(), _>("tun failed".to_string())
+            },
+            async { Err("loopback failed".to_string()) },
+            async {
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                "advisory"
+            },
+        )
+        .await;
+        let elapsed = began.elapsed();
+        assert_eq!(outcome.data_plane, Err("tun failed".to_string()));
+        assert_eq!(outcome.proxy_cross_check, Some(Err("loopback failed".to_string())));
+        assert_eq!(outcome.advisory, Some("advisory"));
+        assert!(elapsed >= Duration::from_millis(80), "advisory result returned early: {elapsed:?}");
+        assert!(elapsed < Duration::from_millis(120), "advisory ran after the data plane: {elapsed:?}");
+    }
+
+    #[tokio::test]
+    async fn final_round_returns_the_advisory_sample_that_finished_before_a_failing_data_plane() {
+        let outcome = verify_final_round(
+            async {
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                Err::<(), _>("tun failed".to_string())
+            },
+            async { Ok(()) },
+            async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                "advisory"
+            },
+        )
+        .await;
+        assert_eq!(outcome.data_plane, Err("tun failed".to_string()));
+        assert_eq!(outcome.advisory, Some("advisory"));
     }
 }
