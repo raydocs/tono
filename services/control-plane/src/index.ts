@@ -1,14 +1,7 @@
-import {
-  randomToken,
-  sha256,
-} from './crypto';
+import { sha256 } from './crypto';
 import { refreshSession } from './sessions';
+import { oidcRoute, redeemLinkTicket } from './oidc-routes';
 import {
-  OidcVerificationError,
-  verifyOidcIdToken,
-} from './oidc';
-import {
-  accountForOidcIdentity,
   accountForVerifiedEmail,
   directSignupAllowed,
 } from './accounts';
@@ -107,9 +100,7 @@ import { issueEnrollment, confirmDevice } from './enrollment';
 import {
   rateLimitEmailStart,
   rateLimitChallenge,
-  rateLimitOidcStart,
   challengeID,
-  oidcProvider,
   emailDeliveryConfigured,
   providerAudience,
   numericCode,
@@ -271,110 +262,24 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       e,
       String(claimed.email).toLowerCase(),
     );
-    return Response.json(await completePasswordlessAuth(
-      e, req,
-      user,
-      String(claimed.device_name),
-      String(claimed.installation_id),
-    ));
-  }
-
-  if (p === '/api/v1/auth/oidc/challenge' && m === 'POST') {
-    const b = await body(req, 8 * 1024);
-    const provider = oidcProvider(b.provider);
-    const name = str(b.deviceName, 'deviceName', 1, 100);
-    const inst = str(b.installationId, 'installationId', 8, 200);
-    const audience = providerAudience(e, provider);
-    if (!audience) {
-      throw new ApiError(503, 'PROVIDER_UNAVAILABLE', 'This identity provider is not configured');
-    }
-    await rateLimitOidcStart(e, req, inst);
-    const challenge = id();
-    const nonce = randomToken(32);
-    const t = now();
-    const ttl = envInt(e, 'OIDC_CHALLENGE_TTL_SECONDS', 300);
-    await e.DB.prepare(
-      `INSERT INTO auth_challenges(
-         id, kind, secret_hash, invitation_id, installation_id, device_name,
-         attempts, max_attempts, expires_at, created_at
-       ) VALUES(?, ?, ?, ?, ?, ?, 0, 3, ?, ?)`,
-    ).bind(
-      challenge,
-      provider,
-      await sha256(nonce),
-      null,
-      inst,
-      name,
-      t + ttl,
-      t,
-    ).run();
+    // The code proved the mailbox; an Apple/Google refusal on this same
+    // installation may now attach that provider account (decision 139).
+    const identityLink = await redeemLinkTicket(
+      e, b.linkTicket, String(user.id), String(user.email), String(claimed.installation_id),
+    );
     return Response.json({
-      challengeId: challenge,
-      nonce,
-      expiresIn: ttl,
-      audience,
+      ...await completePasswordlessAuth(
+        e, req,
+        user,
+        String(claimed.device_name),
+        String(claimed.installation_id),
+      ),
+      ...(identityLink ? { identityLink } : {}),
     });
   }
 
-  if (p === '/api/v1/auth/oidc/verify' && m === 'POST') {
-    const b = await body(req, 24 * 1024);
-    const provider = oidcProvider(b.provider);
-    const challenge = challengeID(b.challengeId);
-    const idToken = str(b.idToken, 'idToken', 100, 16_384);
-    const audience = providerAudience(e, provider);
-    if (!audience) {
-      throw new ApiError(503, 'PROVIDER_UNAVAILABLE', 'This identity provider is not configured');
-    }
-    await rateLimitChallenge(e, req, 'oidc-verify', challenge);
-    const t = now();
-    const reserved = await e.DB.prepare(
-      `UPDATE auth_challenges
-       SET attempts = attempts + 1
-       WHERE id = ? AND kind = ? AND consumed_at IS NULL
-         AND expires_at > ? AND attempts < max_attempts
-       RETURNING *`,
-    ).bind(challenge, provider, t).first<Row>();
-    if (!reserved) {
-      throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
-    }
-
-    let identity: Awaited<ReturnType<typeof verifyOidcIdToken>>;
-    try {
-      identity = await verifyOidcIdToken(provider, idToken, audience, t);
-    } catch (verificationError) {
-      if (
-        verificationError instanceof OidcVerificationError &&
-        verificationError.temporary
-      ) {
-        throw new ApiError(
-          503,
-          'IDENTITY_PROVIDER_UNAVAILABLE',
-          'The identity provider is temporarily unavailable',
-        );
-      }
-      throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
-    }
-    const nonceHash = await sha256(identity.nonce);
-    if (nonceHash !== reserved.secret_hash) {
-      throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
-    }
-    const consumed = await e.DB.prepare(
-      `UPDATE auth_challenges
-       SET consumed_at = ?
-       WHERE id = ? AND kind = ? AND secret_hash = ?
-         AND consumed_at IS NULL AND expires_at > ?`,
-    ).bind(t, challenge, provider, nonceHash, t).run();
-    if (!consumed.meta.changes) {
-      throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
-    }
-    const user = await accountForOidcIdentity(e, identity);
-    return Response.json(await completePasswordlessAuth(
-      e, req,
-      user,
-      String(reserved.device_name),
-      String(reserved.installation_id),
-    ));
-  }
+  const oidc = await oidcRoute(e, req, p, m);
+  if (oidc) return oidc;
 
   if (
     (p === '/api/v1/auth/redeem' || p === '/api/v1/auth/login') &&

@@ -9,6 +9,7 @@ import {
   sequence,
   createAccount,
   startEmailSignIn,
+  GOOGLE_AUDIENCE,
   emailSignIn,
   oidcToken,
   nextSequence,
@@ -187,9 +188,12 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       }));
       expect(challengeResponse.status).toBe(200);
       const challenge = await challengeResponse.json() as any;
+      const relay = `apple-body-failure-${nextSequence()}@privaterelay.appleid.com`;
+      await env.DB.prepare('INSERT INTO signup_allowlist(email, created_at) VALUES(?, ?)')
+        .bind(relay, Math.floor(Date.now() / 1000)).run();
       const idToken = await oidcToken('apple', challenge.nonce, {
         subject: 'apple-body-failure-subject',
-        email: `apple-body-failure-${nextSequence()}@example.com`,
+        email: relay,
       });
       const verify = () => api('auth/oidc/verify', json({
         provider: 'apple', challengeId: challenge.challengeId, idToken,
@@ -202,7 +206,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ).bind(challenge.challengeId).first()).toMatchObject({ consumed_at: null });
 
       failBody = false;
-      expect((await verify()).status).toBe(200);
+      const retried = await verify();
+      expect(await retried.json()).toMatchObject({ user: expect.any(Object) });
     } finally {
       fetchSpy.mockImplementation(originalFetch);
       clock.mockRestore();
@@ -317,29 +322,70 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
-  it('links a verified Apple identity to the matching existing account', async () => {
+  it('links Apple to an external-mailbox account only after an email code on the same installation (decision 139)', async () => {
     const account = await createAccount('apple-link');
-    const challengeResponse = await api('auth/oidc/challenge', json({
-      provider: 'apple',
-      deviceName: 'Apple Mac',
-      installationId: 'apple-link-installation-two',
-    }));
-    const challenge = await challengeResponse.json() as any;
-    const token = await oidcToken('apple', challenge.nonce, {
-      subject: 'apple-linked-subject',
-      email: account.email,
-    });
-    const linked = await api('auth/oidc/verify', json({
-      provider: 'apple',
-      challengeId: challenge.challengeId,
-      idToken: token,
-    }));
+    const appleVerify = async (installationId: string, email = account.email) => {
+      const challenge = await (await api('auth/oidc/challenge', json({
+        provider: 'apple', deviceName: 'Apple Mac', installationId,
+      }))).json() as any;
+      const idToken = await oidcToken('apple', challenge.nonce, { subject: 'apple-linked-subject', email });
+      return api('auth/oidc/verify', json({ provider: 'apple', challengeId: challenge.challengeId, idToken }));
+    };
+    const codeWithTicket = async (email: string, installationId: string, linkTicket: string) => {
+      const started = await startEmailSignIn({ email, deviceName: 'Apple Mac', installationId });
+      return api('auth/email/verify', json({ challengeId: started.challengeId, code: started.code, linkTicket }));
+    };
+    const linkedUser = async () => (await env.DB.prepare(
+      "SELECT user_id FROM auth_identities WHERE provider = 'apple' AND subject = 'apple-linked-subject'",
+    ).first<any>())?.user_id;
+
+    // Apple cannot vouch for an @example.com mailbox: no takeover, a ticket instead.
+    const refused = await appleVerify('apple-link-installation-two');
+    expect(refused.status).toBe(401);
+    const refusal = await refused.json() as any;
+    expect(refusal.error.code).toBe('EMAIL_OWNERSHIP_UNVERIFIED');
+    expect(await linkedUser()).toBeUndefined();
+
+    // Another installation, or another account's code, cannot redeem it.
+    const elsewhere = await codeWithTicket(account.email, 'apple-link-installation-three', refusal.linkTicket);
+    expect((await elsewhere.json() as any).identityLink).toEqual({ status: 'expired' });
+    const other = await createAccount('apple-link-other');
+    const wrongAccount = await codeWithTicket(other.email, 'apple-link-installation-two', refusal.linkTicket);
+    expect((await wrongAccount.json() as any).identityLink).toEqual({ status: 'expired' });
+    expect(await linkedUser()).toBeUndefined();
+
+    // The mailbox owner's code on the same installation links it, and Apple
+    // then signs in to that account.
+    const linked = await codeWithTicket(account.email, 'apple-link-installation-two', refusal.linkTicket);
     expect(linked.status).toBe(200);
-    expect((await linked.json() as any).user.id).toBe(account.user.id);
-    const identity = await env.DB.prepare(
-      "SELECT user_id FROM auth_identities WHERE provider = 'apple' AND subject = ?",
-    ).bind('apple-linked-subject').first<any>();
-    expect(identity.user_id).toBe(account.user.id);
+    expect((await linked.json() as any).identityLink).toEqual({ provider: 'apple', status: 'linked' });
+    expect(await linkedUser()).toBe(account.user.id);
+    const signedIn = await appleVerify('apple-link-installation-four');
+    expect(signedIn.status).toBe(200);
+    expect((await signedIn.json() as any).user.id).toBe(account.user.id);
+  });
+
+  it('accepts an ID token for any configured client of the provider, and only those', async () => {
+    const original = (env as unknown as Env).GOOGLE_CLIENT_ID;
+    (env as unknown as Env).GOOGLE_CLIENT_ID = `${GOOGLE_AUDIENCE}, desktop-client.apps.googleusercontent.com`;
+    try {
+      const verifyFor = async (audience: string) => {
+        const challenge = await (await api('auth/oidc/challenge', json({
+          provider: 'google', deviceName: 'Google PC', installationId: `google-multi-${nextSequence()}`,
+          clientId: 'desktop-client.apps.googleusercontent.com',
+        }))).json() as any;
+        expect(challenge.audience).toBe('desktop-client.apps.googleusercontent.com');
+        const gmail = `google-multi-${nextSequence()}@gmail.com`;
+        await env.DB.prepare('INSERT INTO signup_allowlist(email, created_at) VALUES(?, ?)')
+          .bind(gmail, Math.floor(Date.now() / 1000)).run();
+        const idToken = await oidcToken('google', challenge.nonce, { audience, email: gmail });
+        return api('auth/oidc/verify', json({ provider: 'google', challengeId: challenge.challengeId, idToken }));
+      };
+      expect(await (await verifyFor('desktop-client.apps.googleusercontent.com')).json()).toMatchObject({ user: expect.any(Object) });
+      expect((await verifyFor('unlisted-client.apps.googleusercontent.com')).status).toBe(401);
+    } finally {
+      (env as unknown as Env).GOOGLE_CLIENT_ID = original;
+    }
   });
 
   it('completes a valid OIDC verify even when concurrent failures exhaust attempts (TOCTOU)', async () => {
