@@ -1,6 +1,6 @@
 // Apple and Google sign-in: nonce challenges, ID-token verification, and the
 // link ticket that attaches a provider identity to an account only after the
-// user also proves that account with an email code (decision 139).
+// user also proves that account with an email code (decision 141).
 import { hmacSha256, jwtSign, jwtVerify, randomToken, sha256 } from './crypto';
 import { OidcVerificationError, type OidcIdentity, type OidcProvider, verifyOidcIdToken } from './oidc';
 import { accountForOidcIdentity } from './accounts';

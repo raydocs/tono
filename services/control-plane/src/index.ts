@@ -262,20 +262,19 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       e,
       String(claimed.email).toLowerCase(),
     );
-    // The code proved the mailbox; an Apple/Google refusal on this same
-    // installation may now attach that provider account (decision 139).
+    const signedIn = await completePasswordlessAuth(
+      e, req,
+      user,
+      String(claimed.device_name),
+      String(claimed.installation_id),
+    );
+    // Only a completed sign-in may attach the Apple/Google account an
+    // earlier refusal on this installation named (decision 141); a refused
+    // one (no plan, disabled) links nothing.
     const identityLink = await redeemLinkTicket(
       e, b.linkTicket, String(user.id), String(user.email), String(claimed.installation_id),
     );
-    return Response.json({
-      ...await completePasswordlessAuth(
-        e, req,
-        user,
-        String(claimed.device_name),
-        String(claimed.installation_id),
-      ),
-      ...(identityLink ? { identityLink } : {}),
-    });
+    return Response.json({ ...signedIn, ...(identityLink ? { identityLink } : {}) });
   }
 
   const oidc = await oidcRoute(e, req, p, m);

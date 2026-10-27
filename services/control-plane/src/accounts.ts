@@ -245,7 +245,7 @@ export async function accountForOidcIdentity(
   // email_verified after that mailbox is reassigned, so its claim can neither
   // take over the account the current mailbox owner signed up with nor
   // pre-create the account that owner's email-code sign-in would land on
-  // (#789, decisions 072 and 139). Such users sign in with an email code and
+  // (#789, decisions 072 and 141). Such users sign in with an email code and
   // may then link the provider from that session.
   if (!providerAuthoritativeForEmail(identity)) {
     throw new ApiError(
