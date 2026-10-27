@@ -132,6 +132,7 @@ export const TrayPanel = () => {
     />
   ) : null
   const [now, setNow] = useState(Date.now)
+  const { status, mutateTonoStatus, visible } = useTonoStatus()
   useEffect(() => {
     appearanceQueue = appearanceQueue
       .then(() =>
@@ -142,13 +143,13 @@ export const TrayPanel = () => {
       })
   }, [newAppearance])
   useEffect(() => {
-    if (!newAppearance) return
-    // The flyout stays loaded while closed; its clock must not keep running there.
+    // The flyout stays loaded while closed, and a hidden window's page still reads as
+    // visible, so its clock follows the window.
+    if (!newAppearance || !visible) return
     return whileVisible(() => setNow(Date.now()), 1000)
-  }, [newAppearance])
+  }, [newAppearance, visible])
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
-  const { status, mutateTonoStatus } = useTonoStatus()
   const uiState: TonoUiState = status?.uiState ?? 'notConnected'
   const color = STATUS_COLOR[uiState]
   // Cancelling while the barrier is held releases it. That needs the confirmation the
@@ -170,7 +171,7 @@ export const TrayPanel = () => {
     response: { data: traffic },
     live: trafficLive,
   } = useTrafficData({
-    enabled: connected,
+    enabled: connected && visible,
     generation: status?.controllerGeneration,
   })
   const [up, upUnit] = parseTraffic(traffic?.up ?? 0)
@@ -193,7 +194,8 @@ export const TrayPanel = () => {
     queryKey: ['tono', 'route-preferences', scope, status?.catalogRevision],
     queryFn: tonoRoutePreferences,
     enabled: newAppearance && !!scope,
-    refetchInterval: newAppearance ? 30_000 : false,
+    refetchInterval: newAppearance && visible ? 30_000 : false,
+    refetchOnWindowFocus: true,
   })
   const { data: progress } = useQuery({
     queryKey: tonoConnectProgressQueryKey,
@@ -206,9 +208,11 @@ export const TrayPanel = () => {
         uiState === 'notConnected'),
     refetchInterval:
       newAppearance &&
+      visible &&
       (uiState === 'connecting' || uiState === 'protectedOffline')
         ? 1000
         : false,
+    refetchOnWindowFocus: true,
   })
   const preferences = preferencesMatch(
     storedPreferences,

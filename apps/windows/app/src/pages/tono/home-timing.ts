@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { useVisibility } from '@/hooks/use-visibility'
 import type { TonoConnectProgress, TonoStatus } from '@/services/tono'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { whileVisible } from '@/tono-ui/while-visible'
@@ -26,13 +27,15 @@ export const useHomeTiming = (
   const [elapsed, setElapsed] = useState({ attempt: '', ms: 0 })
   const [duration, setDuration] = useState({ owner: '', minutes: 0 })
   const recordedElapsed = Math.max(0, progress?.totalElapsedMs ?? 0)
+  // A window hidden to the tray still reads as a visible page; ask the window.
+  const visible = useVisibility()
   useEffect(() => {
-    if (state !== 'connecting') return
+    if (state !== 'connecting' || !visible) return
     const start = Date.now() - recordedElapsed
     const tick = () =>
       setElapsed({ attempt, ms: Math.max(0, Date.now() - start) })
     return whileVisible(tick, HOME_CONNECT_TIMES.tick)
-  }, [state, attempt, recordedElapsed])
+  }, [state, attempt, recordedElapsed, visible])
   useEffect(() => {
     if (!protectedNow) {
       if (!statusKnown) return
@@ -67,10 +70,11 @@ export const useHomeTiming = (
 /** Same deadline semantics for the home sentence and the retained progress record. */
 export const useRetryCountdown = (deadline: number | null | undefined) => {
   const [now, setNow] = useState(Date.now)
+  const visible = useVisibility()
   useEffect(() => {
-    if (deadline == null) return
+    if (deadline == null || !visible) return
     return whileVisible(() => setNow(Date.now()), 1000)
-  }, [deadline])
+  }, [deadline, visible])
   return deadline == null
     ? null
     : Math.max(0, Math.ceil((deadline - now) / 1000))

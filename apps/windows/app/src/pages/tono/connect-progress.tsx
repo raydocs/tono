@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { tonoConnectProgressQueryKey } from '@/hooks/use-tono'
+import { useVisibility } from '@/hooks/use-visibility'
 import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
@@ -53,12 +54,14 @@ const hex = (color: string, alpha: number) =>
 const formatElapsed = formatTonoElapsed
 
 const useConnectProgress = (active: boolean) => {
+  const visible = useVisibility()
   const { data: progress, refetch } = useQuery({
     queryKey: tonoConnectProgressQueryKey,
     queryFn: tonoConnectProgress,
     // 2s polling only while a transaction is live; status pushes (below)
     // cover the transitions in between.
-    refetchInterval: active ? 2000 : false,
+    refetchInterval: active && visible ? 2000 : false,
+    refetchOnWindowFocus: true,
   })
 
   const refetchRef = useRef(refetch)

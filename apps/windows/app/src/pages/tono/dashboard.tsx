@@ -42,6 +42,7 @@ import {
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
+import { whileVisible } from '@/tono-ui/while-visible'
 import parseTraffic from '@/utils/parse-traffic'
 
 import { ConnectProgressCard } from './connect-progress'
@@ -533,18 +534,20 @@ const DashboardPage = () => {
     [],
   )
   const navigate = useNavigate()
-  const { status, mutateTonoStatus } = useTonoStatus()
+  const { status, mutateTonoStatus, visible } = useTonoStatus()
   // The overview's "server pool" card reads the same catalog status the
   // Nodes page shows; it used to repeat the selected city instead.
   const { data: catalog } = useQuery({
     queryKey: catalogStatusQueryKey,
     queryFn: tonoCatalogStatus,
-    refetchInterval: 30_000,
+    refetchInterval: visible ? 30_000 : false,
+    refetchOnWindowFocus: true,
   })
   const { data: encryptedDnsOverrides } = useQuery({
     queryKey: encryptedDnsQueryKey,
     queryFn: tonoEncryptedDnsOverrides,
-    refetchInterval: 15_000,
+    refetchInterval: visible ? 15_000 : false,
+    refetchOnWindowFocus: true,
   })
   const [actionError, setActionError] = useState<DashboardActionError | null>(
     null,
@@ -566,9 +569,9 @@ const DashboardPage = () => {
   // Wall-clock for the hint's expiry, sampled outside render.
   const [hintNow, setHintNow] = useState(() => Date.now())
   useEffect(() => {
-    const timer = window.setInterval(() => setHintNow(Date.now()), 30_000)
-    return () => window.clearInterval(timer)
-  }, [])
+    if (!visible) return
+    return whileVisible(() => setHintNow(Date.now()), 30_000)
+  }, [visible])
   const routeUnstable = (status?.routeUnstableUntilMs ?? 0) > hintNow
   const busy =
     uiState === 'connecting' ||
@@ -621,7 +624,7 @@ const DashboardPage = () => {
     live: trafficLive,
     refreshGetClashTraffic,
   } = useTrafficData({
-    enabled: connected,
+    enabled: connected && visible,
     generation: status?.controllerGeneration,
   })
   // The sea's water sparkle follows live throughput (decision 078).
@@ -630,15 +633,15 @@ const DashboardPage = () => {
   useEffect(() => publishSeaTraffic(liveBytes), [liveBytes])
   useEffect(() => () => publishSeaTraffic(null), [])
   const [trafficWaited, setTrafficWaited] = useState(false)
-  if (trafficWaited && (!connected || trafficLive)) {
+  if (trafficWaited && (!connected || !visible || trafficLive)) {
     setTrafficWaited(false)
   }
   // biome-ignore lint/correctness/useExhaustiveDependencies: the controller generation is a deliberate extra dependency — a controller restart must restart the wait.
   useEffect(() => {
-    if (!connected || trafficLive) return
+    if (!connected || !visible || trafficLive) return
     const timer = window.setTimeout(() => setTrafficWaited(true), 4_000)
     return () => window.clearTimeout(timer)
-  }, [connected, trafficLive, status?.controllerGeneration])
+  }, [connected, visible, trafficLive, status?.controllerGeneration])
   // biome-ignore lint/correctness/useExhaustiveDependencies: same — the backoff poll is rebuilt on a controller restart, see the comment below.
   useEffect(() => {
     if (!trafficWaited || trafficLive) return
