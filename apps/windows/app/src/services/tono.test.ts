@@ -494,6 +494,17 @@ describe('describeTonoActionError', () => {
     ).toEqual({ message: 'translated:tono.dashboard.errors.releaseNeedsRestart' })
   })
 
+  it('tells the user to connect again when the attempt was superseded', () => {
+    const error = new Error(
+      'TONO_STALE_GENERATION: PrepareCoreStart refused: an explicit release or update takeover superseded this attempt',
+    )
+    expect(describeTonoActionError(error, t)).toEqual({
+      message: 'translated:tono.dashboard.errors.staleGeneration',
+    })
+    // Another city cannot help a superseded attempt, so no server switch is offered.
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+  })
+
   it('says a dead loopback system proxy is the problem', () => {
     expect(
       describeTonoActionError(
