@@ -40,12 +40,9 @@ targets:
       - target: TonoWidgets
         embed: true
       - sdk: WidgetKit.framework
-      - framework: Frameworks/Libbox.xcframework
-        embed: false
+      # No libbox here: the tunnel extension is the only target that links the core (its ~40 MB of
+      # Go code once, not twice); the app asks it for statistics (TunnelMessage.traffic).
       - sdk: NetworkExtension.framework
-      - sdk: libresolv.tbd
-      # libbox's Go code calls UIDevice; the extension imports no UIKit itself, so link it explicitly.
-      - sdk: UIKit.framework
   PacketTunnel:
     type: app-extension
     platform: iOS
