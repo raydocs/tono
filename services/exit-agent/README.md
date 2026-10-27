@@ -180,7 +180,7 @@ roster time, failed or not. After two attempts with no converged round in
 between it stops restarting until a round converges (an operator has to fix a
 cause a restart does not, such as a wrong inbound tag). After the restart it reinstalls the roster and
 checks that the revoked client is gone, starting restore attempts for up to 30 s
-to come back (past that, the next timer round restores the roster); that round still exits non-zero and the
+(past that, the next timer round restores the roster); that round still exits non-zero and the
 next round acknowledges. The restart drops **every** connection on the node for
 a few seconds. Leave it off until it has been exercised on a real node and the
 owner has decided to enable it ([decision 140](../../docs/decisions/140-2026-10-27-exit-agent-stuck-revocation-restart.md)). The
