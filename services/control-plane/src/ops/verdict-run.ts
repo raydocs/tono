@@ -153,7 +153,7 @@ export async function runVerdictPass(
     );
     const nodeDesires = carried.filter((d) => d.subjectType !== 'user');
     const customers = customerDesires(input.customers, nowSec, nodeDesires, input.maintenance);
-    await persistPathStreaks(e.DB, customers.pathStreaks);
+    await persistPathStreaks(e.DB, customers.pathStreaks, input.customers);
     const raw = await reconcileIncidents(e.DB, [...customers.desires, ...carried], nowSec);
     return { nodes: 0, transitions: await toAlertTransitions(e.DB, raw) };
   }
@@ -169,7 +169,7 @@ export async function runVerdictPass(
     ];
   }
   await persistNodeStates(e.DB, output, nowSec);
-  if (scope !== 'none') await persistPathStreaks(e.DB, output.pathStreaks);
+  if (scope !== 'none') await persistPathStreaks(e.DB, output.pathStreaks, input.customers);
   const raw = await reconcileIncidents(e.DB, desires, nowSec);
   return { nodes: output.nodes.length, transitions: await toAlertTransitions(e.DB, raw) };
 }
