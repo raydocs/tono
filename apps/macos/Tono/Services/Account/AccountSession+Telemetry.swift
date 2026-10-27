@@ -782,23 +782,27 @@ nonisolated enum TelemetryOutbox {
     }
 }
 
-/// Events that leave the user without a working network.
+/// Events that leave the user without a working network, plus the app's own
+/// release after a failed connect.
 ///
 /// Queued on disk and posted to `telemetry/diagnostics` on a later signed-in
 /// pass, with or without the snapshot switch (decision 051). The control plane
-/// treats these codes as severity `p0` and alerts on the first event of the cluster.
-/// The closed set matches `P0_NETWORK_LOSS_CODES` in `failure-clusters.ts`.
+/// treats the network-loss codes as severity `p0` and alerts on the first event
+/// of the cluster; they match `P0_NETWORK_LOSS_CODES` in `failure-clusters.ts`.
+/// `connectReleased` is the one normal-severity event on the queue: the app
+/// released the network on purpose after a failed connect.
 nonisolated enum NetworkLossReport {
     static let networkLoss = "TONO_NETWORK_LOSS"
-    static let failOpen = "TONO_FAIL_OPEN"
+    static let connectReleased = "TONO_CONNECT_RELEASED"
     static let watchdogRestore = "TONO_WATCHDOG_RESTORE"
     static let killSwitchStuck = "TONO_KILL_SWITCH_STUCK"
     static let restoreNetwork = "TONO_RESTORE_NETWORK"
     static let crashWhileProtected = "TONO_CRASH_WHILE_PROTECTED"
 
-    static func isP0(_ code: String) -> Bool {
+    /// The enqueue gate: the network-loss codes and `connectReleased`.
+    static func ridesOfflineQueue(_ code: String) -> Bool {
         switch code {
-        case networkLoss, failOpen, watchdogRestore, killSwitchStuck, restoreNetwork, crashWhileProtected:
+        case networkLoss, connectReleased, watchdogRestore, killSwitchStuck, restoreNetwork, crashWhileProtected:
             return true
         default:
             return false
@@ -814,7 +818,7 @@ nonisolated enum NetworkLossReport {
     }
 
     static func enqueue(code: String, node: String, defaults: UserDefaults = AppProfile.defaults) {
-        guard isP0(code) else { return }
+        guard ridesOfflineQueue(code) else { return }
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
             .map { String($0.prefix(40)) }
             .flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"

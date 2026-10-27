@@ -139,7 +139,7 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
     func testNetworkLossCodesWaitOnDiskUntilTheNetworkReturns() throws {
         defaults.removeObject(forKey: TelemetryOutbox.key)
         NetworkLossReport.enqueue(code: NetworkLossReport.networkLoss, node: "", defaults: defaults)
-        NetworkLossReport.enqueue(code: NetworkLossReport.failOpen, node: "Tokyo", defaults: defaults)
+        NetworkLossReport.enqueue(code: NetworkLossReport.connectReleased, node: "Tokyo", defaults: defaults)
         NetworkLossReport.enqueue(code: NetworkLossReport.watchdogRestore, node: "Tokyo", defaults: defaults)
         NetworkLossReport.enqueue(code: NetworkLossReport.killSwitchStuck, node: "Tokyo", defaults: defaults)
         NetworkLossReport.enqueue(code: NetworkLossReport.restoreNetwork, node: "Tokyo", defaults: defaults)
