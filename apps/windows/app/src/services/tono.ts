@@ -580,6 +580,10 @@ const call = <T>(command: string, args?: Record<string, unknown>): Promise<T> =>
 export const tonoSignInStart = (email: string) =>
   call<TonoSignInChallenge>('tono_sign_in_start', { email })
 
+/** `auth/methods` sign-up mode; global, never about one address. Failure reads `closed`. */
+export type TonoSignupMode = 'open' | 'paused' | 'closed'
+export const tonoSignupMode = () => call<TonoSignupMode>('tono_signup_mode')
+
 export const tonoSignInVerify = (email: string, code: string) =>
   call<TonoAccount>('tono_sign_in_verify', { email, code })
 

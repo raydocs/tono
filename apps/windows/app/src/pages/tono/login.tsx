@@ -14,6 +14,9 @@ import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
   stableTonoErrorCode,
+  tonoAccount,
+  type TonoSignupMode,
+  tonoSignupMode,
   tonoRestoreInternet,
   tonoRetryRestore,
   tonoSignInDismiss,
@@ -46,6 +49,17 @@ import {
 import './sea-welcome.css'
 
 const RESEND_COUNTDOWN = 60
+type PlanLapse = 'planExpired' | 'quotaExceeded' | 'noPlan'
+
+/** Decision 133's 403 codes, carried on the sign-in error's message by `ApiError::PlanInactive`. */
+const planLapseOfError = (error: unknown): PlanLapse | null => {
+  const raw = String(error)
+  if (raw.includes('(ACCOUNT_EXPIRED)')) return 'planExpired'
+  if (raw.includes('(QUOTA_EXCEEDED)')) return 'quotaExceeded'
+  // A new account that has never had a plan (public sign-up, decision pending).
+  if (raw.includes('(ENTITLEMENT_REQUIRED)')) return 'noPlan'
+  return null
+}
 const SENT_ACK_MS = 1500
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -125,7 +139,7 @@ const authSupportSummary = (
 }
 
 const LoginPage = () => {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { newAppearance } = useAppearancePreferences()
   const [rejectedAttempt, setRejectedAttempt] = useState(0)
@@ -175,8 +189,47 @@ const LoginPage = () => {
   // control plane stopped accepting (revoked device, signed out elsewhere, a
   // lapsed plan) also reads as suspended; signing in again is the way out.
   const sessionEnded = suspended && !verifySuspended
+  // A refused session keeps the last account it read. When that account says its plan ran
+  // out, say so: "signed out" would send the user to sign in again, which cannot help
+  // until the plan is renewed (decision 133).
+  const [endedLapse, setEndedLapse] = useState<{
+    lapse: 'planExpired' | 'quotaExceeded'
+    date: string
+  } | null>(null)
+  useEffect(() => {
+    if (!sessionEnded) return
+    let live = true
+    tonoAccount()
+      .then((account) => {
+        if (!live || !account) return
+        const expired =
+          account.expiresAt != null && account.expiresAt * 1000 <= Date.now()
+        const usedUp =
+          account.quotaBytes != null &&
+          account.usageBytes != null &&
+          account.usageBytes >= account.quotaBytes
+        setEndedLapse(
+          expired
+            ? {
+                lapse: 'planExpired',
+                date: new Date(
+                  (account.expiresAt ?? 0) * 1000,
+                ).toLocaleDateString(i18n.language),
+              }
+            : usedUp
+              ? { lapse: 'quotaExceeded', date: '' }
+              : null,
+        )
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [sessionEnded, i18n.language])
+  const planLapse = sessionEnded ? (endedLapse?.lapse ?? null) : null
+  const endedKey = planLapse ?? 'sessionEnded'
   const suspendedTitle = sessionEnded
-    ? t('tono.login.sessionEnded.title')
+    ? t(`tono.login.${endedKey}.title`)
     : t('tono.login.suspended.title')
 
   const restoreFailed = status?.accountState === 'error'
@@ -193,8 +246,27 @@ const LoginPage = () => {
   const authBusy = sending || verifying || changingEmail || automaticRecovery
   const supportAvailable = recovery?.phase === 'userAction' && !authBusy
   const visibleError = automaticRecovery ? null : error
+  // Global sign-up mode, read once; never about the typed address (anti-enumeration).
+  // `closed` (also unknown/unreadable, and an older server's budget-spent `false`) keeps
+  // conditional wording that claims neither invite-only nor delivery.
+  const [signupMode, setSignupMode] = useState<TonoSignupMode>('closed')
+  const publicSignup = signupMode === 'open'
+  useEffect(() => {
+    let live = true
+    tonoSignupMode()
+      .then((mode) => live && mode && setSignupMode(mode))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+  const signupCopy = (key: 'inboxInstructions' | 'codeSent' | 'codeSentTo') =>
+    t(publicSignup ? `tono.login.openSignup.${key}` : `tono.login.${key}`)
+  const [signInPlanLapse, setSignInPlanLapse] = useState<PlanLapse | null>(null)
+  // A lapsed plan is an answer about the account, not a failure to diagnose.
   const hasDiagnosticFailure =
     Boolean(visibleError) &&
+    !signInPlanLapse &&
     error !== t('tono.login.invalidEmail') &&
     error !== t('tono.login.invalidCode')
   // `auth/email/start` answers 202 for every address and a failed delivery is
@@ -204,6 +276,7 @@ const LoginPage = () => {
   const showNoEmailHint = codeSent && countdown === 0 && !authBusy && !error
 
   const resetToStart = () => {
+    setSignInPlanLapse(null)
     setCodeSent(false)
     setSentAck(false)
     setCode('')
@@ -287,6 +360,7 @@ const LoginPage = () => {
     authRequestPendingRef.current = true
     setVerifying(true)
     setError(null)
+    setSignInPlanLapse(null)
     setAuthFailureSummary(null)
     setAuthPaths([])
     try {
@@ -298,6 +372,12 @@ const LoginPage = () => {
       await mutateTonoStatus()
       navigate('/', { replace: true })
     } catch (error) {
+      const lapse = planLapseOfError(error)
+      if (lapse) {
+        setSignInPlanLapse(lapse)
+        setError(t(`tono.login.${lapse}.signInError`))
+        return
+      }
       // The server already used up this code; clear it so a new one is requested.
       if (String(error).includes('TONO_SIGN_IN_NOT_SAVED')) setCode('')
       if (
@@ -530,7 +610,9 @@ const LoginPage = () => {
           </h1>
           <p style={{ margin: 0, fontSize: 13, color: text.secondary }}>
             {sessionEnded
-              ? t('tono.login.sessionEnded.description')
+              ? t(`tono.login.${endedKey}.description`, {
+                  date: endedLapse?.date ?? '',
+                })
               : t('tono.login.suspended.description')}
           </p>
           <button
@@ -549,7 +631,7 @@ const LoginPage = () => {
             }}
           >
             {sessionEnded
-              ? t('tono.login.sessionEnded.signIn')
+              ? t(`tono.login.${endedKey}.signIn`)
               : t('tono.login.changeEmail')}
           </button>
 
@@ -735,7 +817,7 @@ const LoginPage = () => {
               color: text.secondary,
             }}
           >
-            {t(codeSent ? 'tono.login.inboxInstructions' : 'tono.login.intro')}
+            {codeSent ? signupCopy('inboxInstructions') : t('tono.login.intro')}
           </p>
         </div>
 
@@ -748,9 +830,6 @@ const LoginPage = () => {
               </code>
               {changeEmailButton}
             </span>
-            <p>
-              {t('tono.login.codeSentTo')} {t('tono.login.codeFrom')}
-            </p>
           </div>
         )}
 
@@ -768,7 +847,7 @@ const LoginPage = () => {
                 : verifying
                   ? t('tono.login.verifying')
                   : codeSent
-                    ? t('tono.login.codeSent')
+                    ? signupCopy('codeSent')
                     : ''}
         </p>
 
@@ -1064,7 +1143,7 @@ const LoginPage = () => {
                 color: text.secondary,
               }}
             >
-              {t('tono.login.codeSentTo')}
+              {signupCopy('codeSentTo')}
             </p>
             <p
               style={{
@@ -1080,12 +1159,13 @@ const LoginPage = () => {
         )}
         {showNoEmailHint && (
           <div
+            className={newAppearance ? 'sea-login-notice' : undefined}
             style={{
               display: 'flex',
               flexDirection: 'column',
               gap: 4,
-              alignItems: 'center',
-              textAlign: 'center',
+              alignItems: newAppearance ? 'flex-start' : 'center',
+              textAlign: newAppearance ? 'left' : 'center',
             }}
           >
             <strong style={{ fontSize: 12, color: text.primary }}>
@@ -1094,8 +1174,18 @@ const LoginPage = () => {
             <span
               style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}
             >
-              {t('tono.login.noEmail.description')}
+              {publicSignup
+                ? t('tono.login.openSignup.noEmail')
+                : signupMode === 'paused'
+                  ? t('tono.login.signupPaused.noEmail')
+                  : t('tono.login.noEmail.description')}
             </span>
+            {/* The sender only matters once the mail has not shown up. */}
+            {newAppearance && (
+              <span style={{ fontSize: 11, color: text.tertiary }}>
+                {t('tono.login.codeFrom')}
+              </span>
+            )}
           </div>
         )}
       </GlassCard>

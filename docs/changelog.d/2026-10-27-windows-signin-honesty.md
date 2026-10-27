@@ -1,0 +1,21 @@
+## 2026-10-27 · Windows 登录：未受邀邮箱不再误报「已发送」，套餐到期不再说成登录失效
+- 归属：G1（客户路径 UI/UX）；Windows 应用（海面外观为主，文案两种外观共用）与 `tono-core`。
+- 来源：叠在 #1777（`amp/windows-onboarding-polish`）上；分支 `amp/windows-signin-honesty`，PR #1778；未合 main。依据登录与订阅研究线程 T-01a17e6b。
+- 缺陷修复：
+  - 未受邀邮箱（服务端为防枚举照样回 202，但不发信）：验证码步骤原先说「请查收邮件」。现在改为「如果这个邮箱已开通 Tono，验证码会在一分钟内送达」；一分钟后的提示写明 Tono 只对受邀用户开放，请核对地址或联系为你开通 Tono 的人，发件人地址也放在这里。服务端行为和防枚举都没有动（WIN-SIGNIN-UNINVITED-SENT）。
+  - 套餐到期 / 流量用完：重新登录时原来显示「登录服务暂时不可用」，并附带技术详情。现在 `tono-core` 把 403 `ACCOUNT_EXPIRED`、`QUOTA_EXCEEDED`、`ENTITLEMENT_REQUIRED` 映射成 `ApiError::PlanInactive(code)`，支持码仍然是 `TONO_AUTH_FORBIDDEN`，登录页给出对应说明（套餐已到期 / 本期流量用完 / 账号已建好但还没有套餐），不再展开技术详情。
+  - 已登录设备的会话被拒时：如果缓存账户的 `expiresAt` 已过期或流量已用完，标题从「登录已失效」改为「套餐已到期（日期）」或「本期流量已用完」，按钮改为「已续费，重新登录」（决策 133：续费后要重新登录一次）。通用的「登录已失效」文案去掉了「或套餐已暂停」（WIN-SIGNIN-PLAN-AS-SESSION）。
+- 新增/优化：验证码步骤更轻，标题改为「输入验证码」，只占一行；邮箱和「换邮箱」放在同一行；发件人和垃圾箱提示等一分钟后没收到信才出现。
+- 没做（需要所有者决定或依赖未合入的工作）：开放注册（控制面 PUBLIC_SIGNUP 在 T-01a17e7b 中实现，默认关闭；Windows 还没有读取 `auth/methods`）、Apple 登录、支付渠道和续费按钮；邮箱 webmail 快捷入口（需要放宽 Tauri `shell.open` 白名单）；记住上次邮箱。
+- 工程与测试：`login.test.tsx` 新增 2 个 `it`（登录时套餐到期、会话被拒时套餐到期），在 #1777 的 login.tsx 上均为红；`tono-core` 新增 1 个 `#[tokio::test]`；预览壳 fixture 新增 `planError` 参数。
+- 验证（Linux orb，Node 22）：`vitest run src/pages/tono src/pages/_layout src/tono-ui` 共 38 个文件、316 个用例通过；`tsc --noEmit` 和改动文件的 eslint、biome 都通过。Rust 未在本地编译（orb 里没有 cargo），交给 hosted CI 的 windows/core 和 app-rust。截图来自 Windows 预览壳（模拟数据），不是真机。
+- 候选/发布：只改源码，没有出新候选包。
+- 剩余限制：macOS、iOS 的登录文案和到期处理没有改；没有在 Windows 真机上看过；没有真实的到期账号联调。UI PR，不开 auto-merge。
+- 续记（2026-10-27，同一 PR）：接入开放注册开关。`tono-core` 的 `AuthMethod` 读取 `email.publicSignup`（缺省视为 false），新增只读命令 `tono_public_signup`。登录页挂载时读取一次，读取失败按 false 处理。开关打开时，验证码步骤改为「验证码会在一分钟内发到这个邮箱；第一次使用的邮箱会自动创建 Tono 账号」，一分钟后的提示不再提「只对受邀用户开放」；开关关闭时保持邀请制的条件式文案。这是全局开关，与输入的邮箱无关，防枚举不变（202、发信时序与 #1779 一致）。无套餐账号的提示改为「请联系 Tono 支持或为你开通 Tono 的人开通套餐」。没有开启生产开关。
+  验证：`login.test.tsx` 新增 1 个 `it`（开关打开时的文案；在上一版 login.tsx 上为红：仍显示 "If this email has a Tono account…"），开关关闭时的文案由原有用例覆盖；`tono-core` 新增 `auth_methods_reads_public_signup`，原有 auth_methods 用例补上「字段缺省 = false」的断言；Windows 前端完整 `vitest run` 共 61 个文件、440 个用例通过；tsc、eslint 通过；预览壳 `?publicSignup` 下截图核对了开关开、关两种状态。Rust 仍交给 CI 编译。客户端可以独立于 #1779 合入：服务端没有这个字段时按 false 处理。
+- 续记 2（2026-10-27，同一 PR）：去掉「验证码一定会送达」的承诺。核对已合并 main 的 #1779：`auth/email/start` 在下面几种情况仍回 202 但不发信：邮箱不合格（停用账号、开关关闭时的未受邀地址、陌生地址的每日额度用完），或 `deliverEmailCode` 失败（这时验证码会被作废）。所以开关开、关两种文案都改为「已请求验证码，通常一分钟内到达，偶尔会延迟或没能送达」（邀请制文案仍是条件句：「如果这个邮箱可以登录 Tono…」）。一分钟后的提示给出下一步：稍后重新发送，一直收不到就联系 Tono 支持（邀请制下是联系为你开通 Tono 的人）。不提这个邮箱的账号状态。验证：`login.test.tsx` 新增 1 个 `it`，开关开、关两种状态都检查验证码步骤不出现无条件的送达承诺，并给出「稍后重新发送」；这条用例在旧文案上为红；Windows 前端完整 vitest 共 61 个文件、441 个用例通过；tsc 通过；预览壳截图核对了开关开、关两种状态。注册线程计划新增的 `deliveryDegraded` 以及按当日额度计算的 `publicSignup`（还没进 main）留作后续可选接入。
+- 续记 3（2026-10-27，同一 PR）：`publicSignup` 为 false 时不再声称「只对受邀用户开放」。#1781 合入后，main 上 `email.publicSignup` 表示「开关打开且当日新邮箱额度未用完」，所以 false 也可能是额度用完，不一定是邀请制。注册线程随后把契约改为 `publicSignup` 只表示开关本身，另加全局字段 `email.signupPaused`（开放注册但当日额度已满）。Windows 改成读三种状态：`tono_signup_mode` 返回 `open` / `paused` / `closed`，`signupPaused` 优先，读失败按 `closed` 处理。
+  - `closed`：一分钟提示改为中性说法：「可能是这个邮箱暂时不能用来登录 Tono，也可能是邮件没能送达」，不说「仅受邀」，因此连到旧版 #1781 服务端时也成立。
+  - `paused`：「今天的新用户注册名额已满；已有账号的邮箱不受影响，新用户请明天再试」，与 #1783 的 macOS/iOS 文案一致。
+  - 三种状态都与输入的邮箱无关，防枚举不变。
+  - 验证：「never promises…」用例扩展为三种状态，并断言不出现 invite-only（在上一版文案上为红）；新增 paused 用例（去掉 paused 分支后为红）；`tono-core` 用例补上 `signupPaused`；Windows 前端完整 vitest 共 61 个文件、442 个用例通过；tsc 和 eslint 通过；预览壳 `?signup=closed|paused` 截图核对。

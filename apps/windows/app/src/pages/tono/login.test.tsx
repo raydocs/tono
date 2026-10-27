@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
   dismiss: vi.fn(),
   mutate: vi.fn(),
+  account: vi.fn(),
+  signupMode: vi.fn(),
   status: {} as Record<string, unknown>,
 }))
 
@@ -37,6 +39,8 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoSignInStart: mocks.start,
   tonoSignInVerify: mocks.verify,
   tonoSignInDismiss: mocks.dismiss,
+  tonoAccount: mocks.account,
+  tonoSignupMode: mocks.signupMode,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
   tonoRestoreInternet: mocks.disconnect,
@@ -65,6 +69,8 @@ beforeEach(() => {
   mocks.verify.mockReset()
   mocks.dismiss.mockReset().mockResolvedValue(undefined)
   mocks.mutate.mockReset().mockResolvedValue(undefined)
+  mocks.account.mockReset().mockResolvedValue(null)
+  mocks.signupMode.mockReset().mockResolvedValue('closed')
   mocks.status = {}
 })
 
@@ -230,11 +236,11 @@ describe('login request exclusion', () => {
   it('announces the inbox step, focuses code, and returns to the original email', async () => {
     await enterCodeStep()
     expect(
-      screen.getByRole('heading', { name: 'Open your inbox' }),
+      screen.getByRole('heading', { name: 'Enter your code' }),
     ).toBeDefined()
     const code = screen.getByLabelText('6-digit code')
     expect(document.activeElement).toBe(code)
-    expect(screen.getByRole('status').textContent).toBe('Check your inbox.')
+    expect(screen.getByRole('status').textContent).toBe(enTono.login.codeSent)
     expect(
       document.getElementById(code.getAttribute('aria-describedby')!),
     ).not.toBeNull()
@@ -465,4 +471,85 @@ describe('sea sign-in', () => {
     expect(document.activeElement).toBe(screen.getByLabelText('6-digit code'))
     expect(mocks.verify).toHaveBeenCalledTimes(1)
   })
+})
+
+describe('login plan answers', () => {
+  it('says the plan expired at sign-in instead of a service failure with diagnostics', async () => {
+    mocks.verify.mockRejectedValue(
+      new Error(
+        'TONO_AUTH_FORBIDDEN: this Tono plan is not active (ACCOUNT_EXPIRED)',
+      ),
+    )
+    await enterCodeStep()
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('6-digit code'), {
+        target: { value: '123456' },
+      }),
+    )
+    expect(screen.getByRole('alert').textContent).toBe(
+      enTono.login.planExpired.signInError,
+    )
+    expect(screen.queryByText('Details')).toBeNull()
+    expect(screen.queryByTestId('support-contact')).toBeNull()
+  })
+
+  it('names a lapsed plan on a refused session instead of a plain sign-out', async () => {
+    mocks.status = { accountState: 'suspended' }
+    mocks.account.mockResolvedValue({
+      email: 'person@example.com',
+      suspended: false,
+      deviceLimit: 3,
+      expiresAt: Math.floor(Date.now() / 1000) - 86_400,
+    })
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    await act(async () => undefined)
+    expect(screen.getByText('Plan expired')).toBeDefined()
+    expect(screen.queryByText('Session ended')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: enTono.login.planExpired.signIn }),
+    ).toBeDefined()
+  })
+})
+
+describe('login sign-up policy', () => {
+  // auth/email/start answers 202 even when nothing is sent (daily cap, failed delivery,
+  // ineligible address), so neither state may promise that a code arrives.
+  it('never promises delivery or claims invite-only, and offers a next step, in every sign-up mode', async () => {
+    for (const mode of ['closed', 'open', 'paused']) {
+      cleanup()
+      mocks.signupMode.mockResolvedValue(mode)
+      await enterCodeStep()
+      const page = document.body.textContent ?? ''
+      expect(page).not.toMatch(
+        /on its way|(?<!usually )arrives (at this email )?within a minute/i,
+      )
+      expect(page).toMatch(/send again later/i)
+      // An older server's `false` can be today's sign-up budget, not a closed registration.
+      expect(page).not.toMatch(/invite-only/i)
+    }
+  })
+
+  it('drops the invite-only wording when the server says sign-up is open', async () => {
+    mocks.signupMode.mockResolvedValue('open')
+    const sendAgain = await enterCodeStep()
+    expect(sendAgain).toBeDefined()
+    expect(screen.getByRole('status').textContent).toBe(
+      enTono.login.openSignup.codeSent,
+    )
+    expect(screen.getByText(enTono.login.openSignup.noEmail)).toBeDefined()
+    expect(screen.queryByText(/invite-only|has a Tono account/)).toBeNull()
+    // One global read; the typed address never reaches it.
+    expect(mocks.signupMode).toHaveBeenCalledWith()
+  })
+})
+
+it('says new sign-ups are full for today when open registration is paused', async () => {
+  mocks.signupMode.mockResolvedValue('paused')
+  await enterCodeStep()
+  expect(screen.getByText(enTono.login.signupPaused.noEmail)).toBeDefined()
+  expect(screen.getByRole('status').textContent).toBe(enTono.login.codeSent)
 })

@@ -40,7 +40,7 @@ pub mod support;
 pub mod quit;
 pub mod update;
 pub use account::{
-    load_credentials, tono_account, tono_devices, tono_repair_service, tono_revoke_device,
+    load_credentials, tono_account, tono_devices, tono_signup_mode, tono_repair_service, tono_revoke_device,
     tono_service_prerequisites, tono_sign_in_dismiss, tono_sign_in_start, tono_sign_in_verify, tono_sign_out,
 };
 pub use catalog::{

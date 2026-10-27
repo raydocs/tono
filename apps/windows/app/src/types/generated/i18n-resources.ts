@@ -1318,6 +1318,15 @@ export interface TranslationResources {
           description: string
           title: string
         }
+        noPlan: {
+          signInError: string
+        }
+        openSignup: {
+          codeSent: string
+          codeSentTo: string
+          inboxInstructions: string
+          noEmail: string
+        }
         paths: {
           elapsed: string
           kind: {
@@ -1332,8 +1341,20 @@ export interface TranslationResources {
           system_dns: string
           title: string
         }
+        planExpired: {
+          description: string
+          signIn: string
+          signInError: string
+          title: string
+        }
         privacyDetails: string
         privacySummary: string
+        quotaExceeded: {
+          description: string
+          signIn: string
+          signInError: string
+          title: string
+        }
         recoveryEnded: string
         relayFailureDetails: string
         relayFailureKinds: string
@@ -1354,6 +1375,9 @@ export interface TranslationResources {
           description: string
           signIn: string
           title: string
+        }
+        signupPaused: {
+          noEmail: string
         }
         stepCode: string
         stepEmail: string

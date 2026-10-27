@@ -263,10 +263,18 @@ export const tonoSignInStart = async () => {
   await signInFixtureIO('sendCode')
   return { challengeId: 'synthetic', expiresIn: 600, message: '' }
 }
+// `auth/methods` sign-up mode; `?signup=open|paused` previews it (default closed).
+export const tonoSignupMode = async () =>
+  (params.get('signup') ?? 'closed') as 'open' | 'paused' | 'closed'
 export const tonoSignInVerify = async () => {
   await signInFixtureIO('verifyCode')
   if (params.has('badCode'))
     throw new Error('TONO_AUTH_INVALID_CODE: Synthetic rejected code')
+  // ACCOUNT_EXPIRED / QUOTA_EXCEEDED / ENTITLEMENT_REQUIRED, as `ApiError::PlanInactive` words it.
+  if (params.has('planError'))
+    throw new Error(
+      `TONO_AUTH_FORBIDDEN: this Tono plan is not active (${params.get('planError')})`,
+    )
   const suspended = params.has('paused')
   window.dispatchEvent(
     new CustomEvent('preview-home-state', {

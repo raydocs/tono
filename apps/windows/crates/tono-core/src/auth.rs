@@ -164,6 +164,12 @@ pub enum ApiError {
     InvalidOrExpiredCode,
     #[error("this account does not have permission for that action")]
     Forbidden,
+    /// HTTP 403 `ACCOUNT_EXPIRED` / `QUOTA_EXCEEDED` (decision 133) or `ENTITLEMENT_REQUIRED`
+    /// (an account that has no plan yet): the code was right, but the account has no active
+    /// plan. Names the code so the sign-in screen says so instead of "the sign-in service is
+    /// unavailable".
+    #[error("this Tono plan is not active ({0})")]
+    PlanInactive(String),
     #[error("the requested item no longer exists")]
     NotFound,
     #[error("this Tono account has reached its device allowance; revoke another device first")]
@@ -375,6 +381,14 @@ pub struct AuthMethod {
     pub enabled: bool,
     #[serde(rename = "clientId", default)]
     pub client_id: Option<String>,
+    /// `email.publicSignup` (decision 138): whether any address may create an account. A
+    /// global setting, never an answer about one address; absent on older servers = false.
+    #[serde(rename = "publicSignup", default)]
+    pub public_signup: bool,
+    /// `email.signupPaused`: open registration is on but today's new-address code budget is
+    /// spent. Global, never about one address; absent = false.
+    #[serde(rename = "signupPaused", default)]
+    pub signup_paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1725,6 +1739,9 @@ fn map_status(response: ApiResponse) -> Result<Vec<u8>, ApiError> {
         // code: the same endpoint also answers a plain 401 (`AUTHENTICATION_FAILED`).
         401 if code.as_deref() == Some("INVALID_OR_EXPIRED_CODE") => Err(ApiError::InvalidOrExpiredCode),
         401 => Err(ApiError::Unauthorized),
+        403 if matches!(code.as_deref(), Some("ACCOUNT_EXPIRED" | "QUOTA_EXCEEDED" | "ENTITLEMENT_REQUIRED")) => {
+            Err(ApiError::PlanInactive(code.unwrap_or_default()))
+        }
         403 => Err(ApiError::Forbidden),
         404 => Err(ApiError::NotFound),
         409 if code.as_deref() == Some("DEVICE_LIMIT") => Err(ApiError::DeviceLimit),
@@ -2338,6 +2355,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_methods_reads_public_signup() {
+        let (client, _mock, _store) = test_client(|_| {
+            json(
+                200,
+                r#"{"email":{"enabled":true,"publicSignup":true},"apple":{"enabled":true},"google":{"enabled":false}}"#,
+            )
+        });
+        let email = client.auth_methods().await.unwrap().email;
+        assert!(email.public_signup);
+        assert!(!email.signup_paused, "absent means not paused");
+        let (client, _mock, _store) = test_client(|_| {
+            json(
+                200,
+                r#"{"email":{"enabled":true,"publicSignup":true,"signupPaused":true},"apple":{"enabled":true},"google":{"enabled":false}}"#,
+            )
+        });
+        assert!(client.auth_methods().await.unwrap().email.signup_paused);
+    }
+
+    #[tokio::test]
+    async fn verify_names_a_lapsed_plan_instead_of_a_generic_refusal() {
+        let (client, _mock, _store) = test_client(|_| {
+            json(
+                403,
+                r#"{"error":{"message":"Your plan has expired; renew or contact your family","code":"ACCOUNT_EXPIRED"}}"#,
+            )
+        });
+        let err = client.verify_email_sign_in("c1", "123456").await.unwrap_err();
+        assert_eq!(err, ApiError::PlanInactive("ACCOUNT_EXPIRED".to_string()));
+        // The support prefix is unchanged; the screen reads the code from the message.
+        assert_eq!(
+            crate::customer_failure::auth_support_prefix(&err),
+            "TONO_AUTH_FORBIDDEN"
+        );
+        assert!(err.to_string().contains("(ACCOUNT_EXPIRED)"));
+    }
+
+    #[tokio::test]
     async fn refresh_rotates_tokens_and_stores_new_refresh() {
         let (client, mock, store) = test_client(|request| {
             if request.url.ends_with("auth/refresh") {
@@ -2564,6 +2619,7 @@ mod tests {
             ));
             let methods = client.auth_methods().await.unwrap();
             assert!(methods.email.enabled, "{kind:?}");
+            assert!(!methods.email.public_signup, "{kind:?}: absent means invite-only");
             assert_eq!(
                 mock.count_to("auth/methods"),
                 2,
