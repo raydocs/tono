@@ -4,7 +4,7 @@ ManifestDPIAware true
 ; time, so a @tauri-apps/cli upgrade must be diffed against the upstream template of the
 ; new version (crates/tauri-bundler/src/bundle/windows/nsis/) before the version below moves.
 ; windows-packaging.test.mjs fails when package.json's @tauri-apps/cli no longer matches.
-; TEMPLATE_SYNCED_WITH_TAURI_CLI 2.12.1
+; TEMPLATE_SYNCED_WITH_TAURI_CLI 2.12.4
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
 ; Currently undocumented on NSIS's website but is in the Docs folder of source tree, see
 ; https://github.com/kichik/nsis/blob/5fc0b87b819a9eec006df4967d08e522ddd651c9/Docs/src/attributes.but#L286-L300
@@ -28,6 +28,9 @@ ManifestDPIAwareness PerMonitorV2
 !include "Win\Propkey.nsh"
 ; tauri-bundler 2.12 (cli 2.12.1): utils.nsh's CheckIfAppIsRunning uses the Restart Manager.
 !include "Win\RestartManager.nsh"
+; tauri-bundler 2.10.4 (cli 2.12.4): APP_ASSOCIATE quotes the executable path in the icon and open
+; command (ported below). Its reinstall-page, WiX lookup, language-string and silent-downgrade changes do
+; not apply: DetectExistingInstall replaces that flow and blocks downgrades in every mode.
 !include "WinVer.nsh"
 !include "LogicLib.nsh"
 !include "StrFunc.nsh"
@@ -1438,7 +1441,7 @@ Section Install
   ; Create file associations
   {{#each file_associations as |association| ~}}
     {{#each association.ext as |ext| ~}}
-       !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$INSTDIR\${MAINBINARYNAME}.exe,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
+       !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0" "Open with ${PRODUCTNAME}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
     {{/each}}
   {{/each}}
 
