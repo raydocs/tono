@@ -28,7 +28,7 @@ export const ProtectedOfflineBanner = () => {
   const text = tonoText(dark)
   const navigate = useNavigate()
   const location = useLocation()
-  const { status, mutateTonoStatus } = useTonoStatus()
+  const { status, mutateTonoStatus, visible } = useTonoStatus()
   const { requestRelease, dialog: releaseDialog } =
     useReleaseProtection(mutateTonoStatus)
   const { available: backupAvailable, selectAndRetry } = useManualBackupChannel(
@@ -75,7 +75,8 @@ export const ProtectedOfflineBanner = () => {
     queryKey: tonoConnectProgressQueryKey,
     queryFn: tonoConnectProgress,
     enabled: shouldShow,
-    refetchInterval: shouldShow ? 2000 : false,
+    refetchInterval: shouldShow && visible ? 2000 : false,
+    refetchOnWindowFocus: true,
   })
   const retryScheduled = progress?.nextRetryAtMs != null
 

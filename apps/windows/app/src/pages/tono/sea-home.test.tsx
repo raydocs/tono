@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   aiMount: vi.fn(),
   aiUnmount: vi.fn(),
 }))
+vi.mock('@/hooks/use-visibility', () => ({ useVisibility: () => true }))
 vi.mock('@/hooks/use-tono', () => ({
   useTonoStatus: () => ({
     status: mocks.status,
