@@ -24,6 +24,7 @@ import {
 } from './verdict-facts';
 import { customerDesires } from './verdict-customers';
 import { loadRelayDesires } from './relay-alerts';
+import { loadExitRosterDesires } from './exit-roster-alerts';
 
 const ID_CHUNK = 90;
 
@@ -153,14 +154,16 @@ export async function runVerdictPass(
     );
     const nodeDesires = carried.filter((d) => d.subjectType !== 'user');
     const customers = customerDesires(input.customers, nowSec, nodeDesires, input.maintenance);
-    await persistPathStreaks(e.DB, customers.pathStreaks);
+    await persistPathStreaks(e.DB, customers.pathStreaks, input.customers);
     const raw = await reconcileIncidents(e.DB, [...customers.desires, ...carried], nowSec);
     return { nodes: 0, transitions: await toAlertTransitions(e.DB, raw) };
   }
   const output = evaluate(input);
   // Relay incidents are judged from their own two tables on every fleet pass;
   // the count lives in those rows, so a node-ingest pass agrees with the cron.
-  const fleet = [...output.desires, ...await loadRelayDesires(e.DB, nowSec)];
+  const fleet = [
+    ...output.desires, ...await loadRelayDesires(e.DB, nowSec), ...await loadExitRosterDesires(e.DB, nowSec),
+  ];
   let desires = fleet;
   if (scope === 'none') {
     desires = [
@@ -169,7 +172,7 @@ export async function runVerdictPass(
     ];
   }
   await persistNodeStates(e.DB, output, nowSec);
-  if (scope !== 'none') await persistPathStreaks(e.DB, output.pathStreaks);
+  if (scope !== 'none') await persistPathStreaks(e.DB, output.pathStreaks, input.customers);
   const raw = await reconcileIncidents(e.DB, desires, nowSec);
   return { nodes: output.nodes.length, transitions: await toAlertTransitions(e.DB, raw) };
 }

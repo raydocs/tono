@@ -115,6 +115,14 @@ class Refusal(RuntimeError):
     """A condition the operator must fix. Never worked around silently."""
 
 
+class PartialReconcile(Refusal):
+    """Some client adds or removals failed; the others were applied.
+
+    The counters are still worth reading: one client the API refuses must not
+    stop metering, and so quota enforcement, for every account on the node.
+    """
+
+
 class Rejection(RuntimeError):
     """A batch the control plane refused. Offering it again changes nothing."""
 
@@ -823,8 +831,25 @@ def control_plane_unreachable(error: BaseException) -> bool:
     the copy.
     """
     if isinstance(error, urllib.error.HTTPError):
-        return error.code in RETRYABLE_STATUSES or error.code >= 500
+        return (error.code in RETRYABLE_STATUSES or error.code >= 500
+                or not worker_error_answer(error))
     return isinstance(error, (OSError, http.client.HTTPException))
+
+
+def worker_error_answer(error: urllib.error.HTTPError) -> bool:
+    """Whether an HTTP error carries the Worker's own JSON error envelope.
+
+    Every control-plane rejection is `{"error": {"code": ...}}`. A 4xx without
+    it, such as Cloudflare's browser-integrity block ("error code: 1010") or a
+    WAF page, came from the edge in front of the Worker: the control plane has
+    not said anything about this node, so the saved roster must survive it.
+    """
+    try:
+        payload = json.loads(getattr(error, "tono_body", b"") or b"")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    detail = payload.get("error") if isinstance(payload, dict) else None
+    return isinstance(detail, dict) and isinstance(detail.get("code"), str)
 
 
 def discard_roster_cache(path: Path) -> None:
@@ -841,8 +866,9 @@ def node_disabled_answer(error: BaseException) -> bool:
 
     Reserved for PR #375, which keeps that bounded error body as `tono_body`
     and raises NodeDisabled from the HTTPError; either form counts. Without
-    #375 no error carries the body and this is always false; such a 403 is
-    still an answer and discards the copy like any other.
+    #375 no error carries the body and this is always false. A 403 that does
+    carry the Worker's JSON error body is still an answer and discards the
+    copy like any other; one without it is the edge (worker_error_answer).
     """
     for candidate in (error, error.__cause__):
         if not isinstance(candidate, urllib.error.HTTPError) or candidate.code != 403:
@@ -1172,7 +1198,7 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     # namespace in either case.
     if not wanted and listed is None and recorded is None:
         if failures:
-            raise Refusal("; ".join(failures))
+            raise PartialReconcile("; ".join(failures))
         # A confirmed shared-legacy removal above still counts.
         return 0, removed, None
     installed = listed if listed is not None else recorded
@@ -1252,7 +1278,7 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         # Successful adds and removals already changed the inbound. The set has
         # to leave with the error, or the caller keeps the previous inventory
         # and a later unlistable round cannot revoke the client just installed.
-        raise attach_installed(Refusal("; ".join(failures)), known_installed)
+        raise attach_installed(PartialReconcile("; ".join(failures)), known_installed)
     return added, removed, known_installed
 
 
@@ -1740,6 +1766,37 @@ def keep_usage_locally(path: Path, state: dict, installed: set[str] | None,
     save_state(path, state)
 
 
+def refuse_keeping_usage(error: Exception, path: Path, state: dict, installed: set[str] | None,
+                         counters: dict[str, int], settled_marker: str | None,
+                         *, ledger_missing: bool) -> None:
+    """Raise `error` after folding this round's counter reading into the totals.
+
+    For refusals that come after the counters were read. Without the fold the
+    reading is thrown away; if Xray restarts before the next round folds, the
+    restart resets the counters and every account's growth since the last fold
+    is never billed. Nothing is reported or acknowledged here.
+
+    A ledger that is still missing from disk stays missing: the next round that
+    completes adopts the roster's watermark, which a zero-total fold written
+    now would skip. Once this round has written the file, the zero-total fold
+    is what stops the next round from posting the raw counter as a lifetime.
+    """
+    if ledger_missing and not path.exists():
+        persist_installed_inventory(path, state, installed)
+        raise error
+    inventory_base = dict(state)
+    try:
+        keep_usage_locally(
+            path, state, installed, counters, settled_marker, ledger_missing=ledger_missing,
+        )
+    except (Refusal, OSError) as keep_error:
+        # source_id can refuse before keep_usage_locally writes. The clients
+        # already reconciled still have to be remembered.
+        persist_installed_inventory(path, inventory_base, installed)
+        raise Refusal(f"{error}; usage not kept: {keep_error}") from error
+    raise error
+
+
 def run_outage_round(path: Path, configured: str, binary: Path,
                      commands: dict[str, str], address: str, tag: str,
                      override: bool | None, failure: BaseException) -> None:
@@ -1931,9 +1988,24 @@ def run_once(path: Path) -> None:
         )
     except Refusal as error:
         persist_installed_inventory(path, state, refusal_installed(error))
-        if hy2_error is None:
+        if hy2_error is not None:
+            raise Refusal(f"{hy2_error}; {error}") from error
+        if not isinstance(error, PartialReconcile) or state is None:
             raise
-        raise Refusal(f"{hy2_error}; {error}") from error
+        # The other clients were applied. Read the counters on their own and
+        # meter the node as usual below, without either acknowledgement: the
+        # roster is not converged, but usage (and so quota enforcement) must
+        # not wait for the one client the API refused.
+        try:
+            _, _, _, counters, settled_marker = reconcile_and_read_stable(
+                binary, commands, address, tag, None, None,
+            )
+        except Refusal as read_error:
+            raise Refusal(f"{error}; usage not read: {read_error}") from error
+        reconcile_error: PartialReconcile | None = error
+        added, removed, installed = 0, 0, refusal_installed(error)
+    else:
+        reconcile_error = None
     persist_error: Refusal | None = None
     if retire_shared_legacy:
         # Checked every round: a hand edit or reprovision can put it back.
@@ -1965,10 +2037,12 @@ def run_once(path: Path) -> None:
             persist_installed_inventory(path, inventory_base, installed)
             raise Refusal(f"{hy2_error}; usage not kept: {error}") from error
         raise hy2_error
-    if cache_error:
+    if cache_error and state is not None:
         # An older saved roster is still on disk and may name an account this
         # roster revoked. Never report the round as complete while it is.
-        persist_installed_inventory(path, state, installed)
+        refuse_keeping_usage(Refusal(cache_error), path, state, installed, counters,
+                             settled_marker, ledger_missing=ledger_missing)
+    if cache_error:
         raise Refusal(cache_error)
     if state is None:
         raise Refusal(f"clients were reconciled, but the state file is unusable: {state_error}")
@@ -1985,30 +2059,42 @@ def run_once(path: Path) -> None:
             or isinstance(pending_at, bool)
             or not 0 <= pending_at <= MAX_SAFE_INTEGER
         ):
-            persist_installed_inventory(path, durable_state, installed)
-            raise Refusal("a queued usage report has an invalid observedAt")
+            refuse_keeping_usage(Refusal("a queued usage report has an invalid observedAt"),
+                                 path, state, installed, counters, settled_marker,
+                                 ledger_missing=ledger_missing)
         if pending_at > observed_at + 300:
             # A 400 is normally isolated and dropped so one bad account cannot
             # wedge the queue. This report is locally known to be outside the
             # server window, though, so retain it until the server clock catches
             # up instead of silently losing the last growth for an idle account.
-            persist_installed_inventory(path, durable_state, installed)
-            raise Refusal("queued usage is more than five minutes ahead of the roster clock")
-    if installed is None:
+            refuse_keeping_usage(
+                Refusal("queued usage is more than five minutes ahead of the roster clock"),
+                path, state, installed, counters, settled_marker, ledger_missing=ledger_missing,
+            )
+    if installed is None and reconcile_error is None:
         # Additions can be attempted safely without a live listing, but they do
         # not prove that an old credential generation or shared-legacy client
         # is absent. Never turn that partial result into rollout readiness.
-        raise Refusal(
-            "the live client inventory is unavailable and no durable inventory can prove complete reconciliation"
+        refuse_keeping_usage(
+            Refusal("the live client inventory is unavailable and no durable inventory"
+                    " can prove complete reconciliation"),
+            path, state, None, counters, settled_marker, ledger_missing=ledger_missing,
         )
-    # Keep the reconciled inventory even if the ACK fails, or a newly installed
-    # client revoked before the next poll would never be a removal candidate.
-    state["installedClients"] = sorted(installed)
-    save_state(path, {**durable_state, "installedClients": state["installedClients"]})
-    # Only a complete reconciliation is readiness evidence. Do this before any
-    # usage state save so a failed acknowledgement leaves that state intact and
-    # the whole roster can be retried next round.
-    acknowledge_roster(base, token, observed_at)
+    if installed is not None:
+        # Keep the reconciled inventory even if the ACK fails, or a newly installed
+        # client revoked before the next poll would never be a removal candidate.
+        state["installedClients"] = sorted(installed)
+        save_state(path, {**durable_state, "installedClients": state["installedClients"]})
+    # Only a complete reconciliation is readiness evidence. A failed ACK keeps
+    # the reported totals and the queue as they were, so the roster and any
+    # queued usage are retried next round; the counter reading is folded into
+    # the lifetime totals so an Xray restart before then cannot forgive it.
+    if reconcile_error is None:
+        try:
+            acknowledge_roster(base, token, observed_at)
+        except Refusal as ack_error:
+            refuse_keeping_usage(ack_error, path, state, installed, counters, settled_marker,
+                                 ledger_missing=ledger_missing)
 
     # A batch the server accepted but that was never acknowledged here goes out
     # before newly measured usage: the figure is cumulative per source, so
@@ -2017,7 +2103,14 @@ def run_once(path: Path) -> None:
     if state["pendingReports"]:
         state["pendingReports"] = merge_reports(state["pendingReports"], [])
         save_state(path, state)
-        replayed, discarded = deliver_queue(base, token, path, state)
+        try:
+            replayed, discarded = deliver_queue(base, token, path, state)
+        except (Unreachable, Refusal) as replay_error:
+            # The queue keeps whatever was not delivered. This round's counter
+            # reading has not been folded yet; without the fold an Xray restart
+            # before delivery comes back forgives it.
+            refuse_keeping_usage(replay_error, path, state, installed, counters, settled_marker,
+                                 ledger_missing=ledger_missing)
         print(f"replayed {replayed} queued report(s), dropped {discarded}")
 
     recorded_marker = state.get("startMarker")
@@ -2032,6 +2125,16 @@ def run_once(path: Path) -> None:
         + (", after an xray restart" if restarted else "")
     )
 
+    timestamp = max(observed_at, int(state.get("lastReportObservedAt", -1)) + 1)
+    if timestamp > observed_at + 300:
+        # The server rejects observations more than five minutes beyond its own
+        # clock. Fold the reading but report nothing, so the bytes go out after
+        # server time catches up rather than in a report that a 400 response
+        # would discard before any later traffic arrives.
+        refuse_keeping_usage(
+            Refusal("usage report clock is more than five minutes ahead of the roster clock"),
+            path, state, installed, counters, settled_marker, ledger_missing=ledger_missing,
+        )
     totals = adopt_source_watermarks(
         lifetime_totals(state, counters, restarted=restarted),
         watermarks if watermarks is not None else source_watermarks(roster),
@@ -2043,13 +2146,6 @@ def run_once(path: Path) -> None:
         previous_user_totals = aggregate_user_totals(state.get("totals", {}))
 
     reports: list[dict] = []
-    timestamp = max(observed_at, int(state.get("lastReportObservedAt", -1)) + 1)
-    if timestamp > observed_at + 300:
-        # The server rejects observations more than five minutes beyond its own
-        # clock. Keep the old baseline durable so the bytes are measured again
-        # after server time catches up, rather than queueing a report that a 400
-        # response would discard before any later traffic arrives.
-        raise Refusal("usage report clock is more than five minutes ahead of the roster clock")
     for user_id in sorted(current_user_totals):
         total = current_user_totals[user_id]
         previous = int(previous_user_totals.get(user_id, 0))
@@ -2088,13 +2184,19 @@ def run_once(path: Path) -> None:
     # Persist before delivering: a crash after the server accepts must replay, and
     # replaying is safe. The reverse — delivering first — loses usage silently.
     save_state(path, state)
+    # The metering ACK is readiness evidence for the whole node, so a round
+    # whose reconciliation was incomplete reports usage but never sends it.
     if not state["pendingReports"]:
-        acknowledge_metering(base, token, observed_at)
+        if reconcile_error is None:
+            acknowledge_metering(base, token, observed_at)
         print("no new usage to report")
     else:
         delivered, dropped = deliver_queue(base, token, path, state)
-        acknowledge_metering(base, token, observed_at)
+        if reconcile_error is None:
+            acknowledge_metering(base, token, observed_at)
         print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
+    if reconcile_error is not None:
+        raise reconcile_error
     if persist_error is not None:
         raise persist_error
 
