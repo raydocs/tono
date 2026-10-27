@@ -1,6 +1,6 @@
 ## 2026-10-27 · Windows 登录：注册与邮件状态跟随服务器，套餐到期只信服务器拒绝码
 - 归属：G1（客户路径 UI）；Windows 登录页、`tono-core` 认证响应、Tauri 状态。
-- 来源：基线 main 2bcbee78c；分支 `amp/windows-signin-freshness`。独立审查发现（#1778 合入后）：未读 `deliveryDegraded`；注册状态只在进入页面时读一次；套餐到期提示靠缓存账号和本机时间。
+- 来源：基线 main 2bcbee78c；分支 `amp/windows-signin-freshness`，PR #1796。独立审查发现（#1778 合入后）：未读 `deliveryDegraded`；注册状态只在进入页面时读一次；套餐到期提示靠缓存账号和本机时间。
 - 新增/优化：
   - `auth/email/start` 的 202 带回的全局 `publicSignup`/`signupPaused`/`deliveryDegraded` 现在会更新提示文案（`EmailChallengeResponse` 字段可缺省：旧服务器不发时保留之前读到的状态）。名额在会话中途用完时，不再显示「第一次使用的邮箱会自动创建账号」。
   - 发送验证码后约 30 秒重读一次 `auth/methods`（全局，不带邮箱）；服务器报告邮件服务异常时，在验证码步骤显示「Tono 的邮件服务暂时异常，验证码可能延迟或收不到。请过几分钟再试。」（与 macOS/iOS #1783 一致）。`tono_signup_mode` 改为返回 `{ mode, deliveryDegraded }`，命令名不变。
