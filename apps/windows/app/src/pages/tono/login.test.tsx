@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
@@ -113,6 +120,37 @@ describe('login welcome v2', () => {
     fireEvent.click(screen.getByText('Privacy details'))
     expect(details?.open).toBe(true)
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
+  })
+
+  it('puts a failure inline between the field and its retry, readable without colour', async () => {
+    setNewAppearance(true)
+    // This file's formatter passes the message through.
+    mocks.start.mockRejectedValue(new Error(enTono.login.errors.unreachable))
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    const email = screen.getByLabelText('Email')
+    fireEvent.change(email, { target: { value: 'person@example.com' } })
+    const send = screen.getByRole('button', { name: 'Send code' })
+    await act(async () => fireEvent.click(send))
+    const alert = screen.getByRole('alert')
+    const notice = alert.closest('.sea-inline-notice')
+    expect(notice).not.toBeNull()
+    if (!notice) return
+    // Inside the form, before the action that retries it, and named by the field.
+    expect(
+      notice.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(email.getAttribute('aria-describedby')).toBe(notice.id)
+    // Severity is the bold lead sentence and the icon, not only a colour.
+    expect(alert.querySelector('strong')?.textContent).toBe(
+      "Tono couldn't reach its sign-in server. ",
+    )
+    expect(alert.textContent).toBe(enTono.login.errors.unreachable)
+    expect(notice.querySelector('svg')).not.toBeNull()
+    expect(within(notice as HTMLElement).getByText('Details')).toBeDefined()
   })
 
   it('keeps the scene story beside the form and out of the paused-account screen', () => {
@@ -288,9 +326,9 @@ describe('login request exclusion', () => {
     expect(screen.getByRole('alert').textContent).toBe('Code rejected')
     const code = screen.getByLabelText('6-digit code')
     expect(code.getAttribute('aria-invalid')).toBe('true')
-    expect(
-      document.getElementById(code.getAttribute('aria-describedby')!),
-    ).not.toBeNull()
+    // Every id it names (the inbox help, and the failure in the new look) resolves.
+    for (const id of code.getAttribute('aria-describedby')!.split(' '))
+      expect(document.getElementById(id)).not.toBeNull()
     await act(async () => vi.advanceTimersByTime(1000))
     expect(mocks.verify).toHaveBeenCalledTimes(1)
   })

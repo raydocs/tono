@@ -38,12 +38,61 @@
 }
 .sea-login .tono-welcome__trust {
   grid-column: 1 / -1;
-  grid-row: 2;
+  grid-row: 3;
   max-width: 450px;
 }
 .sea-login .sea-login-privacy {
   grid-column: 1 / -1;
-  grid-row: 3;
+  grid-row: 4;
+}
+/* A failure sits inline, under the field and next to the action that retries it (concept A):
+   no card, no red. Severity reads from the icon and the bold lead sentence; warm amber is a
+   retryable failure, the calm accent an answer about the account. */
+.sea-login .sea-inline-notice {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sea-secondary);
+  animation: sea-welcome-in 200ms ease-out both;
+}
+.sea-inline-notice[data-tone="warning"] {
+  --sea-notice: #ffcf8a;
+}
+.sea-inline-notice[data-tone="info"] {
+  --sea-notice: var(--sea-accent);
+}
+.sea-inline-notice__icon {
+  margin-top: 1px;
+  color: var(--sea-notice);
+}
+.sea-inline-notice__body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.sea-inline-notice__body > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.sea-inline-notice__body strong {
+  display: block;
+  font-weight: 600;
+  color: var(--sea-notice);
+}
+.sea-inline-notice__body summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--sea-secondary);
+}
+.sea-inline-notice__body summary:focus-visible {
+  outline: 2px solid var(--sea-notice);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .sea-login .tono-progress-pill {
   border-radius: 999px;
@@ -295,6 +344,7 @@
   .sea-login-card,
   .sea-login-heading,
   .sea-code-sent,
+  .sea-login .sea-inline-notice,
   .sea-login[data-code-step="true"] .sea-code-label {
     animation: none;
   }
@@ -364,14 +414,14 @@
   .sea-login:not(.sea-login--suspended)
     .sea-login-fields
     > button[type="submit"] {
-    grid-row: 2;
+    grid-row: 3;
     width: 100% !important;
   }
   .sea-login:not(.sea-login--suspended) .tono-welcome__trust {
-    grid-row: 3;
+    grid-row: 4;
   }
   .sea-login:not(.sea-login--suspended) .sea-login-privacy {
-    grid-row: 4;
+    grid-row: 5;
   }
   .sea-login-story {
     display: grid;
