@@ -71,8 +71,9 @@ updater signing keypair outside this repository and configure:
 
 - repository variable `TONO_UPDATER_PUBLIC_KEY` with the complete outer-Base64
   public-key value emitted by Tauri (copy the generated `.pub` content unchanged);
-- protected GitHub Environment `windows-release`, restricted to `release/windows` with a
-  required reviewer and self-approval/bypass disabled where supported;
+- protected GitHub Environment `windows-release`, restricted to `release/windows` by branch
+  policy; it has had no required reviewer since 2026-10-27 (decision 137), so `build-draft`
+  runs unattended;
 - `windows-release` Environment secrets `TAURI_SIGNING_PRIVATE_KEY` and
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
 - protected GitHub Environment `windows-update-channel`, also restricted to

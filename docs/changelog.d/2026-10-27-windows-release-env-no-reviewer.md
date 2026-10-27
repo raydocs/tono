@@ -1,0 +1,7 @@
+## 2026-10-27 · GitHub 环境 `windows-release` 不再设必需审批人
+- 归属：发布流程 / GitHub 环境设置（`windows-release`）；文件：`docs/decisions/137-2026-10-27-windows-release-env-no-reviewer.md`、`apps/windows/README.md`、`docs/RELEASE_LINES.md`、本条。工作流文件、`windows-update-channel` 均未改。
+- 来源：分支 `docs/windows-release-env-no-reviewer`（基线 origin/main `bd556b9ea`）；仅文档。环境设置本身由 `gh api -X PUT repos/raydocs/tono/environments/windows-release`（`reviewers: []`、`wait_timer: 0`，保留分支策略）于 2026-10-27 改好，不在该分支里。
+- 变更：环境 `windows-release` 原有两条保护规则：`required_reviewers`（审批人 `raydocs`）和 `branch_policy`（自定义策略，只允许 `release/windows`）。现在只剩分支策略，`windows-release.yml` 的 `build-draft` 在 `branch`、`pinned-core`、`sing-box-input` 通过后直接开始，不等人批。签名密钥仍只给 `release/windows`。`windows-update-channel` 不变（仍是审批人 `raydocs`，客户通道只经它在 G4 前进；决策 023 对它的做法不变）。
+- 原因：负责人 2026-10-27 在对话里说：「为什么 winrelase gate 不能自动？ 让他自动开始」「我已经 approve 了 但我希望之后可以自动开始」。0.0.81 的运行 https://github.com/raydocs/tono/actions/runs/40445151033 被这个门卡了一个多小时：agent 按决策 023 自批，被 agent 自己的权限分类器拒绝；负责人在浏览器里前两次批准没有记录，第三次才记上。审批人是 `raydocs`，与 agent 的令牌同一账号，这条规则本来就不是人工检查。
+- 审批记录（决策 023 要求；`windows-release` 的最后一条）：运行 https://github.com/raydocs/tono/actions/runs/40445151033；环境 `windows-release`；候选 `dd38b3e9a`；发布序号 8101；由负责人在运行页面批准（approvals 接口返回 `approved`，用户 `raydocs`）；`build-draft` 开始时间 2026-10-27 06:32:10 UTC。此后 `windows-release` 无需批准也无需记录。
+- 未验证：下一次 `windows-release` 派发是否真的不经门禁直接开始还没有观察到；`windows-update-channel` 未动，也未测试其自批。
