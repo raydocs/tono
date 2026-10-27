@@ -1,0 +1,13 @@
+## 2026-10-26 · macOS 0.0.81 帮助程序拒绝归类、TUN 路由证据与节点侧失败文案
+- 归属：G3（macOS 客户端）；模块 `apps/macos/Tono/Services`（`ProtectedConnectivity`、`AppState+Connect`）、`Views/DashboardView`、`Localizable.xcstrings`、`apps/macos/TonoTests`。帮助程序（`tooling/scripts/core-helper`）未改。
+- 来源：基线 main `0c0e6d7fb` → 分支 `fix/macos-0081-failure-copy`，PR #1760；每项一个提交。未合 main。
+- 缺陷修复：
+  - 帮助程序回复「The selected DNS service cannot be identified.」落为 `UNKNOWN_CLASSIFIED_FAILURE` → 新增 `AppState.helperRefusalFailure`，按句子（忽略大小写、允许包装）映射为 `PROTECTED_DNS_NOT_READY`，沿用现有文案。
+  - 「sing-box exited (status N)」落为 UNKNOWN → 新码 `TONO_CORE_EXITED`，文案「连接引擎刚启动就退出了。请重新连接；如果再次发生，请发送诊断。」诊断详情记 `engine exit status N`；帮助程序不回传 stderr 尾部（它有缓冲但不发送），本次未改帮助程序。
+  - `TUN_ROUTE_UNAVAILABLE` 看不出哪项检查失败、不提示其他 VPN、重新武装无上限 → 失败详情前置「TUN route check failed: tun probe lost N/N origins (Google=timeout, …); controller ok; mixed ok」；健康监控最终失败也走 `OtherVPNDetection.attributedMessage`；`TunRouteRearmBound.maxRearmsPerAttempt = 3`（按连接尝试计，健康周期不重置），到上限记一条 `tun_route_rearm_bound_reached` 审计后交给原有升级逻辑（6 次）。码串不变。
+  - `CORE_EXIT_UNREACHABLE` 文案只说「连接没有完成」→ 改为「这台节点现在连不上，换一台试试。」，保护被阻断时仪表盘对这一个码显示「选择其他线路」。
+- 新增/优化：`TONO_SINGBOX_UNSUPPORTED_POLICY` 只做了溯源：生产中的产生点（主机名家庭线路被严格模式合同拒绝）已由 PR #1702 在 0.0.80 修复，14 天内的命中来自更老客户端；编译期抛错到用户只有 UNKNOWN 句子，要修需在编译步骤加类型化错误到码的映射，本次未做。macOS 没有隧道前出口拨号失败文本，未加 `TONO_EXIT_UNREACHABLE`。
+- 工程与测试：新增 `HelperRefusalClassificationTests`（4）、`TunRouteUnavailableEvidenceTests`（7），`ConnectionActivityTests`、`ProtectedConnectivityTests` 文案断言更新；`ProtectedFailureCodeProducerTests` 仍通过。
+- 验证：本机 macOS，`xcodebuild -scheme Tono -configuration Debug CODE_SIGNING_ALLOWED=NO … test -only-testing:…`：三轮分别 42、53、39 个测试全部通过，Debug 构建成功；整套 TonoTests 与渲染测试未在本机跑，依赖 PR 上 `macos-ci.yml`。
+- 候选/发布：无新包，仅源码。版本号未改。
+- 剩余限制：控制平面 `EXIT_SIDE_SQL` 不匹配 macOS 上传的 `code='CORE_EXIT_UNREACHABLE'`（其 `stage` 是英文界面文案，`error` 是用户句子），需在控制平面把该码加入 `code IN (…)`；ops-console `customers.ts` 无 `TONO_CORE_EXITED` 标签；监控循环里的重新武装上限分支没有端到端测试。
