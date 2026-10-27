@@ -213,8 +213,9 @@ the owner's step.
 **Windows.**
 
 1. `windows-release.yml` on `release/windows`, dispatched with `version` and
-   `update_release_sequence`, builds the signed draft `v<version>`; its job waits on
-   environment `windows-release`. Each run for a version overwrites that draft, so the
+   `update_release_sequence`, builds the signed draft `v<version>`; its `build-draft` job uses
+   environment `windows-release`, which has had no reviewer since 2026-10-27
+   ([decision 137](decisions/137-2026-10-27-windows-release-env-no-reviewer.md)). Each run for a version overwrites that draft, so the
    accepted run must be the last one for its version.
 2. Check the draft's installer and `.sig` hashes against the owner's evidence, then
    `gh release edit v<version> --draft=false`, then
@@ -223,15 +224,13 @@ the owner's step.
    commits `services/control-plane/public/windows/latest.json` to `main`; its job
    waits on environment `windows-update-channel`. Then deploy per AGENTS.md.
 
-Both environments list reviewer `raydocs`, the same account as the agents' token,
-so an agent approving them removes the only human check there. Whether that token
-can approve its own deployment was confirmed on 2026-09-26 for `windows-release` only (kit
-runs recorded in `docs/changelog.d/2026-09-26-kit-0-0-74.md`); `windows-update-channel` is
-configured separately and is still untested. By owner decision of 2026-09-28
-([agents approve GHA environments](decisions/023-2026-09-28-agents-approve-gha-environments.md)), agents approve GitHub Actions environment approvals
-themselves (`windows-release` for any candidate, `windows-update-channel` at G4); none waits
-for the owner. Record each approval (run URL, environment, candidate SHA and release
-sequence) in the changelog. The customer-publish precondition is unchanged: the owner's
+`windows-update-channel` still lists reviewer `raydocs`, the same account as the agents' token. By owner
+decision of 2026-09-28
+([agents approve GHA environments](decisions/023-2026-09-28-agents-approve-gha-environments.md)), agents
+approve it at G4 themselves and record each approval (run URL, environment, candidate SHA and release
+sequence) in the changelog. `windows-release` has had no reviewer since 2026-10-27
+([decision 137](decisions/137-2026-10-27-windows-release-env-no-reviewer.md)), so there is nothing to
+approve or record for it. The customer-publish precondition is unchanged: the owner's
 `[x]` for G1–G2 in SHIP_PLAN §6 (0.0.75), and only the candidate that evidence names.
 
 **Rollback.** Moving a feed back to the last good entry only stops machines that
