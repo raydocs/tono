@@ -113,6 +113,27 @@ describe('login welcome v2', () => {
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
   })
 
+  it('keeps the scene story beside the form and out of the paused-account screen', () => {
+    setNewAppearance(true)
+    const { container, unmount } = render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    const story = container.querySelector('.sea-login-story')
+    expect(story?.textContent).toContain(enTono.login.brandDescription)
+    // Words only: the form stays the page's single heading and landmark.
+    expect(story?.querySelector('h1, h2, button, input')).toBeNull()
+    unmount()
+    mocks.status = { accountState: 'suspended' }
+    const paused = render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    expect(paused.container.querySelector('.sea-login-story')).toBeNull()
+  })
+
   it('puts the sea sign-in form on its own glass card', () => {
     setNewAppearance(true)
     const { container } = render(
