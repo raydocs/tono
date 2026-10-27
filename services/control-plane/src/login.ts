@@ -9,7 +9,7 @@ import { requireAccountEntitlement } from './accounts';
 import { consumeRateLimit } from './ops/ingest-limits';
 import { ApiError } from './errors';
 import { recordClient } from './client-identity';
-import { type Env, type Row, str, envInt, tailscaleEnrollmentEnabled, requiredSecret } from './env';
+import { type Env, type Row, str, envInt, tailscaleEnrollmentEnabled, requiredSecret, publicSignupEnabled } from './env';
 import { clientIp } from './auth';
 import { API_RELAYS } from './api-relays';
 import { publicDevice } from './ops/shared-admin';
@@ -104,6 +104,23 @@ export async function rateLimitOidcStart(e: Env, req: Request, installationId: s
 }
 
 
+
+// Open registration mails strangers, so a global daily budget bounds what a
+// spread of IPs and addresses can make the sender emit (decision 138). Past it
+// the code is silently not sent: a 429 would tell the caller that the address
+// has no account.
+export async function publicSignupCodeAllowed(e: Env): Promise<boolean> {
+  if (!publicSignupEnabled(e)) return false;
+  try {
+    await consumeRateLimit(e, `rl:${await sha256('public-signup:codes:day')}`,
+      envInt(e, 'PUBLIC_SIGNUP_CODES_PER_DAY', 200), 86_400);
+    return true;
+  } catch (limited) {
+    if (!(limited instanceof ApiError) || limited.status !== 429) throw limited;
+    console.warn('public signup daily code budget exhausted');
+    return false;
+  }
+}
 
 // --- Passwordless authentication ---------------------------------------------
 

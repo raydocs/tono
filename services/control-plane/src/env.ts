@@ -31,6 +31,12 @@ export interface Env {
   APPLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_ID?: string;
   DIRECT_SIGNUP_ALLOWLIST?: string;
+  // 'true' lets any verified mailbox create an account. Such an account holds
+  // no plan (see `insertUserCarryingAllowlistProfile`) until an operator grants
+  // one; invited addresses keep their onboard profile. Off by default.
+  PUBLIC_SIGNUP?: string;
+  // Codes sent per day to addresses with neither an account nor an invitation.
+  PUBLIC_SIGNUP_CODES_PER_DAY?: string;
   CATALOG_ENCRYPTION_KEY?: string;
   // Public half of the offline policy signing key, standard base64, 32 bytes. A
   // var rather than a secret: it is a public key, and keeping it readable is what
@@ -118,6 +124,10 @@ export function envInt(e: Env, key: keyof Env, fallback: number) {
 
 export function tailscaleEnrollmentEnabled(e: Env) {
   return e.TAILSCALE_ENROLLMENT_ENABLED?.trim().toLowerCase() === 'true';
+}
+
+export function publicSignupEnabled(e: Env) {
+  return e.PUBLIC_SIGNUP?.trim().toLowerCase() === 'true';
 }
 
 export function requiredSecret(value: unknown) {

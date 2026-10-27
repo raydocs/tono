@@ -9,6 +9,7 @@
 | 403 | ACCOUNT_EXPIRED | 套餐到期；保留账户、令牌、VPN 配置，显示“套餐已到期，请续费或联系家人” |
 | 403 | QUOTA_EXCEEDED | 额度用完；保留账户、令牌、VPN 配置，显示“流量已用完，请续费或联系家人” |
 | 401 | UNAUTHORIZED（access）/ INVALID_REFRESH_TOKEN（refresh） | 账户已恢复，但旧设备网络授权仍已撤销；进入已发布桌面客户端的重新登录流程，不自动恢复网络身份。移动端可保留配置并提供重新登录动作 |
+| 403 | ENTITLEMENT_REQUIRED | 开放注册的新账户从未有过套餐（[决策 138](decisions/138-2026-10-27-public-signup-without-plan.md)）；验证登录时不签发 token。显示“账户已创建，尚未开通套餐”，不是登录失败或服务故障。两端桌面客户端已把它列入 entitlement 码 |
 | 403 | USER_DISABLED | 验证登录后账户被停用；拒绝授权，不等于套餐到期。已撤销的旧会话仍为 401 |
 | 401 | UNAUTHORIZED / INVALID_REFRESH_TOKEN | 凭据失效、过期、主动撤销或设备撤权；沿用认证恢复流程 |
 | 429 | RATE_LIMITED | 不登出、不删除报告；保留待发数据，按 `Retry-After`（整数秒）等待后重试 |

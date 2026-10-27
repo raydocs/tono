@@ -104,6 +104,8 @@
     "APPLE_CLIENT_ID": "com.raydocs.tono",
     "GOOGLE_CLIENT_ID": "",
     "DIRECT_SIGNUP_ALLOWLIST": "ruiruiwan2019@gmail.com,ruiruiwan8@gmail.com,stephonhe0227@gmail.com",
+    "PUBLIC_SIGNUP": "false",
+    "PUBLIC_SIGNUP_CODES_PER_DAY": "200",
     "CONFIRM_CLAIM_TTL_SECONDS": "300"
   }
 }
