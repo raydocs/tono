@@ -9,3 +9,5 @@
 - 剩余限制：没有截图，也没有真机验证；属于 UI 改动，需要负责人看过界面才能合并。macOS 在登录时遇到 `ENTITLEMENT_REQUIRED` 会进入已有的「This Tono account cannot connect」页面（与登录时遇到 `ACCOUNT_EXPIRED` 的路径相同），页面上的说明改为新文案。Android 未改。
 
 2026-10-27 续：跟随 #1786 的契约，区分「开放注册当日名额已满」（`signupPaused`）和邀请制（`publicSignup` 为 false）。名额已满时，两端写「如果该邮箱已经可以登录，验证码正在发送……今天的新用户注册名额已满，新用户请明天再试」。邀请制和读取失败时仍用条件式文案，任何状态下都不写「邀请制」。测试中的 methods 增加了 `signupPaused`。
+
+2026-10-27 续二（独立审查）：macOS 验证码页 60 秒后台重读 `auth/methods` 失败时，原来走 `loadAuthMethods()`，会清空 `authMethods` 并进入错误状态，整个验证码表单被替换成「服务不可用」。现在改走新增的 `refreshMailState()`：只在读取成功时更新，失败时保留当前表单和状态。回归测试 `testFailedMailStateRefreshKeepsTheCodeForm`。另外，「联系 Tono 开通」目前在所有客户端都没有可用的支持渠道（Windows `SupportContact` 只复制诊断信息），作为开启 `PUBLIC_SIGNUP` 前需要负责人决定的事项，客户端不虚构联系方式。

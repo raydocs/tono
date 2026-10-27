@@ -103,8 +103,8 @@ struct LoginView: View {
         showNoEmailHint = false
         try? await Task.sleep(for: SignInCodeNotReceivedHint.delay)
         guard !Task.isCancelled else { return }
-        // Fresh global mail state for the hint.
-        await session.loadAuthMethods()
+        // Fresh global mail state for the hint; a failed read keeps the form.
+        await session.refreshMailState()
         guard !Task.isCancelled else { return }
         withAnimation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion)) {
             showNoEmailHint = true

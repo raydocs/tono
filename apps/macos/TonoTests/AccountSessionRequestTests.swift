@@ -1695,6 +1695,21 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(account.authMethods?.email.deliveryDegraded, true)
     }
 
+    func testFailedMailStateRefreshKeepsTheCodeForm() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let load = Task { await account.loadAuthMethods() }
+        try await nextRequest(requests).respond(status: 200, body: Self.enabledMethods)
+        await load.value
+        let shown = account.authMethods
+        let refresh = Task { await account.refreshMailState() }
+        try await nextRequest(requests).respond(status: 400, body: #"{"error":{"message":"outage"}}"#)
+        await refresh.value
+        XCTAssertEqual(account.authMethods, shown)
+        XCTAssertNotNil(account.authMethods)
+        XCTAssertEqual(account.state, .signedOut)
+    }
+
     func testProtectionReleaseReloadsTheSignInMethodsItRetired() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
