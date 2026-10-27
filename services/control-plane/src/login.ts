@@ -193,11 +193,21 @@ export function emailDeliveryConfigured(e: Env): boolean {
     !/[\r\n]/.test(e.EMAIL_FROM);
 }
 
-export function providerAudience(e: Env, provider: OidcProvider): string | undefined {
+/**
+ * The OIDC clients this deployment accepts for a provider, primary first.
+ * `APPLE_CLIENT_ID` / `GOOGLE_CLIENT_ID` may list several comma-separated
+ * client IDs: each platform (app bundle ID, Apple web Services ID, Google
+ * desktop / iOS / Android client) signs ID tokens for its own audience.
+ */
+export function providerAudiences(e: Env, provider: OidcProvider): string[] {
   const value = provider === 'apple' ? e.APPLE_CLIENT_ID : e.GOOGLE_CLIENT_ID;
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed.length >= 3 && trimmed.length <= 512 ? trimmed : undefined;
+  if (typeof value !== 'string') return [];
+  return value.split(',').map((item) => item.trim())
+    .filter((item) => item.length >= 3 && item.length <= 512);
+}
+
+export function providerAudience(e: Env, provider: OidcProvider): string | undefined {
+  return providerAudiences(e, provider)[0];
 }
 
 export function numericCode(): string {
