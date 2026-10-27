@@ -183,6 +183,33 @@ class LifetimeTotals(unittest.TestCase):
             agent.save_state(Path(directory) / "state.json", fresh_state())
         self.assertEqual(events, ["fsync-file", "rename", "fsync-dir"])
 
+    def test_save_state_never_writes_the_ledger_readable_by_others(self) -> None:
+        # The ledger names every client and its usage. It must be 0600 while its
+        # bytes are written, not only after the rename, including over a stale
+        # world-readable `.new` left by a crashed run.
+        modes: list[int] = []
+        real_fsync = agent.os.fsync
+
+        def fsync(descriptor: int) -> None:
+            if not os.path.isdir(f"/dev/fd/{descriptor}"):
+                modes.append(os.fstat(descriptor).st_mode & 0o777)
+            real_fsync(descriptor)
+
+        previous = os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as directory, \
+                 patch.object(agent.os, "fsync", side_effect=fsync):
+                path = Path(directory) / "state.json"
+                stale = path.with_suffix(".new")
+                stale.write_text("{}")
+                stale.chmod(0o644)
+                agent.save_state(path, fresh_state())
+                final = path.stat().st_mode & 0o777
+        finally:
+            os.umask(previous)
+        self.assertEqual(modes, [0o600])
+        self.assertEqual(final, 0o600)
+
     def test_first_reading_is_the_whole_total(self) -> None:
         state = fresh_state()
         self.assertEqual(agent.lifetime_totals(state, {"u1": 500}), {"u1": 500})

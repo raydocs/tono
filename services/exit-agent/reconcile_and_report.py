@@ -766,13 +766,17 @@ def take_ledger_missing(state: dict) -> bool:
 def save_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".new")
-    with temporary.open("w", encoding="utf-8") as handle:
+    # The ledger names every client and its usage: create it 0600 and narrow a
+    # stale `.new` from a crashed run before any byte is written, never after.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(temporary, flags, STATE_MODE)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), STATE_MODE)
         json.dump(state, handle, sort_keys=True)
         # The rename below must not reach disk before these bytes do, or a
         # power loss leaves an empty ledger that refuses metering.
         handle.flush()
         os.fsync(handle.fileno())
-    os.chmod(temporary, STATE_MODE)
     # Rename rather than write in place: a crash mid-write would otherwise leave
     # lifetime totals truncated, and truncated totals bill nobody for what they
     # already used.
