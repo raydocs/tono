@@ -267,6 +267,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(first.code).toMatch(/^\d{6}$/);
       expect(second.response.status).toBe(202);
       expect(second.code).toBeUndefined();
+      // The spent budget is global state, told to every caller alike.
+      expect(second.payload.publicSignup).toBe(false);
+      expect((await (await api('auth/methods')).json() as any).email.publicSignup).toBe(false);
       // Existing accounts are outside the budget.
       const known = await createAccount('cap-known');
       expect((await startEmailSignIn({
@@ -275,6 +278,38 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     } finally {
       (env as unknown as Env).PUBLIC_SIGNUP = undefined;
       (env as unknown as Env).PUBLIC_SIGNUP_CODES_PER_DAY = undefined;
+    }
+  });
+
+  it('reports a provider-side mail outage globally, but not a recipient rejection', async () => {
+    const account = await createAccount('mail-outage');
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let resendStatus = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === 'https://api.resend.com/emails' && resendStatus) {
+        return new Response('provider says no', { status: resendStatus });
+      }
+      return originalFetch(input, init);
+    });
+    const degraded = async () => (await (await api('auth/methods')).json() as any).email.deliveryDegraded;
+    const start = (installationId: string) => startEmailSignIn({
+      email: account.email, deviceName: 'Outage Mac', installationId,
+    });
+    try {
+      resendStatus = 422;
+      expect((await start('mail-outage-recipient')).code).toBeUndefined();
+      expect(await degraded()).toBe(false);
+
+      resendStatus = 503;
+      expect((await start('mail-outage-provider')).code).toBeUndefined();
+      expect(await degraded()).toBe(true);
+
+      resendStatus = 0;
+      expect((await start('mail-outage-recovered')).code).toMatch(/^\d{6}$/);
+      expect(await degraded()).toBe(false);
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
     }
   });
 

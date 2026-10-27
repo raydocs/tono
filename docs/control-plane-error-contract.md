@@ -18,6 +18,7 @@
 到期/超额的网络撤权仍照常执行；标记该原因并保留会话行（不是继续提供 VPN 服务）。
 续费不自动复活网络凭据，保持既有“重新验证后恢复”策略。
 登录 start 不透露账户存在性，仍返回统一 202；已验证邮箱/OIDC 后才返回具体账户错误。
+邮件提示（[决策 138](decisions/138-2026-10-27-public-signup-without-plan.md)）：`GET auth/methods` 的 `email.publicSignup`（开放注册已开，且当天新邮箱额度没用完）和 `email.deliveryDegraded`（邮件服务商最近出错），以及 start 202 里的 `publicSignup`，都是全局状态，与具体邮箱无关。`publicSignup` 为 false 时，客户端用条件式文案（“如果该邮箱可以登录，验证码正在发送”）。`deliveryDegraded` 为 true 时，告诉用户验证码可能延迟或收不到，请稍后再试。
 刷新遇到账户状态返回 403，不消费 refresh token。
 
 P0（服务端 allowlist 中的网络丢失 code）与普通 FAILURE 使用不同账户限流桶。
