@@ -150,13 +150,16 @@ pub fn health_monitor_releases(strict_explicit: bool, policy_rebuild: bool) -> b
 
 pub fn region_of(name: &str) -> String {
     let base = name.trim_end_matches(" · hy2");
-    for token in base.split(|ch: char| !ch.is_alphanumeric()) {
-        if token.eq_ignore_ascii_case("us") {
-            return "us".to_string();
-        }
-        if token.eq_ignore_ascii_case("jp") {
-            return "jp".to_string();
-        }
+    // Same rule as `heal::region_key`: an explicit US token wins over JP.
+    let has_token = |wanted: &str| {
+        base.split(|ch: char| !ch.is_alphanumeric())
+            .any(|token| token.eq_ignore_ascii_case(wanted))
+    };
+    if has_token("us") {
+        return "us".to_string();
+    }
+    if has_token("jp") {
+        return "jp".to_string();
     }
     let city = base.split('·').next().unwrap_or(base).trim().to_ascii_lowercase();
     match city.as_str() {
