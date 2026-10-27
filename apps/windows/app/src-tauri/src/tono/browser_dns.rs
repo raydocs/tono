@@ -640,33 +640,37 @@ mod tests {
         })
     }
 
-    #[tokio::test(start_paused = true)]
+    // tono-core's tokio has no paused clock in tests, so the pause is injected and short.
+    const TEST_PAUSE: std::time::Duration = std::time::Duration::from_millis(30);
+
+    #[tokio::test]
     async fn timed_out_scan_is_retried_once_after_a_pause_and_can_succeed() {
         let (calls, scan) = scripted(vec![ScanRun::TimedOut, ScanRun::Verdict(Ok(()))]);
-        let started = tokio::time::Instant::now();
-        assert_eq!(run_scan_with_retry(scan, RETRY_PAUSE).await, Ok(()));
+        let started = std::time::Instant::now();
+        assert_eq!(run_scan_with_retry(scan, TEST_PAUSE).await, Ok(()));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
-        assert_eq!(started.elapsed(), std::time::Duration::from_secs(2));
+        assert!(started.elapsed() >= TEST_PAUSE, "the retry must wait out the pause");
+        assert_eq!(RETRY_PAUSE, std::time::Duration::from_secs(2));
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn task_failure_is_retried_and_a_second_timeout_reports_the_timeout_text() {
         let (calls, scan) = scripted(vec![ScanRun::TaskFailed, ScanRun::TimedOut]);
-        let error = run_scan_with_retry(scan, RETRY_PAUSE).await.unwrap_err();
+        let error = run_scan_with_retry(scan, TEST_PAUSE).await.unwrap_err();
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(error.contains("the browser configuration scan timed out; close Chrome and Edge, then connect again"));
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn definite_findings_are_never_retried() {
         let finding = message("Chrome", BrowserDnsIssue::UnsupportedMode);
         let (calls, scan) = scripted(vec![ScanRun::Verdict(Err(finding.clone()))]);
-        assert_eq!(run_scan_with_retry(scan, RETRY_PAUSE).await, Err(finding));
+        assert_eq!(run_scan_with_retry(scan, TEST_PAUSE).await, Err(finding));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         let incomplete = message("Chrome", BrowserDnsIssue::IncompleteScan);
         let (calls, scan) = scripted(vec![ScanRun::Verdict(Err(incomplete.clone()))]);
-        assert_eq!(run_scan_with_retry(scan, RETRY_PAUSE).await, Err(incomplete));
+        assert_eq!(run_scan_with_retry(scan, TEST_PAUSE).await, Err(incomplete));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }
