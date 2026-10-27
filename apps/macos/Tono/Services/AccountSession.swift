@@ -87,6 +87,8 @@ final class AccountSession {
     var emailChallengeAddress: String?
     /// The last link outcome, for one line on the next screen.
     var identityLinkResult: TonoIdentityLink?
+    /// Set when the user closed Apple's sheet during the current attempt.
+    var appleSignInCancelled = false
     /// A credential write can fail after verification succeeds. Keep its
     /// localized explanation while the account returns to signedOut.
     var signInError: String?
