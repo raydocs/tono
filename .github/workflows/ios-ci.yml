@@ -104,6 +104,14 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPointIdentifier" "$APP/PlugIns/TonoWidgets.appex/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :NSSupportsLiveActivities" "$APP/Info.plist"
           du -sh "$APP" "$APP/PlugIns/PacketTunnel.appex" "$APP/PlugIns/TonoWidgets.appex"
+          for f in "$APP/Tono" "$APP/PlugIns/PacketTunnel.appex/PacketTunnel" "$APP/PlugIns/TonoWidgets.appex/TonoWidgets"; do
+            echo "SIZE exe $(stat -f %z "$f") $(basename "$f")"
+          done
+          for d in "$APP" "$APP/PlugIns/PacketTunnel.appex" "$APP/PlugIns/TonoWidgets.appex"; do
+            echo "SIZE bundle_kb $(du -sk "$d" | cut -f1) $(basename "$d")"
+          done
+          (cd "$(dirname "$APP")" && ditto -c -k --keepParent Tono.app "$RUNNER_TEMP/Tono-app.zip")
+          echo "SIZE zip $(stat -f %z "$RUNNER_TEMP/Tono-app.zip") Tono.app.zip"
       - name: Build for the simulator (Debug)
         working-directory: apps/ios
         run: |
