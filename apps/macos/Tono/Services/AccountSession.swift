@@ -78,6 +78,15 @@ final class AccountSession {
     var devices: [TonoDevice] = []
     var authMethods: TonoAuthMethodsResponse?
     var emailChallenge: TonoEmailChallengeResponse?
+    /// Decision 141: an Apple/Google account the server would not select by
+    /// its email. Memory only; sent with the next email code only after the
+    /// user agreed (`identityLinkConsented`), and dropped on a changed email,
+    /// sign-out, cancel or after ten minutes.
+    var pendingIdentityLink: PendingIdentityLink?
+    /// The normalized address the current email code was requested for.
+    var emailChallengeAddress: String?
+    /// The last link outcome, for one line on the next screen.
+    var identityLinkResult: TonoIdentityLink?
     /// A credential write can fail after verification succeeds. Keep its
     /// localized explanation while the account returns to signedOut.
     var signInError: String?

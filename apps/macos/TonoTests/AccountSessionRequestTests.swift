@@ -1710,6 +1710,21 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(account.state, .signedOut)
     }
 
+    func testIdentityLinkTicketNeedsConsentTheSameAddressAndTenMinutes() throws {
+        // Decision 141: on a shared Mac a ticket from someone else's Apple ID
+        // must never ride along with another person's code unasked.
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        var link = try XCTUnwrap(PendingIdentityLink(
+            provider: "apple", ticket: "eyJhbGciOiJIUzI1NiJ9.eyJ0eXAiOiAib2lkYy1saW5rIiwgImVtYWlsIjogImpvQG91dGxvb2suY29tIn0.sig", now: start
+        ))
+        XCTAssertEqual(link.maskedEmail, "j•••@outlook.com")
+        XCTAssertNil(link.ticket(for: "jo@outlook.com", now: start), "no consent, no ticket")
+        link.consented = true
+        XCTAssertNil(link.ticket(for: "someone@outlook.com", now: start))
+        XCTAssertNotNil(link.ticket(for: "Jo@Outlook.com", now: start.addingTimeInterval(599)))
+        XCTAssertNil(link.ticket(for: "jo@outlook.com", now: start.addingTimeInterval(600)))
+    }
+
     func testProtectionReleaseReloadsTheSignInMethodsItRetired() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
