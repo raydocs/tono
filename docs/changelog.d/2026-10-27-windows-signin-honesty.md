@@ -1,6 +1,6 @@
 ## 2026-10-27 · Windows 登录：未受邀邮箱不再误报「已发送」，套餐到期不再说成登录失效
 - 归属：G1（客户路径 UI/UX）；Windows 应用（海面外观为主，文案两种外观共用）与 `tono-core`。
-- 来源：叠在 #1777（`amp/windows-onboarding-polish`）上；分支 `amp/windows-signin-honesty`；未合 main。依据登录与订阅研究线程 T-01a17e6b。
+- 来源：叠在 #1777（`amp/windows-onboarding-polish`）上；分支 `amp/windows-signin-honesty`，PR #1778；未合 main。依据登录与订阅研究线程 T-01a17e6b。
 - 缺陷修复：
   - 未受邀邮箱（服务端为防枚举照样回 202，但不发信）：验证码步骤原先说「请查收邮件」。现在改为「如果这个邮箱已开通 Tono，验证码会在一分钟内送达」；一分钟后的提示写明 Tono 只对受邀用户开放，请核对地址或联系为你开通 Tono 的人，发件人地址也放在这里。服务端行为和防枚举都没有动（WIN-SIGNIN-UNINVITED-SENT）。
   - 套餐到期 / 流量用完：重新登录时原来显示「登录服务暂时不可用」，并附带技术详情。现在 `tono-core` 把 403 `ACCOUNT_EXPIRED`、`QUOTA_EXCEEDED`、`ENTITLEMENT_REQUIRED` 映射成 `ApiError::PlanInactive(code)`，支持码仍然是 `TONO_AUTH_FORBIDDEN`，登录页给出对应说明（套餐已到期 / 本期流量用完 / 账号已建好但还没有套餐），不再展开技术详情。
