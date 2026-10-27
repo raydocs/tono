@@ -23,6 +23,9 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
     case localPortInUse = "LOCAL_PORT_IN_USE"
     case updateRecoveryFailed = "UPDATE_RECOVERY_FAILED"
     case catalogNodeRemoved = "CATALOG_NODE_REMOVED"
+    /// macOS only: the helper started the connection engine and it exited
+    /// within the first moments ("sing-box exited (status N)").
+    case coreExited = "TONO_CORE_EXITED"
     case unknownClassifiedFailure = "UNKNOWN_CLASSIFIED_FAILURE"
 
     var userMessage: String {
@@ -60,6 +63,8 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
             return String(localized: "The protected connection did not come back after the update. Reconnect to restore protection.")
         case .catalogNodeRemoved:
             return String(localized: "The selected node was removed from the catalog. Tono is switching to an available node.")
+        case .coreExited:
+            return String(localized: "The connection engine stopped right after starting. Connect again; if it happens again, send diagnostics.")
         case .unknownClassifiedFailure:
             return String(localized: "The protected connection failed. Diagnostic details have been recorded.")
         }

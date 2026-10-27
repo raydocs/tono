@@ -644,6 +644,17 @@ extension AppState {
                 }
                 self.retireFailedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation)
                 let failedStage = self.connectionStage
+                // Helper refusals that carry no typed code would otherwise land
+                // as UNKNOWN_CLASSIFIED_FAILURE. Only fills a gap: a failure the
+                // connect path already classified keeps its own code.
+                if self.lastClassifiedFailure == nil,
+                   let classified = Self.helperRefusalFailure(
+                       error,
+                       stage: failedStage.rawValue,
+                       generation: self.connectionCoordinator.protectionOperationGeneration
+                   ) {
+                    self.lastClassifiedFailure = classified
+                }
                 let failedAt = Date()
                 let totalDuration = self.connectionStartedAt.map {
                     max(0, Int(failedAt.timeIntervalSince($0) * 1_000))
@@ -2661,6 +2672,52 @@ extension AppState {
         return failure
     }
 
+    /// The sentence the helper's `/dns/enable` refuses with when macOS cannot
+    /// name the network service to point at the protected resolver.
+    private static let dnsServiceUnidentifiedSentence = "the selected dns service cannot be identified"
+
+    /// Helper refusals the app can name from their text, because the helper
+    /// sends them without a typed code: the DNS service that cannot be
+    /// identified (the protected-DNS step could not finish) and the engine
+    /// exiting right after it started. Returns nil for every other error.
+    /// The helper's exit reply carries only the status, no engine log tail, so
+    /// the detail holds what the helper sent and nothing more.
+    static func helperRefusalFailure(
+        _ error: Error,
+        stage: String,
+        generation: UInt64
+    ) -> ProtectedFailure? {
+        var texts = [error.localizedDescription]
+        if case HelperIPCError.commandFailed(let message, _) = error {
+            texts.append(message)
+        }
+        let detail = String(describing: error)
+        if texts.contains(where: { $0.lowercased().contains(dnsServiceUnidentifiedSentence) }) {
+            return ProtectedConnectivity.failure(
+                .protectedDnsNotReady,
+                stage: stage,
+                attempt: 1,
+                generation: generation,
+                detail: "helper could not identify the DNS service: \(detail)"
+            )
+        }
+        for text in texts {
+            guard let range = text.range(
+                of: #"sing-box exited \(status (-?\d+)\)"#,
+                options: .regularExpression
+            ) else { continue }
+            let status = text[range].dropFirst("sing-box exited (status ".count).dropLast()
+            return ProtectedConnectivity.failure(
+                .coreExited,
+                stage: stage,
+                attempt: 1,
+                generation: generation,
+                detail: "engine exit status \(status); helper sent no engine log tail: \(detail)"
+            )
+        }
+        return nil
+    }
+
     /// A browser Secure DNS scan that is not clear. The card shows the scan's
     /// own steps (turn off Secure DNS, or quit the browsers), not the generic
     /// "wait and reconnect" text of a system resolver that is still settling.
@@ -3175,7 +3232,7 @@ extension AppState {
     func backupHy2SiblingName() -> String? {
         if let code = lastClassifiedFailure?.code {
             switch code {
-            case .coreExitUnreachable, .unknownClassifiedFailure:
+            case .coreExitUnreachable, .coreExited, .unknownClassifiedFailure:
                 break
             default:
                 return nil
