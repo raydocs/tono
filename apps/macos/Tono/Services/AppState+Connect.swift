@@ -75,7 +75,7 @@ extension AppState {
                             // clears the strike count; "Choose Reality" above
                             // stays the action to take.
                             let refusal = self.errorMessage ?? reason
-                            self.noteProtectionLoss(NetworkLossReport.failOpen)
+                            self.noteProtectionLoss(NetworkLossReport.connectReleased)
                             self.releaseAfterPausedFailure(
                                 pending: refusal + " "
                                     + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
@@ -2831,11 +2831,11 @@ extension AppState {
                 || RuntimeCleanup.nativeUpdatePending
             // The queue is written before the release so the selected node is
             // still known. A pending update keeps the barrier on exhausted
-            // tunnel loss, so that case is a stuck filter, not a fail-open.
+            // tunnel loss, so that case is a stuck filter, not a deliberate release.
             if exhaustedTunnelLoss, holdsUpdateBarrier {
                 noteProtectionLoss(NetworkLossReport.killSwitchStuck)
             } else {
-                noteProtectionLoss(NetworkLossReport.failOpen)
+                noteProtectionLoss(NetworkLossReport.connectReleased)
             }
             disconnect(
                 releaseKillSwitch: true,
@@ -3148,7 +3148,7 @@ extension AppState {
             "protected_dns_broken_retries_exhausted",
             details: ["audits": String(consecutiveProtectedDNSBrokenAudits)]
         )
-        noteProtectionLoss(NetworkLossReport.failOpen)
+        noteProtectionLoss(NetworkLossReport.connectReleased)
         releaseAfterPausedFailure(
             pending: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked."),
             released: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
@@ -3206,7 +3206,7 @@ extension AppState {
             ]
         )
         let detail = " (" + summary + ")"
-        noteProtectionLoss(NetworkLossReport.failOpen)
+        noteProtectionLoss(NetworkLossReport.connectReleased)
         releaseAfterPausedFailure(
             pending: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.")
                 + detail,

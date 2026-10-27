@@ -90,9 +90,9 @@ async fn fail_connect_observed(
         match result {
             Ok(()) => {
                 inner.fsm.connect_failed();
-                // Armed, and this release opened the network. That is fail-open:
-                // protection had the host and then let go. The audit hook queues
-                // TONO_FAIL_OPEN for the next upload.
+                // Armed, and the app released the network on purpose after the
+                // failed connect, so the user has normal internet. The audit
+                // hook queues TONO_CONNECT_RELEASED for the next upload.
                 state.audit().log(AuditEvent::ProtectedOffline { reason: "failOpen" });
             }
             Err(release_error) => {

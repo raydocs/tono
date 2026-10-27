@@ -164,7 +164,7 @@ final class ArmedFailureReleaseTests: XCTestCase {
         let body = try XCTUnwrap(queued.first?["body"].flatMap { Data(base64Encoded: $0) })
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         let event = try XCTUnwrap((json["events"] as? [[String: Any]])?.first)
-        XCTAssertEqual(event["code"] as? String, NetworkLossReport.failOpen)
+        XCTAssertEqual(event["code"] as? String, NetworkLossReport.connectReleased)
     }
 
     func testUnarmedReconnectWaitsForAProofWhileProtectionIsDown() {

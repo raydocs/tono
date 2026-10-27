@@ -1,0 +1,12 @@
+## 2026-10-26 · 桌面端：连接失败后的主动释放改报 TONO_CONNECT_RELEASED
+- 归属：桌面端两个客户端（macOS 与 Windows）的失败遥测；模块 `apps/macos/Tono/Services/Account`、`apps/macos/Tono/Services/AppState+Connect`、`apps/macos/TonoTests`、`apps/windows/app/src-tauri/src/tono/network_loss.rs`、`connection/outcome.rs`。服务端未改。
+- 来源：基线 `origin/main` → 分支 `fix/released-after-failure-telemetry`。未合 main。
+- 缺陷修复：
+  - 14 天生产遥测里 `connectFail` 的最大一组是 `TONO_FAIL_OPEN`（macOS 103 条、Windows 49 条，共 152 条）。运营台把它标成「保护失效，流量被放开了」，控制平面按 P0 告警（用户没有可用网络）。逐个核对产生点：每一条都是应用自己在受保护连接失败后主动释放 Kill Switch，用户拿回的是正常上网（AI 服务仍被拦），没有一处检测到泄漏。
+  - 两端改报已有的诚实代码 `TONO_CONNECT_RELEASED`（macOS 仪表盘早就把它当支持码显示，运营台文案「连接被主动释放了」，控制平面不在 `P0_NETWORK_LOSS_CODES` 里，按普通严重度处理）。事件仍进同一个离线安全的 `p0` 队列，机器恢复联网后照常上传；类型仍为 `connectFail`。
+  - 控制平面 P0 清单保留 `TONO_FAIL_OPEN`，给还没升级的旧客户端用。
+  - 对用户没有任何变化：文案、释放行为、事件触发时机都不动。
+- 工程与测试：Windows `FAIL_OPEN` → `CONNECT_RELEASED`，入队闸门 `is_p0` → `rides_offline_queue`（它现在包含一个非 P0 的码）；审计原因字符串 `"failOpen"` 保持不变（本机审计日志和诊断工具读它），加了一行注释。macOS `NetworkLossReport.failOpen` → `connectReleased`，`isP0` → `ridesOfflineQueue`，四个产生点同步；`killSwitchStuck` 未动。更新 `network_loss.rs` 的测试、`ArmedFailureReleaseTests`、`PeriodicTelemetryConsentTests`；修正 `outcome.rs` 与 `AppState+Connect` 里把这次释放叫 fail-open 的注释。
+- 验证：Windows `cargo +1.98.1 test --lib network_loss` 3 个通过，`cargo +1.98.1 check --lib` 通过。macOS `xcodebuild test -only-testing:TonoTests/ArmedFailureReleaseTests -only-testing:TonoTests/PeriodicTelemetryConsentTests`：10 + 11 = 21 个测试，0 失败，`** TEST SUCCEEDED **`。整套 TonoTests、Windows 全量测试未在本机跑，依赖 PR 上的 CI。服务端 fixture 与 e2e 里的 `TONO_FAIL_OPEN` 是控制平面读侧的样例，不受影响。
+- 候选/发布：无新包，仅源码。版本号未改。
+- 剩余限制：事件仍不带原因字段，因为控制平面在 `services/control-plane/src/telemetry/diagnostics.ts:42` 拒绝未知键；要区分释放原因需先放开服务端的校验。已发布的旧版本仍会继续报 `TONO_FAIL_OPEN`，历史聚类不会改名；决策 050/051 与 `docs/diagnostics-privacy.md` 里列出的 P0 清单描述的是服务端清单，未改。
