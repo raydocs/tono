@@ -23,6 +23,9 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
     case localPortInUse = "LOCAL_PORT_IN_USE"
     case updateRecoveryFailed = "UPDATE_RECOVERY_FAILED"
     case catalogNodeRemoved = "CATALOG_NODE_REMOVED"
+    /// macOS only: the helper started the connection engine and it exited
+    /// within the first moments ("sing-box exited (status N)").
+    case coreExited = "TONO_CORE_EXITED"
     case unknownClassifiedFailure = "UNKNOWN_CLASSIFIED_FAILURE"
 
     var userMessage: String {
@@ -36,7 +39,7 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .coreControllerUnavailable:
             return String(localized: "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.")
         case .coreExitUnreachable:
-            return String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.")
+            return String(localized: "This server did not answer. Pick another server and try again.")
         case .networkEnvironmentOffline:
             // Looked up rather than written in place: a physical-link
             // observation is what produces this code, and it reaches the
@@ -60,6 +63,8 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
             return String(localized: "The protected connection did not come back after the update. Reconnect to restore protection.")
         case .catalogNodeRemoved:
             return String(localized: "The selected node was removed from the catalog. Tono is switching to an available node.")
+        case .coreExited:
+            return String(localized: "The connection engine stopped right after starting. Connect again; if it happens again, send diagnostics.")
         case .unknownClassifiedFailure:
             return String(localized: "The protected connection failed. Diagnostic details have been recorded.")
         }
@@ -276,22 +281,27 @@ nonisolated enum ProtectedConnectivity {
 
         let code: ProtectedFailureCode
         let detail: String
+        // Named first so the support report answers "which check failed"
+        // before the long per-probe tail. Only the TUN-route code carries it.
+        let evidence = tunRouteEvidence(
+            controller: controller, mixed: mixed, probes: probes
+        )
         switch (controller, mixed) {
         case (.ok, .some(.ok)):
             code = .tunRouteUnavailable
-            detail = "controller and mixed proxy succeeded; real TUN failed: \(tunDetail)"
+            detail = "\(evidence); controller and mixed proxy succeeded; real TUN failed: \(tunDetail)"
         case (.failed(let controllerError), .some(.ok)):
             code = .tunRouteUnavailable
-            detail = "mixed proxy succeeded; controller=\(controllerError); TUN=\(tunDetail)"
+            detail = "\(evidence); mixed proxy succeeded; controller=\(controllerError); TUN=\(tunDetail)"
         case (.ok, .some(.failed(let proxyError))):
             code = .tunRouteUnavailable
-            detail = "controller succeeded; TUN=\(tunDetail); mixed=\(proxyError)"
+            detail = "\(evidence); controller succeeded; TUN=\(tunDetail); mixed=\(proxyError)"
         case (.failed(let controllerError), .some(.failed(let proxyError))):
             code = .coreExitUnreachable
             detail = "controller=\(controllerError); TUN=\(tunDetail); mixed=\(proxyError)"
         case (.ok, nil):
             code = .tunRouteUnavailable
-            detail = "controller succeeded; real TUN failed: \(tunDetail)"
+            detail = "\(evidence); controller succeeded; real TUN failed: \(tunDetail)"
         case (.failed(let controllerError), nil):
             code = .coreExitUnreachable
             detail = "controller=\(controllerError); TUN=\(tunDetail)"
@@ -314,6 +324,37 @@ nonisolated enum ProtectedConnectivity {
             decided.userMessage = CertificateClock.userMessage
         }
         return .retry(decided)
+    }
+
+    /// The check that failed for `TUN_ROUTE_UNAVAILABLE`, in one short clause:
+    /// `TUN route check failed: tun probe lost 3/3 origins (Google=timeout,
+    /// Cloudflare=timeout, Apple=timeout); controller ok; mixed ok`. The
+    /// category is the leg's failure (dns, tcp, tls, http, timeout), which is
+    /// what tells a missing route (tcp/timeout on every origin) from a
+    /// tunnel that carries traffic but loses one origin.
+    static func tunRouteEvidence(
+        controller: ProbeCheck,
+        mixed: ProbeCheck?,
+        probes: [ProbeOriginResult]
+    ) -> String {
+        let tunClause: String
+        if probes.isEmpty {
+            tunClause = "tun probe returned no per-origin result"
+        } else {
+            let legs = probes
+                .map { "\($0.label)=\($0.category.rawValue)" }
+                .joined(separator: ", ")
+            tunClause = "tun probe lost \(probes.count)/\(probes.count) origins (\(legs))"
+        }
+        let controllerClause: String
+        if case .failed = controller { controllerClause = "controller failed" } else { controllerClause = "controller ok" }
+        let mixedClause: String
+        switch mixed {
+        case .some(.ok): mixedClause = "mixed ok"
+        case .some(.failed): mixedClause = "mixed failed"
+        case nil: mixedClause = "mixed not probed"
+        }
+        return "TUN route check failed: \(tunClause); \(controllerClause); \(mixedClause)"
     }
 
     static func failure(
@@ -398,5 +439,17 @@ enum SessionRuntimePorts {
         guard nameResult == 0 else { return nil }
         let port = Int(UInt16(bigEndian: bound.sin_port))
         return (1024...65_535).contains(port) ? port : nil
+    }
+}
+
+/// Bound on in-place PF re-arms for a dead TUN data plane. The monitor state
+/// that carries the count lives for one connect attempt, so a new attempt
+/// starts at zero; success inside an attempt does not reset it, which is what
+/// stops a flapping route from re-arming forever.
+nonisolated enum TunRouteRearmBound {
+    static let maxRearmsPerAttempt = 3
+
+    static func allows(priorRearms: Int) -> Bool {
+        priorRearms < maxRearmsPerAttempt
     }
 }
