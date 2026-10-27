@@ -1,0 +1,22 @@
+{
+  "fixtureVersion": 1,
+  "cases": [
+    { "name": "Los Angeles · Sunset", "region": "us" },
+    { "name": "Los Angeles · Sunset · hy2", "region": "us" },
+    { "name": "Salt Lake City · Summit", "region": "us" },
+    { "name": "Buffalo · Niagara", "region": "us" },
+    { "name": "  Seattle · Rain", "region": "us" },
+    { "name": "Tokyo · Sakura", "region": "jp" },
+    { "name": "Tokyo · Sakura · hy2", "region": "jp" },
+    { "name": "Osaka · Wave", "region": "jp" },
+    { "name": "US West 01", "region": "us" },
+    { "name": "🇺🇸 US Reality 01", "region": "us" },
+    { "name": "jp-west", "region": "jp" },
+    { "name": "JP-VLESS-Reality", "region": "jp" },
+    { "name": "JP relay via US", "region": "us" },
+    { "name": "JPN East", "region": "other" },
+    { "name": "Rust Server", "region": "other" },
+    { "name": "Paris · Seine", "region": "other" },
+    { "name": "Home Residential A · hy2", "region": "other" }
+  ]
+}

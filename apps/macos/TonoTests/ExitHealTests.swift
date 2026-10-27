@@ -32,6 +32,25 @@ final class ExitHealTests: XCTestCase {
         ]
     }
 
+    /// Failover and unarmed recovery stay inside `regionKey`; Windows Rust, its UI and this
+    /// client read the same cases (tooling/scripts/tests/fixtures/exit-region-v1).
+    func testRegionKeyMatchesTheSharedExitRegionCases() throws {
+        struct Fixture: Decodable {
+            struct Case: Decodable { let name: String; let region: String }
+            let fixtureVersion: Int
+            let cases: [Case]
+        }
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent(
+            "tooling/scripts/tests/fixtures/exit-region-v1/cases.json"))
+        let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+        XCTAssertEqual(fixture.fixtureVersion, 1)
+        for item in fixture.cases {
+            XCTAssertEqual(ExitHeal.regionKey(item.name), item.region, item.name)
+        }
+    }
+
     func testFailoverRetriesTheSameNodeBeforeThePool() {
         var session = ExitHeal.Session.forPreferred("Buffalo · Niagara", residentialId: "socks5:198.51.100.8:1080")
         let first = ExitHeal.observe(&session, failure: .tcp, candidates: pool(), stance: .ordinary, nowMs: 0)
