@@ -6,3 +6,4 @@
 - 验证：`npx vitest run test/ops-jobs.test.ts -t "bearer tokens"` 在旧代码上失败（输出原样保留 Bearer、refreshToken、accessToken、Cookie 与两种 IPv6），新代码通过；`npm test`（`services/control-plane`）结果见 PR 验证评论。
 - 候选/发布：仅源码，无新候选；需部署控制面后生效。
 - 剩余限制：库里已有的行不回扫；冒号分隔的 MAC 不处理；`token: <词>` 形状的普通报错里那个词会被一起抹掉。
+- 续记（2026-10-27）：同一 PR 补两类遗漏。结构化任务结果按键名整值脱敏（`password`、`secret`、`clientSecret`、`apiKey`/`X-Api-Key`、`privateKey`、`authorization`、`cookie`/`set-cookie`、`token`、`accessToken`、`refreshToken`、`idToken`、`sessionToken`、`authToken`，忽略 `-`/`_` 与大小写）；文本里补单引号键、`api-key`/`secret` 赋值、`前缀::` 与 `::x:y` 形式的 IPv6（`::1` 保留）。验证：两条回归在首轮代码上失败、新代码通过；`npm test` 74 个文件 1102 个测试通过；`npm run typecheck` 通过。历史行不回扫，靠 30/90 天保留期过期（见发现分片）。

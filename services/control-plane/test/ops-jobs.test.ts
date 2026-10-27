@@ -172,13 +172,32 @@ describe('ops node jobs', () => {
       '{"refreshToken":"rt-SECRET-1"} accessToken=at-SECRET-2 Cookie: sid=c-SECRET-3',
       'dial vless://alice:pw-SECRET-4@exit.example:443 via [2001:db8:85a3::8a2e:370:7334]:443',
       'home fe80::1c2d:3e4f:5a6b:7c8d%en0 full 2001:0db8:0000:0000:0000:ff00:0042:8329 at tono_core::connection',
+      "prefix 2001:db8:4f2a:: mapped ::ffff:c000:280 {'accessToken': 'at-SECRET-5'} x-api-key: k-SECRET-6",
     ].join('\n');
     const out = redactJobResult(raw);
-    expect(out).not.toMatch(/SECRET|eyJhbGciOi|alice|2001:|fe80:|8a2e|0042:8329/);
+    expect(out).not.toMatch(/SECRET|eyJhbGciOi|alice|2001:|fe80:|8a2e|0042:8329|4f2a|c000:280/);
     // Diagnostic shape survives: clock times, Rust paths and the failing host.
     expect(out).toContain('12:30:45');
     expect(out).toContain('tono_core::connection');
     expect(out).toContain('exit.example:443');
+  });
+
+  it('redacts credential values stored under structured result keys', async () => {
+    const t = 1_800_000_350;
+    await enqueue('node_config_snapshot', t);
+    const claimed = await leaseJobs(db(), 'hub', 1, t);
+    const done = await completeJob(db(), claimed.jobs[0].id, claimed.leaseId, {
+      status: 'ok',
+      summary: 'snapshot',
+      resultJson: JSON.stringify({
+        refreshToken: 'rt-plain', auth: { access_token: 'at-plain', 'X-Api-Key': 'k-plain', cookie: 'sid=c-plain' },
+        node: { tag: 'tokyo-1', port: 443 },
+      }),
+    }, t + 1);
+    expect(JSON.parse(done.resultJson!)).toEqual({
+      refreshToken: '[redacted]', auth: { access_token: '[redacted]', 'X-Api-Key': '[redacted]', cookie: '[redacted]' },
+      node: { tag: 'tokyo-1', port: 443 },
+    });
   });
 
   it('requeues an expired lease then fails after max attempts', async () => {
