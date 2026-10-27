@@ -99,6 +99,18 @@ LEGACY_CLIENT_EMAIL = "shared-legacy"
 # credentials append device ID and credential UUID so a rotated UUID cannot be
 # mistaken for the still-installed previous generation.
 CLIENT_LABEL_PREFIX = "u:"
+# Opt-in stuck-revocation restart (TONO_RESTART_XRAY_ON_STUCK_REVOCATION=1).
+STUCK_REVOCATION_ROUNDS = 3
+XRAY_RESTART_INTERVAL_SECONDS = 60 * 60
+MAX_RESTARTS_UNCONVERGED = 2
+# No new restore attempt starts more than 30 s after systemctl returns; past
+# that the next timer round (60 s after this one ends) restores the roster.
+# One attempt already started can still run to its own RPC timeouts.
+RESTART_SETTLE_DEADLINE_SECONDS = 30
+RESTART_SETTLE_SECONDS = 2
+SYSTEMCTL = "/usr/bin/systemctl"
+XRAY_UNIT = "tono-xray.service"
+CHILD_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
 SOURCE_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 # The control plane's answer for a token that belongs to a disabled or retired
 # node. Only this exact 403 body withdraws clients; a bare 401/403, an edge
@@ -742,7 +754,8 @@ def load_state(path: Path) -> dict:
     # Absent on a state file written before this agent recorded them, which is
     # not corruption — it is the case that has to remove nothing.
     for key, kind in (("installedClients", list), ("sourceId", str), ("startMarker", str),
-                      ("lastReportObservedAt", int)):
+                      ("lastReportObservedAt", int), ("stuckRemovals", dict),
+                      ("xrayRestartAt", int), ("xrayRestartsUnconverged", int)):
         if key in state and not isinstance(state[key], kind):
             raise Refusal(f"state file is corrupt: {key}")
     # Used as a set of labels before revocation; a non-string entry would crash it.
@@ -1169,6 +1182,9 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     """
     removed = 0
     failures: list[str] = []
+    # Our own clients whose revocation the API refused: the only input to the
+    # opt-in Xray restart (shared-legacy comes back from the static config).
+    failed_removals: set[str] = set()
     if retire_shared_legacy and listed is None:
         try:
             result = remove_inbound_user(
@@ -1226,10 +1242,12 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
                 result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
             except (OSError, subprocess.TimeoutExpired) as error:
                 failures.append(f"removing {label} failed: {type(error).__name__}")
+                failed_removals.add(label)
                 continue
             if not removal_succeeded(result, label, commands["remove_user"]):
                 # One failure must not leave every later revocation in place.
                 failures.append(f"removing {label} failed: {api_error(result)}")
+                failed_removals.add(label)
                 continue
             if known_installed is not None:
                 known_installed.discard(label)
@@ -1282,7 +1300,9 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         # Successful adds and removals already changed the inbound. The set has
         # to leave with the error, or the caller keeps the previous inventory
         # and a later unlistable round cannot revoke the client just installed.
-        raise attach_installed(PartialReconcile("; ".join(failures)), known_installed)
+        error = attach_installed(PartialReconcile("; ".join(failures)), known_installed)
+        error.failed_removals = failed_removals
+        raise error
     return added, removed, known_installed
 
 
@@ -1859,6 +1879,96 @@ def run_outage_round(path: Path, configured: str, binary: Path,
     ) from failure
 
 
+def restart_for_stuck_revocation(
+    path: Path, state: dict, observed_at: int, binary: Path, commands: dict[str, str],
+    address: str, tag: str, roster: list[dict[str, str]], *, retire_shared_legacy: bool,
+    sleep=time.sleep, clock=time.monotonic,
+) -> str | None:
+    """Opt-in: restart tono-xray once when a revocation keeps failing.
+
+    Xray drops every API-added client on a restart, so a client its API will not
+    remove is gone afterwards and the roster puts the others back. The cost is
+    every connection on the node, which is why this is off unless
+    TONO_RESTART_XRAY_ON_STUCK_REVOCATION=1, waits for STUCK_REVOCATION_ROUNDS
+    reporting rounds, and runs at most once per XRAY_RESTART_INTERVAL_SECONDS of
+    roster time (the attempt is saved before systemctl runs, so a failed or
+    hanging restart cannot loop). Returns a note for the round's refusal, or
+    None when nothing was attempted. The round is never acknowledged here; the
+    next timer round converges and acknowledges.
+    """
+    if os.environ.get("TONO_RESTART_XRAY_ON_STUCK_REVOCATION", "") != "1":
+        return None
+    stuck = sorted(label for label, rounds in state.get("stuckRemovals", {}).items()
+                   if isinstance(rounds, int) and rounds >= STUCK_REVOCATION_ROUNDS)
+    if not stuck:
+        return None
+    attempts = state.get("xrayRestartsUnconverged", 0)
+    if isinstance(attempts, int) and attempts >= MAX_RESTARTS_UNCONVERGED:
+        # A cause a restart does not fix (a wrong inbound tag, a broken API)
+        # must not drop every connection on the node once an hour forever.
+        return (f"tono-xray restart stopped: {attempts} attempt(s) did not converge the roster;"
+                " an operator must fix the removal")
+    last = state.get("xrayRestartAt")
+    if isinstance(last, int) and observed_at - last < XRAY_RESTART_INTERVAL_SECONDS:
+        return f"tono-xray restart skipped: the last one was at {last} (at most one per hour)"
+    # Counters reset on restart. Fold a reading taken right before it, from a
+    # known process generation, or the bytes since this round's read are lost.
+    try:
+        _, _, _, counters, marker = reconcile_and_read_stable(
+            binary, commands, address, tag, None, None,
+        )
+        if not marker:
+            return "tono-xray restart skipped: its start marker is unreadable, so usage could not be kept"
+        keep_usage_locally(path, state, None, counters, marker)
+    except (Refusal, OSError) as error:
+        return f"tono-xray restart skipped: usage could not be kept first: {error}"
+    state["xrayRestartAt"] = observed_at
+    state["xrayRestartsUnconverged"] = (attempts if isinstance(attempts, int) else 0) + 1
+    save_state(path, state)
+    print(f"restarting tono-xray: revocation of {len(stuck)} client(s) failed"
+          f" {STUCK_REVOCATION_ROUNDS}+ rounds in a row", file=sys.stderr)
+    try:
+        result = subprocess.run(
+            [SYSTEMCTL, "--no-ask-password", "restart", XRAY_UNIT],
+            capture_output=True, text=True, timeout=60, check=False, env=CHILD_ENV,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return f"tono-xray restart failed: {type(error).__name__}"
+    if result.returncode != 0:
+        return f"tono-xray restart failed: systemctl exited {result.returncode}"
+    # The API needs a moment after the unit starts; until the roster is back
+    # every customer on the node is offline, so retry briefly rather than
+    # leaving that to the next timer round.
+    reason = "the start marker did not change"
+    deadline = clock() + RESTART_SETTLE_DEADLINE_SECONDS
+    attempt = 0
+    while attempt == 0 or clock() + RESTART_SETTLE_SECONDS <= deadline:
+        if attempt:
+            sleep(RESTART_SETTLE_SECONDS)
+        attempt += 1
+        if xray_start_marker(binary) in (None, marker):
+            continue
+        try:
+            _, _, installed, _, _ = reconcile_and_read_stable(
+                binary, commands, address, tag, roster,
+                set(state.get("installedClients", [])),
+                retire_shared_legacy=retire_shared_legacy,
+            )
+        except Refusal as error:
+            persist_installed_inventory(path, state, refusal_installed(error))
+            reason = f"restoring the roster failed: {error}"
+            continue
+        # The post-restart reading is not folded: the saved marker still names
+        # the old process, so the next round folds the whole new counter.
+        persist_installed_inventory(path, state, installed)
+        remaining = sorted(set(stuck) & (installed or set()))
+        if remaining:
+            return f"restarted tono-xray, but {len(remaining)} revoked client(s) are still installed"
+        return (f"restarted tono-xray: {len(stuck)} revoked client(s) gone, roster restored;"
+                " the next round acknowledges")
+    return f"restarted tono-xray, but {reason}"
+
+
 def run_once(path: Path) -> None:
     base = api_base()
     token = env("TONO_HOME_AGENT_TOKEN")
@@ -2184,6 +2294,21 @@ def run_once(path: Path) -> None:
     else:
         state.pop("startMarker", None)
     state["pendingReports"] = merge_reports(state["pendingReports"], reports)
+    # Consecutive reporting rounds each of our clients has failed revocation
+    # in. A label that was removed, or a round that converged, starts over.
+    stuck = getattr(reconcile_error, "failed_removals", set())
+    previous_stuck = state.get("stuckRemovals")
+    if not isinstance(previous_stuck, dict):
+        previous_stuck = {}
+    state["stuckRemovals"] = {
+        label: (rounds if isinstance(rounds := previous_stuck.get(label), int) else 0) + 1
+        for label in sorted(stuck) if label.startswith(CLIENT_LABEL_PREFIX)
+    }
+    if not state["stuckRemovals"]:
+        state.pop("stuckRemovals")
+    if reconcile_error is None:
+        # Converged: a later stuck revocation gets its full restart budget.
+        state.pop("xrayRestartsUnconverged", None)
 
     # Persist before delivering: a crash after the server accepts must replay, and
     # replaying is safe. The reverse — delivering first — loses usage silently.
@@ -2200,6 +2325,13 @@ def run_once(path: Path) -> None:
             acknowledge_metering(base, token, observed_at)
         print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
     if reconcile_error is not None:
+        # Usage up to this round's reading is saved and delivered by now.
+        note = restart_for_stuck_revocation(
+            path, state, observed_at, binary, commands, address, tag, roster,
+            retire_shared_legacy=retire_shared_legacy,
+        )
+        if note:
+            raise Refusal(f"{reconcile_error}; {note}") from reconcile_error
         raise reconcile_error
     if persist_error is not None:
         raise persist_error
