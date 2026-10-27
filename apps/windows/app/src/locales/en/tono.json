@@ -253,13 +253,16 @@
     "invalidCode": "Enter the 6-digit code",
     "noEmail": {
       "title": "No email yet?",
-      "description": "Check spam first. Still nothing? This email may not have a Tono account yet (Tono is invite-only), or the email may not have been delivered: check the address and send again later, or ask whoever set up Tono for you."
+      "description": "Check spam first. Still nothing? This email may not be able to sign in to Tono right now, or the email may not have been delivered: check the address and send again later, or contact Tono support or whoever invited you."
     },
     "openSignup": {
       "inboxInstructions": "Code requested for this email. It usually arrives within a minute, but can be delayed or not delivered. A first-time email gets a new Tono account. Type or paste the 6 digits; Tono checks them automatically.",
       "codeSent": "Code requested.",
       "codeSentTo": "Look in this inbox (and spam) for the code.",
       "noEmail": "Check spam and the address above. Emails can be delayed or not delivered: send again later, and if it never arrives, contact Tono support."
+    },
+    "signupPaused": {
+      "noEmail": "New sign-ups are full for today; existing accounts are not affected. New users, please try again tomorrow. Check spam and the address above; emails can be delayed or not delivered, so you can send again later."
     },
     "suspended": {
       "title": "Account paused",

@@ -67,7 +67,7 @@ vi.mock('@/services/tono', () => ({
   tonoRetryRestore: tonoRetryRestoreMock,
   tonoDisconnect: tonoDisconnectMock,
   tonoRestoreInternet: tonoDisconnectMock,
-  tonoPublicSignup: async () => false,
+  tonoSignupMode: async () => 'closed',
   formatTonoActionError: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   TONO_STATUS_EVENT: 'tono://status',

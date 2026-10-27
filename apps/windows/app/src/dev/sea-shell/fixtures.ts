@@ -263,8 +263,9 @@ export const tonoSignInStart = async () => {
   await signInFixtureIO('sendCode')
   return { challengeId: 'synthetic', expiresIn: 600, message: '' }
 }
-// `auth/methods` `email.publicSignup`; `?publicSignup` previews the flag on.
-export const tonoPublicSignup = async () => params.has('publicSignup')
+// `auth/methods` sign-up mode; `?signup=open|paused` previews it (default closed).
+export const tonoSignupMode = async () =>
+  (params.get('signup') ?? 'closed') as 'open' | 'paused' | 'closed'
 export const tonoSignInVerify = async () => {
   await signInFixtureIO('verifyCode')
   if (params.has('badCode'))

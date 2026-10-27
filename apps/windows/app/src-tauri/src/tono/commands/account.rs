@@ -1685,13 +1685,17 @@ mod lifecycle_tests {
     }
 }
 
-/// `auth/methods`' `email.publicSignup`: picks the sign-in copy. Read-only and global (it says
-/// nothing about any address), so anti-enumeration is unchanged; any failure reads as false,
-/// the invite-only copy.
+/// `auth/methods`' sign-up mode for the sign-in copy: `paused` (open registration with today's
+/// new-address budget spent), `open`, or `closed`. Read-only and global (it says nothing about
+/// any address), so anti-enumeration is unchanged; any failure reads as `closed`.
 #[tauri::command]
-pub async fn tono_public_signup(state: tauri::State<'_, Arc<TonoState>>) -> Result<bool, String> {
+pub async fn tono_signup_mode(state: tauri::State<'_, Arc<TonoState>>) -> Result<&'static str, String> {
     let client = { state.lock().await.client.clone() };
-    Ok(client.auth_methods().await.map(|methods| methods.email.public_signup).unwrap_or(false))
+    Ok(match client.auth_methods().await {
+        Ok(methods) if methods.email.signup_paused => "paused",
+        Ok(methods) if methods.email.public_signup => "open",
+        _ => "closed",
+    })
 }
 
 /// The current account, if signed in.

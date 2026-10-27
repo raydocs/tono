@@ -1376,6 +1376,9 @@ export interface TranslationResources {
           signIn: string
           title: string
         }
+        signupPaused: {
+          noEmail: string
+        }
         stepCode: string
         stepEmail: string
         stillWaiting: string

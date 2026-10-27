@@ -15,7 +15,8 @@ import {
   formatTonoActionError,
   stableTonoErrorCode,
   tonoAccount,
-  tonoPublicSignup,
+  type TonoSignupMode,
+  tonoSignupMode,
   tonoRestoreInternet,
   tonoRetryRestore,
   tonoSignInDismiss,
@@ -245,13 +246,15 @@ const LoginPage = () => {
   const authBusy = sending || verifying || changingEmail || automaticRecovery
   const supportAvailable = recovery?.phase === 'userAction' && !authBusy
   const visibleError = automaticRecovery ? null : error
-  // Global sign-up policy, read once; never about the typed address (anti-enumeration).
-  // Unknown or unreadable keeps the invite-only wording, which stays true either way.
-  const [publicSignup, setPublicSignup] = useState(false)
+  // Global sign-up mode, read once; never about the typed address (anti-enumeration).
+  // `closed` (also unknown/unreadable, and an older server's budget-spent `false`) keeps
+  // conditional wording that claims neither invite-only nor delivery.
+  const [signupMode, setSignupMode] = useState<TonoSignupMode>('closed')
+  const publicSignup = signupMode === 'open'
   useEffect(() => {
     let live = true
-    tonoPublicSignup()
-      .then((open) => live && setPublicSignup(open === true))
+    tonoSignupMode()
+      .then((mode) => live && mode && setSignupMode(mode))
       .catch(() => undefined)
     return () => {
       live = false
@@ -1173,7 +1176,9 @@ const LoginPage = () => {
             >
               {publicSignup
                 ? t('tono.login.openSignup.noEmail')
-                : t('tono.login.noEmail.description')}
+                : signupMode === 'paused'
+                  ? t('tono.login.signupPaused.noEmail')
+                  : t('tono.login.noEmail.description')}
             </span>
             {/* The sender only matters once the mail has not shown up. */}
             {newAppearance && (

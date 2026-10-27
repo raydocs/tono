@@ -775,6 +775,7 @@ export const translationKeys = [
   'tono.login.openSignup.codeSent',
   'tono.login.openSignup.codeSentTo',
   'tono.login.openSignup.noEmail',
+  'tono.login.signupPaused.noEmail',
   'tono.login.suspended.title',
   'tono.login.suspended.description',
   'tono.login.sessionEnded.title',

@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   dismiss: vi.fn(),
   mutate: vi.fn(),
   account: vi.fn(),
-  publicSignup: vi.fn(),
+  signupMode: vi.fn(),
   status: {} as Record<string, unknown>,
 }))
 
@@ -40,7 +40,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoSignInVerify: mocks.verify,
   tonoSignInDismiss: mocks.dismiss,
   tonoAccount: mocks.account,
-  tonoPublicSignup: mocks.publicSignup,
+  tonoSignupMode: mocks.signupMode,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
   tonoRestoreInternet: mocks.disconnect,
@@ -70,7 +70,7 @@ beforeEach(() => {
   mocks.dismiss.mockReset().mockResolvedValue(undefined)
   mocks.mutate.mockReset().mockResolvedValue(undefined)
   mocks.account.mockReset().mockResolvedValue(null)
-  mocks.publicSignup.mockReset().mockResolvedValue(false)
+  mocks.signupMode.mockReset().mockResolvedValue('closed')
   mocks.status = {}
 })
 
@@ -518,21 +518,23 @@ describe('login plan answers', () => {
 describe('login sign-up policy', () => {
   // auth/email/start answers 202 even when nothing is sent (daily cap, failed delivery,
   // ineligible address), so neither state may promise that a code arrives.
-  it('never promises delivery and offers a next step, with sign-up open or closed', async () => {
-    for (const open of [false, true]) {
+  it('never promises delivery or claims invite-only, and offers a next step, in every sign-up mode', async () => {
+    for (const mode of ['closed', 'open', 'paused']) {
       cleanup()
-      mocks.publicSignup.mockResolvedValue(open)
+      mocks.signupMode.mockResolvedValue(mode)
       await enterCodeStep()
       const page = document.body.textContent ?? ''
       expect(page).not.toMatch(
         /on its way|(?<!usually )arrives (at this email )?within a minute/i,
       )
       expect(page).toMatch(/send again later/i)
+      // An older server's `false` can be today's sign-up budget, not a closed registration.
+      expect(page).not.toMatch(/invite-only/i)
     }
   })
 
   it('drops the invite-only wording when the server says sign-up is open', async () => {
-    mocks.publicSignup.mockResolvedValue(true)
+    mocks.signupMode.mockResolvedValue('open')
     const sendAgain = await enterCodeStep()
     expect(sendAgain).toBeDefined()
     expect(screen.getByRole('status').textContent).toBe(
@@ -541,6 +543,13 @@ describe('login sign-up policy', () => {
     expect(screen.getByText(enTono.login.openSignup.noEmail)).toBeDefined()
     expect(screen.queryByText(/invite-only|has a Tono account/)).toBeNull()
     // One global read; the typed address never reaches it.
-    expect(mocks.publicSignup).toHaveBeenCalledWith()
+    expect(mocks.signupMode).toHaveBeenCalledWith()
   })
+})
+
+it('says new sign-ups are full for today when open registration is paused', async () => {
+  mocks.signupMode.mockResolvedValue('paused')
+  await enterCodeStep()
+  expect(screen.getByText(enTono.login.signupPaused.noEmail)).toBeDefined()
+  expect(screen.getByRole('status').textContent).toBe(enTono.login.codeSent)
 })

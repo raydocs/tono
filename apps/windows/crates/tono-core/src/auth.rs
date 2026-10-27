@@ -385,6 +385,10 @@ pub struct AuthMethod {
     /// global setting, never an answer about one address; absent on older servers = false.
     #[serde(rename = "publicSignup", default)]
     pub public_signup: bool,
+    /// `email.signupPaused`: open registration is on but today's new-address code budget is
+    /// spent. Global, never about one address; absent = false.
+    #[serde(rename = "signupPaused", default)]
+    pub signup_paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2358,7 +2362,16 @@ mod tests {
                 r#"{"email":{"enabled":true,"publicSignup":true},"apple":{"enabled":true},"google":{"enabled":false}}"#,
             )
         });
-        assert!(client.auth_methods().await.unwrap().email.public_signup);
+        let email = client.auth_methods().await.unwrap().email;
+        assert!(email.public_signup);
+        assert!(!email.signup_paused, "absent means not paused");
+        let (client, _mock, _store) = test_client(|_| {
+            json(
+                200,
+                r#"{"email":{"enabled":true,"publicSignup":true,"signupPaused":true},"apple":{"enabled":true},"google":{"enabled":false}}"#,
+            )
+        });
+        assert!(client.auth_methods().await.unwrap().email.signup_paused);
     }
 
     #[tokio::test]
