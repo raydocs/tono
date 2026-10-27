@@ -173,6 +173,33 @@ fn restore_selection_value(
     crate::tono::state::save_selection(catalog_dir, previous_name)
 }
 
+/// What a switch worker does with the published selection once it owns the lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PendingSwitch {
+    /// A newer generation owns the session. This includes the reconnect that a wake or
+    /// network-change recovery admits while the worker waits: that attempt dials the published
+    /// target, so rolling back would relabel it with the exit the user was leaving.
+    Retired,
+    /// A connect admitted before the selection was published is dialling the previous exit.
+    RestorePrevious,
+    /// Not connected: the published name is simply the choice for the next connect.
+    KeepForNextConnect,
+    Proceed,
+}
+
+pub(super) fn pending_switch(inner: &crate::tono::state::TonoInner, generation: u64) -> PendingSwitch {
+    let status = inner.fsm.status();
+    if inner.connect_generation != generation {
+        PendingSwitch::Retired
+    } else if status.is_connected {
+        PendingSwitch::Proceed
+    } else if status.is_connecting {
+        PendingSwitch::RestorePrevious
+    } else {
+        PendingSwitch::KeepForNextConnect
+    }
+}
+
 pub(super) fn hot_switch_allowed(previous: Option<&ValidatedNode>, next: &ValidatedNode) -> bool {
     previous.is_some_and(|previous| previous.is_hysteria2() == next.is_hysteria2())
 }
@@ -193,20 +220,14 @@ pub async fn switch_selected_node(
     }
     let snapshot = {
         let inner = state.lock().await;
-        if inner.connect_generation != generation {
-            return;
-        }
-        if !inner.fsm.status().is_connected {
-            // A connect already in flight is dialling the previous exit, but
-            // the caller has published the new name — the UI would show a node
-            // the attempt is not using. When fully disconnected the new name is
-            // simply the choice for the next connect, so leave it alone.
-            let connecting = inner.fsm.status().is_connecting;
-            drop(inner);
-            if connecting {
+        match pending_switch(&inner, generation) {
+            PendingSwitch::Proceed => {}
+            PendingSwitch::Retired | PendingSwitch::KeepForNextConnect => return,
+            PendingSwitch::RestorePrevious => {
+                drop(inner);
                 restore_selected_node(&state, &app, generation, &previous_name).await;
+                return;
             }
-            return;
         }
         // A17: the live runtime may dial the previous node's hy2 block automatically.
         // Judge the hot switch, its endpoints, rollback and socket cleanup by the exact
@@ -581,6 +602,37 @@ mod convergence_tests {
         super::restore_selection_value(&mut selected, &directory, "old-exit").unwrap();
         assert_eq!(selected.as_deref(), Some("old-exit"));
         assert_eq!(crate::tono::state::load_selection(&directory).as_deref(), Some("old-exit"));
+    }
+
+    /// Windows mirror of macOS X1-5 (`NodeSwitchSleepTests`). The selection command publishes
+    /// B, then the worker queues for lifecycle ownership. A wake recovery takes it first, stops
+    /// the tunnel and admits a reconnect, which dials the published B. The late worker must
+    /// not roll the selection back to A, the exit the user was leaving.
+    #[tokio::test]
+    async fn wake_recovery_during_a_pending_switch_keeps_the_switch_target() {
+        use super::{PendingSwitch, pending_switch};
+        let state = crate::tono::state::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.fsm.begin_connect();
+        inner.fsm.mark_kill_switch_armed();
+        inner.fsm.mark_session_verified();
+        inner.fsm.connect_succeeded().unwrap();
+        inner.selected_node = Some("B".to_owned());
+        let switch_generation = inner.connect_generation;
+        assert_eq!(pending_switch(&inner, switch_generation), PendingSwitch::Proceed);
+
+        inner.fsm.tunnel_died();
+        assert_eq!(pending_switch(&inner, switch_generation), PendingSwitch::KeepForNextConnect,
+            "an idle protected session keeps B as the choice for the next connect");
+
+        let (reconnect_generation, _, _) = super::super::attempt::begin_attempt(&mut inner, switch_generation)
+            .await
+            .expect("the wake reconnect is admitted while the switch worker waits");
+        assert!(inner.fsm.status().is_connecting);
+        assert_eq!(pending_switch(&inner, switch_generation), PendingSwitch::Retired,
+            "the wake reconnect dials B; the old worker must not restore A over it");
+        assert_eq!(pending_switch(&inner, reconnect_generation), PendingSwitch::RestorePrevious,
+            "a switch published after that admission still rolls back to what the attempt dials");
     }
 
     #[tokio::test]
