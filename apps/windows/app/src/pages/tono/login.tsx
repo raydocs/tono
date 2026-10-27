@@ -948,9 +948,8 @@ const LoginPage = () => {
                 </span>
               </button>
               <details
+                className={newAppearance ? 'sea-login-privacy' : undefined}
                 style={{
-                  gridColumn: '1 / -1',
-                  gridRow: 3,
                   fontSize: 12,
                   color: text.secondary,
                 }}

@@ -41,6 +41,10 @@
   grid-row: 2;
   max-width: 450px;
 }
+.sea-login .sea-login-privacy {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
 .sea-login .tono-progress-pill {
   border-radius: 999px;
   min-height: 48px;
@@ -349,10 +353,25 @@
   .sea-login:not(.sea-login--suspended) .sea-login-fields {
     width: 100%;
   }
-  /* The email field gives way to the button inside the fixed-width panel. */
+  /* The panel is too narrow at the minimum window for field and button side by side
+     (the placeholder was cut off): the field takes the full width, the button sits
+     under it at full width, then the privacy line and details. Source order (field,
+     button, privacy) already matches, so focus order follows what is seen. */
   .sea-login:not(.sea-login--suspended):not([data-code-step="true"])
     .sea-login-fields {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sea-login:not(.sea-login--suspended)
+    .sea-login-fields
+    > button[type="submit"] {
+    grid-row: 2;
+    width: 100% !important;
+  }
+  .sea-login:not(.sea-login--suspended) .tono-welcome__trust {
+    grid-row: 3;
+  }
+  .sea-login:not(.sea-login--suspended) .sea-login-privacy {
+    grid-row: 4;
   }
   .sea-login-story {
     display: grid;
