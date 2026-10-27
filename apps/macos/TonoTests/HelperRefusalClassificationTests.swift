@@ -5,7 +5,8 @@ import XCTest
 /// telemetry as UNKNOWN_CLASSIFIED_FAILURE: macOS could not name the DNS
 /// service to point at the protected resolver, and the connection engine
 /// exited right after it started. The helper sends both as plain text with no
-/// code, so the app names them from the text.
+/// code, so the app names them from the text. The release and stale-generation
+/// refusals do carry a typed code and get stable codes of their own.
 final class HelperRefusalClassificationTests: XCTestCase {
     private let dnsSentence = "The selected DNS service cannot be identified."
 
@@ -54,6 +55,52 @@ final class HelperRefusalClassificationTests: XCTestCase {
         )
     }
 
+    func testTypedReleaseAndStaleRefusalsGetStableCodes() {
+        let cases: [(helper: String, code: ProtectedFailureCode, wire: String)] = [
+            ("RELEASE_IN_PROGRESS", .releaseInProgress, "TONO_RELEASE_IN_PROGRESS"),
+            ("RELEASE_UNFINISHED", .releaseUnfinished, "TONO_RELEASE_UNFINISHED"),
+            ("RELEASE_RECORD_CORRUPT", .releaseUnfinished, "TONO_RELEASE_UNFINISHED"),
+            ("STALE_GENERATION", .staleGeneration, "TONO_STALE_GENERATION"),
+        ]
+        for item in cases {
+            let error = HelperIPCError.commandFailed("raw helper text", code: item.helper)
+            let failure = AppState.helperRefusalFailure(error, stage: "securingDNS", generation: 9)
+            XCTAssertEqual(failure?.code, item.code, item.helper)
+            XCTAssertEqual(failure?.code.rawValue, item.wire, item.helper)
+            XCTAssertEqual(failure?.stage, "securingDNS", item.helper)
+            // The sentence the user already sees, never the helper's raw text.
+            XCTAssertEqual(failure?.userMessage, error.localizedDescription, item.helper)
+            XCTAssertNotEqual(failure?.userMessage, "raw helper text", item.helper)
+            XCTAssertTrue(failure?.detail.contains("helper refused \(item.helper)") == true, item.helper)
+        }
+    }
+
+    func testTheReleaseAndStaleCodesReuseTheExistingSentences() {
+        XCTAssertEqual(
+            ProtectedFailureCode.releaseInProgress.userMessage,
+            HelperIPCError.commandFailed("", code: "RELEASE_IN_PROGRESS").localizedDescription
+        )
+        XCTAssertEqual(
+            ProtectedFailureCode.releaseUnfinished.userMessage,
+            HelperIPCError.commandFailed("", code: "RELEASE_UNFINISHED").localizedDescription
+        )
+        XCTAssertEqual(
+            ProtectedFailureCode.staleGeneration.userMessage,
+            HelperIPCError.commandFailed("", code: "STALE_GENERATION").localizedDescription
+        )
+    }
+
+    func testACorruptReleaseRecordKeepsItsOwnSentence() {
+        let error = HelperIPCError.commandFailed("raw", code: "RELEASE_RECORD_CORRUPT")
+        let failure = AppState.helperRefusalFailure(error, stage: "securingDNS", generation: 2)
+        XCTAssertEqual(failure?.code, .releaseUnfinished)
+        XCTAssertEqual(
+            failure?.userMessage,
+            String(localized: "Tono's restore record could not be read. Choose Restore internet once, then connect.")
+        )
+        XCTAssertNotEqual(failure?.userMessage, ProtectedFailureCode.releaseUnfinished.userMessage)
+    }
+
     func testOtherErrorsStayUnclassified() {
         let others: [Error] = [
             HelperIPCError.commandFailed("Could not lock network preferences.", code: nil),
@@ -61,6 +108,7 @@ final class HelperRefusalClassificationTests: XCTestCase {
                 "Port 53 (UDP) on 127.0.0.1 is already in use by another program.",
                 code: "CORE_PORT_IN_USE"
             ),
+            HelperIPCError.commandFailed("Something else was refused.", code: "SOME_FUTURE_CODE"),
             HelperIPCError.emptyResponse,
         ]
         for error in others {
