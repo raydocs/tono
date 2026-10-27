@@ -1602,6 +1602,7 @@ export interface TranslationResources {
         summary: string
       }
       seaIntro: {
+        back: string
         line: string
         next: string
         skip: string

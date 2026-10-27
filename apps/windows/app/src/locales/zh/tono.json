@@ -856,6 +856,7 @@
   "seaIntro": {
     "next": "下一步",
     "skip": "跳过",
+    "back": "上一步",
     "line": "线路由 Tono 推荐"
   },
   "seaActivity": {

@@ -44,6 +44,8 @@
 .sea-login .tono-progress-pill {
   border-radius: 999px;
   min-height: 48px;
+  /* "Request sent" must not wrap inside the pill while the code is sent. */
+  white-space: nowrap;
 }
 .sea-login .tono-progress-pill--sending::after {
   display: none;
@@ -108,15 +110,42 @@
   width: min(480px, 100%);
   animation: sea-welcome-in 220ms ease-out both;
 }
+.sea-intro-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+}
+.sea-intro-count {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--sea-secondary);
+}
+.sea-intro-top .sea-intro-skip {
+  margin-left: auto;
+}
+.sea-intro-panel {
+  animation: sea-intro-in 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+/* Headlines break at punctuation, not mid-word, and keep the lines even. */
+.sea-intro-copy h1,
+.sea-login h1 {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
 .sea-intro-copy h1 {
-  margin: 12px 0 18px;
+  margin: 14px 0 18px;
   font-size: 44px;
   font-weight: 300;
   line-height: 1.15;
   letter-spacing: -0.04em;
 }
-.sea-intro-copy > p:not(.tono-welcome__eyebrow) {
+.sea-intro-panel > p {
   max-width: 390px;
+  margin: 0;
   font-size: 15px;
   color: var(--sea-secondary);
   line-height: 1.65;
@@ -129,32 +158,55 @@
 }
 .sea-intro-line {
   display: inline-block;
+  margin-top: 20px;
   padding: 8px 16px;
   border-radius: 999px;
   background: rgb(255 255 255 / 0.07);
   font-size: 13px;
+  animation: sea-welcome-in 320ms 120ms ease-out both;
 }
 .sea-intro-pager {
   border: 0;
+  margin: 0 0 0 -4px;
   padding: 0;
   display: flex;
-  gap: 4px;
-  margin-top: 32px;
 }
 .sea-intro-pager button {
-  padding: 8px;
+  padding: 12px 4px;
   background: none;
   border: 0;
+  border-radius: 999px;
+  cursor: pointer;
 }
 .sea-intro-pager span {
   display: block;
-  width: 6px;
-  height: 6px;
-  background: rgb(246 242 236 / 0.25);
-  border-radius: 50%;
+  width: 10px;
+  height: 4px;
+  background: rgb(246 242 236 / 0.24);
+  border-radius: 999px;
+  transition:
+    width 280ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    background-color 280ms;
+}
+.sea-intro-pager button:hover span {
+  background: rgb(246 242 236 / 0.5);
+}
+.sea-intro-pager [data-seen="true"] span {
+  background: rgb(255 213 142 / 0.55);
 }
 .sea-intro-pager [aria-current="step"] span {
-  background: var(--sea-accent);
+  width: 28px;
+  background: #ffd58e;
+}
+@keyframes sea-intro-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--sea-intro-dir, 1) * 16px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 @keyframes sea-welcome-in {
   from {
@@ -170,8 +222,13 @@
   .sea-code-boxes[data-rejected="true"] {
     animation: none;
   }
-  .sea-intro-copy {
+  .sea-intro-copy,
+  .sea-intro-panel,
+  .sea-intro-line {
     animation: none;
+  }
+  .sea-intro-pager span {
+    transition: none;
   }
 }
 @media (max-height: 560px) {
@@ -194,4 +251,47 @@
 }
 .sea-login-notice summary {
   color: var(--sea-secondary);
+}
+
+/* Each sign-in step settles in instead of swapping in place. */
+.sea-login-card {
+  animation: sea-welcome-in 260ms ease-out both;
+}
+.sea-login-heading,
+.sea-login[data-code-step="true"] .sea-code-label {
+  animation: sea-welcome-in 240ms ease-out both;
+}
+.sea-code-sent {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  font-size: 12px;
+  color: var(--sea-secondary);
+  animation: sea-welcome-in 240ms 60ms ease-out both;
+}
+.sea-code-sent__to {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.sea-code-sent__to code {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.07);
+  font-size: 13px;
+  color: var(--sea-text, #f6f2ec);
+  user-select: text;
+}
+.sea-code-sent p {
+  margin: 0;
+  line-height: 1.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sea-login-card,
+  .sea-login-heading,
+  .sea-code-sent,
+  .sea-login[data-code-step="true"] .sea-code-label {
+    animation: none;
+  }
 }

@@ -83,6 +83,13 @@ it('teaches three scene phases then preserves the original sign-in destination a
       .querySelector('[data-scene-phase]')
       ?.getAttribute('data-scene-phase'),
   ).toBe('idle')
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+  expect(
+    document
+      .querySelector('[data-scene-phase]')
+      ?.getAttribute('data-scene-phase'),
+  ).toBe('failed')
+  fireEvent.keyDown(window, { key: 'ArrowRight' })
   fireEvent.click(screen.getByRole('button', { name: 'Get started →' }))
   expect(localStorage.getItem(TONO_INTRO_SEEN_KEY)).toBe('1')
   expect(screen.getByText('login page')).toBeDefined()
