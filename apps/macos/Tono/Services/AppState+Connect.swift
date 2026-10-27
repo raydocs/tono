@@ -644,8 +644,8 @@ extension AppState {
                 }
                 self.retireFailedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation)
                 let failedStage = self.connectionStage
-                // Helper refusals that carry no typed code would otherwise land
-                // as UNKNOWN_CLASSIFIED_FAILURE. Only fills a gap: a failure the
+                // Helper refusals would otherwise land as
+                // UNKNOWN_CLASSIFIED_FAILURE. Only fills a gap: a failure the
                 // connect path already classified keeps its own code.
                 if self.lastClassifiedFailure == nil,
                    let classified = Self.helperRefusalFailure(
@@ -2698,10 +2698,13 @@ extension AppState {
     /// name the network service to point at the protected resolver.
     private static let dnsServiceUnidentifiedSentence = "the selected dns service cannot be identified"
 
-    /// Helper refusals the app can name from their text, because the helper
-    /// sends them without a typed code: the DNS service that cannot be
-    /// identified (the protected-DNS step could not finish) and the engine
-    /// exiting right after it started. Returns nil for every other error.
+    /// Helper refusals the app can name. Four carry a typed code the helper
+    /// sends (`RELEASE_IN_PROGRESS`, `RELEASE_UNFINISHED`,
+    /// `RELEASE_RECORD_CORRUPT`, `STALE_GENERATION`); the card keeps the
+    /// sentence the user already sees for them. Two have no code and are
+    /// named from their text: the DNS service that cannot be identified (the
+    /// protected-DNS step could not finish) and the engine exiting right after
+    /// it started. Returns nil for every other error.
     /// The helper's exit reply carries only the status, no engine log tail, so
     /// the detail holds what the helper sent and nothing more.
     static func helperRefusalFailure(
@@ -2714,6 +2717,25 @@ extension AppState {
             texts.append(message)
         }
         let detail = String(describing: error)
+        if case HelperIPCError.commandFailed(_, let helperCode?) = error {
+            let typed: ProtectedFailureCode? = switch helperCode {
+            case "RELEASE_IN_PROGRESS": .releaseInProgress
+            case "RELEASE_UNFINISHED", "RELEASE_RECORD_CORRUPT": .releaseUnfinished
+            case "STALE_GENERATION": .staleGeneration
+            default: nil
+            }
+            if let typed {
+                var failure = ProtectedConnectivity.failure(
+                    typed,
+                    stage: stage,
+                    attempt: 1,
+                    generation: generation,
+                    detail: "helper refused \(helperCode): \(detail)"
+                )
+                failure.userMessage = error.localizedDescription
+                return failure
+            }
+        }
         if texts.contains(where: { $0.lowercased().contains(dnsServiceUnidentifiedSentence) }) {
             return ProtectedConnectivity.failure(
                 .protectedDnsNotReady,

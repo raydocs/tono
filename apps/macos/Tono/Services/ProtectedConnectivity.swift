@@ -26,6 +26,17 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
     /// macOS only: the helper started the connection engine and it exited
     /// within the first moments ("sing-box exited (status N)").
     case coreExited = "TONO_CORE_EXITED"
+    /// macOS: the helper refused a connect with `RELEASE_IN_PROGRESS` because a
+    /// Restore internet is still running. Matches the Windows client.
+    case releaseInProgress = "TONO_RELEASE_IN_PROGRESS"
+    /// macOS: the helper refused a connect with `RELEASE_UNFINISHED` (an
+    /// earlier Restore internet did not finish) or `RELEASE_RECORD_CORRUPT`
+    /// (its record cannot be read). The user acts the same way in both: choose
+    /// Restore internet once, then connect. Matches the Windows client.
+    case releaseUnfinished = "TONO_RELEASE_UNFINISHED"
+    /// macOS: the helper refused a step with `STALE_GENERATION` because it
+    /// belonged to an earlier connection. Matches the Windows client.
+    case staleGeneration = "TONO_STALE_GENERATION"
     case unknownClassifiedFailure = "UNKNOWN_CLASSIFIED_FAILURE"
 
     var userMessage: String {
@@ -65,6 +76,14 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
             return String(localized: "The selected node was removed from the catalog. Tono is switching to an available node.")
         case .coreExited:
             return String(localized: "The connection engine stopped right after starting. Connect again; if it happens again, send diagnostics.")
+        // The three helper refusals reuse the sentences `HelperIPCError`
+        // already shows, so the catalog gains no key.
+        case .releaseInProgress:
+            return String(localized: "Restore internet is still finishing. Connect again when it completes.")
+        case .releaseUnfinished:
+            return String(localized: "An earlier Restore internet has not finished, so Tono is not connecting yet. Choose Restore internet again, then connect.")
+        case .staleGeneration:
+            return String(localized: "This step belonged to an earlier connection and was not applied.")
         case .unknownClassifiedFailure:
             return String(localized: "The protected connection failed. Diagnostic details have been recorded.")
         }
