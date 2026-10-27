@@ -1688,9 +1688,10 @@ final class AccountSessionRequestTests: XCTestCase {
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
         let task = Task { await account.loadAuthMethods() }
         let request = try await nextRequest(requests)
-        request.respond(status: 200, body: #"{"email":{"enabled":true,"publicSignup":true,"deliveryDegraded":true},"apple":{"enabled":false},"google":{"enabled":false}}"#)
+        request.respond(status: 200, body: #"{"email":{"enabled":true,"publicSignup":true,"signupPaused":true,"deliveryDegraded":true},"apple":{"enabled":false},"google":{"enabled":false}}"#)
         await task.value
         XCTAssertEqual(account.authMethods?.email.publicSignup, true)
+        XCTAssertEqual(account.authMethods?.email.signupPaused, true)
         XCTAssertEqual(account.authMethods?.email.deliveryDegraded, true)
     }
 

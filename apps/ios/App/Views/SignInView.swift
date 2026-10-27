@@ -42,6 +42,13 @@ struct SignInView: View {
 
     private var codeStep: Bool { model.login.challengeID != nil }
 
+    /// Open registration mails every address; invite-only, or open but paused for today, mails only
+    /// accounts and invitations, and the copy must not say which this address is.
+    private var codeSentKey: String {
+        guard let mail = model.login.mail, mail.publicSignup else { return "signin_code_sent" }
+        return mail.signupPaused ? "signin_code_sent_paused" : "signin_code_requested"
+    }
+
     private var form: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !codeStep {
@@ -60,7 +67,7 @@ struct SignInView: View {
             } else {
                 // Open registration mails every address; otherwise only accounts and invitations get
                 // a code, and the copy must not say which this address is.
-                Text(L.t(model.login.mail?.publicSignup == true ? "signin_code_requested" : "signin_code_sent", model.login.email))
+                Text(L.t(codeSentKey, model.login.email))
                     .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                     .task(id: model.login.challengeID) {
                         await model.refreshMailStatus()

@@ -598,10 +598,12 @@ nonisolated struct TonoDeviceActionResultResponse: Codable, Sendable { let actio
 nonisolated struct TonoAuthMethod: Codable, Sendable, Equatable {
     let enabled: Bool
     let clientId: String?
-    /// Email only, global and never about one address (decision 138): open
-    /// registration with today's new-address budget left, and a recent
-    /// failure of the mail provider. Absent from older control planes.
+    /// Email only, global and never about one address (decision 138): the
+    /// registration mode (false is invite-only), open registration paused
+    /// because today's new-address budget is spent, and a recent failure of
+    /// the mail provider. Absent from older control planes.
     var publicSignup: Bool? = nil
+    var signupPaused: Bool? = nil
     var deliveryDegraded: Bool? = nil
 }
 
@@ -621,8 +623,9 @@ nonisolated struct TonoEmailChallengeResponse: Codable, Sendable, Equatable {
     let challengeId: String
     let expiresIn: Int
     let message: String
-    /// The same global value as `auth/methods`, read after this request.
+    /// The same global values as `auth/methods`, read after this request.
     var publicSignup: Bool? = nil
+    var signupPaused: Bool? = nil
 }
 
 nonisolated struct TonoEmailVerifyRequest: Codable, Sendable {

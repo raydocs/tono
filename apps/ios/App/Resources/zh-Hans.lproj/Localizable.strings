@@ -63,6 +63,7 @@
 "signin_send" = "发送验证码";
 "signin_sending" = "发送中…";
 "signin_code_sent" = "如果该邮箱已开通 Tono，验证码已发送到 %1$@，也请查看垃圾箱。";
+"signin_code_sent_paused" = "如果该邮箱已经可以登录 Tono，验证码已发送到 %1$@，也请查看垃圾箱。今天的新用户注册名额已满，新用户请明天再试。";
 "signin_code_requested" = "已为 %1$@ 申请验证码，通常一分钟内送达，也请查看垃圾箱。";
 "signin_mail_degraded" = "Tono 的邮件服务暂时异常，验证码可能延迟或收不到。请过几分钟再试。";
 "signin_code" = "6 位验证码";

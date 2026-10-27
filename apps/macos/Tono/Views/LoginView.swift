@@ -76,17 +76,25 @@ struct LoginView: View {
         return nil
     }
     private var methods: TonoAuthMethodsResponse? { session.authMethods }
+    /// Global registration state, preferring the answer to this request.
     private var openRegistration: Bool {
         session.emailChallenge?.publicSignup ?? methods?.email.publicSignup ?? false
     }
+    private var signupPaused: Bool {
+        session.emailChallenge?.signupPaused ?? methods?.email.signupPaused ?? false
+    }
     private var mailDeliveryDegraded: Bool { methods?.email.deliveryDegraded == true }
 
-    /// Open registration mails every address; otherwise only accounts and
-    /// invitations get a code, and the copy must not say which this one is.
-    /// Its own property: inline, it pushed `body` past the type checker.
+    /// Open registration mails every address; invite-only, or open but paused
+    /// for today, mails only accounts and invitations, and the copy must not
+    /// say which this one is. Its own property: inline, it pushed `body` past
+    /// the type checker. One `Text` per branch: the modifiers and the hint
+    /// timer at the call site must apply once.
     @ViewBuilder private var codeRequestNotice: some View {
-        if openRegistration {
+        if openRegistration && !signupPaused {
             Text("A sign-in code was requested for \(email). It usually arrives within a minute from Tono <login@lecvia.com>; check spam too. A code is valid for 10 minutes.")
+        } else if openRegistration {
+            Text("If \(email) can already sign in to Tono, a code is on its way from Tono <login@lecvia.com>; check spam too. New sign-ups are full for today, so new users should try again tomorrow. A code is valid for 10 minutes.")
         } else {
             Text("If \(email) can sign in to Tono, a code is on its way from Tono <login@lecvia.com>; check spam too. A code is valid for 10 minutes.")
         }

@@ -99,10 +99,12 @@ public enum AccountErrors {
 }
 
 /// The control plane's global sign-in mail state (`auth/methods`, decision 138). Never about one
-/// address: open registration with today's new-address budget left, and a recent failure of the
-/// mail provider. Fields an older control plane does not send read as false.
+/// address: the registration mode (false is invite-only), open registration paused because today's
+/// new-address budget is spent, and a recent failure of the mail provider. Fields an older control
+/// plane does not send read as false.
 public struct EmailSignInStatus: Equatable, Sendable {
     public let publicSignup: Bool
+    public let signupPaused: Bool
     public let deliveryDegraded: Bool
 }
 
@@ -162,6 +164,7 @@ public actor AccountSession {
     public func emailSignInStatus() async -> EmailSignInStatus? {
         guard let methods = try? await api.get("auth/methods", bearer: nil), let email = methods["email"] else { return nil }
         return EmailSignInStatus(publicSignup: email["publicSignup"]?.bool ?? false,
+                                 signupPaused: email["signupPaused"]?.bool ?? false,
                                  deliveryDegraded: email["deliveryDegraded"]?.bool ?? false)
     }
 

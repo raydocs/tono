@@ -79,11 +79,13 @@ final class AccountTests: XCTestCase {
             return await AccountSession(api: ControlPlaneClient(clientVersion: "1", transport: transport),
                                         tokens: MemoryTokens(nil), cache: MemoryCache()).emailSignInStatus()
         }
-        let open = await status(.obj(("enabled", true), ("publicSignup", true), ("deliveryDegraded", true)))
+        let open = await status(.obj(("enabled", true), ("publicSignup", true), ("signupPaused", true), ("deliveryDegraded", true)))
         XCTAssertEqual(open?.publicSignup, true)
+        XCTAssertEqual(open?.signupPaused, true)
         XCTAssertEqual(open?.deliveryDegraded, true)
         let older = await status(.obj(("enabled", true)))
         XCTAssertEqual(older?.publicSignup, false)
+        XCTAssertEqual(older?.signupPaused, false)
         XCTAssertEqual(older?.deliveryDegraded, false)
     }
 

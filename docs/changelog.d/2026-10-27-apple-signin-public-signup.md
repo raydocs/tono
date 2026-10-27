@@ -7,3 +7,5 @@
 - 验证：只有托管 CI（macos-26 XCTest 与 iOS 工作流）。orb 是 Linux，没有 Swift，也无法渲染界面。
 - 候选/发布：仅源码。
 - 剩余限制：没有截图，也没有真机验证；属于 UI 改动，需要负责人看过界面才能合并。macOS 在登录时遇到 `ENTITLEMENT_REQUIRED` 会进入已有的「This Tono account cannot connect」页面（与登录时遇到 `ACCOUNT_EXPIRED` 的路径相同），页面上的说明改为新文案。Android 未改。
+
+2026-10-27 续：跟随 #1786 的契约，区分「开放注册当日名额已满」（`signupPaused`）和邀请制（`publicSignup` 为 false）。名额已满时，两端写「如果该邮箱已经可以登录，验证码正在发送……今天的新用户注册名额已满，新用户请明天再试」。邀请制和读取失败时仍用条件式文案，任何状态下都不写「邀请制」。测试中的 methods 增加了 `signupPaused`。
