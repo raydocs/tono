@@ -1,4 +1,11 @@
+// Windows ships no flag emoji, so this face covers flags only; every other emoji uses the
+// system's Segoe UI Emoji. Subset of Twemoji Mozilla 1.45 MB TTF (unchanged artwork):
+//   pyftsubset Twemoji.Mozilla.ttf --layout-features='*' --flavor=woff2 \
+//     --unicodes='U+1F1E6-1F1FF,U+1F3F3,U+1F3F4,U+E0020-E007F,U+200D,U+FE0F,U+2620,U+26A7,U+1F308,U+2695'
 @font-face {
   font-family: 'twemoji mozilla';
-  src: url('../fonts/Twemoji.Mozilla.ttf');
+  src: url('../fonts/twemoji-flags.woff2') format('woff2');
+  unicode-range:
+    U+1F1E6-1F1FF, U+1F3F3, U+1F3F4, U+E0020-E007F, U+200D, U+FE0F, U+2620,
+    U+26A7, U+1F308, U+2695;
 }
