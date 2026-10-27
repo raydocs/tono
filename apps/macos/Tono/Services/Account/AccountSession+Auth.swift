@@ -339,9 +339,13 @@ extension AccountSession {
         default: return
         }
         emailChallenge = nil
+        pendingIdentityLink = nil
         signInRecoveryLedger.dismiss()
         state = .signedOut
     }
+
+    /// The user declined, or left the link prompt: the ticket is gone.
+    func discardIdentityLink() { pendingIdentityLink = nil }
 
     func requestEmailCode(email: String, deviceName: String) async {
         await accountLifecycle.run {
@@ -358,6 +362,7 @@ extension AccountSession {
         state = .authenticating
         let operation = signInRecoveryLedger.begin(.sendCode)
         do {
+            emailChallengeAddress = TonoAccountRules.normalizedEmail(email)
             emailChallenge = try await api.startEmailSignIn(TonoEmailStartRequest(
                 email: TonoAccountRules.normalizedEmail(email),
                 deviceName: TonoAccountRules.normalizedDeviceName(deviceName),
@@ -382,21 +387,28 @@ extension AccountSession {
             state = .error(String(localized: "Enter the six-digit code from your email."))
             return
         }
+        let link = pendingIdentityLink?.ticket(for: emailChallengeAddress)
+        pendingIdentityLink = nil
+        identityLinkResult = nil
         await authenticate {
-            try await self.api.verifyEmailSignIn(TonoEmailVerifyRequest(
+            let response = try await self.api.verifyEmailSignIn(TonoEmailVerifyRequest(
                 challengeId: emailChallenge.challengeId,
-                code: normalizedCode
+                code: normalizedCode,
+                linkTicket: link
             ))
+            self.identityLinkResult = response.identityLink
+            return response
         }
     }
 
-    #if DEBUG
     func signInWithApple(deviceName: String) async {
         guard !accountLifecycle.isBusy else { return }
-        guard authMethods?.apple.enabled == true else {
+        guard authMethods?.apple.enabled == true, AppleSignInAvailability.entitled else {
             state = .error(String(localized: "Sign in with Apple is not configured."))
             return
         }
+        pendingIdentityLink = nil
+        identityLinkResult = nil
         await authenticate {
             let challenge = try await self.api.oidcChallenge(TonoOIDCChallengeRequest(
                 provider: "apple",
@@ -406,13 +418,20 @@ extension AccountSession {
             let token = try await AppleSignInCoordinator().identityToken(
                 nonce: challenge.nonce
             )
-            return try await self.api.verifyOIDC(TonoOIDCVerifyRequest(
-                provider: "apple",
-                challengeId: challenge.challengeId,
-                idToken: token
-            ))
+            do {
+                return try await self.api.verifyOIDC(TonoOIDCVerifyRequest(
+                    provider: "apple",
+                    challengeId: challenge.challengeId,
+                    idToken: token
+                ))
+            } catch TonoAPIClient.APIError.providerMailboxUnverified(let ticket) {
+                self.pendingIdentityLink = ticket.flatMap { PendingIdentityLink(provider: "apple", ticket: $0) }
+                throw TonoAPIClient.APIError.providerMailboxUnverified(linkTicket: nil)
+            }
         }
     }
+
+    #if DEBUG
 
     func signInWithGoogle(deviceName: String) async {
         guard !accountLifecycle.isBusy else { return }
