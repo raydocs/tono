@@ -9,7 +9,7 @@ import { requireAccountEntitlement } from './accounts';
 import { consumeRateLimit } from './ops/ingest-limits';
 import { ApiError } from './errors';
 import { recordClient } from './client-identity';
-import { type Env, type Row, str, envInt, tailscaleEnrollmentEnabled, requiredSecret } from './env';
+import { type Env, type Row, str, envInt, tailscaleEnrollmentEnabled, requiredSecret, publicSignupEnabled, now } from './env';
 import { clientIp } from './auth';
 import { API_RELAYS } from './api-relays';
 import { publicDevice } from './ops/shared-admin';
@@ -103,7 +103,67 @@ export async function rateLimitOidcStart(e: Env, req: Request, installationId: s
   );
 }
 
+const PUBLIC_SIGNUP_BUDGET_SECONDS = 86_400;
+const publicSignupBudgetKey = async () => `rl:${await sha256('public-signup:codes:day')}`;
+// Set when the mail provider itself failed (not one recipient), cleared by the
+// next delivery it accepts. Kept beside the rate-limit rows so retention ages it.
+const EMAIL_DELIVERY_DOWN_KEY = 'state:email-delivery-unavailable';
+const EMAIL_DELIVERY_DOWN_SECONDS = 900;
 
+// Open registration mails strangers, so a global daily budget bounds what a
+// spread of IPs and addresses can make the sender emit (decision 138). Past it
+// the code is silently not sent: a 429 would tell the caller that the address
+// has no account.
+export async function publicSignupCodeAllowed(e: Env): Promise<boolean> {
+  if (!publicSignupEnabled(e)) return false;
+  try {
+    await consumeRateLimit(e, await publicSignupBudgetKey(),
+      envInt(e, 'PUBLIC_SIGNUP_CODES_PER_DAY', 200), PUBLIC_SIGNUP_BUDGET_SECONDS);
+    return true;
+  } catch (limited) {
+    if (!(limited instanceof ApiError) || limited.status !== 429) throw limited;
+    console.warn('public signup daily code budget exhausted');
+    return false;
+  }
+}
+
+/**
+ * Global sign-in mail state for clients' copy, the same for every caller and
+ * never about one address: `publicSignup` is open registration with today's
+ * new-address budget not yet spent (once spent, "a code is on its way if this
+ * address has an account" is the honest line); `deliveryDegraded` is a recent
+ * provider-side failure that no accepted delivery has cleared since.
+ */
+export async function emailSignupStatus(e: Env) {
+  const t = now();
+  const budgetKey = await publicSignupBudgetKey();
+  const rows = (await e.DB.prepare(
+    'SELECT key, count, window_start FROM rate_limits WHERE key IN (?, ?)',
+  ).bind(budgetKey, EMAIL_DELIVERY_DOWN_KEY).all<Row>()).results;
+  const budget = rows.find((row) => row.key === budgetKey);
+  const down = rows.find((row) => row.key === EMAIL_DELIVERY_DOWN_KEY);
+  return {
+    publicSignup: publicSignupEnabled(e) && (
+      !budget ||
+      Number(budget.window_start) <= t - PUBLIC_SIGNUP_BUDGET_SECONDS ||
+      Number(budget.count) < envInt(e, 'PUBLIC_SIGNUP_CODES_PER_DAY', 200)
+    ),
+    deliveryDegraded: !!down && Number(down.window_start) > t - EMAIL_DELIVERY_DOWN_SECONDS,
+  };
+}
+
+async function recordEmailDelivery(e: Env, providerAvailable: boolean) {
+  // Best effort: the caller still has to retire an undelivered code.
+  await (providerAvailable
+    ? e.DB.prepare('DELETE FROM rate_limits WHERE key = ?').bind(EMAIL_DELIVERY_DOWN_KEY)
+    : e.DB.prepare(
+      `INSERT INTO rate_limits(key, count, window_start) VALUES(?, 1, ?)
+       ON CONFLICT(key) DO UPDATE SET count = rate_limits.count + 1, window_start = excluded.window_start`,
+    ).bind(EMAIL_DELIVERY_DOWN_KEY, now())
+  ).run().catch((stateError: unknown) => {
+    console.error('email delivery state update failed', String(stateError));
+  });
+}
 
 // --- Passwordless authentication ---------------------------------------------
 
@@ -182,12 +242,19 @@ export async function deliverEmailCode(
       }),
     });
     await response.body?.cancel();
+    // A 400/422 is about this recipient and must not turn into a global
+    // signal anyone can read; auth, rate-limit and 5xx answers are the
+    // provider's and say nothing about the address.
+    const providerFailed = response.status === 401 || response.status === 403 ||
+      response.status === 429 || response.status >= 500;
+    if (response.ok || providerFailed) await recordEmailDelivery(e, response.ok);
     return response.ok;
   } catch (deliveryError) {
     console.error(
       'email delivery failed',
       deliveryError instanceof Error ? deliveryError.message : String(deliveryError),
     );
+    await recordEmailDelivery(e, false);
     return false;
   }
 }
