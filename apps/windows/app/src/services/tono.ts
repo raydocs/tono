@@ -291,6 +291,17 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_NODE_OR_CORE_UNREACHABLE',
     key: 'tono.dashboard.errors.nodeUnreachable',
   },
+  // The selected exit itself did not answer the pre-tunnel dial: pick another server.
+  {
+    prefix: 'TONO_EXIT_UNREACHABLE',
+    key: 'tono.dashboard.errors.exitUnreachable',
+  },
+  // The backend saw a failure it has no rule for. A stable sentence with the support
+  // code beats "something went wrong" with the raw probe text.
+  {
+    prefix: 'UNKNOWN_CLASSIFIED_FAILURE',
+    key: 'tono.dashboard.errors.unclassified',
+  },
   // The other two post-lock classifications. The backend composes them into
   // English sentences carrying raw probe detail, and the failure they describe
   // takes the full-release path, so without these the marker and its detail
@@ -471,6 +482,8 @@ const showsSupportCode = (code: string): boolean =>
   code === 'TONO_TLS_INTERCEPTED' ||
   code === 'TONO_SIGN_IN_NOT_SAVED' ||
   code === 'TONO_NODE_OR_CORE_UNREACHABLE' ||
+  code === 'TONO_EXIT_UNREACHABLE' ||
+  code === 'UNKNOWN_CLASSIFIED_FAILURE' ||
   code.startsWith('CORE_')
 
 /** First stable `TONO_*` / `CORE_*` token in a diagnostic string, for Copy details. */
@@ -478,7 +491,10 @@ export const stableTonoErrorCode = (
   raw: string | null | undefined,
 ): string | null => {
   if (!raw) return null
-  return raw.match(/\b((?:TONO|CORE)_[A-Z0-9_]+)\b/)?.[1] ?? null
+  return (
+    raw.match(/\b((?:TONO|CORE)_[A-Z0-9_]+|UNKNOWN_CLASSIFIED_FAILURE)\b/)?.[1] ??
+    null
+  )
 }
 
 /**
@@ -527,6 +543,10 @@ export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
   }
   return (
     raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
+    raw.includes('TONO_EXIT_UNREACHABLE') ||
+    // A plain network-class failure on the way to the exit: another server is the
+    // next thing to try once a retry has failed.
+    /\bTONO_CONNECT_(?:DNS|TCP|QUIC|TIMEOUT)\b/.test(raw) ||
     raw.toLowerCase().includes('node or core unreachable') ||
     raw.toLowerCase().includes('network blocked')
   )

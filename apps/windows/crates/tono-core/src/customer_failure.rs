@@ -76,6 +76,8 @@ pub enum CustomerFailureCode {
     ConnectTun,
     ConnectCaptive,
     ConnectLocalConflict,
+    /// The selected exit itself did not answer; the customer should pick another server.
+    ExitUnreachable,
     UnknownClassified,
 }
 
@@ -107,6 +109,7 @@ impl CustomerFailureCode {
             Self::ConnectTun => "TONO_CONNECT_TUN",
             Self::ConnectCaptive => "TONO_CONNECT_CAPTIVE",
             Self::ConnectLocalConflict => "TONO_CONNECT_LOCAL_CONFLICT",
+            Self::ExitUnreachable => "TONO_EXIT_UNREACHABLE",
             Self::UnknownClassified => "UNKNOWN_CLASSIFIED_FAILURE",
         }
     }
@@ -129,6 +132,7 @@ impl CustomerFailureCode {
             Self::AuthLocalConflict | Self::ConnectLocalConflict => FailureStage::LocalConflict,
             Self::AuthUnreachable | Self::AuthStore | Self::UnknownClassified => FailureStage::Auth,
             Self::ConnectTun => FailureStage::Tunnel,
+            Self::ExitUnreachable => FailureStage::Tcp,
         }
     }
 }
@@ -206,6 +210,9 @@ pub fn stamp_connect_failure(text: &str) -> String {
 
 pub fn classify_connect_text(text: &str) -> CustomerFailureCode {
     let lower = text.to_lowercase();
+    if lower.starts_with("tcp connect to the selected exit") {
+        return CustomerFailureCode::ExitUnreachable;
+    }
     if is_captive(&lower) {
         return CustomerFailureCode::ConnectCaptive;
     }
@@ -609,6 +616,29 @@ mod tests {
         let stamped = stamp_connect_failure("connection refused");
         assert!(stamped.starts_with("TONO_CONNECT_TCP: "));
         message_has_no_self_help(&customer_message(CustomerFailureCode::ConnectTcp));
+    }
+
+    #[test]
+    fn the_pre_tunnel_exit_dial_failure_is_its_own_code() {
+        let raw = "tcp connect to the selected exit did not complete before a tunnel was installed";
+        assert_eq!(classify_connect_text(raw), CustomerFailureCode::ExitUnreachable);
+        assert_eq!(CustomerFailureCode::ExitUnreachable.as_str(), "TONO_EXIT_UNREACHABLE");
+        assert_eq!(CustomerFailureCode::ExitUnreachable.stage(), FailureStage::Tcp);
+        // Must win over the generic "connect" / "refused" / "timed out" rules.
+        assert_eq!(
+            classify_connect_text("TCP connect to the selected exit timed out: connection refused"),
+            CustomerFailureCode::ExitUnreachable
+        );
+        let stamped = stamp_connect_failure(raw);
+        assert_eq!(stamped, format!("TONO_EXIT_UNREACHABLE: {raw}"));
+        // The Rust producer already carries the token and is not stamped twice.
+        let tagged = format!("TONO_EXIT_UNREACHABLE: {raw}");
+        assert_eq!(stamp_connect_failure(&tagged), tagged);
+        // Other texts that merely mention a connect stay on the generic rule.
+        assert_eq!(
+            classify_connect_text("connection refused"),
+            CustomerFailureCode::ConnectTcp
+        );
     }
 
     #[test]

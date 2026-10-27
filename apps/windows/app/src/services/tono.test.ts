@@ -263,6 +263,16 @@ describe('connectErrorSuggestsServerSwitch', () => {
     }
   })
 
+  it('suggests switching when the selected exit itself did not answer', () => {
+    expect(
+      connectErrorSuggestsServerSwitch(
+        new Error(
+          'TONO_EXIT_UNREACHABLE: tcp connect to the selected exit did not complete before a tunnel was installed',
+        ),
+      ),
+    ).toBe(true)
+  })
+
   it('does not suggest switching for service or account failures', () => {
     for (const error of [
       new Error('TONO_SERVICE_BUSY: repair pending'),
@@ -311,6 +321,54 @@ describe('connectErrorSuggestsServerSwitch', () => {
     ).toBe(
       'translated:tono.dashboard.errors.nodeUnreachable (TONO_NODE_OR_CORE_UNREACHABLE)',
     )
+  })
+
+  it('maps TONO_EXIT_UNREACHABLE to the pick-another-server copy with its support code', () => {
+    expect(
+      formatTonoActionError(
+        new Error(
+          'TONO_EXIT_UNREACHABLE: tcp connect to the selected exit did not complete before a tunnel was installed',
+        ),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe(
+      'translated:tono.dashboard.errors.exitUnreachable (TONO_EXIT_UNREACHABLE)',
+    )
+  })
+
+  it('maps UNKNOWN_CLASSIFIED_FAILURE to a stable sentence with its support code', () => {
+    const error = new Error(
+      'UNKNOWN_CLASSIFIED_FAILURE: post-lock verification raised an error nobody classified',
+    )
+    expect(describeTonoActionError(error, (key) => `translated:${key}`)).toEqual({
+      message:
+        'translated:tono.dashboard.errors.unclassified (UNKNOWN_CLASSIFIED_FAILURE)',
+    })
+    expect(stableTonoErrorCode(error.message)).toBe('UNKNOWN_CLASSIFIED_FAILURE')
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+  })
+
+  it('suggests another server after a plain network failure on the way to the exit', () => {
+    for (const code of [
+      'TONO_CONNECT_DNS',
+      'TONO_CONNECT_TCP',
+      'TONO_CONNECT_QUIC',
+      'TONO_CONNECT_TIMEOUT',
+    ]) {
+      expect(connectErrorSuggestsServerSwitch(new Error(`${code}: dial failed`))).toBe(
+        true,
+      )
+    }
+    for (const code of [
+      'TONO_CONNECT_TLS',
+      'TONO_CONNECT_TUN',
+      'TONO_CONNECT_LOCAL_CONFLICT',
+      'TONO_CONNECT_CAPTIVE',
+    ]) {
+      expect(connectErrorSuggestsServerSwitch(new Error(`${code}: dial failed`))).toBe(
+        false,
+      )
+    }
   })
 
   it('shows a support code and not a switch instruction when every probe dies at TLS', () => {
@@ -469,6 +527,17 @@ describe('describeTonoActionError', () => {
         t,
       ),
     ).toEqual({ message: 'translated:tono.dashboard.errors.releaseNeedsRestart' })
+  })
+
+  it('tells the user to connect again when the attempt was superseded', () => {
+    const error = new Error(
+      'TONO_STALE_GENERATION: PrepareCoreStart refused: an explicit release or update takeover superseded this attempt',
+    )
+    expect(describeTonoActionError(error, t)).toEqual({
+      message: 'translated:tono.dashboard.errors.staleGeneration',
+    })
+    // Another city cannot help a superseded attempt, so no server switch is offered.
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
   })
 
   it('says a dead loopback system proxy is the problem', () => {

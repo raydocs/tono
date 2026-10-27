@@ -394,7 +394,9 @@ pub(crate) async fn tono_prepare_core_start() -> Result<u32> {
 /// otherwise dropped here, so the refusals the UI must explain differently — armed protection
 /// held by another signed-in local user (H2-F2), and a connect from a Remote Desktop session
 /// (TW-anthropic-1) — get their stable markers; every other refusal keeps the Service's message
-/// untouched.
+/// untouched. A PrepareCoreStart that an explicit release or update takeover superseded
+/// (`StaleReleaseEpoch`) is an attempt that lost the race, not a network failure: it reports as
+/// `TONO_STALE_GENERATION` so the user is told to connect again instead of "didn't complete".
 fn tono_start_refusal(code: u16, message: String) -> String {
     use tono_service_protocol::ServiceErrorCode;
     // PROPOSAL §10 v5: a Connect the release authority did not admit says why.
@@ -403,6 +405,7 @@ fn tono_start_refusal(code: u16, message: String) -> String {
         (ServiceErrorCode::ReleaseUnfinished, "TONO_RELEASE_UNFINISHED"),
         (ServiceErrorCode::ReleaseRecordCorrupt, "TONO_RELEASE_RECORD_CORRUPT"),
         (ServiceErrorCode::StaleGeneration, "TONO_STALE_GENERATION"),
+        (ServiceErrorCode::StaleReleaseEpoch, "TONO_STALE_GENERATION"),
     ]
     .into_iter()
     .find(|(candidate, _)| code == *candidate as u16);

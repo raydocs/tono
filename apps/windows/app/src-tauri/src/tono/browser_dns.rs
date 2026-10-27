@@ -16,6 +16,10 @@ use serde_json::Value;
 
 const MAX_CONFIG_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_BROWSER_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
+#[cfg(windows)]
+const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+#[cfg(any(windows, test))]
+const RETRY_PAUSE: std::time::Duration = std::time::Duration::from_secs(2);
 const PREF_MODE: &str = "mode";
 const PREF_TEMPLATES: &str = "templates";
 
@@ -25,6 +29,10 @@ enum BrowserDnsIssue {
     AutomaticCustomProvider,
     UnsupportedMode,
     IncompleteScan,
+    /// The scan did not return in time (a slow browser, disk or registry); nothing was read.
+    ScanTimedOut,
+    /// The blocking scan task failed to finish (panic or cancellation); nothing was read.
+    ScanTaskFailed,
     /// A managed-policy key or value exists but cannot be read; names the scope and item so
     /// support can find the program that wrote or locked it.
     UnreadablePolicy {
@@ -40,6 +48,12 @@ impl BrowserDnsIssue {
             Self::AutomaticCustomProvider => "Secure DNS is Automatic with a custom provider".to_owned(),
             Self::UnsupportedMode => "Secure DNS has an unsupported configuration".to_owned(),
             Self::IncompleteScan => "the bounded Secure DNS configuration scan is incomplete".to_owned(),
+            Self::ScanTimedOut => {
+                "the browser configuration scan timed out; close Chrome and Edge, then connect again".to_owned()
+            }
+            Self::ScanTaskFailed => {
+                "the browser configuration scan failed to finish; close Chrome and Edge, then connect again".to_owned()
+            }
             Self::UnreadablePolicy { scope, item } => {
                 format!("the managed Secure DNS policy ({scope} {item}) could not be read")
             }
@@ -96,17 +110,49 @@ const BROWSERS: [BrowserSpec; 2] = [
 ///
 /// The scan is blocking filesystem/registry work, so keep it off the async runtime. Both the
 /// source count and byte count are bounded; the outer timeout handles a filesystem or registry
-/// read that the operating system itself does not return from promptly.
+/// read that the operating system itself does not return from promptly. A timed-out or failed
+/// scan is retried once after a short pause (a busy browser usually answers the second time);
+/// a definite finding is never retried.
 #[cfg(windows)]
 pub(crate) async fn verify_residential_browser_dns() -> Result<(), String> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(scan_windows_browser_dns),
+    run_scan_with_retry(
+        || async {
+            match tokio::time::timeout(SCAN_TIMEOUT, tokio::task::spawn_blocking(scan_windows_browser_dns)).await {
+                Ok(Ok(verdict)) => ScanRun::Verdict(verdict),
+                Ok(Err(_)) => ScanRun::TaskFailed,
+                Err(_) => ScanRun::TimedOut,
+            }
+        },
+        RETRY_PAUSE,
     )
-    .await;
-    match result {
-        Ok(Ok(verdict)) => verdict,
-        Ok(Err(_)) | Err(_) => Err(message("Chrome/Edge", BrowserDnsIssue::IncompleteScan)),
+    .await
+}
+
+/// How one run of the blocking scan ended.
+#[cfg(any(windows, test))]
+enum ScanRun {
+    /// The scan finished: pass, or a definite finding / incomplete read.
+    Verdict(Result<(), String>),
+    TimedOut,
+    TaskFailed,
+}
+
+/// Run the scan; when it timed out or its task failed, pause and run it exactly once more.
+#[cfg(any(windows, test))]
+async fn run_scan_with_retry<F, Fut>(mut scan: F, pause: std::time::Duration) -> Result<(), String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ScanRun>,
+{
+    let mut last = scan().await;
+    if matches!(last, ScanRun::TimedOut | ScanRun::TaskFailed) {
+        tokio::time::sleep(pause).await;
+        last = scan().await;
+    }
+    match last {
+        ScanRun::Verdict(verdict) => verdict,
+        ScanRun::TimedOut => Err(message("Chrome/Edge", BrowserDnsIssue::ScanTimedOut)),
+        ScanRun::TaskFailed => Err(message("Chrome/Edge", BrowserDnsIssue::ScanTaskFailed)),
     }
 }
 
@@ -143,6 +189,9 @@ fn message(browser: &str, issue: BrowserDnsIssue) -> String {
     let recovery = match issue {
         BrowserDnsIssue::IncompleteScan => {
             "Tono could not verify the configuration; this does not mean Secure DNS is enabled. Fully close the browser and retry connecting. If this persists, ask support to check Local State readability, valid JSON, scan limits, and policy access; do not delete browser data or disable Tono protection"
+        }
+        BrowserDnsIssue::ScanTimedOut | BrowserDnsIssue::ScanTaskFailed => {
+            "Tono could not verify the configuration; this does not mean Secure DNS is enabled. If this persists, ask support to check disk and registry responsiveness; do not delete browser data or disable Tono protection"
         }
         BrowserDnsIssue::UnreadablePolicy { .. } => {
             "Tono could not verify the configuration; this does not mean Secure DNS is enabled. Another program may have written this policy with an unexpected type or locked its permissions; ask support to check that registry value. Do not delete browser data or disable Tono protection"
@@ -561,5 +610,67 @@ mod tests {
         assert!(text.contains("fully restart the browser"));
         assert!(text.contains("ask your administrator"));
         assert!(!text.contains("resolver.example"));
+    }
+
+    #[test]
+    fn timed_out_and_failed_scans_say_what_to_close_not_incomplete() {
+        let timed_out = message("Chrome/Edge", BrowserDnsIssue::ScanTimedOut);
+        assert!(timed_out.starts_with(
+            "Chrome/Edge: the browser configuration scan timed out; close Chrome and Edge, then connect again."
+        ));
+        assert!(!timed_out.contains("incomplete"));
+        assert!(!timed_out.contains("Set Secure DNS to Off"));
+        let failed = message("Chrome/Edge", BrowserDnsIssue::ScanTaskFailed);
+        assert!(failed.contains("scan failed to finish; close Chrome and Edge, then connect again"));
+        assert!(!failed.contains("incomplete"));
+    }
+
+    fn scripted(
+        runs: Vec<ScanRun>,
+    ) -> (
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        impl FnMut() -> std::future::Ready<ScanRun>,
+    ) {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = calls.clone();
+        let mut runs = std::collections::VecDeque::from(runs);
+        (calls, move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::future::ready(runs.pop_front().expect("scan ran more often than scripted"))
+        })
+    }
+
+    // tono-core's tokio has no paused clock in tests, so the pause is injected and short.
+    const TEST_PAUSE: std::time::Duration = std::time::Duration::from_millis(30);
+
+    #[tokio::test]
+    async fn timed_out_scan_is_retried_once_after_a_pause_and_can_succeed() {
+        let (calls, scan) = scripted(vec![ScanRun::TimedOut, ScanRun::Verdict(Ok(()))]);
+        let started = std::time::Instant::now();
+        assert_eq!(run_scan_with_retry(scan, TEST_PAUSE).await, Ok(()));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(started.elapsed() >= TEST_PAUSE, "the retry must wait out the pause");
+        assert_eq!(RETRY_PAUSE, std::time::Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn task_failure_is_retried_and_a_second_timeout_reports_the_timeout_text() {
+        let (calls, scan) = scripted(vec![ScanRun::TaskFailed, ScanRun::TimedOut]);
+        let error = run_scan_with_retry(scan, TEST_PAUSE).await.unwrap_err();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(error.contains("the browser configuration scan timed out; close Chrome and Edge, then connect again"));
+    }
+
+    #[tokio::test]
+    async fn definite_findings_are_never_retried() {
+        let finding = message("Chrome", BrowserDnsIssue::UnsupportedMode);
+        let (calls, scan) = scripted(vec![ScanRun::Verdict(Err(finding.clone()))]);
+        assert_eq!(run_scan_with_retry(scan, TEST_PAUSE).await, Err(finding));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let incomplete = message("Chrome", BrowserDnsIssue::IncompleteScan);
+        let (calls, scan) = scripted(vec![ScanRun::Verdict(Err(incomplete.clone()))]);
+        assert_eq!(run_scan_with_retry(scan, TEST_PAUSE).await, Err(incomplete));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

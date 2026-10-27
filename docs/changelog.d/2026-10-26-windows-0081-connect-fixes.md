@@ -1,0 +1,14 @@
+## 2026-10-26 · Windows 0.0.81 连接失败归类、重建上限、探测源与文案
+- 归属：G2（Windows 客户端）；模块 `apps/windows/app`（src-tauri `tono/connection`、`connection_health`、`protected_probe`、`browser_dns`、`core/service`，前端 `services/tono.ts` 与 en/zh 文案）、`apps/windows/crates/tono-core`（`customer_failure`、`other_vpn`）。
+- 来源：基线 main `0c0e6d7fb`（PR #1758 合入后）→ 分支 `fix/windows-0081-connect-fixes`，PR #1759；每项一个提交。未合 main。
+- 缺陷修复：
+  - 隧道建立前拨号出口失败的文本「tcp connect to the selected exit did not complete before a tunnel was installed」落为 `UNKNOWN_CLASSIFIED_FAILURE`（14 天 7 次）→ 现在带 `TONO_EXIT_UNREACHABLE` 码，`classify_connect_text` 新增首条规则，界面文案「这台节点现在连不上，换一台试试。」并显示「换节点」动作。控制平面 `EXIT_SIDE_SQL` 继续按码与 `tcp connect to the selected exit` 子串匹配。
+  - 网络变化事件探测连续两次失败即整体重建隧道，没有上限（一台 0.0.79 设备一天 2295 次 networkChange、14 次 `TONO_STALE_GENERATION`）→ 一小时内最多 3 次事件驱动重建，之后改为 Hold，记一条审计 `networkEventRebuildCap`，每次重建都记为线路中断，让「线路不稳定」提示与换节点动作出现。周期健康探测与 Service 轮询路径不变。
+  - 受保护隧道健康检查只有 Google 一个源（「all 1 independent protected TUN probes failed」14 天 199 次）→ 新增 Cloudflare `cp.cloudflare.com/generate_204`，只有两个源都失败才算失败；Google 仍为索引 0（`EXIT_PROBE_URL`）。
+  - Service 回复 `StaleReleaseEpoch`（1013）「PrepareCoreStart refused: … superseded this attempt」被 `classify_connect_text` 的「refused」规则记成 `TONO_CONNECT_TCP`（5 次）→ App 按类型码映射为 `TONO_STALE_GENERATION`，原文保留在前缀后。Service 处理器未改。
+  - 浏览器 Secure DNS 预检 5 秒超时被当作「扫描不完整」直接拦截连接（单台 0.0.80 设备 14 天 38 次）→ 超时与任务失败各有自己的原因文本，暂停 2 秒后重扫一次再判失败；文案改为「先关闭 Chrome 和 Edge，再重新连接。」门控（仅住宅目录）不变。
+- 新增/优化：`TONO_CONNECT_DNS/TCP/QUIC/TIMEOUT/TLS/TUN/LOCAL_CONFLICT` 与 `UNKNOWN_CLASSIFIED_FAILURE` 的文案都给出下一步（重试后换节点、检查隧道、退出其他 VPN、带支持码发诊断）；`UNKNOWN_CLASSIFIED_FAILURE` 有稳定映射并显示支持码；网络类四个码显示「换节点」动作。`staleGeneration` 文案不再只说「恢复网络之前」。未做：`classify_exhausted_data_plane` 的 EXIT/NODE_OR_CORE 拆分——后锁探测运行时隧道前出口证明已成功或被跳过，没有证据区分「出口死」与「Core 坏」，113 条 `TONO_NODE_OR_CORE_UNREACHABLE` 仍保持原码。
+- 工程与测试：`browser_dns.rs` 被 tono-core 作为独立测试目标编译，其 tokio 无暂停时钟，重试测试改为注入短暂停（CI 首次 `Test tono-core` 编译失败已修）。新增测试：`customer_failure::tests::the_pre_tunnel_exit_dial_failure_is_its_own_code`、`connection_health` 4 个上限测试、`protected_probe` 2 个、`core::service::tests::superseded_prepare_core_start_reports_stale_generation_not_a_tcp_failure`、`browser_dns` 4 个、`tono.test.ts` 5 个用例。
+- 验证：本机 macOS（stub sidecar/resources/dist 后 app crate 可 `cargo +1.98.1 check --lib` 与 `test --lib`）：`cargo test -p tono-core --lib` 361 通过、`--test browser_dns` 16 通过、app crate `connection`/`connection_health`/`protected_probe`/`browser_dns` 全部通过（`outcome::tests::late_failure_keeps_successor_auth_tunnel_port` 需 127.0.0.2，本机环境失败，与改动无关）；`pnpm vitest run` 61 文件 437 通过、`pnpm run typecheck` 通过（ratchet 69/79）。`cfg(windows)` 内代码本机未编译，依赖 PR 上 `windows-ci.yml`。
+- 候选/发布：无新包，仅源码。版本号未改；0.0.81 的版本提升、发布说明与 release/windows 推进在后续 PR。
+- 剩余限制：事件重建上限窗口存于监控循环局部变量，手动重连后重置；`cp.cloudflare.com` 预热未加（`controller.rs` 只预解析 gstatic）；`classify_exhausted_data_plane` 仍无法说出出口是否应答，需 Core 上报拨号错误。

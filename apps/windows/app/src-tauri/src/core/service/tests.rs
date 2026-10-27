@@ -994,6 +994,20 @@ fn protection_held_by_another_user_refusal_carries_its_marker() {
     )));
 }
 
+/// The Service answers a PrepareCoreStart that a release or update takeover superseded with
+/// 1013 and plain text containing "refused". Without the code that text classified as a TCP
+/// failure ("The connection didn't complete"); it must read as a superseded attempt instead and
+/// keep the Service's wording after the prefix so logs stay searchable.
+#[test]
+fn superseded_prepare_core_start_reports_stale_generation_not_a_tcp_failure() {
+    let code = tono_service_protocol::ServiceErrorCode::StaleReleaseEpoch as u16;
+    let service_text = "PrepareCoreStart refused: an explicit release or update takeover superseded this attempt";
+    let reported = tono_start_refusal(code, service_text.to_owned());
+    assert_eq!(reported, format!("TONO_STALE_GENERATION: {service_text}"));
+    // The telemetry stamp leaves a message that already carries a TONO_ token alone.
+    assert_eq!(tono_core::customer_failure::stamp_connect_failure(&reported), reported);
+}
+
 /// Sol R2-F4 on PR #1569: a Restore whose answer arrives after the user clicked Restore again (or
 /// Connect, which moves the same epoch) no longer owns the epoch, so its result changes nothing.
 #[test]
