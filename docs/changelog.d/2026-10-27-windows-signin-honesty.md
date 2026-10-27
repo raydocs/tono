@@ -1,0 +1,13 @@
+## 2026-10-27 · Windows 登录：未受邀邮箱不再误报「已发送」，套餐到期不再说成登录失效
+- 归属：G1（客户路径 UI/UX）；Windows 应用（海面外观为主，文案两种外观共用）与 `tono-core`。
+- 来源：叠在 #1777（`amp/windows-onboarding-polish`）上；分支 `amp/windows-signin-honesty`；未合 main。依据登录与订阅研究线程 T-01a17e6b。
+- 缺陷修复：
+  - 未受邀邮箱（服务端为防枚举照样回 202，但不发信）：验证码步骤原先说「请查收邮件」。现在改为「如果这个邮箱已开通 Tono，验证码会在一分钟内送达」；一分钟后的提示写明 Tono 只对受邀用户开放，请核对地址或联系为你开通 Tono 的人，发件人地址也放在这里。服务端行为和防枚举都没有动（WIN-SIGNIN-UNINVITED-SENT）。
+  - 套餐到期 / 流量用完：重新登录时原来显示「登录服务暂时不可用」，并附带技术详情。现在 `tono-core` 把 403 `ACCOUNT_EXPIRED`、`QUOTA_EXCEEDED`、`ENTITLEMENT_REQUIRED` 映射成 `ApiError::PlanInactive(code)`，支持码仍然是 `TONO_AUTH_FORBIDDEN`，登录页给出对应说明（套餐已到期 / 本期流量用完 / 账号已建好但还没有套餐），不再展开技术详情。
+  - 已登录设备的会话被拒时：如果缓存账户的 `expiresAt` 已过期或流量已用完，标题从「登录已失效」改为「套餐已到期（日期）」或「本期流量已用完」，按钮改为「已续费，重新登录」（决策 133：续费后要重新登录一次）。通用的「登录已失效」文案去掉了「或套餐已暂停」（WIN-SIGNIN-PLAN-AS-SESSION）。
+- 新增/优化：验证码步骤更轻，标题改为「输入验证码」，只占一行；邮箱和「换邮箱」放在同一行；发件人和垃圾箱提示等一分钟后没收到信才出现。
+- 没做（需要所有者决定或依赖未合入的工作）：开放注册（控制面 PUBLIC_SIGNUP 在 T-01a17e7b 中实现，默认关闭；Windows 还没有读取 `auth/methods`）、Apple 登录、支付渠道和续费按钮；邮箱 webmail 快捷入口（需要放宽 Tauri `shell.open` 白名单）；记住上次邮箱。
+- 工程与测试：`login.test.tsx` 新增 2 个 `it`（登录时套餐到期、会话被拒时套餐到期），在 #1777 的 login.tsx 上均为红；`tono-core` 新增 1 个 `#[tokio::test]`；预览壳 fixture 新增 `planError` 参数。
+- 验证（Linux orb，Node 22）：`vitest run src/pages/tono src/pages/_layout src/tono-ui` 共 38 个文件、316 个用例通过；`tsc --noEmit` 和改动文件的 eslint、biome 都通过。Rust 未在本地编译（orb 里没有 cargo），交给 hosted CI 的 windows/core 和 app-rust。截图来自 Windows 预览壳（模拟数据），不是真机。
+- 候选/发布：只改源码，没有出新候选包。
+- 剩余限制：macOS、iOS 的登录文案和到期处理没有改；没有在 Windows 真机上看过；没有真实的到期账号联调。UI PR，不开 auto-merge。

@@ -222,8 +222,8 @@
     "brandFootnote": "你的连接，始终由你掌握。",
     "stepEmail": "01 / 邮箱登录",
     "stepCode": "02 / 查收邮件",
-    "checkInbox": "打开邮箱，查收验证码",
-    "inboxInstructions": "找到 Tono 发来的最新邮件，回到这里粘贴六位验证码，我们会自动验证。",
+    "checkInbox": "输入验证码",
+    "inboxInstructions": "如果这个邮箱已开通 Tono，验证码会在一分钟内送达。输入或粘贴 6 位数字，Tono 会自动验证。",
     "title": "登录 Tono",
     "subtitle": "输入邮箱，收取验证码。",
     "welcome": "登录 Tono",
@@ -240,8 +240,8 @@
     "recoveryEnded": "这次登录未完成。请重试，或换个网络。",
     "trust": "邮箱只用于登录。流量日志默认上传：你连接的主机名、发起每条连接的应用、命中的规则与路由，用于排查问题。可在设置里关闭。",
     "resendIn": "{{seconds}} 秒后可重发",
-    "codeSent": "请查收邮件。",
-    "codeSentTo": "请查看这个邮箱（也可查看垃圾箱）。",
+    "codeSent": "如果这个邮箱已开通 Tono，验证码已经发出。",
+    "codeSentTo": "如果这个邮箱已开通 Tono，请在这里查收验证码（也看看垃圾箱）。",
     "codeFrom": "发件人：Tono <login@lecvia.com>",
     "codeLabel": "6 位验证码",
     "codePlaceholder": "123456",
@@ -253,7 +253,7 @@
     "invalidCode": "请输入 6 位验证码",
     "noEmail": {
       "title": "还没收到邮件？",
-      "description": "请查看垃圾箱并核对上面的邮箱地址，或重新发送。"
+      "description": "先看看垃圾箱。仍然没有的话，这个邮箱可能还没开通 Tono：Tono 目前只对受邀用户开放，请核对邮箱地址，或联系为你开通 Tono 的人。"
     },
     "suspended": {
       "title": "账号已暂停",
@@ -261,8 +261,23 @@
     },
     "sessionEnded": {
       "title": "登录已失效",
-      "description": "Tono 不再接受这次登录：可能已在别处退出，或套餐已暂停。请重新登录。",
+      "description": "这台电脑上的登录已经失效：可能在别处退出了，或这台设备被移除了。刚续费的账号也需要重新登录一次。",
       "signIn": "重新登录"
+    },
+    "planExpired": {
+      "title": "套餐已到期",
+      "description": "套餐已于 {{date}} 到期，这台电脑暂时无法连接。续费请联系为你开通 Tono 的人；续费后重新登录即可恢复。",
+      "signIn": "已续费，重新登录",
+      "signInError": "这个账号的套餐已到期，暂时无法登录。续费请联系为你开通 Tono 的人，之后用同一个邮箱重新登录即可。"
+    },
+    "quotaExceeded": {
+      "title": "本期流量已用完",
+      "description": "这个账号本期的流量已经用完，暂时无法连接。需要更多流量请联系为你开通 Tono 的人；处理好后重新登录即可恢复。",
+      "signIn": "已处理，重新登录",
+      "signInError": "这个账号本期的流量已经用完，暂时无法登录。请联系为你开通 Tono 的人，处理好后用同一个邮箱重新登录。"
+    },
+    "noPlan": {
+      "signInError": "账号已经建好，但还没有开通套餐，所以暂时无法登录连接。请联系为你开通 Tono 的人或 Tono 支持开通，之后用同一个邮箱重新登录即可。"
     },
     "restoreFailed": {
       "title": "没能恢复登录",

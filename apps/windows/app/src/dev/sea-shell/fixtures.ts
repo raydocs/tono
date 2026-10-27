@@ -267,6 +267,11 @@ export const tonoSignInVerify = async () => {
   await signInFixtureIO('verifyCode')
   if (params.has('badCode'))
     throw new Error('TONO_AUTH_INVALID_CODE: Synthetic rejected code')
+  // ACCOUNT_EXPIRED / QUOTA_EXCEEDED / ENTITLEMENT_REQUIRED, as `ApiError::PlanInactive` words it.
+  if (params.has('planError'))
+    throw new Error(
+      `TONO_AUTH_FORBIDDEN: this Tono plan is not active (${params.get('planError')})`,
+    )
   const suspended = params.has('paused')
   window.dispatchEvent(
     new CustomEvent('preview-home-state', {

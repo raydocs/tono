@@ -157,7 +157,7 @@ pub fn auth_support_prefix(err: &ApiError) -> &'static str {
         ApiError::DeviceLimit => CustomerFailureCode::AuthDeviceLimit.as_str(),
         ApiError::Unauthorized => CustomerFailureCode::AuthUnauthorized.as_str(),
         ApiError::InvalidOrExpiredCode => CustomerFailureCode::AuthInvalidCode.as_str(),
-        ApiError::Forbidden => CustomerFailureCode::AuthForbidden.as_str(),
+        ApiError::Forbidden | ApiError::PlanInactive(_) => CustomerFailureCode::AuthForbidden.as_str(),
         ApiError::Credentials(_) => CustomerFailureCode::AuthStore.as_str(),
         ApiError::Server { status, message } if *status == 511 || is_captive(message) => {
             CustomerFailureCode::AuthCaptive.as_str()

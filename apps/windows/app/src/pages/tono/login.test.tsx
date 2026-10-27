@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
   dismiss: vi.fn(),
   mutate: vi.fn(),
+  account: vi.fn(),
   status: {} as Record<string, unknown>,
 }))
 
@@ -37,6 +38,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoSignInStart: mocks.start,
   tonoSignInVerify: mocks.verify,
   tonoSignInDismiss: mocks.dismiss,
+  tonoAccount: mocks.account,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
   tonoRestoreInternet: mocks.disconnect,
@@ -65,6 +67,7 @@ beforeEach(() => {
   mocks.verify.mockReset()
   mocks.dismiss.mockReset().mockResolvedValue(undefined)
   mocks.mutate.mockReset().mockResolvedValue(undefined)
+  mocks.account.mockReset().mockResolvedValue(null)
   mocks.status = {}
 })
 
@@ -230,11 +233,13 @@ describe('login request exclusion', () => {
   it('announces the inbox step, focuses code, and returns to the original email', async () => {
     await enterCodeStep()
     expect(
-      screen.getByRole('heading', { name: 'Open your inbox' }),
+      screen.getByRole('heading', { name: 'Enter your code' }),
     ).toBeDefined()
     const code = screen.getByLabelText('6-digit code')
     expect(document.activeElement).toBe(code)
-    expect(screen.getByRole('status').textContent).toBe('Check your inbox.')
+    expect(screen.getByRole('status').textContent).toBe(
+      'If this email has a Tono account, a code is on its way.',
+    )
     expect(
       document.getElementById(code.getAttribute('aria-describedby')!),
     ).not.toBeNull()
@@ -464,5 +469,47 @@ describe('sea sign-in', () => {
     ).toBe('true')
     expect(document.activeElement).toBe(screen.getByLabelText('6-digit code'))
     expect(mocks.verify).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('login plan answers', () => {
+  it('says the plan expired at sign-in instead of a service failure with diagnostics', async () => {
+    mocks.verify.mockRejectedValue(
+      new Error(
+        'TONO_AUTH_FORBIDDEN: this Tono plan is not active (ACCOUNT_EXPIRED)',
+      ),
+    )
+    await enterCodeStep()
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('6-digit code'), {
+        target: { value: '123456' },
+      }),
+    )
+    expect(screen.getByRole('alert').textContent).toBe(
+      enTono.login.planExpired.signInError,
+    )
+    expect(screen.queryByText('Details')).toBeNull()
+    expect(screen.queryByTestId('support-contact')).toBeNull()
+  })
+
+  it('names a lapsed plan on a refused session instead of a plain sign-out', async () => {
+    mocks.status = { accountState: 'suspended' }
+    mocks.account.mockResolvedValue({
+      email: 'person@example.com',
+      suspended: false,
+      deviceLimit: 3,
+      expiresAt: Math.floor(Date.now() / 1000) - 86_400,
+    })
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    await act(async () => undefined)
+    expect(screen.getByText('Plan expired')).toBeDefined()
+    expect(screen.queryByText('Session ended')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: enTono.login.planExpired.signIn }),
+    ).toBeDefined()
   })
 })

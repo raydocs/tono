@@ -1318,6 +1318,9 @@ export interface TranslationResources {
           description: string
           title: string
         }
+        noPlan: {
+          signInError: string
+        }
         paths: {
           elapsed: string
           kind: {
@@ -1332,8 +1335,20 @@ export interface TranslationResources {
           system_dns: string
           title: string
         }
+        planExpired: {
+          description: string
+          signIn: string
+          signInError: string
+          title: string
+        }
         privacyDetails: string
         privacySummary: string
+        quotaExceeded: {
+          description: string
+          signIn: string
+          signInError: string
+          title: string
+        }
         recoveryEnded: string
         relayFailureDetails: string
         relayFailureKinds: string

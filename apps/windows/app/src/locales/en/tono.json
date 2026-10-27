@@ -222,8 +222,8 @@
     "brandFootnote": "Your connection stays in your hands.",
     "stepEmail": "01 / SIGN IN",
     "stepCode": "02 / CHECK YOUR EMAIL",
-    "checkInbox": "Open your inbox",
-    "inboxInstructions": "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically.",
+    "checkInbox": "Enter your code",
+    "inboxInstructions": "If this email has a Tono account, a code arrives within a minute. Type or paste the 6 digits; Tono checks them automatically.",
     "title": "Sign in to Tono",
     "subtitle": "Enter your email for a sign-in code.",
     "welcome": "Sign in to Tono",
@@ -240,8 +240,8 @@
     "recoveryEnded": "This sign-in did not finish. Retry, or try another network.",
     "trust": "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.",
     "resendIn": "Resend in {{seconds}}s",
-    "codeSent": "Check your inbox.",
-    "codeSentTo": "Check this inbox and spam for a Tono code.",
+    "codeSent": "If this email has a Tono account, a code is on its way.",
+    "codeSentTo": "If this email has a Tono account, look here (and in spam) for the code.",
     "codeFrom": "From Tono <login@lecvia.com>",
     "codeLabel": "6-digit code",
     "codePlaceholder": "123456",
@@ -253,7 +253,7 @@
     "invalidCode": "Enter the 6-digit code",
     "noEmail": {
       "title": "No email yet?",
-      "description": "Check spam and the address above, or send again."
+      "description": "Check spam first. Still nothing? This email may not have a Tono account yet: Tono is invite-only, so check the address or ask whoever set up Tono for you."
     },
     "suspended": {
       "title": "Account paused",
@@ -261,8 +261,23 @@
     },
     "sessionEnded": {
       "title": "Session ended",
-      "description": "Tono no longer accepts this session. It may have been signed out elsewhere, or the plan may be paused. Sign in again.",
+      "description": "This PC is no longer signed in: it may have been signed out elsewhere, or this device was removed. After renewing a plan you also need to sign in once more.",
       "signIn": "Sign in again"
+    },
+    "planExpired": {
+      "title": "Plan expired",
+      "description": "Your plan expired on {{date}}, so this PC can’t connect for now. To renew, contact whoever set up Tono for you, then sign in again.",
+      "signIn": "Renewed — sign in again",
+      "signInError": "This account’s plan has expired, so it can’t sign in right now. To renew, contact whoever set up Tono for you, then sign in again with the same email."
+    },
+    "quotaExceeded": {
+      "title": "Data used up",
+      "description": "This account has used all of its data for this period, so this PC can’t connect for now. Contact whoever set up Tono for you for more, then sign in again.",
+      "signIn": "Sorted — sign in again",
+      "signInError": "This account has used all of its data for this period, so it can’t sign in right now. Contact whoever set up Tono for you, then sign in again with the same email."
+    },
+    "noPlan": {
+      "signInError": "Your account is set up but has no plan yet, so it can’t sign in to connect right now. Ask whoever set up Tono for you, or Tono support, to add a plan, then sign in again with the same email."
     },
     "restoreFailed": {
       "title": "Couldn't restore your sign-in",
