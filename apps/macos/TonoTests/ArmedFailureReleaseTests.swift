@@ -167,6 +167,21 @@ final class ArmedFailureReleaseTests: XCTestCase {
         XCTAssertEqual(event["code"] as? String, NetworkLossReport.failOpen)
     }
 
+    func testUnarmedCandidatesAreProvenConcurrentlyInPreferenceOrder() async {
+        let delaysMs: [String: UInt64] = ["first": 300, "second": 300, "third": 50]
+        let outcomes: [String: Bool] = ["first": false, "second": true, "third": true]
+        let started = ContinuousClock.now
+        let name = await UnarmedReconnect.firstProvenName(among: ["first", "second", "third"]) { name in
+            try? await Task.sleep(for: .milliseconds(delaysMs[name] ?? 0))
+            return outcomes[name] ?? false
+        }
+        let elapsed = started.duration(to: .now)
+        XCTAssertEqual(name, "second", "preference order, not the fastest proof, decides")
+        XCTAssertLessThan(elapsed, .milliseconds(600), "proofs run in one window, not serially")
+        let none = await UnarmedReconnect.firstProvenName(among: []) { _ in true }
+        XCTAssertNil(none)
+    }
+
     func testUnarmedReconnectWaitsForAProofWhileProtectionIsDown() {
         XCTAssertFalse(UnarmedReconnect.shouldConnect(tcpReachable: false, protectionArmed: false))
         XCTAssertFalse(UnarmedReconnect.shouldConnect(tcpReachable: true, protectionArmed: true))

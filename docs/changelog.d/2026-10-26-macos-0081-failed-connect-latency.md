@@ -1,0 +1,11 @@
+## 2026-10-26 · macOS 0.0.81 失败连接路径的两处串行等待改为并行
+- 归属：G3（macOS 客户端）；模块 `apps/macos/Tono/Services`（`AppState.verifyProtectedConnection`、`AppState+Connect` 的未武装重连循环）、`apps/macos/Tono/Core/UnarmedReconnect.swift`、`apps/macos/TonoTests`。
+- 来源：基线 origin/main → 分支 `fix/macos-0081-connect-latency`；每项一个提交，本次一个提交。未推送，未合 main。
+- 缺陷修复（延迟，仅失败路径）：
+  - 连接后验证：最后一轮 TUN 竞速失败、且调用方只传 `advisoryProbe`（生产两处调用）时，原先要等 8 秒的 mixed 诊断结束后才启动 5 秒的控制器 `/delay` 咨询探测。现在 TUN 竞速失败的那一刻立即启动咨询探测，与 mixed 诊断并行，再依次等待两者。一次失败的连接后验证最多少等 5 秒。
+  - 未武装重连：原先对候选节点逐个做 TCP 证明（每个最多 2.5 秒）。现在 `UnarmedReconnect.firstProvenName` 用 `withTaskGroup` 同时证明全部候选，仍按候选顺序取第一个可达者（不是最先应答者）。每轮探测最多少等 (N-1) × 2.5 秒，N 最多 3。
+- 未改变：TUN 成功时不提前启动咨询探测，仍在 `advisoryDelayDeferralMilliseconds`（1500 ms）后才启动，首页加载不与 `/delay` 握手共用隧道；`controller:` 与 `controllerTask:` 参数路径的时序不变；`ProtectedConnectivity.classifyPostLock` 的输入与全部判定/分类规则不变；健康路径不变；未武装重连的取消与代际检查（循环前后各一处）保留。
+- 工程与测试：新增 `testFailedFinalTUNStartsAdvisoryProbeBesideHeldDiagnostic`（TUN 失败后，mixed 诊断仍被挂住时咨询探测已启动，随后判定为 failed 且详情含咨询探测的控制器信息）、`testWinningTUNDoesNotStartAdvisoryProbeSynchronously`（TUN 成功时咨询闭包不被同步调用）、`testUnarmedCandidatesAreProvenConcurrentlyInPreferenceOrder`（三个候选证明耗时 300 ms 假、300 ms 真、50 ms 真，返回第二个，总耗时小于 600 ms）。第一个新测试已在去掉修复的代码上运行，失败（咨询探测未启动，等待超时）。
+- 验证：本机 `xcodebuild test`，`-only-testing` ProtectedConnectionTimingTests、ArmedFailureReleaseTests、MacUsabilityTests，共 29 个测试 0 失败，`** TEST SUCCEEDED **`。
+- 候选/发布：无新包，仅源码。版本号未改。
+- 剩余限制：未在真机或真实失败网络上测量实际节省的秒数，上限是按超时常量推算的；整套 TonoTests 与渲染测试未在本机跑，依赖 PR 上 `macos-ci.yml`；并行证明会同时对至多 3 个节点发起 TCP 连接，未测量其对弱网的影响。

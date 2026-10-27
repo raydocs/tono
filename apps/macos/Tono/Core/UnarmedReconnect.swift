@@ -27,6 +27,25 @@ enum UnarmedReconnect {
         return Array(names.prefix(3))
     }
 
+    /// Proves every candidate in one concurrent window instead of one 2.5 s proof per
+    /// candidate. The result keeps the preference order of `candidates`: the first name
+    /// that proved reachable wins, not the first to answer.
+    static func firstProvenName(
+        among candidates: [String],
+        prove: @escaping @Sendable (String) async -> Bool
+    ) async -> String? {
+        guard !candidates.isEmpty else { return nil }
+        let results = await withTaskGroup(of: (String, Bool).self) { group in
+            for name in candidates {
+                group.addTask { (name, await prove(name)) }
+            }
+            var results: [String: Bool] = [:]
+            for await (name, proven) in group { results[name] = proven }
+            return results
+        }
+        return candidates.first { results[$0] == true }
+    }
+
     /// Connect only after a TCP proof, and only while protection is down.
     static func shouldConnect(tcpReachable: Bool, protectionArmed: Bool) -> Bool {
         tcpReachable && !protectionArmed
