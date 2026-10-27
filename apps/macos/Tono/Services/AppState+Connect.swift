@@ -1765,6 +1765,9 @@ extension AppState {
         var consecutiveHealthFailures = 0
         var consecutiveHealthyProtectionAudits = 0
         var tunRouteRearmAttempts = 0
+        /// Re-arms taken since this monitor started (one connect attempt).
+        /// Unlike `tunRouteRearmAttempts` a healthy cycle does not reset it.
+        var tunRouteRearmsThisAttempt = 0
         /// Consecutive ticks that observed the owned TUN absent. Any tick that
         /// sees the interface resets it.
         var consecutiveMissingTUNTicks = 0
@@ -2289,6 +2292,20 @@ extension AppState {
                     self.errorMessage = String(localized: "Recovering protected connection…")
                     return .continueMonitoring
                 }
+                if state.tunRouteRearmAttempts == 0,
+                   !TunRouteRearmBound.allows(priorRearms: state.tunRouteRearmsThisAttempt) {
+                    // Bound reached for this connect attempt: no further
+                    // re-arm, the failure stands and the escalation below
+                    // decides. Marking the streak spent keeps this one line.
+                    state.tunRouteRearmAttempts += 1
+                    LocalTrafficAudit.shared.recordEvent(
+                        "tun_route_rearm_bound_reached",
+                        details: [
+                            "max": String(TunRouteRearmBound.maxRearmsPerAttempt),
+                            "failures": String(state.consecutiveHealthFailures),
+                        ]
+                    )
+                }
                 if state.tunRouteRearmAttempts == 0 {
                     // A restatement of the guard taken before the
                     // classification above — nothing between the two
@@ -2304,6 +2321,7 @@ extension AppState {
                         return .continueMonitoring
                     }
                     state.tunRouteRearmAttempts += 1
+                    state.tunRouteRearmsThisAttempt += 1
                     LocalTrafficAudit.shared.recordEvent(
                         "tun_route_rearm",
                         details: [
@@ -2345,8 +2363,12 @@ extension AppState {
                 return .continueMonitoring
             }
             guard self.isConnected, !self.isDisconnecting else { return .stopMonitoring }
+            // H21-O-F7: the same other-VPN sentence the connect path shows.
             await self.applyExhaustedArmedFailure(
-                message: failure.userMessage,
+                message: OtherVPNDetection.attributedMessage(
+                    for: failure,
+                    interfaces: OtherVPNDetection.currentInterfaces()
+                ) ?? failure.userMessage,
                 resumeWhenReachable: true
             )
             return .stopMonitoring
