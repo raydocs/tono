@@ -226,7 +226,8 @@ enum ExitHeal {
         let sameBase = current.map { baseName($0.name) == baseName(candidate.name) } ?? false
         if failure == .auth && sameBase { return nil }
         if sameBase, let current {
-            if current.transport != candidate.transport && transportMatches(failure, candidate.transport) {
+            if current.transport != candidate.transport
+                && transportMatches(failure, current: current.transport, candidate: candidate.transport) {
                 return (0, .transport)
             }
             if current.port != candidate.port { return (1, .port) }
@@ -238,11 +239,17 @@ enum ExitHeal {
         return (4, .sameRegion)
     }
 
-    private static func transportMatches(_ failure: Failure, _ transport: Transport) -> Bool {
+    /// A failed hy2 dial goes to the same node's Reality block whatever its text says: a UDP
+    /// path that drops everything reports a timeout or TLS failure, not "quic", and the
+    /// catalog's ` · hy2` block shares the Reality block's address, port and SNI. Same rule as
+    /// Windows `heal::transport_matches`.
+    private static func transportMatches(
+        _ failure: Failure, current: Transport, candidate: Transport
+    ) -> Bool {
         switch failure {
-        case .quicHandshake: return transport == .tcp
+        case .quicHandshake: return candidate == .tcp
         case .auth: return false
-        default: return transport == .hy2
+        default: return candidate == .hy2 || current == .hy2
         }
     }
 }
