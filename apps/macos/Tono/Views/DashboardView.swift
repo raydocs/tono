@@ -686,9 +686,12 @@ private struct ConnectionProgressCard: View {
     private var reduceMotion: Bool { displayPreferences.reduceMotion }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        // Only the elapsed and retry counters read the clock; a shown failure or idle card
+        // does not rebuild every second. A schedule change can hand back an old entry, so the
+        // header reads the later of it and now.
+        TimelineView(.periodic(from: .now, by: needsClock ? 1 : 3_600)) { context in
             VStack(alignment: .leading, spacing: 12) {
-                header(now: context.date)
+                header(now: max(context.date, .now))
                 if homePresentation && appState.isProtectionBlockUnreadable {
                     Text("Tono's network helper is not answering this copy of Tono, so Tono cannot tell whether direct traffic is still blocked. Repair and reconnect from the dashboard, or restore internet here.")
                         .font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
@@ -906,6 +909,10 @@ private struct ConnectionProgressCard: View {
         if appState.isConnecting { return appState.connectionStartedAt }
         if appState.isDisconnecting { return appState.disconnectionStartedAt }
         return nil
+    }
+
+    private var needsClock: Bool {
+        activeStartedAt != nil || appState.protectedReconnectNextAttemptAt != nil
     }
 
     private func stageRow(_ stage: ConnectionStage) -> some View {
