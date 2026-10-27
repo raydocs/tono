@@ -263,6 +263,16 @@ describe('connectErrorSuggestsServerSwitch', () => {
     }
   })
 
+  it('suggests switching when the selected exit itself did not answer', () => {
+    expect(
+      connectErrorSuggestsServerSwitch(
+        new Error(
+          'TONO_EXIT_UNREACHABLE: tcp connect to the selected exit did not complete before a tunnel was installed',
+        ),
+      ),
+    ).toBe(true)
+  })
+
   it('does not suggest switching for service or account failures', () => {
     for (const error of [
       new Error('TONO_SERVICE_BUSY: repair pending'),
@@ -310,6 +320,19 @@ describe('connectErrorSuggestsServerSwitch', () => {
       ),
     ).toBe(
       'translated:tono.dashboard.errors.nodeUnreachable (TONO_NODE_OR_CORE_UNREACHABLE)',
+    )
+  })
+
+  it('maps TONO_EXIT_UNREACHABLE to the pick-another-server copy with its support code', () => {
+    expect(
+      formatTonoActionError(
+        new Error(
+          'TONO_EXIT_UNREACHABLE: tcp connect to the selected exit did not complete before a tunnel was installed',
+        ),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe(
+      'translated:tono.dashboard.errors.exitUnreachable (TONO_EXIT_UNREACHABLE)',
     )
   })
 

@@ -382,7 +382,7 @@ pub(super) async fn tcp_proof_before_tunnel(
         return Ok(());
     }
     Err(
-        "tcp connect to the selected exit did not complete before a tunnel was installed"
+        "TONO_EXIT_UNREACHABLE: tcp connect to the selected exit did not complete before a tunnel was installed"
             .to_string(),
     )
 }

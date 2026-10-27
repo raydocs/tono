@@ -396,6 +396,7 @@
       "browserDnsPreflight": "Claude residential protection cannot connect because Chrome or Edge Secure DNS could not be proven safe. Tono routes all Chrome and Edge profiles together; profile-level routing is unavailable. Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono.",
       "hy2Idle": "The UDP backup path went idle and the home router likely dropped it. Tono stays on this same route and retries. Support code TONO_CONNECT_HY2_IDLE. Send diagnostics if it keeps happening.",
       "nodeUnreachable": "The connection didn't complete.",
+      "exitUnreachable": "This server did not answer. Pick another server and try again.",
       "tunDataPlaneBroken": "The connection didn't complete.",
       "tunIngressBroken": "The connection didn't complete.",
       "otherVpnPresent": "Another VPN is running on this PC and may conflict with Tono. Quit it, then connect again.",

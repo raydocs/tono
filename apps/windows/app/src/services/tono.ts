@@ -291,6 +291,11 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_NODE_OR_CORE_UNREACHABLE',
     key: 'tono.dashboard.errors.nodeUnreachable',
   },
+  // The selected exit itself did not answer the pre-tunnel dial: pick another server.
+  {
+    prefix: 'TONO_EXIT_UNREACHABLE',
+    key: 'tono.dashboard.errors.exitUnreachable',
+  },
   // The other two post-lock classifications. The backend composes them into
   // English sentences carrying raw probe detail, and the failure they describe
   // takes the full-release path, so without these the marker and its detail
@@ -471,6 +476,7 @@ const showsSupportCode = (code: string): boolean =>
   code === 'TONO_TLS_INTERCEPTED' ||
   code === 'TONO_SIGN_IN_NOT_SAVED' ||
   code === 'TONO_NODE_OR_CORE_UNREACHABLE' ||
+  code === 'TONO_EXIT_UNREACHABLE' ||
   code.startsWith('CORE_')
 
 /** First stable `TONO_*` / `CORE_*` token in a diagnostic string, for Copy details. */
@@ -527,6 +533,7 @@ export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
   }
   return (
     raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
+    raw.includes('TONO_EXIT_UNREACHABLE') ||
     raw.toLowerCase().includes('node or core unreachable') ||
     raw.toLowerCase().includes('network blocked')
   )

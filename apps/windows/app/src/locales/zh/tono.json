@@ -396,6 +396,7 @@
       "browserDnsPreflight": "无法连接 Claude 住宅专线，因为不能确认 Chrome / Edge 的「安全 DNS」配置安全。Tono 会统一路由 Chrome / Edge 的所有用户资料，不支持按资料单独路由。请将「安全 DNS」设为关闭，或自动且不指定自定义提供商；然后彻底重启浏览器，再重新连接 Tono。",
       "hy2Idle": "备用 UDP 通道空闲后断了，多半是家里的路由器清掉了闲置连接。Tono 会留在同一条线路上重试。支持码 TONO_CONNECT_HY2_IDLE。如果反复出现，请发诊断。",
       "nodeUnreachable": "连接没有完成。",
+      "exitUnreachable": "这台节点现在连不上，换一台试试。",
       "tunDataPlaneBroken": "连接没有完成。",
       "tunIngressBroken": "线路是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
       "otherVpnPresent": "存在其他 VPN：这台电脑上还有别的 VPN 在运行，可能与 Tono 冲突。请先退出它，再重新连接。",
