@@ -2532,6 +2532,8 @@ class MeteringAcrossFailedRounds(unittest.TestCase):
         ]
         self.live: set[str] = set()
         self.failing_add: set[str] = set()
+        self.failing_remove: set[str] = set()
+        self.deliver_down = False
         self.delivered: list[dict] = []
         self.io = io
 
@@ -2541,7 +2543,15 @@ class MeteringAcrossFailedRounds(unittest.TestCase):
             self.live.add(label)
             return agent.subprocess.CompletedProcess([], 0, "Added 1 user(s) in total.", "")
 
+        def fake_remove(_binary, _command, _address, _tag, label):
+            if label in self.failing_remove:
+                return agent.subprocess.CompletedProcess([], 0, "failed to remove user", "")
+            self.live.discard(label)
+            return agent.subprocess.CompletedProcess([], 0, "Removed 1 user(s) in total.", "")
+
         def fake_deliver(_base, _token, queue_path, state):
+            if self.deliver_down:
+                raise agent.Unreachable("4 attempts failed: connection reset")
             count = len(state["pendingReports"])
             self.delivered.extend(state["pendingReports"])
             state["pendingReports"] = []
@@ -2559,6 +2569,7 @@ class MeteringAcrossFailedRounds(unittest.TestCase):
                 "stats_query": "statsquery", "list_users": "inbounduser",
             }),
             patch.object(agent, "add_inbound_user", side_effect=fake_add),
+            patch.object(agent, "remove_inbound_user", side_effect=fake_remove),
             patch.object(agent, "installed_clients", side_effect=lambda *_: set(self.live)),
             patch.object(agent, "deliver_queue", side_effect=fake_deliver),
             patch.object(agent, "sync_hy2_roster", return_value=False),
@@ -2616,6 +2627,62 @@ class MeteringAcrossFailedRounds(unittest.TestCase):
         self.failing_add.clear()
         self.run_round(1_180, {self.label_a: 300, self.label_b: 7}, "boot:2")
         self.assertEqual((self.billed("usr_a"), self.billed("usr_b")), (5_300, 7))
+        self.ack_roster.assert_called_once()
+
+    def test_a_failed_revocation_is_never_acknowledged_and_is_retried(self) -> None:
+        self.run_round(1_000, {self.label_a: 100, self.label_b: 10}, "boot:1")
+        self.ack_roster.assert_called_once()
+        # usr_b is revoked, but Xray refuses the removal.
+        self.roster = self.roster[:1]
+        self.failing_remove.add(self.label_b)
+        with self.assertRaisesRegex(agent.Refusal, "removing u:usr_b"):
+            self.run_round(1_060, {self.label_a: 300, self.label_b: 40}, "boot:1")
+        # Measured traffic is still reported, including the account whose
+        # access could not be withdrawn; nothing claims the revocation happened.
+        self.assertEqual((self.billed("usr_a"), self.billed("usr_b")), (300, 40))
+        self.ack_roster.assert_called_once()
+        self.assertEqual(self.ack_metering.call_count, 1)
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertIn(self.label_b, saved["installedClients"])
+        # The next round retries the removal; once it succeeds the roster is
+        # acknowledged and nothing is billed twice.
+        self.failing_remove.clear()
+        self.run_round(1_120, {self.label_a: 350, self.label_b: 40}, "boot:1")
+        self.assertNotIn(self.label_b, self.live)
+        self.assertEqual(self.ack_roster.call_count, 2)
+        self.assertEqual((self.billed("usr_a"), self.billed("usr_b")), (350, 40))
+        self.assertEqual(sum(r["userId"] == "usr_b" for r in self.delivered), 2)
+
+    def test_an_undeliverable_queue_replay_keeps_the_new_reading_across_a_restart(self) -> None:
+        # Complete rounds: the queued report from an earlier round cannot be
+        # sent, and Xray restarts before delivery comes back.
+        self.deliver_down = True
+        self.run_round(1_000, {self.label_a: 1_000, self.label_b: 0}, "boot:1", raises=agent.Unreachable)
+        self.run_round(1_060, {self.label_a: 4_000, self.label_b: 0}, "boot:1", raises=agent.Unreachable)
+        self.run_round(1_120, {self.label_a: 500, self.label_b: 0}, "boot:2", restart=True,
+                       raises=agent.Unreachable)
+        self.deliver_down = False
+        self.run_round(1_180, {self.label_a: 600, self.label_b: 0}, "boot:2")
+        self.assertEqual(self.billed("usr_a"), 4_600)
+
+    def test_partial_rounds_with_delivery_down_and_a_restart_bill_each_byte_once(self) -> None:
+        self.failing_add.add(self.label_b)
+        self.deliver_down = True
+        self.run_round(1_000, {self.label_a: 1_000}, "boot:1", raises=agent.Unreachable)
+        self.run_round(1_060, {self.label_a: 4_000}, "boot:1", raises=agent.Unreachable)
+        self.run_round(1_120, {self.label_a: 500}, "boot:2", restart=True, raises=agent.Unreachable)
+        self.assertEqual(self.delivered, [])
+        self.ack_roster.assert_not_called()
+        self.ack_metering.assert_not_called()
+        self.deliver_down = False
+        self.run_round(1_180, {self.label_a: 600}, "boot:2", raises=agent.Refusal)
+        # The queued cumulative 1,000 goes first, then one new total: 4,000
+        # before the restart plus 600 after it. Totals are cumulative per
+        # source, so the account is billed 4,600, not 5,600.
+        self.assertEqual([r["totalBytes"] for r in self.delivered], [1_000, 4_600])
+        self.failing_add.clear()
+        self.run_round(1_240, {self.label_a: 600, self.label_b: 0}, "boot:2")
+        self.assertEqual([r["totalBytes"] for r in self.delivered], [1_000, 4_600])
         self.ack_roster.assert_called_once()
 
     def test_an_edge_block_page_keeps_the_outage_roster(self) -> None:

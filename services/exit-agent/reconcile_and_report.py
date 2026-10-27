@@ -1766,7 +1766,7 @@ def keep_usage_locally(path: Path, state: dict, installed: set[str] | None,
     save_state(path, state)
 
 
-def refuse_keeping_usage(error: Refusal, path: Path, state: dict, installed: set[str] | None,
+def refuse_keeping_usage(error: Exception, path: Path, state: dict, installed: set[str] | None,
                          counters: dict[str, int], settled_marker: str | None,
                          *, ledger_missing: bool) -> None:
     """Raise `error` after folding this round's counter reading into the totals.
@@ -2103,7 +2103,14 @@ def run_once(path: Path) -> None:
     if state["pendingReports"]:
         state["pendingReports"] = merge_reports(state["pendingReports"], [])
         save_state(path, state)
-        replayed, discarded = deliver_queue(base, token, path, state)
+        try:
+            replayed, discarded = deliver_queue(base, token, path, state)
+        except (Unreachable, Refusal) as replay_error:
+            # The queue keeps whatever was not delivered. This round's counter
+            # reading has not been folded yet; without the fold an Xray restart
+            # before delivery comes back forgives it.
+            refuse_keeping_usage(replay_error, path, state, installed, counters, settled_marker,
+                                 ledger_missing=ledger_missing)
         print(f"replayed {replayed} queued report(s), dropped {discarded}")
 
     recorded_marker = state.get("startMarker")

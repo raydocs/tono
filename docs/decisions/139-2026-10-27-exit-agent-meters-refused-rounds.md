@@ -1,6 +1,6 @@
 ## 2026-10-27 · Does an exit-agent round that refuses after reading Xray's counters keep or report them?
 
-- Status: provisional
+- Status: owner (2026-10-27, relayed by thread T-01a17c78: option A, "部分客户端配置失败时，优先保障其他客户体验，继续上报实际测得的流量，不因为配置失败本身额外收费")
 - Chosen:
   1. A refusal after the counter read (failed roster ACK, a saved roster that could not be replaced, a
      queued report or report clock outside the roster window, an unprovable inventory) folds the
@@ -20,7 +20,10 @@
   Quota keeps being enforced. No readiness signal is widened: a node whose roster did not converge is
   never acknowledged, so the control plane still sees it as not converged. A ledger file that is still
   missing is not created early, so watermark adoption is unchanged.
-- Owner choice still open: (b) instead of 2 if usage from a non-converged node should wait for
-  convergence.
+- Owner chose 2 (option A) over (b). Guarantees that go with it: neither ACK on a partial round,
+  so a refused revocation is never reported as done; the label stays in the durable inventory and
+  the removal is retried every round (60 s timer); only measured counters are reported, with no
+  charge for the failure itself; a node whose roster ACK is 15 min old is dropped from catalogs and
+  now opens a `node-roster-stale` incident (`src/ops/exit-roster-alerts.ts`).
 - Applied in: `services/exit-agent/reconcile_and_report.py` (`refuse_keeping_usage`,
   `PartialReconcile`), PR for branch `fix/exit-agent-metering-durability`.

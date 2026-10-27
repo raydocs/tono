@@ -106,6 +106,28 @@ describe('runVerdictPass path streaks', () => {
   });
 });
 
+describe('exit roster acknowledgement alerts', () => {
+  it('opens a node incident once a withheld roster ACK drops the node from catalogs, and resolves on the next ACK', async () => {
+    const e = env as unknown as Env;
+    const add = async (id: string, name: string, status: string, ack: number) => db().prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, name, await sha256(`token-${id}-with-at-least-32-characters`), status, ack, NOW - 7200, NOW - 7200).run();
+    await add('ack-stale', 'Roster · Stale', 'active', NOW - 15 * 60);
+    await add('ack-fresh', 'Roster · Fresh', 'active', NOW - 15 * 60 + 1);
+    await add('ack-never', 'Roster · Never', 'active', 0);
+    await add('ack-off', 'Roster · Off', 'disabled', NOW - 7200);
+    const open = async () => (await db().prepare(
+      `SELECT subject_id FROM ops_incidents WHERE kind = 'node-roster-stale' AND status = 'open' ORDER BY subject_id`,
+    ).all<{ subject_id: string }>()).results.map((row) => row.subject_id);
+    await runVerdictPass(e, NOW, 'all');
+    expect(await open()).toEqual(['Roster · Stale']);
+    await db().prepare("UPDATE exit_nodes SET last_roster_at = ? WHERE id IN ('ack-stale', 'ack-fresh')").bind(NOW + 60).run();
+    await runVerdictPass(e, NOW + 120, 'all');
+    expect(await open()).toEqual([]);
+  });
+});
+
 describe('api relay alerts', () => {
   it('alerts once on the third consecutive failed probe and once on recovery', async () => {
     const e = env as unknown as Env;

@@ -77,7 +77,13 @@ usage is reported as usual, so one client the Xray API refuses cannot stop
 metering or quota enforcement for the rest of the node; neither the roster ACK
 nor the metering ACK is sent and the round exits non-zero. The client inventory
 already reflects the installed clients, so the next roster can still revoke
-them. An unknown inventory is not written.
+them. An unknown inventory is not written. A refused removal is never acknowledged as a revocation:
+the label stays in the inventory and the removal is retried every round. A
+node with no roster ACK for 15 minutes leaves every customer's catalog, and the
+control plane opens a `node-roster-stale` incident for it. The same fold applies
+when queued reports from an earlier round cannot be replayed: the round's own
+reading is kept before it exits, so an outage and an Xray restart together
+cannot forgive usage.
 
 The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
 timer and an operator start overlap, the second run exits without observing or

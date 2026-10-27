@@ -10,3 +10,8 @@
 - 验证：见 PR 验证评论。
 - 候选/发布：仅源码；exit-agent 需在节点重新安装。
 - 剩余限制：索引需 owner 在 preview D1 演练；未在真实节点复现 Xray 重启场景；hy2 与 reconcile 同时失败时仍不读数。
+
+### 续记 2026-10-27（决定 139 owner 选 A 后）
+- 缺陷修复：EXIT-AGENT-REPLAY-UNREACHABLE-FOLD——排队上报重放失败时先折算本轮读数再退出（红测 4,600 → 1,600 已修）；CP-EXIT-ROSTER-STALE-NO-ALERT——新增 `node-roster-stale` 节点事件。
+- 工程与测试：新增撤销失败不 ACK 且下一轮重试、投递中断 + 重启 + 部分失败仍各字节只计一次、roster 过期告警开/关三项回归；`ops/verdict-facts.ts` 压回 500 行预算（修 #1784 的 ops-contract 失败）。
+- 剩余限制：未在真实 Xray 节点验证；撤销失败期间被撤销账号在该节点仍能连接，直到移除成功或 tono-xray 重启。

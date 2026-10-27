@@ -388,15 +388,9 @@ export async function liveDesires(
   }
 }
 
-export async function persistPathStreaks(
-  db: D1Database,
-  streaks: Record<string, number>,
-  customers: ReadonlyArray<{ userId: string; priorPathStreak: number }>,
-): Promise<void> {
-  // The fleet pass runs every five minutes over every customer, and nearly
-  // every streak is unchanged (0 stays 0). Write only the ones that moved: an
-  // unchanged row already holds the value, and one UPDATE per customer per
-  // tick grows the cron's statement count with the customer base.
+// Writes only streaks that moved; the fleet pass used to UPDATE every customer every tick.
+export async function persistPathStreaks(db: D1Database, streaks: Record<string, number>,
+  customers: ReadonlyArray<{ userId: string; priorPathStreak: number }>): Promise<void> {
   const prior = new Map(customers.map((c) => [c.userId, c.priorPathStreak]));
   const entries = Object.entries(streaks).filter(([userId, streak]) => prior.get(userId) !== streak);
   if (entries.length === 0) return;
