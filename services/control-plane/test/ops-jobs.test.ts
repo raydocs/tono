@@ -166,6 +166,21 @@ describe('ops node jobs', () => {
     );
   });
 
+  it('redacts bearer tokens, token assignments, URL userinfo and IPv6 addresses but keeps clock times', () => {
+    const raw = [
+      'GET /v1/catalog Authorization: Bearer eyJhbGciOi.payload.sig failed at 12:30:45',
+      '{"refreshToken":"rt-SECRET-1"} accessToken=at-SECRET-2 Cookie: sid=c-SECRET-3',
+      'dial vless://alice:pw-SECRET-4@exit.example:443 via [2001:db8:85a3::8a2e:370:7334]:443',
+      'home fe80::1c2d:3e4f:5a6b:7c8d%en0 full 2001:0db8:0000:0000:0000:ff00:0042:8329 at tono_core::connection',
+    ].join('\n');
+    const out = redactJobResult(raw);
+    expect(out).not.toMatch(/SECRET|eyJhbGciOi|alice|2001:|fe80:|8a2e|0042:8329/);
+    // Diagnostic shape survives: clock times, Rust paths and the failing host.
+    expect(out).toContain('12:30:45');
+    expect(out).toContain('tono_core::connection');
+    expect(out).toContain('exit.example:443');
+  });
+
   it('requeues an expired lease then fails after max attempts', async () => {
     const t = 1_800_000_400;
     const { job } = await enqueue('xray_dial_errors', t, { params: { sinceMinutes: 15 } });
