@@ -64,14 +64,20 @@ The roster cycle is ordered deliberately:
    `/api/v1/home/metering-ack`. Idle rounds send this separate readiness ACK;
    replaying an old pending queue alone does not prove readiness.
 
-A failed reconciliation is never acknowledged. A failed acknowledgement exits
-non-zero before this round changes the durable usage state, so the roster and
-any queued usage are retried on the next run. The client inventory already
-reflects the installed clients, so the next roster can still revoke them. A
-refusal after a partial reconcile, or after a later check such as a counter
-read or a queued report outside the roster clock, records that same known
-inventory and still does not acknowledge or advance usage totals. An unknown
-inventory is not written.
+A failed reconciliation is never acknowledged. A refusal after the counters were
+read (a failed roster ACK, a stale saved roster that could not be removed, a
+queued report or report clock outside the roster window, an unprovable
+inventory) folds that reading into the durable lifetime totals and reports
+nothing: the reported totals and the queue stay as they were, so the next round
+that completes reports the growth exactly once, and an Xray restart in between
+cannot forgive it. A ledger that is still missing from disk is not created by
+such a round, so the next completed round can adopt the roster's watermark.
+When only some client adds or removals fail, the counters are read anyway and
+usage is reported as usual, so one client the Xray API refuses cannot stop
+metering or quota enforcement for the rest of the node; neither the roster ACK
+nor the metering ACK is sent and the round exits non-zero. The client inventory
+already reflects the installed clients, so the next roster can still revoke
+them. An unknown inventory is not written.
 
 The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
 timer and an operator start overlap, the second run exits without observing or
@@ -137,7 +143,9 @@ the round reinstalls that saved roster if it is at most 24 hours old, keeps
 folding Xray counters into the durable totals, and exits non-zero without any
 acknowledgement. The next round that reaches the control plane reports the
 growth. An older, missing or unreadable copy restores nothing, and the round
-refuses with the reason. Any other control-plane answer, including a rejected
+refuses with the reason. A 4xx without the Worker's JSON error body (a
+Cloudflare browser-integrity or WAF page) is the edge, not the control plane,
+and counts as unreachable. Any other control-plane answer, including a rejected
 token, an invalid roster or another node's roster, deletes the copy first; the
 403 `EXIT_NODE_DISABLED` answer for a disabled node deletes it before the
 node's clients are withdrawn. The copy is saved before the roster is

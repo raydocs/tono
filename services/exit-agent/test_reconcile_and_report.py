@@ -937,14 +937,15 @@ class RosterControlSignals(unittest.TestCase):
                 agent.run_once(path)
                 self.assertEqual(live, set())
 
-    def test_an_ack_failure_does_not_persist_the_round(self) -> None:
+    def test_an_ack_failure_reports_nothing(self) -> None:
         path, _, _ = self.run_round(
             server_retire=False,
             ack_error=agent.Refusal("roster ack failed"),
         )
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
-            **fresh_state(), "installedClients": [],
+            **fresh_state(), "installedClients": [], "sourceId": "exit-node-a", "userTotals": {},
         })
+        self.acknowledge_metering.assert_not_called()
 
     def test_an_ack_failure_keeps_newly_installed_clients_in_the_durable_inventory(self) -> None:
         directory = tempfile.TemporaryDirectory()
@@ -992,8 +993,13 @@ class RosterControlSignals(unittest.TestCase):
 
         self.assertIn("u:revoked", [a for c in calls if "rmu" in c for a in c])
         self.assertEqual(sum("adu" in c for c in calls), 2)
+        # The reading after the restart (boot:100 -> boot:200) is folded into
+        # the lifetime total; the reported total and the queue stay as they
+        # were, so the next round reports the 1,200 new bytes exactly once.
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
             **initial, "installedClients": ["u:usr_a", "u:usr_b"],
+            "totals": {"u:usr_a": 2100}, "counterBaseline": {"u:usr_a": 1200},
+            "startMarker": "boot:200", "sourceId": "exit-node-a",
         })
         deliver.assert_not_called()
 
@@ -1158,6 +1164,7 @@ class RosterControlSignals(unittest.TestCase):
                 agent.run_once(path)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
                 **initial, "installedClients": ["u:aaa_ok", "u:bbb_timeout", "u:stay"],
+                "sourceId": "exit-node-a", "startMarker": "boot:1", "userTotals": {"stay": 40},
             })
             self.assertIsInstance(refused.exception, agent.Refusal)
             acknowledge.assert_not_called()
@@ -1937,8 +1944,10 @@ class MultipleExits(unittest.TestCase):
             with self.assertRaises(agent.Refusal):
                 agent.run_once(path)
 
+        # Folded but not reported: the next round inside the window reports it.
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
             **initial, "installedClients": ["u:usr_1"],
+            "totals": {"u:usr_1": 10}, "counterBaseline": {"u:usr_1": 10}, "userTotals": {},
         })
         deliver.assert_not_called()
 
@@ -1981,11 +1990,11 @@ class MultipleExits(unittest.TestCase):
                 agent.run_once(path)
 
         # Revocation is enforced first. The queued report stays, and the known
-        # empty inventory is recorded without advancing usage totals.
+        # empty inventory is recorded without reporting anything new.
         reconcile.assert_called_once()
         deliver.assert_not_called()
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
-            **initial, "installedClients": [],
+            **initial, "installedClients": [], "userTotals": {},
         })
 
     def test_a_queued_report_is_superseded_only_within_its_own_source(self) -> None:
@@ -2494,6 +2503,149 @@ class ControlPlaneOutage(unittest.TestCase):
             self.assertFalse(cache.exists())
             run(1_090_180, down, set(), 300, "boot:2", raises=agent.Refusal)
             self.assertEqual(added, [label, label, label])
+
+
+class MeteringAcrossFailedRounds(unittest.TestCase):
+    """A round that reads Xray's counters and then refuses must not lose them.
+
+    Each scenario fails one round after the counter read, then Xray restarts
+    (resetting every counter) before a round succeeds. The bytes counted in the
+    failed round must still be billed exactly once.
+    """
+
+    def setUp(self) -> None:
+        import io
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / "state.json"
+        self.path.write_text(
+            json.dumps({**fresh_state(), "sourceId": "node-under-test"}), encoding="utf-8",
+        )
+        self.cache = agent.roster_cache_path(self.path)
+        self.uuid_a = "11111111-1111-4111-8111-111111111111"
+        self.uuid_b = "22222222-2222-4222-8222-222222222222"
+        self.label_a = agent.client_label("usr_a", "dev_a", self.uuid_a)
+        self.label_b = agent.client_label("usr_b", "dev_b", self.uuid_b)
+        self.roster = [
+            {"userId": "usr_a", "clientUUID": self.uuid_a, "deviceId": "dev_a"},
+            {"userId": "usr_b", "clientUUID": self.uuid_b, "deviceId": "dev_b"},
+        ]
+        self.live: set[str] = set()
+        self.failing_add: set[str] = set()
+        self.delivered: list[dict] = []
+        self.io = io
+
+        def fake_add(_binary, _command, _address, _tag, label, _uuid):
+            if label in self.failing_add:
+                return agent.subprocess.CompletedProcess([], 0, "Failed to add user", "")
+            self.live.add(label)
+            return agent.subprocess.CompletedProcess([], 0, "Added 1 user(s) in total.", "")
+
+        def fake_deliver(_base, _token, queue_path, state):
+            count = len(state["pendingReports"])
+            self.delivered.extend(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(queue_path, state)
+            return count, 0
+
+        patches = [
+            patch.dict(agent.os.environ, {
+                "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "node-under-test",
+            }, clear=True),
+            patch.object(agent, "api_base", return_value="https://control.example"),
+            patch.object(agent, "xray_binary", return_value=Path("/unused/xray")),
+            patch.object(agent, "require_commands", return_value={
+                "add_user": "adu", "remove_user": "rmu",
+                "stats_query": "statsquery", "list_users": "inbounduser",
+            }),
+            patch.object(agent, "add_inbound_user", side_effect=fake_add),
+            patch.object(agent, "installed_clients", side_effect=lambda *_: set(self.live)),
+            patch.object(agent, "deliver_queue", side_effect=fake_deliver),
+            patch.object(agent, "sync_hy2_roster", return_value=False),
+        ]
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.real_fetch = agent.fetch_roster
+        self.fetch = self.start(patch.object(agent, "fetch_roster"))
+        self.counters = self.start(patch.object(agent, "read_counters"))
+        self.marker = self.start(patch.object(agent, "xray_start_marker"))
+        self.ack_roster = self.start(patch.object(agent, "acknowledge_roster"))
+        self.ack_metering = self.start(patch.object(agent, "acknowledge_metering"))
+
+    def start(self, patcher):
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def run_round(self, at, reading, boot, *, raises=None, restart=False):
+        if restart:
+            self.live.clear()
+        self.fetch.side_effect = [("node-under-test", at, self.roster, False, None)]
+        self.counters.return_value = reading
+        self.marker.return_value = boot
+        if raises is None:
+            agent.run_once(self.path)
+        else:
+            with self.assertRaises(raises):
+                agent.run_once(self.path)
+
+    def billed(self, user_id: str) -> int:
+        return max(r["totalBytes"] for r in self.delivered if r["userId"] == user_id)
+
+    def test_a_failed_roster_ack_keeps_its_growth_across_an_xray_restart(self) -> None:
+        self.run_round(1_000, {self.label_a: 1_000}, "boot:1")
+        self.assertEqual(self.billed("usr_a"), 1_000)
+        self.ack_roster.side_effect = agent.Refusal("roster ack failed: 503")
+        self.run_round(1_060, {self.label_a: 5_000}, "boot:1", raises=agent.Refusal)
+        self.ack_roster.side_effect = None
+        self.run_round(1_120, {self.label_a: 200}, "boot:2", restart=True)
+        self.assertEqual(self.billed("usr_a"), 5_200)
+
+    def test_one_failing_client_does_not_stop_metering_the_rest_of_the_node(self) -> None:
+        self.failing_add.add(self.label_b)
+        self.run_round(1_000, {self.label_a: 1_000}, "boot:1", raises=agent.Refusal)
+        # Usage still reaches the control plane, so quota enforcement keeps
+        # working; the incomplete roster is never acknowledged.
+        self.assertEqual(self.billed("usr_a"), 1_000)
+        self.ack_roster.assert_not_called()
+        self.ack_metering.assert_not_called()
+        self.run_round(1_060, {self.label_a: 5_000}, "boot:1", raises=agent.Refusal)
+        self.run_round(1_120, {self.label_a: 200}, "boot:2", restart=True, raises=agent.Refusal)
+        self.assertEqual(self.billed("usr_a"), 5_200)
+        self.failing_add.clear()
+        self.run_round(1_180, {self.label_a: 300, self.label_b: 7}, "boot:2")
+        self.assertEqual((self.billed("usr_a"), self.billed("usr_b")), (5_300, 7))
+        self.ack_roster.assert_called_once()
+
+    def test_an_edge_block_page_keeps_the_outage_roster(self) -> None:
+        self.run_round(1_000, {self.label_a: 1_000}, "boot:1")
+        self.assertTrue(self.cache.exists())
+
+        def answering(status, body):
+            class Opener:
+                def open(self_, request, timeout=None):  # noqa: ARG002, N805
+                    raise urllib.error.HTTPError(
+                        request.full_url, status, "Forbidden", {}, self.io.BytesIO(body),
+                    )
+            return Opener()
+
+        self.fetch.side_effect = self.real_fetch
+        self.counters.return_value = {self.label_a: 1_100}
+        # Cloudflare's browser-integrity block is the edge, not the control
+        # plane: the saved roster stays and Xray keeps serving it.
+        with patch.object(agent.urllib.request, "build_opener",
+                          return_value=answering(403, b"error code: 1010")):
+            with self.assertRaises(agent.Unreachable):
+                agent.run_once(self.path)
+        self.assertTrue(self.cache.exists())
+        # The Worker's own JSON rejection still discards the copy.
+        unauthorized = json.dumps({"error": {"code": "UNAUTHORIZED", "message": "x"}}).encode()
+        with patch.object(agent.urllib.request, "build_opener",
+                          return_value=answering(401, unauthorized)):
+            with self.assertRaises(urllib.error.HTTPError):
+                agent.run_once(self.path)
+        self.assertFalse(self.cache.exists())
 
 
 class Delivery(unittest.TestCase):
