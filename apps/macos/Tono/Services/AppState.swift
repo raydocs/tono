@@ -1916,6 +1916,19 @@ final class AppState {
                 lastSuccessfulProbeOrigin = label
             }
             let tun = race.tunCheck
+            // The TUN race has failed, so there is no tunnel to protect from the
+            // advisory /delay handshake: run it beside the eight-second mixed
+            // diagnostic instead of after it. Only the production shape
+            // (advisoryProbe alone) starts here; controller/controllerTask keep
+            // their own timing. A proved tunnel keeps the deferred start below.
+            let earlyAdvisoryTask: Task<ProbeCheck, Never>?
+            if includeMixed, case .failed = tun, controller == nil,
+               controllerTask == nil, let advisoryProbe {
+                earlyAdvisoryTask = advisoryProbe()
+            } else {
+                earlyAdvisoryTask = nil
+            }
+            defer { earlyAdvisoryTask?.cancel() }
             let mixed: ProbeCheck?
             if let mixedTask, case .failed = tun {
                 let diagnostic = await withTaskCancellationHandler {
@@ -1923,6 +1936,7 @@ final class AppState {
                 } onCancel: {
                     mixedTask.cancel()
                     controllerTask?.cancel()
+                    earlyAdvisoryTask?.cancel()
                 }
                 if let result = interrupted(round) { return result }
                 switch diagnostic {
@@ -1966,8 +1980,7 @@ final class AppState {
                         controllerTask.cancel()
                     }
                     if let result = interrupted(round) { return result }
-                } else if let advisoryProbe {
-                    let task = advisoryProbe()
+                } else if let task = earlyAdvisoryTask {
                     controllerResult = await withTaskCancellationHandler {
                         await task.value
                     } onCancel: {

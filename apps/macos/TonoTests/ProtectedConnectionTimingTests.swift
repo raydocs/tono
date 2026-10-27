@@ -120,6 +120,69 @@ final class ProtectedConnectionTimingTests: XCTestCase {
         print("G1 controlled failed final TUN: \(releasedAt.duration(to: .now)) after TUN release; diagnostic already complete (overlap, not serial sum)")
     }
 
+    func testFailedFinalTUNStartsAdvisoryProbeBesideHeldDiagnostic() async {
+        let app = AppState()
+        let mixed = HeldConnectionProbe()
+        let mixedStarted = expectation(description: "final diagnostic started")
+        let advisoryStarted = expectation(description: "advisory started while diagnostic is held")
+        let returned = expectation(description: "failed verdict available")
+        var advisoryCalls = 0
+        var verdict: ConnectivityVerdict?
+        let work = Task {
+            verdict = await app.verifyProtectedConnection(
+                advisoryProbe: {
+                    advisoryCalls += 1
+                    advisoryStarted.fulfill()
+                    return Task { .failed("advisory delay unavailable") }
+                },
+                mixedPort: 12345, generation: 0, rounds: 1,
+                raceProbes: { _, proxyPort, _ in
+                    if proxyPort != nil {
+                        mixedStarted.fulfill()
+                        await mixed.wait()
+                        return .won("Cloudflare")
+                    }
+                    return .lost([])
+                }
+            )
+            returned.fulfill()
+        }
+        // The diagnostic is still held here: the advisory must not wait for it.
+        await fulfillment(of: [mixedStarted, advisoryStarted], timeout: 2)
+        XCTAssertNil(verdict)
+        XCTAssertEqual(advisoryCalls, 1)
+        mixed.open()
+        await fulfillment(of: [returned], timeout: 2)
+        await work.value
+        guard case .failed(let failure) = verdict else { return XCTFail("TUN failure must fail closed") }
+        if PhysicalNetworkReachability.shared.isPhysicallyOffline {
+            XCTAssertEqual(failure.code, .networkEnvironmentOffline)
+        } else {
+            XCTAssertEqual(failure.code, .tunRouteUnavailable)
+            XCTAssertTrue(failure.detail.contains("advisory delay unavailable"))
+        }
+        XCTAssertEqual(advisoryCalls, 1)
+    }
+
+    func testWinningTUNDoesNotStartAdvisoryProbeSynchronously() async {
+        let app = AppState()
+        var advisoryCalls = 0
+        let verdict = await app.verifyProtectedConnection(
+            advisoryProbe: {
+                advisoryCalls += 1
+                return Task { .ok }
+            },
+            mixedPort: 12345, generation: 0, rounds: 1,
+            raceProbes: { _, proxyPort, _ in
+                proxyPort == nil ? .won("Apple") : .lost([])
+            }
+        )
+        XCTAssertEqual(verdict, .connected(controllerAdvisory: nil))
+        // Only scheduled after advisoryDelayDeferralMilliseconds, never at
+        // TUN success, so the first page does not share the tunnel with it.
+        XCTAssertEqual(advisoryCalls, 0)
+    }
+
     func testRetiredTUNCompletionCannotOverwriteNewOriginOrPublishTelemetry() async {
         let app = AppState()
         app.connectionCoordinator.protectionOperationGeneration = 301

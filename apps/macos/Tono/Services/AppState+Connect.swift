@@ -2934,18 +2934,12 @@ extension AppState {
                     preferred: preferred, remembered: self.unarmedDialName,
                     candidates: self.exitHealCandidates()
                 )
-                var provenName: String?
-                for name in candidates {
-                    guard !Task.isCancelled,
-                          self.connectionCoordinator.protectionOperationGeneration == generation else { return }
-                    if await TcpEndpointProof.prove(
-                        name: name,
-                        nodes: self.proxyRegions.flatMap(\.nodes),
-                        override: self.unarmedTcpProof
-                    ) {
-                        provenName = name
-                        break
-                    }
+                guard !Task.isCancelled,
+                      self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+                let nodes = self.proxyRegions.flatMap(\.nodes)
+                let override = self.unarmedTcpProof
+                let provenName = await UnarmedReconnect.firstProvenName(among: candidates) { name in
+                    await TcpEndpointProof.prove(name: name, nodes: nodes, override: override)
                 }
                 // Socket completion is a continuation and can arrive after
                 // cancellation or a newer lifecycle owner has taken over.
