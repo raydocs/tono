@@ -4,12 +4,15 @@
 // A failure the exit can be blamed for: the client never got a usable path to
 // it. Older clients report that as a handshake/dial/tls stage; today's Windows
 // client as TONO_NODE_OR_CORE_UNREACHABLE (controller, TUN and loopback all
-// failed after the barrier locked) or, before any tunnel exists, as the plain
-// text below. Everything else in connectFail is the client's own plumbing.
+// failed after the barrier locked), TONO_EXIT_UNREACHABLE (the exit never
+// answered the dial before any tunnel existed) or the plain text below; the
+// macOS client as CORE_EXIT_UNREACHABLE (controller and TUN probes both failed
+// after the lock; its stage is the UI stage label, never a wire stage).
+// Everything else in connectFail is the client's own plumbing.
 export const EXIT_SIDE_SQL = `(
   stage IN ('handshake', 'dial', 'tls')
   OR lower(COALESCE(stage, '')) LIKE '%handshake%'
-  OR code IN ('TONO_NODE_OR_CORE_UNREACHABLE', 'TONO_EXIT_UNREACHABLE')
+  OR code IN ('TONO_NODE_OR_CORE_UNREACHABLE', 'TONO_EXIT_UNREACHABLE', 'CORE_EXIT_UNREACHABLE')
   OR COALESCE(error, '') LIKE 'tcp connect to the selected exit%'
 )`;
 
