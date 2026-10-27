@@ -153,6 +153,7 @@ mod app_init {
             tono::commands::account::tono_sign_in_dismiss,
             tono::commands::account::tono_sign_out,
             tono::commands::account::tono_account,
+            tono::commands::account::tono_public_signup,
             tono::commands::account::tono_devices,
             tono::commands::account::tono_revoke_device,
             tono::commands::catalog::tono_servers,

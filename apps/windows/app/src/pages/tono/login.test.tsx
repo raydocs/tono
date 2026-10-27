@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   dismiss: vi.fn(),
   mutate: vi.fn(),
   account: vi.fn(),
+  publicSignup: vi.fn(),
   status: {} as Record<string, unknown>,
 }))
 
@@ -39,6 +40,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoSignInVerify: mocks.verify,
   tonoSignInDismiss: mocks.dismiss,
   tonoAccount: mocks.account,
+  tonoPublicSignup: mocks.publicSignup,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
   tonoRestoreInternet: mocks.disconnect,
@@ -68,6 +70,7 @@ beforeEach(() => {
   mocks.dismiss.mockReset().mockResolvedValue(undefined)
   mocks.mutate.mockReset().mockResolvedValue(undefined)
   mocks.account.mockReset().mockResolvedValue(null)
+  mocks.publicSignup.mockReset().mockResolvedValue(false)
   mocks.status = {}
 })
 
@@ -511,5 +514,20 @@ describe('login plan answers', () => {
     expect(
       screen.getByRole('button', { name: enTono.login.planExpired.signIn }),
     ).toBeDefined()
+  })
+})
+
+describe('login sign-up policy', () => {
+  it('drops the invite-only wording when the server says sign-up is open', async () => {
+    mocks.publicSignup.mockResolvedValue(true)
+    const sendAgain = await enterCodeStep()
+    expect(sendAgain).toBeDefined()
+    expect(screen.getByRole('status').textContent).toBe(
+      enTono.login.openSignup.codeSent,
+    )
+    expect(screen.getByText(enTono.login.openSignup.noEmail)).toBeDefined()
+    expect(screen.queryByText(/invite-only|has a Tono account/)).toBeNull()
+    // One global read; the typed address never reaches it.
+    expect(mocks.publicSignup).toHaveBeenCalledWith()
   })
 })

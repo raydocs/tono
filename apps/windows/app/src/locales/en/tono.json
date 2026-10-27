@@ -255,6 +255,12 @@
       "title": "No email yet?",
       "description": "Check spam first. Still nothing? This email may not have a Tono account yet: Tono is invite-only, so check the address or ask whoever set up Tono for you."
     },
+    "openSignup": {
+      "inboxInstructions": "A code arrives at this email within a minute; a first-time email gets a new Tono account. Type or paste the 6 digits; Tono checks them automatically.",
+      "codeSent": "A code is on its way.",
+      "codeSentTo": "Look in this inbox (and spam) for the code.",
+      "noEmail": "Check spam and the address above. Still nothing? Send again in a little while."
+    },
     "suspended": {
       "title": "Account paused",
       "description": "This account cannot connect right now. Sign in again to check its status."
@@ -277,7 +283,7 @@
       "signInError": "This account has used all of its data for this period, so it can’t sign in right now. Contact whoever set up Tono for you, then sign in again with the same email."
     },
     "noPlan": {
-      "signInError": "Your account is set up but has no plan yet, so it can’t sign in to connect right now. Ask whoever set up Tono for you, or Tono support, to add a plan, then sign in again with the same email."
+      "signInError": "Your account is set up but has no plan yet, so it can’t sign in to connect right now. Ask Tono support, or whoever set up Tono for you, to add a plan, then sign in again with the same email."
     },
     "restoreFailed": {
       "title": "Couldn't restore your sign-in",

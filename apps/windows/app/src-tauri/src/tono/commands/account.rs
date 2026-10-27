@@ -1685,6 +1685,15 @@ mod lifecycle_tests {
     }
 }
 
+/// `auth/methods`' `email.publicSignup`: picks the sign-in copy. Read-only and global (it says
+/// nothing about any address), so anti-enumeration is unchanged; any failure reads as false,
+/// the invite-only copy.
+#[tauri::command]
+pub async fn tono_public_signup(state: tauri::State<'_, Arc<TonoState>>) -> Result<bool, String> {
+    let client = { state.lock().await.client.clone() };
+    Ok(client.auth_methods().await.map(|methods| methods.email.public_signup).unwrap_or(false))
+}
+
 /// The current account, if signed in.
 #[tauri::command]
 pub async fn tono_account(state: tauri::State<'_, Arc<TonoState>>) -> Result<Option<TonoAccountInfo>, String> {

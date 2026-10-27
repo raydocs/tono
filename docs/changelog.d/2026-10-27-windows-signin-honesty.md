@@ -11,3 +11,5 @@
 - 验证（Linux orb，Node 22）：`vitest run src/pages/tono src/pages/_layout src/tono-ui` 共 38 个文件、316 个用例通过；`tsc --noEmit` 和改动文件的 eslint、biome 都通过。Rust 未在本地编译（orb 里没有 cargo），交给 hosted CI 的 windows/core 和 app-rust。截图来自 Windows 预览壳（模拟数据），不是真机。
 - 候选/发布：只改源码，没有出新候选包。
 - 剩余限制：macOS、iOS 的登录文案和到期处理没有改；没有在 Windows 真机上看过；没有真实的到期账号联调。UI PR，不开 auto-merge。
+- 续记（2026-10-27，同一 PR）：接入开放注册开关。`tono-core` 的 `AuthMethod` 读取 `email.publicSignup`（缺省视为 false），新增只读命令 `tono_public_signup`。登录页挂载时读取一次，读取失败按 false 处理。开关打开时，验证码步骤改为「验证码会在一分钟内发到这个邮箱；第一次使用的邮箱会自动创建 Tono 账号」，一分钟后的提示不再提「只对受邀用户开放」；开关关闭时保持邀请制的条件式文案。这是全局开关，与输入的邮箱无关，防枚举不变（202、发信时序与 #1779 一致）。无套餐账号的提示改为「请联系 Tono 支持或为你开通 Tono 的人开通套餐」。没有开启生产开关。
+  验证：`login.test.tsx` 新增 1 个 `it`（开关打开时的文案；在上一版 login.tsx 上为红：仍显示 "If this email has a Tono account…"），开关关闭时的文案由原有用例覆盖；`tono-core` 新增 `auth_methods_reads_public_signup`，原有 auth_methods 用例补上「字段缺省 = false」的断言；Windows 前端完整 `vitest run` 共 61 个文件、440 个用例通过；tsc、eslint 通过；预览壳 `?publicSignup` 下截图核对了开关开、关两种状态。Rust 仍交给 CI 编译。客户端可以独立于 #1779 合入：服务端没有这个字段时按 false 处理。

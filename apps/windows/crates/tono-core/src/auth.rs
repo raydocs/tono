@@ -381,6 +381,10 @@ pub struct AuthMethod {
     pub enabled: bool,
     #[serde(rename = "clientId", default)]
     pub client_id: Option<String>,
+    /// `email.publicSignup` (decision 138): whether any address may create an account. A
+    /// global setting, never an answer about one address; absent on older servers = false.
+    #[serde(rename = "publicSignup", default)]
+    pub public_signup: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2347,6 +2351,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_methods_reads_public_signup() {
+        let (client, _mock, _store) = test_client(|_| {
+            json(
+                200,
+                r#"{"email":{"enabled":true,"publicSignup":true},"apple":{"enabled":true},"google":{"enabled":false}}"#,
+            )
+        });
+        assert!(client.auth_methods().await.unwrap().email.public_signup);
+    }
+
+    #[tokio::test]
     async fn verify_names_a_lapsed_plan_instead_of_a_generic_refusal() {
         let (client, _mock, _store) = test_client(|_| {
             json(
@@ -2591,6 +2606,7 @@ mod tests {
             ));
             let methods = client.auth_methods().await.unwrap();
             assert!(methods.email.enabled, "{kind:?}");
+            assert!(!methods.email.public_signup, "{kind:?}: absent means invite-only");
             assert_eq!(
                 mock.count_to("auth/methods"),
                 2,

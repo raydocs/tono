@@ -15,6 +15,7 @@ import {
   formatTonoActionError,
   stableTonoErrorCode,
   tonoAccount,
+  tonoPublicSignup,
   tonoRestoreInternet,
   tonoRetryRestore,
   tonoSignInDismiss,
@@ -244,6 +245,20 @@ const LoginPage = () => {
   const authBusy = sending || verifying || changingEmail || automaticRecovery
   const supportAvailable = recovery?.phase === 'userAction' && !authBusy
   const visibleError = automaticRecovery ? null : error
+  // Global sign-up policy, read once; never about the typed address (anti-enumeration).
+  // Unknown or unreadable keeps the invite-only wording, which stays true either way.
+  const [publicSignup, setPublicSignup] = useState(false)
+  useEffect(() => {
+    let live = true
+    tonoPublicSignup()
+      .then((open) => live && setPublicSignup(open === true))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+  const signupCopy = (key: 'inboxInstructions' | 'codeSent' | 'codeSentTo') =>
+    t(publicSignup ? `tono.login.openSignup.${key}` : `tono.login.${key}`)
   const [signInPlanLapse, setSignInPlanLapse] = useState<PlanLapse | null>(null)
   // A lapsed plan is an answer about the account, not a failure to diagnose.
   const hasDiagnosticFailure =
@@ -799,7 +814,7 @@ const LoginPage = () => {
               color: text.secondary,
             }}
           >
-            {t(codeSent ? 'tono.login.inboxInstructions' : 'tono.login.intro')}
+            {codeSent ? signupCopy('inboxInstructions') : t('tono.login.intro')}
           </p>
         </div>
 
@@ -829,7 +844,7 @@ const LoginPage = () => {
                 : verifying
                   ? t('tono.login.verifying')
                   : codeSent
-                    ? t('tono.login.codeSent')
+                    ? signupCopy('codeSent')
                     : ''}
         </p>
 
@@ -1125,7 +1140,7 @@ const LoginPage = () => {
                 color: text.secondary,
               }}
             >
-              {t('tono.login.codeSentTo')}
+              {signupCopy('codeSentTo')}
             </p>
             <p
               style={{
@@ -1156,7 +1171,9 @@ const LoginPage = () => {
             <span
               style={{ fontSize: 12, lineHeight: 1.45, color: text.secondary }}
             >
-              {t('tono.login.noEmail.description')}
+              {publicSignup
+                ? t('tono.login.openSignup.noEmail')
+                : t('tono.login.noEmail.description')}
             </span>
             {/* The sender only matters once the mail has not shown up. */}
             {newAppearance && (

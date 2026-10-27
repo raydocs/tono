@@ -15,7 +15,13 @@ const mocks = vi.hoisted(() => ({
   status: {} as Record<string, unknown>,
 }))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
+// The sign-up policy read is its own IPC; keep it out of the queued sign-in answers.
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (command: string, args?: unknown) =>
+    command === 'tono_public_signup'
+      ? Promise.resolve(false)
+      : mocks.invoke(command, args),
+}))
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
 vi.mock('@/hooks/use-tono', () => ({
   useTonoStatus: () => ({

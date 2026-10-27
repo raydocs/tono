@@ -1321,6 +1321,12 @@ export interface TranslationResources {
         noPlan: {
           signInError: string
         }
+        openSignup: {
+          codeSent: string
+          codeSentTo: string
+          inboxInstructions: string
+          noEmail: string
+        }
         paths: {
           elapsed: string
           kind: {
