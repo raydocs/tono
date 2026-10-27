@@ -409,15 +409,20 @@ extension AccountSession {
         }
         pendingIdentityLink = nil
         identityLinkResult = nil
+        appleSignInCancelled = false
         await authenticate {
             let challenge = try await self.api.oidcChallenge(TonoOIDCChallengeRequest(
                 provider: "apple",
                 deviceName: TonoAccountRules.normalizedDeviceName(deviceName),
                 installationId: try self.keychain.installationId()
             ))
-            let token = try await AppleSignInCoordinator().identityToken(
-                nonce: challenge.nonce
-            )
+            let token: String
+            do {
+                token = try await AppleSignInCoordinator().identityToken(nonce: challenge.nonce)
+            } catch TonoIdentityProviderError.cancelled {
+                self.appleSignInCancelled = true
+                throw TonoIdentityProviderError.cancelled
+            }
             do {
                 return try await self.api.verifyOIDC(TonoOIDCVerifyRequest(
                     provider: "apple",
@@ -429,6 +434,10 @@ extension AccountSession {
                 throw TonoAPIClient.APIError.providerMailboxUnverified(linkTicket: nil)
             }
         }
+        // Closing Apple's sheet is the user's choice, not a failure: back to
+        // the sign-in screen without an error line.
+        if appleSignInCancelled, user == nil, case .error = state { state = .signedOut }
+        appleSignInCancelled = false
     }
 
     #if DEBUG
