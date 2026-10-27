@@ -1,0 +1,12 @@
+## 2026-10-27 · Windows 唤醒打断节点切换与新控制器的回归测试
+- 归属：G1（已连接=能用；切换、唤醒、重连后界面与实际出口一致，Activity 不卡在旧控制器）；Windows `connection/switch.rs` 与前端 `use-connection-data`。
+- 来源：基线 origin/main `df0c032`；分支 `test/windows-switch-wake-recovery`。
+- 缺陷修复：无。核对结论：macOS X1-5（睡眠打断切换后唤醒连回旧出口）在 Windows 不成立。选择命令先发布目标 B，切换 worker 排队等生命周期写锁；唤醒恢复先拿到写锁时，其重连在准入时换代，并拨 B，迟到的 worker 看到代际已变直接退出，不把选择回滚为 A。
+- 新增/优化：`switch_selected_node` 开头的三分支判断提取为纯函数 `pending_switch`（同顺序、同锁内，无行为变化），以便测试。
+- 工程与测试：
+  - `switch.rs` `wake_recovery_during_a_pending_switch_keeps_the_switch_target`：唤醒停隧道 → 保留 B 给下次连接；重连准入后旧 worker 为 `Retired`，不回滚；准入后才发布的切换仍按原逻辑回滚。
+  - `use-connection-data.test.tsx`：重连换出新控制器（`controllerGeneration` 变化）时 Activity 关闭旧 socket、打开新 socket，旧 socket 的帧不再生效。0.0.72 实机「Connected 后仪表盘/Activity 卡在重试」的根因是插件 IPC 命名空间不一致，已由 `tests/core-plugin-namespace.test.ts` 覆盖；本条覆盖同一症状的另一条路径（旧控制器）。
+  - 新发现 `WIN-WAKE-SWITCH-DEFERRED-REBUILD`（低·推导，open，未修）。
+- 验证：见 PR 验证评论（Windows CI 红/绿运行号与 vitest 结果）。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：未在 Windows 实机做睡眠/唤醒与切换；`pending_switch` 测试驱动的是状态与准入，不是真实电源事件与 Service。
