@@ -2,7 +2,7 @@
 // verified email code or OIDC claim lands on, and when a claim may only create
 // an account rather than select an existing one.
 import { ApiError } from './errors';
-import { type Env, type Row, id, now } from './env';
+import { type Env, type Row, id, now, publicSignupEnabled } from './env';
 import { googleAuthoritativeForEmail, type OidcIdentity } from './oidc';
 import { insertUserCarryingAllowlistProfile } from './signup-profile';
 
@@ -15,6 +15,12 @@ export function ineligible(u: Row, t = now()) {
 // Authentication and service entitlement are separate authorities.
 export function requireAccountEntitlement(u: Row, t = now()) {
   if (u.status !== 'active') throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
+  // An account that expired at its own creation never held a plan: an open
+  // registration nobody has granted service to yet (decision 138). Callers
+  // that select no created_at fall through to ACCOUNT_EXPIRED; both refuse.
+  if (u.expires_at !== null && u.created_at != null && u.expires_at <= u.created_at) {
+    throw new ApiError(403, 'ENTITLEMENT_REQUIRED', 'Your Tono account is ready but has no active plan yet');
+  }
   if (u.expires_at !== null && u.expires_at <= t) {
     throw new ApiError(403, 'ACCOUNT_EXPIRED', 'Your plan has expired; renew or contact your family');
   }
@@ -181,7 +187,8 @@ export async function accountForVerifiedEmail(
     return user;
   }
 
-  if (!(await directSignupAllowed(e, emailAddr))) {
+  const invited = await directSignupAllowed(e, emailAddr);
+  if (!invited && !publicSignupEnabled(e)) {
     throw new ApiError(401, 'AUTHENTICATION_FAILED', 'Authentication could not be completed');
   }
   const t = now();
@@ -191,7 +198,7 @@ export async function accountForVerifiedEmail(
     // The verified email or OIDC claim is the account-creation authority.
     // INSERT OR IGNORE makes concurrent first sign-ins converge on the same
     // unique email without requiring an invitation/redemption transaction.
-    await insertUserCarryingAllowlistProfile(e, userId, emailAddr, t);
+    await insertUserCarryingAllowlistProfile(e, userId, emailAddr, t, !invited);
   } catch (error) {
     // Resolve a concurrent first sign-in below. D1 uniqueness constraints
     // ensure that only the account for this verified email can be selected.

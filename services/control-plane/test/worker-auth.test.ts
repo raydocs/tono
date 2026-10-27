@@ -209,6 +209,75 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  it('opens registration without a plan: a verified stranger gets an account but no service (decision 138)', async () => {
+    const stranger = `open-signup-${nextSequence()}@public.test`;
+    const signIn = (address: string, installationId: string) => emailSignIn({
+      email: address, deviceName: 'Open Mac', installationId,
+    });
+    // Off by default: no code for an address that is neither invited nor known.
+    const closed = await startEmailSignIn({
+      email: stranger, deviceName: 'Open Mac', installationId: 'open-signup-closed',
+    });
+    expect(closed.response.status).toBe(202);
+    expect(closed.code).toBeUndefined();
+
+    (env as unknown as Env).PUBLIC_SIGNUP = 'true';
+    try {
+      expect((await (await api('auth/methods')).json() as any).email.publicSignup).toBe(true);
+
+      for (const attempt of ['first', 'again']) {
+        const refused = await signIn(stranger, `open-signup-${attempt}`);
+        expect(refused.status).toBe(403);
+        expect((await refused.json() as any).error.code).toBe('ENTITLEMENT_REQUIRED');
+      }
+      const user = await env.DB.prepare(
+        'SELECT id, created_at, expires_at, plan, quota_bytes FROM users WHERE email = ?',
+      ).bind(stranger).first<any>();
+      expect(user.expires_at).toBe(user.created_at);
+      expect(user.plan).toBeNull();
+      expect(await env.DB.prepare(
+        'SELECT (SELECT COUNT(*) FROM devices WHERE user_id = ?) + (SELECT COUNT(*) FROM sessions WHERE user_id = ?) AS n',
+      ).bind(user.id, user.id).first<any>()).toEqual({ n: 0 });
+
+      // An invitation keeps its onboard profile under open registration.
+      const invited = `open-signup-invited-${nextSequence()}@public.test`;
+      await env.DB.prepare(
+        "INSERT INTO signup_allowlist(email, created_at, plan) VALUES(?, ?, 'family')",
+      ).bind(invited, Math.floor(Date.now() / 1000)).run();
+      expect((await signIn(invited, 'open-signup-invited')).status).toBe(200);
+
+      // Once an operator grants a plan, the same stranger signs in.
+      await env.DB.prepare('UPDATE users SET expires_at = ? WHERE id = ?')
+        .bind(Math.floor(Date.now() / 1000) + 86_400, user.id).run();
+      expect((await signIn(stranger, 'open-signup-granted')).status).toBe(200);
+    } finally {
+      (env as unknown as Env).PUBLIC_SIGNUP = undefined;
+    }
+  });
+
+  it('caps daily codes to unknown addresses under open registration without revealing the cap', async () => {
+    (env as unknown as Env).PUBLIC_SIGNUP = 'true';
+    (env as unknown as Env).PUBLIC_SIGNUP_CODES_PER_DAY = '1';
+    try {
+      const start = (prefix: string) => startEmailSignIn({
+        email: `${prefix}-${nextSequence()}@public.test`, deviceName: 'Cap Mac', installationId: `${prefix}-cap`,
+      });
+      const first = await start('cap-first');
+      const second = await start('cap-second');
+      expect(first.code).toMatch(/^\d{6}$/);
+      expect(second.response.status).toBe(202);
+      expect(second.code).toBeUndefined();
+      // Existing accounts are outside the budget.
+      const known = await createAccount('cap-known');
+      expect((await startEmailSignIn({
+        email: known.email, deviceName: 'Cap Mac', installationId: 'cap-known-again',
+      })).code).toMatch(/^\d{6}$/);
+    } finally {
+      (env as unknown as Env).PUBLIC_SIGNUP = undefined;
+      (env as unknown as Env).PUBLIC_SIGNUP_CODES_PER_DAY = undefined;
+    }
+  });
+
   it('links a verified Apple identity to the matching existing account', async () => {
     const account = await createAccount('apple-link');
     const challengeResponse = await api('auth/oidc/challenge', json({

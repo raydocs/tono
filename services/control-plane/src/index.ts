@@ -35,7 +35,7 @@ import {
   id,
   str,
   envInt,
-  tailscaleEnrollmentEnabled,
+  tailscaleEnrollmentEnabled, publicSignupEnabled,
 } from './env';
 import {
   auth,
@@ -115,7 +115,7 @@ import {
   numericCode,
   challengeSecret,
   deliverEmailCode,
-  completePasswordlessAuth,
+  completePasswordlessAuth, publicSignupCodeAllowed,
 } from './login';
 
 export { parseBytesRange } from './http';
@@ -169,7 +169,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const appleAudience = providerAudience(e, 'apple');
     const googleAudience = providerAudience(e, 'google');
     return Response.json({
-      email: { enabled: emailDeliveryConfigured(e) },
+      email: { enabled: emailDeliveryConfigured(e), publicSignup: publicSignupEnabled(e) },
       apple: { enabled: appleAudience !== undefined },
       google: {
         enabled: googleAudience !== undefined,
@@ -195,7 +195,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     // response shape as every other request.
     const eligible = existing
       ? existing.status === 'active'
-      : await directSignupAllowed(e, submittedEmail);
+      : await directSignupAllowed(e, submittedEmail) || await publicSignupCodeAllowed(e);
 
     const challenge = id();
     const code = numericCode();
