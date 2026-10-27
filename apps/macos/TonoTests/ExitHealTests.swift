@@ -66,6 +66,17 @@ final class ExitHealTests: XCTestCase {
         XCTAssertEqual(session.residentialId, "socks5:198.51.100.8:1080")
     }
 
+    /// A hand-picked ` · hy2` row on a network that drops UDP fails with a timeout, not a
+    /// QUIC error. The next dial is the same node's Reality block, as on Windows.
+    func testATimedOutHy2DialGoesToTheSameNodesRealityBlock() {
+        var session = ExitHeal.Session.forPreferred("Buffalo · Niagara · hy2", residentialId: "none")
+        let effect = ExitHeal.observe(&session, failure: .tcp, candidates: pool(), stance: .ordinary, nowMs: 0)
+        XCTAssertEqual(
+            effect,
+            .dialBeforeArm(name: "Buffalo · Niagara", change: .transport, dialerChanged: false)
+        )
+    }
+
     func testStickinessKeepsTheConfiguredServer() {
         var session = ExitHeal.Session.forPreferred("Buffalo · Niagara", residentialId: "none")
         session.dial = "Buffalo · Other"
