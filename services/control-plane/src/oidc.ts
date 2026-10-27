@@ -20,7 +20,7 @@ export interface OidcIdentity {
 }
 
 interface ProviderConfiguration {
-  audience: string;
+  audiences: string[];
   issuers: string[];
   jwksURL: string;
 }
@@ -172,15 +172,25 @@ function normalizedHostedDomain(value: unknown): string | undefined {
   return normalized;
 }
 
+// Mailboxes Apple itself hosts, plus its Hide My Email relay: a relay
+// address is minted per Apple ID and team, so no other person can hold it.
+const APPLE_MAILBOX_DOMAINS = new Set(['icloud.com', 'me.com', 'mac.com', 'privaterelay.appleid.com']);
+
 /**
- * Whether Google itself is the authority for the mailbox behind a verified
- * `email` claim: consumer Gmail addresses, or a Workspace account whose `hd`
- * equals the address domain. A Google account backed by an unmanaged external
- * address keeps asserting `email_verified` after the mailbox changes hands.
+ * Whether the provider itself is the authority for the mailbox behind a
+ * verified `email` claim (decisions 072, 139). Google: consumer Gmail, or a
+ * Workspace account whose `hd` equals the address domain. Apple: iCloud
+ * addresses and Hide My Email relays. Any other address is only "verified
+ * once": a Google or Apple account backed by an external mailbox keeps
+ * asserting it after the mailbox changes hands, so it may neither select nor
+ * pre-create the account that address's owner signs in to with an email code.
  */
-export function googleAuthoritativeForEmail(identity: Pick<OidcIdentity, 'email' | 'hostedDomain'>): boolean {
+export function providerAuthoritativeForEmail(
+  identity: Pick<OidcIdentity, 'provider' | 'email' | 'hostedDomain'>,
+): boolean {
   const domain = identity.email?.slice(identity.email.lastIndexOf('@') + 1);
   if (!domain) return false;
+  if (identity.provider === 'apple') return APPLE_MAILBOX_DOMAINS.has(domain);
   if (domain === 'gmail.com' || domain === 'googlemail.com') return true;
   return identity.hostedDomain !== undefined && identity.hostedDomain === domain;
 }
@@ -188,20 +198,26 @@ export function googleAuthoritativeForEmail(identity: Pick<OidcIdentity, 'email'
 export async function verifyOidcIdToken(
   provider: OidcProvider,
   token: string,
-  audience: string,
+  audience: string | string[],
   currentTime = Math.floor(Date.now() / 1_000),
 ): Promise<OidcIdentity> {
-  if (token.length < 100 || token.length > 16_384 || audience.length < 1 || audience.length > 512) {
+  // Each platform has its own client (the app's bundle ID, Apple's web
+  // Services ID, Google's desktop client); a token for any of them is ours.
+  const audiences = typeof audience === 'string' ? [audience] : audience;
+  if (
+    token.length < 100 || token.length > 16_384 || audiences.length < 1 ||
+    audiences.some((value) => value.length < 1 || value.length > 512)
+  ) {
     throw new OidcVerificationError('Invalid OIDC token');
   }
   const configuration: ProviderConfiguration = provider === 'apple'
     ? {
-      audience,
+      audiences,
       issuers: ['https://appleid.apple.com'],
       jwksURL: 'https://appleid.apple.com/auth/keys',
     }
     : {
-      audience,
+      audiences,
       issuers: ['https://accounts.google.com', 'accounts.google.com'],
       jwksURL: 'https://www.googleapis.com/oauth2/v3/certs',
     };
@@ -246,7 +262,7 @@ export async function verifyOidcIdToken(
   const issuedAt = claims.iat;
   if (
     !configuration.issuers.includes(String(claims.iss ?? '')) ||
-    !audienceMatches(claims.aud, configuration.audience, claims.azp) ||
+    !configuration.audiences.some((expected) => audienceMatches(claims.aud, expected, claims.azp)) ||
     !Number.isSafeInteger(expiresAt) ||
     Number(expiresAt) <= currentTime ||
     !Number.isSafeInteger(issuedAt) ||
