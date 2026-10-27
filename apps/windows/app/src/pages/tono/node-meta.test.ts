@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import exitRegions from '../../../../../../tooling/scripts/tests/fixtures/exit-region-v1/cases.json'
+
 import {
   backupChannelName,
   catalogBaseName,
@@ -31,6 +33,12 @@ describe('nodeRegion', () => {
     expect(nodeRegion('Buffalo · Niagara')).toBe('us')
     expect(nodeRegion('Paris · Seine')).toBe('other')
   })
+
+  it('classifies the shared exit-region cases like the Rust and macOS clients', () => {
+    for (const { name, region } of exitRegions.cases) {
+      expect(nodeRegion(name), name).toBe(region)
+    }
+  })
 })
 
 describe('nodeCode', () => {
@@ -46,7 +54,9 @@ describe('nodeCode', () => {
     expect(nodeCode('US West 01')).toBe('US')
     expect(nodeCode('jp-west')).toBe('JP')
     expect(nodeCode('Paris · Seine')).toBe('GL')
-    expect(nodeListGroupKey('Los Angeles · Sunset · hy2')).toBe(UDP_BACKUP_GROUP)
+    expect(nodeListGroupKey('Los Angeles · Sunset · hy2')).toBe(
+      UDP_BACKUP_GROUP,
+    )
     expect(nodeListGroupKey('Los Angeles · Sunset')).toBe('US')
     expect(nodeListGroupKey('Tokyo · Sakura · hy2')).toBe(UDP_BACKUP_GROUP)
   })
@@ -94,9 +104,7 @@ describe('nodeCityParts', () => {
     expect(nodeCityLabel('Tokyo · Sakura', (key) => `t:${key}`)).toBe(
       't:tono.cities.tokyo',
     )
-    expect(
-      nodeCityLabel('US-VLESS-Reality · hy2', (key) => `t:${key}`),
-    ).toBe(
+    expect(nodeCityLabel('US-VLESS-Reality · hy2', (key) => `t:${key}`)).toBe(
       't:tono.cities.losAngeles · Grove · t:tono.nodes.protocol.backup',
     )
   })
@@ -158,10 +166,7 @@ describe('backupChannelName', () => {
   })
 
   it('offers a different city hy2 after the same-city backup already failed', () => {
-    const names = [
-      'Tokyo · Sakura · hy2',
-      'Los Angeles · Sunset · hy2',
-    ]
+    const names = ['Tokyo · Sakura · hy2', 'Los Angeles · Sunset · hy2']
     expect(backupChannelName('Tokyo · Sakura · hy2', names)).toBe(
       'Los Angeles · Sunset · hy2',
     )

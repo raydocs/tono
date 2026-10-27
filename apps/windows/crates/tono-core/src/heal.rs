@@ -185,16 +185,17 @@ pub fn network_effect_for_exhausted(
 /// catalog ordering tokens (`us` / `jp` / `other`).
 pub fn region_key(name: &str) -> String {
     let base = catalog_base_name(name);
-    for token in base
-        .split(|ch: char| !ch.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-    {
-        if token.eq_ignore_ascii_case("us") {
-            return "us".to_string();
-        }
-        if token.eq_ignore_ascii_case("jp") {
-            return "jp".to_string();
-        }
+    // An explicit US token wins over JP wherever it appears, as in Swift, the UI and
+    // `region_rank`: tooling/scripts/tests/fixtures/exit-region-v1 holds them equal.
+    let has_token = |wanted: &str| {
+        base.split(|ch: char| !ch.is_alphanumeric())
+            .any(|token| token.eq_ignore_ascii_case(wanted))
+    };
+    if has_token("us") {
+        return "us".to_string();
+    }
+    if has_token("jp") {
+        return "jp".to_string();
     }
     let city = base.split('·').next().unwrap_or(base).trim().to_lowercase();
     match city.as_str() {

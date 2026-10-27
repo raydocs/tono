@@ -150,13 +150,16 @@ pub fn health_monitor_releases(strict_explicit: bool, policy_rebuild: bool) -> b
 
 pub fn region_of(name: &str) -> String {
     let base = name.trim_end_matches(" · hy2");
-    for token in base.split(|ch: char| !ch.is_alphanumeric()) {
-        if token.eq_ignore_ascii_case("us") {
-            return "us".to_string();
-        }
-        if token.eq_ignore_ascii_case("jp") {
-            return "jp".to_string();
-        }
+    // Same rule as `heal::region_key`: an explicit US token wins over JP.
+    let has_token = |wanted: &str| {
+        base.split(|ch: char| !ch.is_alphanumeric())
+            .any(|token| token.eq_ignore_ascii_case(wanted))
+    };
+    if has_token("us") {
+        return "us".to_string();
+    }
+    if has_token("jp") {
+        return "jp".to_string();
     }
     let city = base.split('·').next().unwrap_or(base).trim().to_ascii_lowercase();
     match city.as_str() {
@@ -174,16 +177,22 @@ fn ordered_tcp_names(
     down: &BTreeSet<String>,
 ) -> Vec<String> {
     let mut names = Vec::new();
-    if let Some(preferred_target) = targets.iter().find(|target| target.name == preferred)
-        && preferred_target.tcp
-            && preferred_target.region == region
-            && !down.contains(&preferred_target.name)
+    // A selected ` · hy2` block is not a TCP proof; its own node's TCP block comes next,
+    // as on macOS (`UnarmedReconnect.tcpCandidateNames`), before any other exit.
+    let base = crate::catalog_base_name(preferred);
+    for wanted in [preferred, base] {
+        if let Some(target) = targets.iter().find(|target| target.name == wanted)
+            && target.tcp
+            && target.region == region
+            && !down.contains(&target.name)
+            && !names.contains(&target.name)
         {
-            names.push(preferred_target.name.clone());
+            names.push(target.name.clone());
         }
+    }
     let mut rest: Vec<&ProbeTarget> = targets
         .iter()
-        .filter(|target| target.tcp && target.region == region && target.name != preferred)
+        .filter(|target| target.tcp && target.region == region && !names.contains(&target.name))
         .filter(|target| !down.contains(&target.name))
         .collect();
     rest.sort_by(|left, right| left.name.cmp(&right.name));
@@ -238,6 +247,27 @@ mod tests {
         );
         let proven = schedule.proven("Los Angeles · Harbor");
         assert_eq!(proven, "Los Angeles · Harbor");
+    }
+
+    #[test]
+    fn a_selected_hy2_block_proves_its_own_tcp_block_before_other_exits() {
+        let targets = vec![
+            target("Buffalo · Erie", "us", true),
+            target("Buffalo · Niagara", "us", true),
+            target("Buffalo · Niagara · hy2", "us", false),
+            target("Los Angeles · Harbor", "us", true),
+        ];
+        let mut schedule = Schedule::begin(0);
+        assert_eq!(
+            schedule.on_clock("Buffalo · Niagara · hy2", "us", &targets, 0),
+            Step::Probe {
+                names: vec![
+                    "Buffalo · Niagara".to_string(),
+                    "Buffalo · Erie".to_string(),
+                    "Los Angeles · Harbor".to_string(),
+                ]
+            }
+        );
     }
 
     #[test]

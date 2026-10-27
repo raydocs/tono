@@ -1076,6 +1076,16 @@ mod tests {
         assert_eq!(region_rank("Paris · Seine"), 2);
         // An explicit token still wins over the city segment.
         assert_eq!(region_rank("Tokyo · US Backup"), 0);
+
+        // The same cases every client classifies (tono-core tests/exit_region_contract.rs).
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../tooling/scripts/tests/fixtures/exit-region-v1/cases.json");
+        let fixture: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for case in fixture["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let rank = match case["region"].as_str().unwrap() { "us" => 0, "jp" => 1, _ => 2 };
+            assert_eq!(region_rank(name), rank, "{name:?}");
+        }
     }
 
     #[test]

@@ -702,6 +702,16 @@ const LoginPage = () => {
           <SeaScene phase={internetBlocked ? 'failed' : 'idle'} />
         </div>
       )}
+      {newAppearance && (
+        // Split layout only (wide windows): the scene's words beside the form panel.
+        <aside className="sea-login-story">
+          <span className="tono-welcome__eyebrow">
+            {t('tono.login.brandLabel')}
+          </span>
+          <p className="sea-login-story__title">{t('tono.login.brandTitle')}</p>
+          <p>{t('tono.login.brandDescription')}</p>
+        </aside>
+      )}
       {!newAppearance && (
         <aside className="tono-welcome__story tono-welcome-ground">
           <div className="tono-welcome__hero">
@@ -729,17 +739,23 @@ const LoginPage = () => {
             ? 'tono-welcome__form sea-login-card'
             : 'tono-welcome__form'
         }
-        padding={newAppearance ? 28 : 'clamp(24px, 4vw, 48px)'}
-        tint={newAppearance ? 'rgb(23 21 28 / 0.78)' : undefined}
+        padding={
+          newAppearance
+            ? 'var(--sea-login-card-padding)'
+            : 'clamp(24px, 4vw, 48px)'
+        }
+        radius={newAppearance ? 'var(--sea-login-card-radius)' : undefined}
+        tint={newAppearance ? 'var(--sea-login-card-bg)' : undefined}
         style={
           newAppearance
             ? {
+                // Glass card over the scene in a narrow window; an opaque side panel in the
+                // split layout. sea-welcome.css owns both through these variables.
                 position: 'relative',
-                border: '1px solid #ffffff14',
-                boxShadow:
-                  'inset 0 1px 0 #ffffff1f, 0 24px 60px -24px rgb(0 0 0 / 0.6)',
-                backdropFilter: 'blur(24px) saturate(1.2)',
-                WebkitBackdropFilter: 'blur(24px) saturate(1.2)',
+                border: 'var(--sea-login-card-border)',
+                boxShadow: 'var(--sea-login-card-shadow)',
+                backdropFilter: 'var(--sea-login-card-blur)',
+                WebkitBackdropFilter: 'var(--sea-login-card-blur)',
               }
             : undefined
         }
@@ -818,7 +834,9 @@ const LoginPage = () => {
           <h1
             style={{
               margin: 0,
-              fontSize: newAppearance ? 44 : 28,
+              fontSize: newAppearance
+                ? 'var(--sea-login-title-size, 44px)'
+                : 28,
               fontWeight: newAppearance ? 300 : 650,
               letterSpacing: -0.4,
               color: text.primary,
@@ -949,9 +967,8 @@ const LoginPage = () => {
                 </span>
               </button>
               <details
+                className={newAppearance ? 'sea-login-privacy' : undefined}
                 style={{
-                  gridColumn: '1 / -1',
-                  gridRow: 3,
                   fontSize: 12,
                   color: text.secondary,
                 }}
