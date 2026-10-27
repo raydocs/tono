@@ -11,7 +11,6 @@ struct LoginView: View {
     @Environment(AppState.self) private var appState
     @SeaAppearancePreference private var seaAppearance
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults) private var seaMotionMode = "Auto"
-    @SeaDisplayPreferences private var seaDisplay
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var email = ""
@@ -107,35 +106,31 @@ struct LoginView: View {
                          motionEnabled: SeaAppearance.animates(seaMotionMode, reduceMotion: reduceMotion))
                     .ignoresSafeArea()
                 ScrollView(.vertical) {
-                    // Extra room below lifts the card above the horizon
-                    // instead of cutting it through its middle.
-                    VStack(alignment: .leading, spacing: 24) {
+                    // One open column on the scene, as the welcome pages:
+                    // brand line, one large title, one supporting line, the
+                    // form, then the protection row. No card over the sea.
+                    VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 10) {
                             Image("TonoMark").resizable().scaledToFit()
                                 .frame(width: 30, height: 30).accessibilityHidden(true)
                             Text("Tono").font(.title3.weight(.semibold))
                         }
                         .foregroundStyle(SeaTheme.text)
+                        .padding(.bottom, 40)
+                        signInHeading
+                            .padding(.bottom, 40)
                         signInForm
                         GateProtectionSection(session: session, disabled: locked, seaStandalone: true)
+                            .padding(.top, 24)
                     }
-                    .frame(maxWidth: 420, alignment: .leading)
-                    .padding(.horizontal, 32)
-                    .padding(.top, 32)
-                    .padding(.bottom, 32 + min(140, proxy.size.height * 0.18))
+                    .frame(maxWidth: 400, alignment: .leading)
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 64)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: proxy.size.height, alignment: .center)
                 }
             }
         }
-    }
-
-    /// Dark glass over the night sky; solid when transparency is reduced or
-    /// contrast is increased.
-    private var seaCardFill: Color {
-        seaDisplay.reduceTransparency || seaDisplay.contrast == .increased
-            ? SeaTheme.opaquePanel
-            : SeaTheme.opaquePanel.opacity(0.78)
     }
 
     private var originalSignIn: some View {
@@ -206,22 +201,31 @@ struct LoginView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    private var signInForm: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if !seaAppearance {
-                Text(LocalizedStringKey(showsCodeStep ? "02 / CHECK YOUR EMAIL" : "01 / SIGN IN"))
-                    .font(.caption.weight(.semibold)).tracking(1)
-                    .foregroundStyle(.secondary)
-            }
+    /// Title and one supporting line. Sea places it above the form in the
+    /// page column at the welcome pages' scale; legacy keeps it in the card.
+    private var signInHeading: some View {
+        VStack(alignment: .leading, spacing: seaAppearance ? 16 : 20) {
             Text(LocalizedStringKey(showsCodeStep ? "Open your inbox" : "Sign in to Tono"))
-                .font(.system(size: 28, weight: seaAppearance ? .light : .semibold))
-                .tracking(seaAppearance ? -0.5 : 0)
+                .font(.system(size: seaAppearance ? 40 : 28, weight: seaAppearance ? .light : .semibold))
+                .tracking(seaAppearance ? -0.8 : 0)
                 .accessibilityAddTraits(.isHeader)
             Text(LocalizedStringKey(showsCodeStep
                  ? "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically."
                  : "Start with your email. We’ll send a sign-in code — no password to remember."))
-                .font(.body).foregroundStyle(.secondary)
+                .font(seaAppearance ? .system(size: 15) : .body)
+                .foregroundStyle(seaAppearance ? AnyShapeStyle(SeaTheme.muted) : AnyShapeStyle(.secondary))
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var signInForm: some View {
+        VStack(alignment: .leading, spacing: seaAppearance ? 16 : 20) {
+            if !seaAppearance {
+                Text(LocalizedStringKey(showsCodeStep ? "02 / CHECK YOUR EMAIL" : "01 / SIGN IN"))
+                    .font(.caption.weight(.semibold)).tracking(1)
+                    .foregroundStyle(.secondary)
+                signInHeading
+            }
 
             if session.isAtDeviceLimit {
                 Label("Your \(session.deviceLimit)-device allowance is full. Sign in and revoke another device if needed.", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
@@ -336,7 +340,7 @@ struct LoginView: View {
                     // Email is the primary task. Alternate providers remain
                     // debug-only and do not add a decision to the shipping flow.
                     if showsEmailForm {
-                        VStack(spacing: 10) {
+                        VStack(spacing: seaAppearance ? 16 : 10) {
                             gateField("Email", text: $email, focused: focusedField == .email)
                                 .focused($focusedField, equals: .email)
                                 .disabled(locked || session.emailChallenge != nil)
@@ -362,6 +366,7 @@ struct LoginView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(seaAppearance ? AnyShapeStyle(SeaTheme.tertiary) : AnyShapeStyle(.secondary))
                                 .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 DisclosureGroup("Privacy details", isExpanded: $showPrivacyDetails) {
                                     Text("Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.")
                                         .fixedSize(horizontal: false, vertical: true)
@@ -386,6 +391,7 @@ struct LoginView: View {
                                 .disabled(locked || emailCode.count != 6)
                             }
                             sendCodeButton
+                                .padding(.top, seaAppearance ? 8 : 0)
                             if showsCodeStep {
                                 Text("Check \(email) for an email from Tono <login@lecvia.com>, including spam. A sign-in code is valid for 10 minutes.")
                                     .font(.caption)
@@ -516,13 +522,18 @@ struct LoginView: View {
                 }
             }
         }
-        .padding(28)
-        .background(seaAppearance ? seaCardFill
-                    : (colorScheme == .dark ? Color(hex: "1B1C36") : .white),
-                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(seaAppearance ? 0 : 28)
+        .background {
+            if !seaAppearance {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(colorScheme == .dark ? Color(hex: "1B1C36") : .white)
+            }
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(seaAppearance ? Color.white.opacity(0.16) : Color.secondary.opacity(0.3), lineWidth: 1)
+            if !seaAppearance {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+            }
         }
         .foregroundStyle(seaAppearance ? SeaTheme.text : Color.primary)
         .onAppear {

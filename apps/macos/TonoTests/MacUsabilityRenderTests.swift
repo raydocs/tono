@@ -667,6 +667,22 @@ final class MacUsabilityRenderTests: XCTestCase {
         }
     }
 
+    /// The sign-in screen at the default window size, both languages.
+    /// Offscreen evidence for layout review; it asserts only a complete capture.
+    func testSignInDefaultWindowRenders() async throws {
+        let app = AppState()
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.state = .signedOut
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        for (suffix, locale) in [("en", "en"), ("zh", "zh-Hans")] {
+            try await capture("login-window-920x600-" + suffix, width: 920, height: 600, annotate: false, darkAppearance: true) {
+                LoginView(session: login).modifier(SeaPageAppearance())
+                    .environment(\.seaAppearanceOverride, true).environment(\.locale, Locale(identifier: locale)).environment(app)
+            }
+        }
+    }
+
     private func capture<Content: View>(
         _ name: String, width: CGFloat, height: CGFloat,
         annotate: Bool = true,

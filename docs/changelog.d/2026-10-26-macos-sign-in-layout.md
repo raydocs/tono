@@ -1,0 +1,11 @@
+## 2026-10-26 · macOS 登录页布局：一列主体、更大的标题、统一的间距
+- 归属：G3（macOS 客户端）；模块 `apps/macos/Tono/Views/LoginView.swift`、`apps/macos/TonoTests/MacUsabilityRenderTests.swift`。`TonoApp.swift`（窗口尺寸）、`Localizable.xcstrings`、`AccountSession` 未改。
+- 来源：基线 main `8910d909c` → 分支 `ui/macos-sign-in-layout`；一个提交。未合 main。产品负责人的原话：登录页「不够大气」「所有东西都缩在一起」。
+- 新增优化：
+  - 海面主题下去掉盖在场景上的 420pt 深色卡片，改为一列直接放在海面场景上的内容（与欢迎页同一语言）：品牌行（图标 + Tono）→ 一个 40pt 细体大标题 → 一行 15pt 辅助说明（`SeaTheme.muted`）→ 表单 → 保护提示行。列宽 400pt，水平居中，上下各 64pt 留白。
+  - 间距改为阶梯：品牌行到标题 40，标题到说明 16，说明到表单 40，表单内各行 16，主按钮前再加 8（共 24），保护提示行前 24。此前卡片内外一律 20/10，层次不清。
+  - 隐私说明（锁图标那行）在单行时曾在列内居中（中文可见），改为靠左与其余行对齐。
+  - 旧版（非海面）外观的卡片、28pt 标题、间距保持不变；所有字符串、本地化键、无障碍标识与标题 trait、键盘焦点顺序都未改动。字段 48pt、按钮 40pt 沿用现有 `SeaFieldSurface` / `SeaButtonStyle`。
+- 工程与测试：新增 `MacUsabilityRenderTests.testSignInDefaultWindowRenders`，按默认窗口 920 × 600 渲染英文与简体中文两张登录页离屏截图（`apps/macos/test-results/renders/login-window-920x600-{en,zh}.png`），只断言截图完整。
+- 验证：本机 macOS，Xcode 26.6，`xcodebuild test -scheme Tono CODE_SIGNING_ALLOWED=NO -only-testing:…`：`MacUsabilityRenderTests/testSignInDefaultWindowRenders` 1 个通过，`SignInRecoveryTests` 5 个通过，`MacUsabilityTests` 11 个通过（合计 17 个，0 失败）。截图是测试进程内渲染的视图，不是真机或真实窗口；对比了修改前后的中英文截图。
+- 剩余限制：600pt 高度下邮箱输入框正好落在地平线光带上（输入框自带描边与填充，仍可辨认）；更矮的窗口或出错/恢复状态会回到滚动。验证码步骤、错误与设备上限状态只按代码路径确认间距，未逐一截图。
