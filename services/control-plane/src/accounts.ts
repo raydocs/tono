@@ -3,7 +3,7 @@
 // an account rather than select an existing one.
 import { ApiError } from './errors';
 import { type Env, type Row, id, now, publicSignupEnabled } from './env';
-import { googleAuthoritativeForEmail, type OidcIdentity } from './oidc';
+import { providerAuthoritativeForEmail, type OidcIdentity } from './oidc';
 import { insertUserCarryingAllowlistProfile } from './signup-profile';
 
 export function ineligible(u: Row, t = now()) {
@@ -241,12 +241,13 @@ export async function accountForOidcIdentity(
       'The identity provider did not return a verified email address',
     );
   }
-  // A Google account backed by an unmanaged external mailbox still asserts
+  // An Apple or Google account backed by an external mailbox still asserts
   // email_verified after that mailbox is reassigned, so its claim can neither
   // take over the account the current mailbox owner signed up with nor
   // pre-create the account that owner's email-code sign-in would land on
-  // (#789, decision 072). Such users sign in with an email code.
-  if (identity.provider === 'google' && !googleAuthoritativeForEmail(identity)) {
+  // (#789, decisions 072 and 139). Such users sign in with an email code and
+  // may then link the provider from that session.
+  if (!providerAuthoritativeForEmail(identity)) {
     throw new ApiError(
       401,
       'EMAIL_OWNERSHIP_UNVERIFIED',
