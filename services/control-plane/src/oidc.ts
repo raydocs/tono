@@ -85,6 +85,8 @@ async function fetchKeys(url: string, force = false): Promise<SigningJWK[]> {
     response = await fetch(url, {
       headers: { accept: 'application/json' },
       redirect: 'manual',
+      // A stalled key service must fail sign-in as retryable, not hang it.
+      signal: AbortSignal.timeout(5_000),
     });
   } catch {
     throw new OidcVerificationError('OIDC key service failed', true);

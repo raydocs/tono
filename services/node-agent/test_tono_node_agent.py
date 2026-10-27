@@ -80,6 +80,27 @@ class NodeAgentTest(unittest.TestCase):
         self.assertTrue(active)
         self.assertNotIn(token[5:], leaked)
 
+        # The heartbeat must not carry urllib's default User-Agent: the zone's
+        # browser-integrity check answers it with CF 403/1010 (CBS-HA-01).
+        sent = []
+
+        class Opener:
+            def open(self, request, timeout):  # noqa: ARG002
+                sent.append(request)
+                raise agent.urllib.error.URLError("offline")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "node-agent.conf").write_text(good)
+            (Path(tmp) / "node-agent-token").write_text(token)
+            with mock.patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": tmp}), \
+                    mock.patch.object(agent.urllib.request, "build_opener", lambda *_: Opener()), \
+                    mock.patch.object(agent, "outbound_ip", lambda: "203.0.113.9"), \
+                    mock.patch.object(agent, "detect_roles", lambda: []), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                agent.main(["--config", str(Path(tmp) / "node-agent.conf")])
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(sent[0].get_header("User-agent", "").startswith("Mozilla/5.0 "))
+
 
 if __name__ == "__main__":
     unittest.main()

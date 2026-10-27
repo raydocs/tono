@@ -48,10 +48,13 @@ export async function upsertExitAsn(
   if (asn == null) return null;
   const asOrg = textOrNull(cf?.asOrganization, 120);
   const hint = textOrNull(nodeHint, 120);
+  // Every exit-agent call lands here (several per node per cycle); re-stamp a
+  // known ASN at most hourly so a poll costs no row write, as recordClient does.
   await db.prepare(
     `INSERT INTO ops_exit_asns(asn, as_org, node_hint, source, first_seen_at, last_seen_at)
      VALUES(?, ?, ?, 'exit-agent', ?, ?)
-     ON CONFLICT(asn) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
+     ON CONFLICT(asn) DO UPDATE SET last_seen_at = excluded.last_seen_at
+     WHERE ops_exit_asns.last_seen_at <= excluded.last_seen_at - 3600`,
   ).bind(asn, asOrg, hint, nowSec, nowSec).run();
   // Only mutate an already-loaded cache. Creating a one-element cache here
   // would hide other ASNs until TTL expiry.

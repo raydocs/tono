@@ -7,9 +7,14 @@ import { type Env, type Row, str, requiredSecret } from './env';
 
 // --- Tailscale ----------------------------------------------------------------
 
+// Per Tailscale call. The cron lists the tailnet before it processes
+// revocations, so an unbounded stall there would hold every later step.
+const TAILSCALE_TIMEOUT_MS = 10_000;
+
 export async function tailscaleToken(e: Env) {
   const r = await fetch('https://api.tailscale.com/api/v2/oauth/token', {
     method: 'POST',
+    signal: AbortSignal.timeout(TAILSCALE_TIMEOUT_MS),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id: e.TAILSCALE_OAUTH_CLIENT_ID,
@@ -46,6 +51,7 @@ export async function tailscale(
   accessToken?: string,
 ) {
   const r = await fetch(`https://api.tailscale.com/api/v2${path}`, {
+    signal: AbortSignal.timeout(TAILSCALE_TIMEOUT_MS),
     ...init,
     headers: { ...init.headers, authorization: `Bearer ${accessToken ?? await tailscaleToken(e)}` },
   });
