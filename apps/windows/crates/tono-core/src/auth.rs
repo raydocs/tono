@@ -343,6 +343,14 @@ pub struct EmailChallengeResponse {
     #[serde(rename = "expiresIn")]
     pub expires_in: i64,
     pub message: String,
+    /// The same global mail state as `auth/methods`, computed after this request. Absent on
+    /// older servers (`None`): the caller keeps what it read before. Never about this address.
+    #[serde(rename = "publicSignup", default, skip_serializing_if = "Option::is_none")]
+    pub public_signup: Option<bool>,
+    #[serde(rename = "signupPaused", default, skip_serializing_if = "Option::is_none")]
+    pub signup_paused: Option<bool>,
+    #[serde(rename = "deliveryDegraded", default, skip_serializing_if = "Option::is_none")]
+    pub delivery_degraded: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -389,6 +397,10 @@ pub struct AuthMethod {
     /// spent. Global, never about one address; absent = false.
     #[serde(rename = "signupPaused", default)]
     pub signup_paused: bool,
+    /// `email.deliveryDegraded`: the mail provider failed recently. Provider-side and global,
+    /// never about one recipient; absent = false.
+    #[serde(rename = "deliveryDegraded", default)]
+    pub delivery_degraded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2319,6 +2331,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_start_reads_the_global_mail_state() {
+        let (client, _mock, _store) = test_client(|_| {
+            json(
+                202,
+                r#"{"challengeId":"c1","expiresIn":600,"message":"sent","publicSignup":true,"signupPaused":true,"deliveryDegraded":true}"#,
+            )
+        });
+        let challenge = client.start_email_sign_in("u@x.co", "pc", &new_installation_id()).await.unwrap();
+        assert_eq!(
+            (challenge.public_signup, challenge.signup_paused, challenge.delivery_degraded),
+            (Some(true), Some(true), Some(true))
+        );
+        let (client, _mock, _store) =
+            test_client(|_| json(202, r#"{"challengeId":"c1","expiresIn":600,"message":"sent"}"#));
+        let challenge = client.start_email_sign_in("u@x.co", "pc", &new_installation_id()).await.unwrap();
+        assert_eq!(challenge.signup_paused, None, "an older server's 202 leaves the earlier reading in place");
+    }
+
+    #[tokio::test]
     async fn email_start_rejects_invalid_email_client_side() {
         let (client, mock, _store) = test_client(|_| unreachable!());
         assert!(matches!(
@@ -2368,10 +2399,12 @@ mod tests {
         let (client, _mock, _store) = test_client(|_| {
             json(
                 200,
-                r#"{"email":{"enabled":true,"publicSignup":true,"signupPaused":true},"apple":{"enabled":true},"google":{"enabled":false}}"#,
+                r#"{"email":{"enabled":true,"publicSignup":true,"signupPaused":true,"deliveryDegraded":true},"apple":{"enabled":true},"google":{"enabled":false}}"#,
             )
         });
-        assert!(client.auth_methods().await.unwrap().email.signup_paused);
+        let email = client.auth_methods().await.unwrap().email;
+        assert!(email.signup_paused);
+        assert!(email.delivery_degraded);
     }
 
     #[tokio::test]

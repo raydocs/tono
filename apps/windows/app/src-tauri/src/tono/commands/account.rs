@@ -277,6 +277,10 @@ pub async fn tono_sign_in_start(
         challenge_id: challenge.challenge_id,
         expires_in: challenge.expires_in,
         message: challenge.message,
+        signup_mode: challenge
+            .public_signup
+            .map(|public| signup_mode_of(public, challenge.signup_paused.unwrap_or(false))),
+        delivery_degraded: challenge.delivery_degraded,
     })
 }
 
@@ -1685,16 +1689,30 @@ mod lifecycle_tests {
     }
 }
 
-/// `auth/methods`' sign-up mode for the sign-in copy: `paused` (open registration with today's
-/// new-address budget spent), `open`, or `closed`. Read-only and global (it says nothing about
-/// any address), so anti-enumeration is unchanged; any failure reads as `closed`.
+/// The sign-in copy's sign-up mode: `paused` (open registration with today's new-address budget
+/// spent), `open`, or `closed`.
+fn signup_mode_of(public_signup: bool, signup_paused: bool) -> &'static str {
+    if signup_paused {
+        "paused"
+    } else if public_signup {
+        "open"
+    } else {
+        "closed"
+    }
+}
+
+/// `auth/methods`' email state for the sign-in copy: the sign-up mode and whether mail delivery
+/// is degraded. Read-only and global (it says nothing about any address), so anti-enumeration is
+/// unchanged; any failure reads as `closed`, not degraded.
 #[tauri::command]
-pub async fn tono_signup_mode(state: tauri::State<'_, Arc<TonoState>>) -> Result<&'static str, String> {
+pub async fn tono_signup_mode(state: tauri::State<'_, Arc<TonoState>>) -> Result<TonoSignupStatus, String> {
     let client = { state.lock().await.client.clone() };
     Ok(match client.auth_methods().await {
-        Ok(methods) if methods.email.signup_paused => "paused",
-        Ok(methods) if methods.email.public_signup => "open",
-        _ => "closed",
+        Ok(methods) => TonoSignupStatus {
+            mode: signup_mode_of(methods.email.public_signup, methods.email.signup_paused),
+            delivery_degraded: methods.email.delivery_degraded,
+        },
+        Err(_) => TonoSignupStatus { mode: "closed", delivery_degraded: false },
     })
 }
 

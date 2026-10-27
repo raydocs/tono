@@ -16,7 +16,7 @@ import {
   stableTonoErrorCode,
   tonoAccount,
   type TonoSignupMode,
-  tonoSignupMode,
+  tonoSignupStatus,
   tonoRestoreInternet,
   tonoRetryRestore,
   tonoSignInDismiss,
@@ -60,6 +60,17 @@ const planLapseOfError = (error: unknown): PlanLapse | null => {
   if (raw.includes('(ENTITLEMENT_REQUIRED)')) return 'noPlan'
   return null
 }
+/** The same codes when the server refused a running session (`TonoStatus.sessionRefusal`). */
+const planLapseOfRefusal = (code: string | undefined): PlanLapse | null =>
+  code === 'ACCOUNT_EXPIRED'
+    ? 'planExpired'
+    : code === 'QUOTA_EXCEEDED'
+      ? 'quotaExceeded'
+      : code === 'ENTITLEMENT_REQUIRED'
+        ? 'noPlan'
+        : null
+/** Re-read the mail state this long after a code request; the server flags provider failures. */
+const DELIVERY_RECHECK_MS = 30_000
 const SENT_ACK_MS = 1500
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -189,44 +200,29 @@ const LoginPage = () => {
   // control plane stopped accepting (revoked device, signed out elsewhere, a
   // lapsed plan) also reads as suspended; signing in again is the way out.
   const sessionEnded = suspended && !verifySuspended
-  // A refused session keeps the last account it read. When that account says its plan ran
-  // out, say so: "signed out" would send the user to sign in again, which cannot help
-  // until the plan is renewed (decision 133).
-  const [endedLapse, setEndedLapse] = useState<{
-    lapse: 'planExpired' | 'quotaExceeded'
-    date: string
-  } | null>(null)
+  // A refused session names a lapsed plan only from the server's refusal code: a cached
+  // account and the local clock can be stale after a renewal (decision 133). Another code,
+  // or none (a relaunch forgets it), reads as a plain session end.
+  const planLapse = sessionEnded
+    ? planLapseOfRefusal(status?.sessionRefusal)
+    : null
+  // The cached expiry only dates a refusal that already says the plan expired.
+  const [expiredOn, setExpiredOn] = useState('')
   useEffect(() => {
-    if (!sessionEnded) return
+    if (planLapse !== 'planExpired') return
     let live = true
     tonoAccount()
       .then((account) => {
-        if (!live || !account) return
-        const expired =
-          account.expiresAt != null && account.expiresAt * 1000 <= Date.now()
-        const usedUp =
-          account.quotaBytes != null &&
-          account.usageBytes != null &&
-          account.usageBytes >= account.quotaBytes
-        setEndedLapse(
-          expired
-            ? {
-                lapse: 'planExpired',
-                date: new Date(
-                  (account.expiresAt ?? 0) * 1000,
-                ).toLocaleDateString(i18n.language),
-              }
-            : usedUp
-              ? { lapse: 'quotaExceeded', date: '' }
-              : null,
-        )
+        const at = account?.expiresAt
+        if (!live || at == null || at * 1000 > Date.now()) return
+        setExpiredOn(new Date(at * 1000).toLocaleDateString(i18n.language))
       })
       .catch(() => undefined)
     return () => {
       live = false
+      setExpiredOn('')
     }
-  }, [sessionEnded, i18n.language])
-  const planLapse = sessionEnded ? (endedLapse?.lapse ?? null) : null
+  }, [planLapse, i18n.language])
   const endedKey = planLapse ?? 'sessionEnded'
   const suspendedTitle = sessionEnded
     ? t(`tono.login.${endedKey}.title`)
@@ -246,20 +242,37 @@ const LoginPage = () => {
   const authBusy = sending || verifying || changingEmail || automaticRecovery
   const supportAvailable = recovery?.phase === 'userAction' && !authBusy
   const visibleError = automaticRecovery ? null : error
-  // Global sign-up mode, read once; never about the typed address (anti-enumeration).
+  // Global mail state: the sign-up mode and whether delivery is degraded. Never about the
+  // typed address (anti-enumeration). Read on arrival, refreshed by every code request's 202
+  // (a budget spent mid-session) and re-read once after it (a provider failing since).
   // `closed` (also unknown/unreadable, and an older server's budget-spent `false`) keeps
   // conditional wording that claims neither invite-only nor delivery.
   const [signupMode, setSignupMode] = useState<TonoSignupMode>('closed')
+  const [deliveryDegraded, setDeliveryDegraded] = useState(false)
   const publicSignup = signupMode === 'open'
+  const [codeRequests, setCodeRequests] = useState(0)
   useEffect(() => {
     let live = true
-    tonoSignupMode()
-      .then((mode) => live && mode && setSignupMode(mode))
-      .catch(() => undefined)
+    const read = () =>
+      tonoSignupStatus()
+        .then((mail) => {
+          if (!live || !mail) return
+          setSignupMode(mail.mode)
+          setDeliveryDegraded(mail.deliveryDegraded)
+        })
+        .catch(() => undefined)
+    if (codeRequests === 0) {
+      void read()
+      return () => {
+        live = false
+      }
+    }
+    const timer = window.setTimeout(read, DELIVERY_RECHECK_MS)
     return () => {
       live = false
+      window.clearTimeout(timer)
     }
-  }, [])
+  }, [codeRequests])
   const signupCopy = (key: 'inboxInstructions' | 'codeSent' | 'codeSentTo') =>
     t(publicSignup ? `tono.login.openSignup.${key}` : `tono.login.${key}`)
   const [signInPlanLapse, setSignInPlanLapse] = useState<PlanLapse | null>(null)
@@ -329,7 +342,11 @@ const LoginPage = () => {
     setSuspendedDismissed(false)
     setVerifySuspended(false)
     try {
-      await tonoSignInStart(trimmed)
+      const challenge = await tonoSignInStart(trimmed)
+      if (challenge?.signupMode) setSignupMode(challenge.signupMode)
+      if (challenge?.deliveryDegraded != null)
+        setDeliveryDegraded(challenge.deliveryDegraded)
+      setCodeRequests((count) => count + 1)
       setSentAck(true)
       // The challenge's `expiresIn` is the code's validity window (minutes),
       // not a resend cooldown — the resend cooldown stays a fixed 60s.
@@ -610,9 +627,11 @@ const LoginPage = () => {
           </h1>
           <p style={{ margin: 0, fontSize: 13, color: text.secondary }}>
             {sessionEnded
-              ? t(`tono.login.${endedKey}.description`, {
-                  date: endedLapse?.date ?? '',
-                })
+              ? planLapse === 'planExpired' && !expiredOn
+                ? t('tono.login.planExpired.descriptionUndated')
+                : t(`tono.login.${endedKey}.description`, {
+                    date: expiredOn,
+                  })
               : t('tono.login.suspended.description')}
           </p>
           <button
@@ -1172,6 +1191,26 @@ const LoginPage = () => {
             >
               {t('tono.login.codeFrom')}
             </p>
+          </div>
+        )}
+        {/* Provider-side and global: says nothing about this address. */}
+        {codeSent && (
+          <div aria-live="polite">
+            {deliveryDegraded && (
+              <p
+                className={newAppearance ? 'sea-login-notice' : undefined}
+                data-testid="delivery-degraded"
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  color: text.secondary,
+                  textAlign: newAppearance ? 'left' : 'center',
+                }}
+              >
+                {t('tono.login.deliveryDegraded')}
+              </p>
+            )}
           </div>
         )}
         {showNoEmailHint && (

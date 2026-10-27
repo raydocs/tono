@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (command: string, args?: unknown) =>
     command === 'tono_signup_mode'
-      ? Promise.resolve('closed')
+      ? Promise.resolve({ mode: 'closed', deliveryDegraded: false })
       : mocks.invoke(command, args),
 }))
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))

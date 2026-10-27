@@ -139,6 +139,10 @@ pub struct TonoStatus {
     /// with only the user's actions left. Absent with no request or after a success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sign_in_recovery: Option<crate::tono::sign_in_recovery::SignInRecovery>,
+    /// While suspended: the code of the server refusal that ended the session, when this process
+    /// heard it (`ACCOUNT_EXPIRED`, `QUOTA_EXCEEDED`, `ENTITLEMENT_REQUIRED`, `INVALID_REFRESH_TOKEN`...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_refusal: Option<String>,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -182,6 +186,20 @@ pub struct TonoSignInChallenge {
     pub challenge_id: String,
     pub expires_in: i64,
     pub message: String,
+    /// The 202's global sign-up mode, computed after this request (`open` | `paused` | `closed`);
+    /// absent when an older server sent none. Never about this address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signup_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_degraded: Option<bool>,
+}
+
+/// TS: `interface TonoSignupStatus { mode: 'open' | 'paused' | 'closed'; deliveryDegraded: boolean }`
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TonoSignupStatus {
+    pub mode: &'static str,
+    pub delivery_degraded: bool,
 }
 
 /// TS: `interface TonoAccount { email; suspended; deviceLimit; plan; quotaBytes; usageBytes; expiresAt }`
@@ -318,6 +336,11 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         route_unstable_until_ms: inner.selected_route_unstable_until_ms(epoch_millis()),
         offline_verified_at_ms: inner.offline.offline_verified_at_ms(),
         sign_in_recovery: inner.sign_in_recovery.current(),
+        session_refusal: if inner.account_state == AccountState::Suspended {
+            inner.offline.refusal_code()
+        } else {
+            None
+        },
     }
 }
 

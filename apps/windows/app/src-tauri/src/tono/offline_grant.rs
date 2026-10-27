@@ -178,6 +178,10 @@ pub struct OfflineGate {
     changed: tokio::sync::Notify,
     /// tono-core identity epoch of the latest refusal not yet applied to the account state.
     pending_refusal: parking_lot::Mutex<Option<u64>>,
+    /// The code of the latest refusal this process heard (`ACCOUNT_EXPIRED`, `INVALID_REFRESH_TOKEN`,
+    /// ...). The sign-in screen names a lapsed plan from this server answer, not from a cached
+    /// account and the local clock. Memory only: after a relaunch it is unknown.
+    refusal_code: parking_lot::Mutex<Option<String>>,
     left_offline: AtomicBool,
     /// Whether the answer that ended offline mode was `Verified`: the server accepted a session
     /// admitted without an account, so [`apply_verdicts`] has the account read now.
@@ -201,10 +205,16 @@ impl OfflineGate {
             durable: tokio::sync::Notify::new(),
             changed: tokio::sync::Notify::new(),
             pending_refusal: parking_lot::Mutex::new(None),
+            refusal_code: parking_lot::Mutex::new(None),
             left_offline: AtomicBool::new(false),
             left_offline_verified: AtomicBool::new(false),
             applier: AtomicBool::new(false),
         }
+    }
+
+    /// The code of the latest refusal this process heard; see `refusal_code`.
+    pub(crate) fn refusal_code(&self) -> Option<String> {
+        self.refusal_code.lock().clone()
     }
 
     /// The sink tono-core reports every classified server answer to.
@@ -463,6 +473,7 @@ impl SessionVerdictSink for OfflineVerdictSink {
             SessionVerdict::Verified => gate.lift_forbidden(),
             SessionVerdict::Forbidden => gate.revoke(FORBIDDEN, REASON_FORBIDDEN.to_string()),
             SessionVerdict::Refused { code } => {
+                *gate.refusal_code.lock() = code.clone();
                 let reason = code.map_or_else(|| REASON_REFUSED.to_string(), |code| format!("{REASON_REFUSED}: {code}"));
                 gate.revoke(REFUSED, reason);
                 *gate.pending_refusal.lock() = Some(identity_epoch);
@@ -681,6 +692,20 @@ mod tests {
         let mut permissions = std::fs::metadata(path).unwrap().permissions();
         permissions.set_readonly(readonly);
         std::fs::set_permissions(path, permissions).unwrap();
+    }
+
+    /// The sign-in screen names a lapsed plan from the latest refusal, so a later refusal (after a
+    /// renewal, the old session's `INVALID_REFRESH_TOKEN`) replaces an earlier plan code.
+    #[tokio::test]
+    async fn the_latest_refusal_code_replaces_an_earlier_one() {
+        let dir = data_dir("refusal-code");
+        let state = TonoState::for_test_in(dir.clone());
+        let gate = Arc::clone(&state.lock().await.offline);
+        gate.verdict_sink().report(1, SessionVerdict::Refused { code: Some("ACCOUNT_EXPIRED".to_string()) });
+        assert_eq!(gate.refusal_code().as_deref(), Some("ACCOUNT_EXPIRED"));
+        gate.verdict_sink().report(1, SessionVerdict::Refused { code: Some("INVALID_REFRESH_TOKEN".to_string()) });
+        assert_eq!(gate.refusal_code().as_deref(), Some("INVALID_REFRESH_TOKEN"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #582 T4: a refusal revokes offline admission in memory at report time, while the disk
