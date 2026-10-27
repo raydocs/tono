@@ -1200,6 +1200,9 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         pending_event_probe_failures = next_pending;
         if effect == NetworkEventProbeEffect::Rebuild {
             event_rebuild_cap_reported = false;
+            // Each event-driven rebuild is a drop of the selected route, so by the time the cap
+            // holds the tunnel the route-unstable hint already has its evidence.
+            note_route_probe_failure(&state, &app).await;
         }
         if rebuild_capped {
             // Show the hint on every capped probe; log and audit once per episode.
