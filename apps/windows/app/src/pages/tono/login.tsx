@@ -575,6 +575,22 @@ const LoginPage = () => {
     )
   }
 
+  const changeEmailButton = (
+    <button
+      type="button"
+      className="tono-link"
+      style={{
+        fontSize: 12,
+        color: text.secondary,
+        alignSelf: 'center',
+      }}
+      onClick={() => void handleChangeEmail()}
+      disabled={authBusy || restoringInternet}
+    >
+      {t('tono.login.changeEmail')}
+    </button>
+  )
+
   return (
     <div
       className={newAppearance ? 'sea-login' : 'tono-welcome'}
@@ -685,6 +701,8 @@ const LoginPage = () => {
         )}
 
         <div
+          key={newAppearance ? String(codeSent) : undefined}
+          className={newAppearance ? 'sea-login-heading' : undefined}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -720,6 +738,21 @@ const LoginPage = () => {
             {t(codeSent ? 'tono.login.inboxInstructions' : 'tono.login.intro')}
           </p>
         </div>
+
+        {codeSent && newAppearance && (
+          // Where the code went sits with the instructions, before the boxes.
+          <div id="tono-code-help" className="sea-code-sent">
+            <span className="sea-code-sent__to">
+              <code style={{ fontFamily: TONO_MONO_STACK }}>
+                {email.trim()}
+              </code>
+              {changeEmailButton}
+            </span>
+            <p>
+              {t('tono.login.codeSentTo')} {t('tono.login.codeFrom')}
+            </p>
+          </div>
+        )}
 
         <p className="tono-sr-only" role="status">
           {automaticRecovery
@@ -946,19 +979,7 @@ const LoginPage = () => {
                     : t('tono.login.sendNewCode')}
                 </button>
               </div>
-              <button
-                type="button"
-                className="tono-link"
-                style={{
-                  fontSize: 12,
-                  color: text.secondary,
-                  alignSelf: 'center',
-                }}
-                onClick={() => void handleChangeEmail()}
-                disabled={authBusy || restoringInternet}
-              >
-                {t('tono.login.changeEmail')}
-              </button>
+              {!newAppearance && changeEmailButton}
             </>
           )}
         </form>
@@ -1015,7 +1036,7 @@ const LoginPage = () => {
             )}
           </div>
         )}
-        {codeSent && (
+        {codeSent && !newAppearance && (
           <div
             id="tono-code-help"
             style={{

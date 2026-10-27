@@ -856,6 +856,7 @@
   "seaIntro": {
     "next": "Next",
     "skip": "Skip",
+    "back": "Back",
     "line": "Tono recommends your server"
   },
   "seaActivity": {

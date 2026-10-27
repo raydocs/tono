@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SeaButton } from '@/tono-ui/SeaControls'
@@ -23,12 +23,25 @@ const PANELS = [
     body: 'tono.intro.step3.body',
   },
 ] as const
+const LAST = PANELS.length - 1
 
 /** Educational scenery, never a status/protection assertion or connection action. */
 export const SeaIntro = ({ onFinish }: { onFinish: () => void }) => {
   const { t } = useTranslation()
-  const [panel, setPanel] = useState(0)
+  // `direction` lets the copy enter from the side the user is heading to.
+  const [step, setStep] = useState({ panel: 0, direction: 1 })
+  const { panel, direction } = step
   const primaryRef = useRef<HTMLButtonElement>(null)
+  const goTo = (target: number) => {
+    const next = Math.max(0, Math.min(LAST, target))
+    setStep((current) =>
+      next === current.panel
+        ? current
+        : { panel: next, direction: next > current.panel ? 1 : -1 },
+    )
+    // Back disappears on the first panel; keep focus on the next action.
+    if (next === 0) primaryRef.current?.focus()
+  }
   useEffect(() => {
     primaryRef.current?.focus()
   }, [])
@@ -36,18 +49,14 @@ export const SeaIntro = ({ onFinish }: { onFinish: () => void }) => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
         event.preventDefault()
-        setPanel((current) =>
-          Math.max(
-            0,
-            Math.min(2, current + (event.key === 'ArrowRight' ? 1 : -1)),
-          ),
-        )
+        goTo(panel + (event.key === 'ArrowRight' ? 1 : -1))
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [panel])
   const current = PANELS[panel] ?? PANELS[0]
+  const last = panel === LAST
   return (
     <section
       className="sea-intro"
@@ -57,45 +66,68 @@ export const SeaIntro = ({ onFinish }: { onFinish: () => void }) => {
       <div className="sea-welcome-scene">
         <SeaScene phase={current.phase as SeaPhase} />
       </div>
-      <div className="sea-intro-copy" aria-live="polite">
-        <p className="tono-welcome__eyebrow">Tono · {panel + 1} / 3</p>
-        <h1 id="sea-intro-title">{t(current.title)}</h1>
-        <p>{t(current.body)}</p>
-        {panel === 2 && (
-          <span className="sea-intro-line">{t('tono.seaIntro.line')}</span>
-        )}
+      <div className="sea-intro-copy">
+        <div className="sea-intro-top">
+          <fieldset
+            className="sea-intro-pager"
+            aria-label={t('tono.intro.landmark')}
+          >
+            {PANELS.map((item, index) => (
+              <button
+                type="button"
+                key={item.title}
+                aria-label={t(item.title)}
+                aria-current={index === panel ? 'step' : undefined}
+                data-seen={index < panel}
+                onClick={() => goTo(index)}
+              >
+                <span />
+              </button>
+            ))}
+          </fieldset>
+          <span className="sea-intro-count" aria-hidden="true">
+            {panel + 1} / {PANELS.length}
+          </span>
+          {!last && (
+            <SeaButton
+              variant="text"
+              className="sea-intro-skip"
+              onClick={onFinish}
+            >
+              {t('tono.seaIntro.skip')}
+            </SeaButton>
+          )}
+        </div>
+        <div aria-live="polite">
+          <div
+            key={panel}
+            className="sea-intro-panel"
+            style={{ '--sea-intro-dir': direction } as CSSProperties}
+          >
+            <h1 id="sea-intro-title">{t(current.title)}</h1>
+            <p>{t(current.body)}</p>
+          </div>
+        </div>
         <div className="sea-intro-actions">
           <button
             type="button"
             className="sea-button"
             data-variant="primary"
             ref={primaryRef}
-            onClick={() => (panel === 2 ? onFinish() : setPanel(panel + 1))}
+            onClick={() => (last ? onFinish() : goTo(panel + 1))}
           >
-            {t(panel === 2 ? 'tono.intro.getStarted' : 'tono.seaIntro.next')}
+            {t(last ? 'tono.intro.getStarted' : 'tono.seaIntro.next')}
           </button>
-          {panel < 2 && (
-            <SeaButton variant="text" onClick={onFinish}>
-              {t('tono.seaIntro.skip')}
+          {panel > 0 && (
+            <SeaButton variant="text" onClick={() => goTo(panel - 1)}>
+              {t('tono.seaIntro.back')}
             </SeaButton>
           )}
         </div>
-        <fieldset
-          className="sea-intro-pager"
-          aria-label={t('tono.intro.landmark')}
-        >
-          {PANELS.map((item, index) => (
-            <button
-              type="button"
-              key={item.title}
-              aria-label={t(item.title)}
-              aria-current={index === panel ? 'step' : undefined}
-              onClick={() => setPanel(index)}
-            >
-              <span />
-            </button>
-          ))}
-        </fieldset>
+        {/* Below the actions, so they stay put when it appears. */}
+        {last && (
+          <span className="sea-intro-line">{t('tono.seaIntro.line')}</span>
+        )}
       </div>
     </section>
   )
