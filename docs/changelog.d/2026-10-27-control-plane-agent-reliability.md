@@ -1,0 +1,15 @@
+## 2026-10-27 · 控制面与节点 agent 的超时、连通性与热路径写入
+- 归属：运维计划（[ops plan](../ops/plan-2026-09-11.md)），不是发布门；服务端 `services/control-plane`、`services/exit-agent`、`services/node-agent`。不改客户端与 UI。
+- 来源：基线 `main` 316d065 → 分支 `perf/control-plane-agent-reliability`；未合 main，未部署。
+- 缺陷修复：
+  - 控制面外呼加超时（CP-OUTBOUND-FETCH-TIMEOUT）：失败聚类 webhook（客户失败上报内 await）5 s；Apple/Google OIDC 公钥与 ops Access 公钥 5 s；Tailscale API 10 s（cron 在撤销前列 tailnet）。对端卡住时请求返回原有的失败结果，不再挂住。
+  - exit-agent 用量上报与两种 ACK 把 `http.client.HTTPException`（截断/乱码响应）当作传输失败：上报走原有轮内重试（同 reportId，不重复计），ACK 走原有 Refusal（EXIT-AGENT-HTTPEXCEPTION）。
+  - node-agent 心跳带 Mozilla 前缀 User-Agent，与 exit/home agent 一致，避免 CF 403/1010（NODE-AGENT-UA）。
+- 新增/优化：
+  - `GET /api/v1/exit-catalog`：`recordClient`（只做观测、从不影响响应）改为 `ctx.waitUntil`，每次五分钟轮询少 1–3 次串行 D1 往返。
+  - `GET /api/v1/device-actions`（远程诊断打开时每 15 s 一次）：过期 UPDATE 与 SELECT 合成一个 D1 batch，两次往返变一次，语义不变。
+  - `ops_exit_asns`：已知 ASN 每小时最多重写一次 `last_seen_at`（该列无读者），exit-agent 每次调用不再写行。
+- 工程与测试：新增 3 个回归（webhook 不应答时放弃且不记发送；exit-agent `IncompleteRead` 后重试；node-agent User-Agent），均在旧代码上先红。
+- 验证：见 PR 验证评论（control-plane typecheck + 全量 vitest；exit-agent / node-agent unittest）。
+- 候选/发布：仅源码，无新候选；控制面需按 AGENTS.md 部署流程上线；node-agent 需在节点上重新安装脚本。
+- 剩余限制：未处理 EXIT-AGENT-ACK-FAIL-USAGE-FOLD（计费，需所有者确认）与 CP-CRON-UNINDEXED-SCANS（需 migration 演练）；exit-catalog 其余读取仍串行；未对生产 zone 核对 UA 拦截。

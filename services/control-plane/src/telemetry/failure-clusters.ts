@@ -11,6 +11,9 @@ export const SPIKE_MIN_GROWTH = 10;
 export const ALERT_HOUR_CAP = 12;
 
 const SAMPLE_LIMIT = 500;
+// The webhook is awaited inside the customer's failure upload; a stalled
+// receiver must not hold that request open. Same budget as ops alerts.
+const WEBHOOK_TIMEOUT_MS = 5_000;
 
 /** The user was left without a working network. First event of the cluster
  *  alerts immediately; spike growth is not required. */
@@ -357,6 +360,7 @@ async function sendClusterAlert(
         'x-tono-signature': `sha256=${signature}`,
       },
       body,
+      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
     });
     if (!response.ok) return false;
   } catch {

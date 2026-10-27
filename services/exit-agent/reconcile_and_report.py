@@ -678,7 +678,7 @@ def acknowledge_roster(base: str, token: str, observed_at: int) -> None:
         raise Refusal(
             f"roster ack failed: control plane answered {error.code} {error.reason}"
         ) from error
-    except (urllib.error.URLError, OSError) as error:
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
         raise Refusal(f"roster ack failed: {error}") from error
 
 
@@ -702,7 +702,7 @@ def acknowledge_metering(base: str, token: str, observed_at: int) -> None:
         raise Refusal(
             f"metering ack failed: control plane answered {error.code} {error.reason}"
         ) from error
-    except (urllib.error.URLError, OSError) as error:
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
         raise Refusal(f"metering ack failed: {error}") from error
 
 
@@ -1413,8 +1413,10 @@ def deliver(base: str, token: str, reports: list[dict]) -> None:
                     "the measured usage stays queued"
                 ) from error
             failure = f"{error.code} {error.reason}"
-        except OSError as error:
-            failure = str(error)
+        except (OSError, http.client.HTTPException) as error:
+            # A truncated or garbled answer is a transport failure: resending
+            # the same reportIds counts nothing twice.
+            failure = str(error) or type(error).__name__
         if attempt == DELIVERY_ATTEMPTS:
             raise Unreachable(f"{DELIVERY_ATTEMPTS} attempts failed: {failure}")
         time.sleep(DELIVERY_BACKOFF_SECONDS * attempt)

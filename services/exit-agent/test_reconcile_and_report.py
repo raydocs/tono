@@ -13,6 +13,7 @@ customer — also invisible from here, and reported by the customer.
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import json
 import os
@@ -2582,8 +2583,11 @@ class Delivery(unittest.TestCase):
         def fake_urlopen(_request, timeout=None):  # noqa: ARG001
             attempts["count"] += 1
             requests.append(_request)
-            if attempts["count"] < 3:
+            if attempts["count"] == 1:
                 raise urllib.error.URLError("connection reset")
+            if attempts["count"] == 2:
+                # A truncated answer from a flaky edge is transient too.
+                raise http.client.IncompleteRead(b"")
             yield io.BytesIO(b"{}")
 
         with patch.object(agent, "open_control_plane", fake_urlopen):

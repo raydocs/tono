@@ -427,7 +427,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
     const a = await auth(req, e);
-    await recordClient(e, req, a.deviceId);
+    ctx.waitUntil(recordClient(e, req, a.deviceId)); // best effort; off the poll's latency
     return Response.json(await publicManagedCatalog(e, {
       userId: a.userId, deviceId: a.deviceId, filterHomeExits: true,
       hy2AcceptHeader: req.headers.get('X-Tono-Accept'),
@@ -442,11 +442,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   if (p === '/api/v1/device-actions' && m === 'GET') {
     const a = await auth(req, e);
     const t = now();
-    await e.DB.prepare("UPDATE device_actions SET status = 'expired' WHERE device_id = ? AND status IN ('pending','delivered') AND expires_at <= ?")
-      .bind(a.deviceId, t).run();
-    const q = await e.DB.prepare(
-      "SELECT * FROM device_actions WHERE device_id = ? AND status IN ('pending','delivered') AND expires_at > ? ORDER BY created_at LIMIT 20",
-    ).bind(a.deviceId, t).all<Row>();
+    const q = (await e.DB.batch<Row>([ // one round trip: polled every 15 s
+      e.DB.prepare("UPDATE device_actions SET status = 'expired' WHERE device_id = ? AND status IN ('pending','delivered') AND expires_at <= ?").bind(a.deviceId, t),
+      e.DB.prepare("SELECT * FROM device_actions WHERE device_id = ? AND status IN ('pending','delivered') AND expires_at > ? ORDER BY created_at LIMIT 20").bind(a.deviceId, t),
+    ]))[1]!;
     const pending = q.results.filter((x) => x.status === 'pending');
     if (pending.length) {
       await e.DB.prepare(

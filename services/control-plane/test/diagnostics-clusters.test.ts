@@ -348,6 +348,25 @@ describe('failure cluster webhook', () => {
     expect(Number(sends?.n)).toBe(0);
   });
 
+  it('gives up on a webhook that never answers instead of holding the upload open', async () => {
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = HOOK;
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;
+    const original = globalThis.fetch;
+    // Answers only by honouring an abort; without one it would hang forever.
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url !== HOOK) return original(input, init);
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    });
+    const atMs = 1_800_000_150_000;
+    const result = await recordFailureCluster(db(), failureInput('timeout', atMs), clusterEnv(), 1_800_000_150);
+    expect(result.alerted).toBe(false);
+    const sends = await db().prepare('SELECT COUNT(*) AS n FROM failure_alert_sends').first<{ n: number }>();
+    expect(Number(sends?.n)).toBe(0);
+  }, 15_000);
+
   it('stops sending after the hourly alert cap', async () => {
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = HOOK;
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;

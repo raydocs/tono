@@ -207,7 +207,13 @@ def run(argv: list[str]) -> int:
         base + HEARTBEAT_PATH,
         data=json.dumps(payload).encode(),
         method="POST",
-        headers={"authorization": f"Bearer {token}", "content-type": "application/json"},
+        headers={
+            "authorization": f"Bearer {token}",
+            "content-type": "application/json",
+            # Zone browser-integrity rejects a bare urllib UA with CF 403/1010
+            # (CBS-HA-01); the exit and home agents send the same shape.
+            "user-agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-node-agent/{AGENT_VERSION}",
+        },
     )
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=15) as response:

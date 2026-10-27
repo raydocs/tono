@@ -98,7 +98,11 @@ async function fetchKeys(url: string, force = false): Promise<SigningJWK[]> {
   }
   let response: Response;
   try {
-    response = await fetch(url, { headers: { accept: 'application/json' }, redirect: 'manual' });
+    response = await fetch(url, {
+      headers: { accept: 'application/json' },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(5_000),
+    });
   } catch {
     throw new AccessVerificationError('unavailable');
   }
