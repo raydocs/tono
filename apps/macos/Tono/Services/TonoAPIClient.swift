@@ -141,6 +141,8 @@ actor TonoAPIClient {
                 String(localized: "This Tono plan has expired. Renew it to keep connecting.")
             case "QUOTA_EXCEEDED":
                 String(localized: "This Tono plan has used its full data allowance.")
+            case "ENTITLEMENT_REQUIRED":
+                String(localized: "Your Tono account is ready, but it has no plan yet. Contact Tono to activate it, then sign in again.")
             default:
                 String(localized: "This Tono account is not active. Contact Tono support to restore access.")
             }

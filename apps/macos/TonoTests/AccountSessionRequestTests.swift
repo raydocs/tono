@@ -1683,6 +1683,17 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(account.authMethodsLoading)
     }
 
+    func testSignInMethodsCarryTheGlobalMailState() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let task = Task { await account.loadAuthMethods() }
+        let request = try await nextRequest(requests)
+        request.respond(status: 200, body: #"{"email":{"enabled":true,"publicSignup":true,"deliveryDegraded":true},"apple":{"enabled":false},"google":{"enabled":false}}"#)
+        await task.value
+        XCTAssertEqual(account.authMethods?.email.publicSignup, true)
+        XCTAssertEqual(account.authMethods?.email.deliveryDegraded, true)
+    }
+
     func testProtectionReleaseReloadsTheSignInMethodsItRetired() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

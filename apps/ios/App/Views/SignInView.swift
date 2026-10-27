@@ -58,7 +58,19 @@ struct SignInView: View {
                 PrimaryButton(title: L.t(model.login.busy ? "signin_sending" : "signin_send"),
                               enabled: !model.login.busy && !email.trimmingCharacters(in: .whitespaces).isEmpty, action: send)
             } else {
-                Text(L.t("signin_code_sent", model.login.email)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                // Open registration mails every address; otherwise only accounts and invitations get
+                // a code, and the copy must not say which this address is.
+                Text(L.t(model.login.mail?.publicSignup == true ? "signin_code_requested" : "signin_code_sent", model.login.email))
+                    .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                    .task(id: model.login.challengeID) {
+                        await model.refreshMailStatus()
+                        try? await Task.sleep(nanoseconds: 60_000_000_000)
+                        guard !Task.isCancelled else { return }
+                        await model.refreshMailStatus()
+                    }
+                if model.login.mail?.deliveryDegraded == true {
+                    Text(L.t("signin_mail_degraded")).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.warning)
+                }
                 TonoField(title: L.t("signin_code"), text: $code, large: true)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)

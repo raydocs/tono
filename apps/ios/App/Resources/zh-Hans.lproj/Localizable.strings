@@ -63,6 +63,8 @@
 "signin_send" = "发送验证码";
 "signin_sending" = "发送中…";
 "signin_code_sent" = "如果该邮箱已开通 Tono，验证码已发送到 %1$@，也请查看垃圾箱。";
+"signin_code_requested" = "已为 %1$@ 申请验证码，通常一分钟内送达，也请查看垃圾箱。";
+"signin_mail_degraded" = "Tono 的邮件服务暂时异常，验证码可能延迟或收不到。请过几分钟再试。";
 "signin_code" = "6 位验证码";
 "signin_verify" = "登录";
 "signin_verifying" = "验证中…";
@@ -75,6 +77,7 @@
 "signin_error_RATE_LIMITED" = "尝试过多，请稍后再试。";
 "signin_error_DEVICE_LIMIT" = "这个账号的设备数已满。请在已登录的设备上移除一台设备后重试。";
 "signin_error_generic" = "这次登录未完成（%1$@）。";
+"signin_error_ENTITLEMENT_REQUIRED" = "账号已建好，但还没有开通套餐。请联系 Tono 开通后重新登录。";
 "settings_title" = "设置";
 "settings_back" = "返回";
 "settings_routing" = "路由模式";
