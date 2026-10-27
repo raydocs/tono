@@ -78,6 +78,8 @@
     <string name="signin_error_RATE_LIMITED">Too many attempts. Try again later.</string>
     <string name="signin_error_DEVICE_LIMIT">This account is on its device limit. Remove a device on another signed-in device.</string>
     <string name="signin_error_generic">Sign-in didn\'t finish (%1$s).</string>
+    <string name="signin_error_ACCOUNT_EXPIRED">Your plan has expired. Ask the person who set up Tono for you to renew it, then sign in again.</string>
+    <string name="signin_error_QUOTA_EXCEEDED">This period\'s data allowance is used up. Ask the person who set up Tono for you to renew it, then sign in again.</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>

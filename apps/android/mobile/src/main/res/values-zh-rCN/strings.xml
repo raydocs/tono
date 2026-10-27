@@ -78,6 +78,8 @@
     <string name="signin_error_RATE_LIMITED">尝试过多，请稍后再试。</string>
     <string name="signin_error_DEVICE_LIMIT">这个账号的设备数已满。请在已登录的设备上移除一台设备后重试。</string>
     <string name="signin_error_generic">这次登录未完成（%1$s）。</string>
+    <string name="signin_error_ACCOUNT_EXPIRED">套餐已到期。请联系为你开通 Tono 的人续费后重新登录。</string>
+    <string name="signin_error_QUOTA_EXCEEDED">本期流量已用完。请联系为你开通 Tono 的人续费后重新登录。</string>
 
     <string name="settings_title">设置</string>
     <string name="settings_back">返回</string>

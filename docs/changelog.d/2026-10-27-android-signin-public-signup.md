@@ -6,3 +6,5 @@
 - 工程与测试：`EngineUnitTest` 新增 `codeRequestReadsTheGlobalRegistrationState…`，扩展快照跨进程往返的测试，覆盖新增字段。
 - 验证：android-ci（JVM 测试）在 PR 上跑；orb 没有 JDK 和 Android SDK，本地没有运行。
 - 剩余限制：没有截图，也没有真机验证。等待期间不会重新读取发信状态（iOS 和 macOS 会在 60 秒时再读一次）。
+
+2026-10-27 续（独立审查）：登录页遇到 `ACCOUNT_EXPIRED` / `QUOTA_EXCEEDED` 时，原来沿用已登录状态的文案，其中「无需退出登录」在未登录时不成立。现在改用登录专用的 `signin_error_ACCOUNT_EXPIRED` / `signin_error_QUOTA_EXCEEDED`：「请联系为你开通 Tono 的人续费后重新登录」，与 Windows 的说法一致。各端文案并不完全相同，PR 描述已更正。「联系 Tono 开通」目前没有可用的支持渠道，需要负责人决定。

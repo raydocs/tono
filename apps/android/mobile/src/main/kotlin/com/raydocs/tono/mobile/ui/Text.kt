@@ -84,8 +84,11 @@ fun signInError(code: String): String = when (code) {
     "NETWORK" -> stringResource(R.string.signin_error_NETWORK)
     "RATE_LIMITED" -> stringResource(R.string.signin_error_RATE_LIMITED)
     "DEVICE_LIMIT" -> stringResource(R.string.signin_error_DEVICE_LIMIT)
-    // Plan states are not sign-in failures: say what the account needs.
-    "ACCOUNT_EXPIRED", "QUOTA_EXCEEDED", "ENTITLEMENT_REQUIRED" -> reasonText(code)
+    // Plan states are not sign-in failures: say what the account needs. The
+    // signed-in wording ("you do not need to sign out") does not fit here.
+    "ACCOUNT_EXPIRED" -> stringResource(R.string.signin_error_ACCOUNT_EXPIRED)
+    "QUOTA_EXCEEDED" -> stringResource(R.string.signin_error_QUOTA_EXCEEDED)
+    "ENTITLEMENT_REQUIRED" -> stringResource(R.string.reason_ENTITLEMENT_REQUIRED)
     else -> stringResource(R.string.signin_error_generic, code)
 }
 
