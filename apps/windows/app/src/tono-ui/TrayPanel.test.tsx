@@ -530,15 +530,15 @@ it('new-look tray names a released failed attempt as the home does', async () =>
 it('shows a new version in the tray with Update now and Later', async () => {
   setNewAppearance(true)
   mocks.updateOffer = {
-    version: '0.0.80',
+    version: '0.0.81',
     manifestSha256: 'ab'.repeat(32),
   }
   render(<TrayPanel />, { wrapper: freshSWR })
-  expect((await screen.findByRole('status')).textContent).toContain('0.0.80')
+  expect((await screen.findByRole('status')).textContent).toContain('0.0.81')
   fireEvent.click(screen.getByRole('button', { name: 'Later' }))
   expect(screen.queryByRole('status')).toBeNull()
   mocks.updateOffer = {
-    version: '0.0.80',
+    version: '0.0.81',
     manifestSha256: 'cd'.repeat(32),
   }
   render(<TrayPanel />, { wrapper: freshSWR })

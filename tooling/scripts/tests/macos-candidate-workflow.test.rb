@@ -99,7 +99,7 @@ source = source.strip
 environment = candidate_env.merge('CANDIDATE_ONLY' => 'true', 'GITHUB_SHA' => source,
                                   'GITHUB_REF' => 'refs/heads/release/macos')
 output, status = Open3.capture2e(environment, '/bin/bash', '-c', source_gate, chdir: root)
-abort "0.0.80 source must pass the second candidate gate:\n#{output}" unless status.success?
+abort "0.0.81 source must pass the second candidate gate:\n#{output}" unless status.success?
 _, status = Open3.capture2e(environment.merge('GITHUB_SHA' => '0' * 40), '/bin/bash', '-c', source_gate, chdir: root)
 abort 'candidate gate accepted a different source checkout' if status.success?
 
@@ -114,7 +114,7 @@ abort 'candidate provenance must stay candidate-only' unless manifest_step['if']
 signing_index = build_steps.index { |step| step['name'] == 'Build, sign and notarize the release archive' }
 abort 'candidate provenance must follow signing/notarization verification' unless signing_index && build_steps.index(manifest_step) > signing_index
 Dir.mktmpdir('tono-candidate-manifest-') do |directory|
-  name = 'Tono-0.0.80-build81-arm64'
+  name = 'Tono-0.0.81-build82-arm64'
   release = File.join(directory, 'release')
   contents = File.join(release, name + '.app', 'Contents')
   files = [name + '.zip', name + '.app/Contents/MacOS/Tono',
@@ -127,8 +127,8 @@ Dir.mktmpdir('tono-candidate-manifest-') do |directory|
   plist = <<~PLIST
     <?xml version="1.0" encoding="UTF-8"?>
     <plist version="1.0"><dict>
-    <key>CFBundleShortVersionString</key><string>0.0.80</string>
-    <key>CFBundleVersion</key><string>81</string>
+    <key>CFBundleShortVersionString</key><string>0.0.81</string>
+    <key>CFBundleVersion</key><string>82</string>
     </dict></plist>
   PLIST
   File.write(File.join(contents, 'Info.plist'), plist)
@@ -138,9 +138,9 @@ Dir.mktmpdir('tono-candidate-manifest-') do |directory|
   manifest_env = environment.merge('RUNNER_TEMP' => directory, 'ARTIFACT_NAME' => name,
                                    'TONO_UPDATE_RELEASE_SEQUENCE' => '7702')
   output, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
-  abort "0.0.80 artifact must pass the candidate manifest boundary:\n#{output}" unless status.success?
+  abort "0.0.81 artifact must pass the candidate manifest boundary:\n#{output}" unless status.success?
   report = JSON.parse(File.read(File.join(release, 'candidate-manifest.json')))
-  abort 'manifest must describe actual 0.0.80/build81 bytes and source' unless report.values_at('version', 'build', 'source') == ['0.0.80', 81, source]
+  abort 'manifest must describe actual 0.0.81/build82 bytes and source' unless report.values_at('version', 'build', 'source') == ['0.0.81', 82, source]
   abort 'manifest must bind the sealed installed floor' unless report['releaseSequence'] == 7702
   abort 'candidate must not claim release or Sparkle authority' unless report.values_at('candidateOnly', 'releaseAccepted', 'sparkleSigned') == [true, false, false]
   expected_files = files.map { |relative| { 'name' => relative, 'sha256' => Digest::SHA256.file(File.join(release, relative)).hexdigest } }
@@ -156,11 +156,11 @@ Dir.mktmpdir('tono-candidate-manifest-') do |directory|
   abort 'candidate manifest accepted another sealed installed floor' if status.success?
   File.write(stamp_path, JSON.generate(stamp))
   # Signing is NOT exercised here. Old bundle identity must fail before a new receipt is written.
-  File.write(File.join(contents, 'Info.plist'), plist.sub('0.0.80', '0.0.79').sub('>81<', '>80<'))
+  File.write(File.join(contents, 'Info.plist'), plist.sub('0.0.81', '0.0.80').sub('>82<', '>81<'))
   _, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
-  abort 'candidate manifest accepted stale 0.0.79/build80 artifact bytes' if status.success?
+  abort 'candidate manifest accepted stale 0.0.80/build81 artifact bytes' if status.success?
 end
-puts 'macOS 0.0.80 build 81 candidate: exact checkout, source version, bundle identity and manifest digests verified (synthetic, unsigned fixtures)'
+puts 'macOS 0.0.81 build 82 candidate: exact checkout, source version, bundle identity and manifest digests verified (synthetic, unsigned fixtures)'
 
 # Signing material and the token reach only the steps that use them.
 signing_secret = /secrets\.(MACOS_DEVELOPER_ID_|APPLE_NOTARY_|MACOS_KEYCHAIN_|SPARKLE_ED_)/
