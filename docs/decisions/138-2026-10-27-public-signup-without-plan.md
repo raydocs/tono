@@ -6,3 +6,5 @@
 - Applied in: `feat/control-plane-public-signup`（`services/control-plane/src/{accounts,signup-profile,login,env,index}.ts`）；错误码见 [control-plane-error-contract](../control-plane-error-contract.md)。
 
 2026-10-27 续（`feat/public-signup-honest-delivery`）：在不泄露单个邮箱状态的前提下，让客户端提示与实际情况一致。只公开全局状态：`email.publicSignup` 改为「开关已开，且当天给新邮箱发码的额度还没用完」；`auth/email/start` 的 202 也带同一个值，在本次请求处理完后计算，所以无论邮箱是否存在，同一时刻读到的都一样。新增 `email.deliveryDegraded`：邮件服务商最近 15 分钟内在服务端出过错（401/403/429/5xx 或网络异常），而且之后还没有成功送达过。400、422 这类针对单个收件人的拒绝不计入，否则攻击者可以借它判断某个地址有没有账户。没有采用按 challenge 查询发送状态的接口：在邀请制下，「没发」本身就说明该邮箱没有资格。
+
+2026-10-27 再续（`fix/public-signup-paused-flag`）：#1781 让 `publicSignup` 在当日额度用完时也变成 false，客户端于是会把「开放注册暂停」当成「邀请制」来提示，这不准确。现在把两种状态拆开：`publicSignup` 只表示注册模式（开关已开）；新增 `signupPaused`，表示开放注册已开、但当天给新邮箱发码的额度已用完。两者都是全局状态，`auth/methods` 和 start 202 都带。`publicSignup` 为 false 时可以如实写「邀请制」；`signupPaused` 为 true 时，提示「今天的新用户注册名额已满；已有账号的邮箱不受影响，新用户请明天再试」，并保留条件式文案。
