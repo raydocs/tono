@@ -1285,6 +1285,7 @@ export interface TranslationResources {
         codePlaceholder: string
         codeSent: string
         codeSentTo: string
+        deliveryDegraded: string
         emailLabel: string
         emailPlaceholder: string
         errors: {
@@ -1319,7 +1320,10 @@ export interface TranslationResources {
           title: string
         }
         noPlan: {
+          description: string
+          signIn: string
           signInError: string
+          title: string
         }
         openSignup: {
           codeSent: string
@@ -1343,6 +1347,7 @@ export interface TranslationResources {
         }
         planExpired: {
           description: string
+          descriptionUndated: string
           signIn: string
           signInError: string
           title: string

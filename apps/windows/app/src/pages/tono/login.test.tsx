@@ -40,7 +40,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoSignInVerify: mocks.verify,
   tonoSignInDismiss: mocks.dismiss,
   tonoAccount: mocks.account,
-  tonoSignupMode: mocks.signupMode,
+  tonoSignupStatus: mocks.signupMode,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
   tonoRestoreInternet: mocks.disconnect,
@@ -70,7 +70,9 @@ beforeEach(() => {
   mocks.dismiss.mockReset().mockResolvedValue(undefined)
   mocks.mutate.mockReset().mockResolvedValue(undefined)
   mocks.account.mockReset().mockResolvedValue(null)
-  mocks.signupMode.mockReset().mockResolvedValue('closed')
+  mocks.signupMode
+    .mockReset()
+    .mockResolvedValue({ mode: 'closed', deliveryDegraded: false })
   mocks.status = {}
 })
 
@@ -494,7 +496,10 @@ describe('login plan answers', () => {
   })
 
   it('names a lapsed plan on a refused session instead of a plain sign-out', async () => {
-    mocks.status = { accountState: 'suspended' }
+    mocks.status = {
+      accountState: 'suspended',
+      sessionRefusal: 'ACCOUNT_EXPIRED',
+    }
     mocks.account.mockResolvedValue({
       email: 'person@example.com',
       suspended: false,
@@ -513,6 +518,29 @@ describe('login plan answers', () => {
       screen.getByRole('button', { name: enTono.login.planExpired.signIn }),
     ).toBeDefined()
   })
+
+  // After a renewal the old session is refused as INVALID_REFRESH_TOKEN while the cached
+  // account still carries the old, past expiry: that is a session end, not a lapsed plan.
+  it('trusts the refusal code over a stale cached expiry', async () => {
+    mocks.status = {
+      accountState: 'suspended',
+      sessionRefusal: 'INVALID_REFRESH_TOKEN',
+    }
+    mocks.account.mockResolvedValue({
+      email: 'person@example.com',
+      suspended: false,
+      deviceLimit: 3,
+      expiresAt: Math.floor(Date.now() / 1000) - 86_400,
+    })
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    await act(async () => undefined)
+    expect(screen.getByText('Session ended')).toBeDefined()
+    expect(screen.queryByText('Plan expired')).toBeNull()
+  })
 })
 
 describe('login sign-up policy', () => {
@@ -521,7 +549,7 @@ describe('login sign-up policy', () => {
   it('never promises delivery or claims invite-only, and offers a next step, in every sign-up mode', async () => {
     for (const mode of ['closed', 'open', 'paused']) {
       cleanup()
-      mocks.signupMode.mockResolvedValue(mode)
+      mocks.signupMode.mockResolvedValue({ mode, deliveryDegraded: false })
       await enterCodeStep()
       const page = document.body.textContent ?? ''
       expect(page).not.toMatch(
@@ -534,7 +562,10 @@ describe('login sign-up policy', () => {
   })
 
   it('drops the invite-only wording when the server says sign-up is open', async () => {
-    mocks.signupMode.mockResolvedValue('open')
+    mocks.signupMode.mockResolvedValue({
+      mode: 'open',
+      deliveryDegraded: false,
+    })
     const sendAgain = await enterCodeStep()
     expect(sendAgain).toBeDefined()
     expect(screen.getByRole('status').textContent).toBe(
@@ -548,8 +579,53 @@ describe('login sign-up policy', () => {
 })
 
 it('says new sign-ups are full for today when open registration is paused', async () => {
-  mocks.signupMode.mockResolvedValue('paused')
+  mocks.signupMode.mockResolvedValue({
+    mode: 'paused',
+    deliveryDegraded: false,
+  })
   await enterCodeStep()
   expect(screen.getByText(enTono.login.signupPaused.noEmail)).toBeDefined()
   expect(screen.getByRole('status').textContent).toBe(enTono.login.codeSent)
+})
+
+it('takes the sign-up mode from the code request, so a budget spent mid-session is not read as open', async () => {
+  mocks.signupMode.mockResolvedValue({ mode: 'open', deliveryDegraded: false })
+  mocks.start.mockResolvedValue({ expiresIn: 600, signupMode: 'paused' })
+  render(
+    <MemoryRouter>
+      <LoginPage />
+    </MemoryRouter>,
+  )
+  fireEvent.change(screen.getByLabelText('Email'), {
+    target: { value: 'person@example.com' },
+  })
+  await act(async () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+  )
+  // Before any re-read of auth/methods: only the 202 can have said so.
+  await act(async () => vi.advanceTimersByTime(5_000))
+  expect(screen.getByRole('status').textContent).toBe(enTono.login.codeSent)
+  expect(
+    screen.queryByText(/first-time email gets a new Tono account/),
+  ).toBeNull()
+})
+
+it('says mail is delayed when the server reports delivery trouble after a code request', async () => {
+  render(
+    <MemoryRouter>
+      <LoginPage />
+    </MemoryRouter>,
+  )
+  fireEvent.change(screen.getByLabelText('Email'), {
+    target: { value: 'person@example.com' },
+  })
+  mocks.signupMode.mockResolvedValue({ mode: 'closed', deliveryDegraded: true })
+  await act(async () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+  )
+  expect(screen.queryByText(enTono.login.deliveryDegraded)).toBeNull()
+  await act(async () => vi.advanceTimersByTime(30_000))
+  expect(screen.getByText(enTono.login.deliveryDegraded)).toBeDefined()
+  // Global reads only: the typed address never reaches them.
+  for (const call of mocks.signupMode.mock.calls) expect(call).toEqual([])
 })

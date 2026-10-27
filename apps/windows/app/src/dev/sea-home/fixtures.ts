@@ -62,6 +62,8 @@ let status: TonoStatus = {
   exitOrg: 'Example exit organization',
   exitLocation: 'Tokyo, Japan',
   claudeHomeActive: true,
+  // `?refusal=ACCOUNT_EXPIRED` previews a refused session's server code.
+  sessionRefusal: params.get('refusal') ?? undefined,
 }
 const primaryName = status.selectedServer ?? 'Tokyo · Sakura'
 const scheduledAt = params.has('scheduled')

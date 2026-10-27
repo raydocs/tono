@@ -31,6 +31,9 @@ export interface TonoSignInChallenge {
   challengeId: string
   expiresIn: number
   message: string
+  /** The 202's global mail state after this request; absent from an older server. */
+  signupMode?: TonoSignupMode
+  deliveryDegraded?: boolean
 }
 
 export interface TonoAccount {
@@ -129,6 +132,8 @@ export interface TonoStatus {
   routeUnstableUntilMs?: number | null
   /** Decision 093: the current sign-in request's outcome; absent with none or after success. */
   signInRecovery?: TonoSignInRecovery
+  /** While suspended: the server's refusal code, when this process heard it. */
+  sessionRefusal?: string
 }
 
 /**
@@ -580,9 +585,14 @@ const call = <T>(command: string, args?: Record<string, unknown>): Promise<T> =>
 export const tonoSignInStart = (email: string) =>
   call<TonoSignInChallenge>('tono_sign_in_start', { email })
 
-/** `auth/methods` sign-up mode; global, never about one address. Failure reads `closed`. */
+/** `auth/methods` email state; global, never about one address. Failure reads `closed`, not degraded. */
 export type TonoSignupMode = 'open' | 'paused' | 'closed'
-export const tonoSignupMode = () => call<TonoSignupMode>('tono_signup_mode')
+export interface TonoSignupStatus {
+  mode: TonoSignupMode
+  deliveryDegraded: boolean
+}
+export const tonoSignupStatus = () =>
+  call<TonoSignupStatus>('tono_signup_mode')
 
 export const tonoSignInVerify = (email: string, code: string) =>
   call<TonoAccount>('tono_sign_in_verify', { email, code })

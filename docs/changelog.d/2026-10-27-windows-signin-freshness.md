@@ -1,0 +1,12 @@
+## 2026-10-27 · Windows 登录：注册与邮件状态跟随服务器，套餐到期只信服务器拒绝码
+- 归属：G1（客户路径 UI）；Windows 登录页、`tono-core` 认证响应、Tauri 状态。
+- 来源：基线 main 2bcbee78c；分支 `amp/windows-signin-freshness`。独立审查发现（#1778 合入后）：未读 `deliveryDegraded`；注册状态只在进入页面时读一次；套餐到期提示靠缓存账号和本机时间。
+- 新增/优化：
+  - `auth/email/start` 的 202 带回的全局 `publicSignup`/`signupPaused`/`deliveryDegraded` 现在会更新提示文案（`EmailChallengeResponse` 字段可缺省：旧服务器不发时保留之前读到的状态）。名额在会话中途用完时，不再显示「第一次使用的邮箱会自动创建账号」。
+  - 发送验证码后约 30 秒重读一次 `auth/methods`（全局，不带邮箱）；服务器报告邮件服务异常时，在验证码步骤显示「Tono 的邮件服务暂时异常，验证码可能延迟或收不到。请过几分钟再试。」（与 macOS/iOS #1783 一致）。`tono_signup_mode` 改为返回 `{ mode, deliveryDegraded }`，命令名不变。
+  - 会话被拒时，「套餐已到期 / 流量已用完 / 还没有开通套餐」只取服务器这次的拒绝码（`TonoStatus.sessionRefusal`，`OfflineGate` 内存中记录最近一次拒绝码，仅在 suspended 时暴露）。续费后旧会话被拒为 `INVALID_REFRESH_TOKEN` 时显示普通「登录已失效」，不再按缓存的旧到期日说套餐到期。到期日期只在拒绝码为 `ACCOUNT_EXPIRED` 且缓存到期日已过时显示，否则用不带日期的文案。应用重启后拒绝码未知，退回「登录已失效」，重新登录时由服务器答复说明。
+  - 无套餐提示不再承诺「联系 Tono 支持」：仓库和客户端里没有可核实的支持渠道（支持页只有「复制诊断」）。改为「如果是别人邀请你使用 Tono，请联系对方开通」；开放注册与未收到邮件的提示也去掉了「Tono 支持」。
+- 防枚举：所有新读取都是全局状态，从不带上输入的邮箱；202 对每个地址照旧。
+- 工程与测试：vitest 新增 3 个 `it`（拒绝码优先于过期缓存、202 的注册状态覆盖页面初读、邮件异常提示），在旧 login.tsx 上均为断言失败的红；`tono-core` 新增 `email_start_reads_the_global_mail_state`，`auth_methods_reads_public_signup` 增加 `deliveryDegraded` 断言；`offline_grant` 新增 `the_latest_refusal_code_replaces_an_earlier_one`。
+- 验证（Linux orb）：Windows 前端完整 vitest 61 文件 448 用例通过；tsc、eslint 通过；Rust 测试未在本地运行（orb 无 cargo），由 ci-gate 的 windows/core、app-rust 编译运行。预览壳截图：邮件异常、套餐到期、无套餐、续费后旧会话、会话中途名额用完。
+- 剩余限制：未在 Windows 真机上验证；未做屏幕阅读器实测（异常提示放在 `aria-live="polite"` 区域）；真实支持渠道需所有者提供后再写进无套餐提示。

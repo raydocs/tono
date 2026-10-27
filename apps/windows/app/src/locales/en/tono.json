@@ -253,17 +253,18 @@
     "invalidCode": "Enter the 6-digit code",
     "noEmail": {
       "title": "No email yet?",
-      "description": "Check spam first. Still nothing? This email may not be able to sign in to Tono right now, or the email may not have been delivered: check the address and send again later, or contact Tono support or whoever invited you."
+      "description": "Check spam first. Still nothing? This email may not be able to sign in to Tono right now, or the email may not have been delivered: check the address and send again later, or ask whoever invited you."
     },
     "openSignup": {
       "inboxInstructions": "Code requested for this email. It usually arrives within a minute, but can be delayed or not delivered. A first-time email gets a new Tono account. Type or paste the 6 digits; Tono checks them automatically.",
       "codeSent": "Code requested.",
       "codeSentTo": "Look in this inbox (and spam) for the code.",
-      "noEmail": "Check spam and the address above. Emails can be delayed or not delivered: send again later, and if it never arrives, contact Tono support."
+      "noEmail": "Check spam and the address above. Emails can be delayed or not delivered: send again later, or try another email address."
     },
     "signupPaused": {
       "noEmail": "New sign-ups are full for today; existing accounts are not affected. New users, please try again tomorrow. Check spam and the address above; emails can be delayed or not delivered, so you can send again later."
     },
+    "deliveryDegraded": "Tono’s email service is having trouble right now, so the code may be delayed or not arrive. Please try again in a few minutes.",
     "suspended": {
       "title": "Account paused",
       "description": "This account cannot connect right now. Sign in again to check its status."
@@ -276,6 +277,7 @@
     "planExpired": {
       "title": "Plan expired",
       "description": "Your plan expired on {{date}}, so this PC can’t connect for now. To renew, contact whoever set up Tono for you, then sign in again.",
+      "descriptionUndated": "Your plan has expired, so this PC can’t connect for now. To renew, contact whoever set up Tono for you, then sign in again.",
       "signIn": "Renewed — sign in again",
       "signInError": "This account’s plan has expired, so it can’t sign in right now. To renew, contact whoever set up Tono for you, then sign in again with the same email."
     },
@@ -286,7 +288,10 @@
       "signInError": "This account has used all of its data for this period, so it can’t sign in right now. Contact whoever set up Tono for you, then sign in again with the same email."
     },
     "noPlan": {
-      "signInError": "Your account is set up but has no plan yet, so it can’t sign in to connect right now. Ask Tono support, or whoever set up Tono for you, to add a plan, then sign in again with the same email."
+      "title": "No plan yet",
+      "description": "Your account is set up but has no plan yet, so this PC can’t connect for now. If someone invited you to Tono, ask them to add a plan, then sign in again.",
+      "signIn": "Plan added — sign in again",
+      "signInError": "Your account is set up but has no plan yet, so it can’t sign in to connect right now. If someone invited you to Tono, ask them to add a plan, then sign in again with the same email."
     },
     "restoreFailed": {
       "title": "Couldn't restore your sign-in",

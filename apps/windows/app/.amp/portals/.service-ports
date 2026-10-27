@@ -1,0 +1,5 @@
+{
+  "servicePorts": {
+    "tono-shell": 31339
+  }
+}

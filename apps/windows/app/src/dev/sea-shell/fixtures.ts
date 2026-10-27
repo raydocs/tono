@@ -261,11 +261,25 @@ export const tonoSignInStart = async () => {
     }),
   )
   await signInFixtureIO('sendCode')
-  return { challengeId: 'synthetic', expiresIn: 600, message: '' }
+  signupAfterSend = params.get('signupAfterSend') as typeof signupAfterSend
+  return {
+    challengeId: 'synthetic',
+    expiresIn: 600,
+    message: '',
+    ...(signupAfterSend ? { signupMode: signupAfterSend } : {}),
+  }
 }
-// `auth/methods` sign-up mode; `?signup=open|paused` previews it (default closed).
-export const tonoSignupMode = async () =>
-  (params.get('signup') ?? 'closed') as 'open' | 'paused' | 'closed'
+// `auth/methods` mail state; `?signup=open|paused` previews the mode (default closed),
+// `?degraded` a failing mail provider.
+// `?signupAfterSend=paused` previews today's budget running out with the first code request;
+// later reads of auth/methods agree with it, as the server's would.
+let signupAfterSend: 'open' | 'paused' | 'closed' | null = null
+export const tonoSignupStatus = async () => ({
+  mode:
+    signupAfterSend ??
+    ((params.get('signup') ?? 'closed') as 'open' | 'paused' | 'closed'),
+  deliveryDegraded: params.has('degraded'),
+})
 export const tonoSignInVerify = async () => {
   await signInFixtureIO('verifyCode')
   if (params.has('badCode'))
