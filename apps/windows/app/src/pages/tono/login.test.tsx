@@ -240,9 +240,7 @@ describe('login request exclusion', () => {
     ).toBeDefined()
     const code = screen.getByLabelText('6-digit code')
     expect(document.activeElement).toBe(code)
-    expect(screen.getByRole('status').textContent).toBe(
-      'If this email has a Tono account, a code is on its way.',
-    )
+    expect(screen.getByRole('status').textContent).toBe(enTono.login.codeSent)
     expect(
       document.getElementById(code.getAttribute('aria-describedby')!),
     ).not.toBeNull()
@@ -518,6 +516,21 @@ describe('login plan answers', () => {
 })
 
 describe('login sign-up policy', () => {
+  // auth/email/start answers 202 even when nothing is sent (daily cap, failed delivery,
+  // ineligible address), so neither state may promise that a code arrives.
+  it('never promises delivery and offers a next step, with sign-up open or closed', async () => {
+    for (const open of [false, true]) {
+      cleanup()
+      mocks.publicSignup.mockResolvedValue(open)
+      await enterCodeStep()
+      const page = document.body.textContent ?? ''
+      expect(page).not.toMatch(
+        /on its way|(?<!usually )arrives (at this email )?within a minute/i,
+      )
+      expect(page).toMatch(/send again later/i)
+    }
+  })
+
   it('drops the invite-only wording when the server says sign-up is open', async () => {
     mocks.publicSignup.mockResolvedValue(true)
     const sendAgain = await enterCodeStep()

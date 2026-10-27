@@ -223,7 +223,7 @@
     "stepEmail": "01 / SIGN IN",
     "stepCode": "02 / CHECK YOUR EMAIL",
     "checkInbox": "Enter your code",
-    "inboxInstructions": "If this email has a Tono account, a code arrives within a minute. Type or paste the 6 digits; Tono checks them automatically.",
+    "inboxInstructions": "If this email can sign in to Tono, a code is sent here and usually arrives within a minute. Type or paste the 6 digits; Tono checks them automatically.",
     "title": "Sign in to Tono",
     "subtitle": "Enter your email for a sign-in code.",
     "welcome": "Sign in to Tono",
@@ -240,7 +240,7 @@
     "recoveryEnded": "This sign-in did not finish. Retry, or try another network.",
     "trust": "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.",
     "resendIn": "Resend in {{seconds}}s",
-    "codeSent": "If this email has a Tono account, a code is on its way.",
+    "codeSent": "Code requested. If this email can sign in to Tono, it is sent here.",
     "codeSentTo": "If this email has a Tono account, look here (and in spam) for the code.",
     "codeFrom": "From Tono <login@lecvia.com>",
     "codeLabel": "6-digit code",
@@ -253,13 +253,13 @@
     "invalidCode": "Enter the 6-digit code",
     "noEmail": {
       "title": "No email yet?",
-      "description": "Check spam first. Still nothing? This email may not have a Tono account yet: Tono is invite-only, so check the address or ask whoever set up Tono for you."
+      "description": "Check spam first. Still nothing? This email may not have a Tono account yet (Tono is invite-only), or the email may not have been delivered: check the address and send again later, or ask whoever set up Tono for you."
     },
     "openSignup": {
-      "inboxInstructions": "A code arrives at this email within a minute; a first-time email gets a new Tono account. Type or paste the 6 digits; Tono checks them automatically.",
-      "codeSent": "A code is on its way.",
+      "inboxInstructions": "Code requested for this email. It usually arrives within a minute, but can be delayed or not delivered. A first-time email gets a new Tono account. Type or paste the 6 digits; Tono checks them automatically.",
+      "codeSent": "Code requested.",
       "codeSentTo": "Look in this inbox (and spam) for the code.",
-      "noEmail": "Check spam and the address above. Still nothing? Send again in a little while."
+      "noEmail": "Check spam and the address above. Emails can be delayed or not delivered: send again later, and if it never arrives, contact Tono support."
     },
     "suspended": {
       "title": "Account paused",
