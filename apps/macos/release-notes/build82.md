@@ -5,7 +5,8 @@ Manual-install test candidate that replaces the 0.0.80 RC (build 81), not stable
 - **Fixed: when the chosen server does not answer, Tono now says so** (#1760). The message reads "This server did not answer. Pick another server and try again." and, while protection is blocked, the dashboard offers "Choose another route". The menu bar's Switch server is unchanged.
 - **Fixed: two helper refusals showed only "the protected connection failed"** (#1760). If system DNS has not joined the protected path yet, the message now says to wait a moment and reconnect; if the connection engine quits right after starting, it says so and asks to connect again and send diagnostics if it repeats. The Devin macOS VM failure at "securing DNS" is the first of these.
 - **Fixed: "traffic could not enter the tunnel" gave no clue** (#1760). The diagnostics now name which check failed (which probe sites, the controller, the mixed port); if another VPN is running at that moment, the message names it. Tono re-arms the tunnel at most three times per connection instead of indefinitely.
-- Everything in 0.0.80 is kept: Home lines given as a gateway name work in AI Home and Three-tier; the AI list has 194 entries; the network helper stays at 4.52.63.
+- **Faster answer when a connection fails, and faster automatic reconnects** (#1767). After the tunnel check fails, the advisory exit measurement now runs beside the final diagnostic instead of after it, up to 5 seconds sooner. While protection is down, Tono now tests all candidate servers at once instead of one after another, so an automatic reconnect starts up to 2.5 seconds per extra candidate sooner; the preferred server still wins when it answers.
+- Everything in 0.0.80 is kept: Home lines given as a gateway name work in AI Home and Three-tier; the AI list has 194 entries; the network helper is 4.52.67.
 
 ## Install and required tests
 
