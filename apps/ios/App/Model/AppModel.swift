@@ -1,5 +1,4 @@
 import Foundation
-import Libbox
 import Network
 import SwiftUI
 import TonoKit
@@ -119,7 +118,10 @@ final class AppModel: ObservableObject {
     private let tokens = KeychainTokenStore()
     private let cache = FileCatalogCache()
     private let tunnel = TunnelController()
-    private let traffic = TrafficMonitor()
+    /// The speed readout, asked of the tunnel itself (`TunnelMessage.traffic`): the app links no libbox.
+    private lazy var traffic = TrafficMonitor(makeClient: { [tunnel] receive in
+        ProviderTrafficClient(receive: receive, ask: { reply in Task { @MainActor in reply(await tunnel.send(.traffic)) } })
+    })
     private let pathMonitor = NWPathMonitor()
     private let liveActivity = LiveActivityController()
     /// The primer was answered for the start in progress.
@@ -164,8 +166,8 @@ final class AppModel: ObservableObject {
         session = AccountSession(api: client, tokens: tokens, cache: cache)
         signedIn = tokens.loadTokens() != nil
         guard !preview else { return }
-        Self.setUpLibbox()
-        coreVersion = LibboxVersion()
+        // The bundled core's version (the tunnel's `status` reply replaces it with what runs).
+        coreVersion = Bundle.main.object(forInfoDictionaryKey: "TonoCoreVersion") as? String ?? ""
         traffic.onRate = { [weak self] down, up in self?.rx = down; self?.tx = up }
         tunnel.onStatus = { [weak self] status, since in self?.tunnelChanged(status, since: since) }
         pathMonitor.pathUpdateHandler = { [weak self] path in
@@ -178,18 +180,6 @@ final class AppModel: ObservableObject {
         }
         pathMonitor.start(queue: DispatchQueue(label: "tono.app.path"))
         recompute()
-    }
-
-    /// The app reads the extension's command socket from the same App Group base path.
-    private static func setUpLibbox() {
-        let options = LibboxSetupOptions()
-        options.basePath = SharedFiles.boxBase.path
-        options.workingPath = SharedFiles.boxWorking.path
-        options.tempPath = SharedFiles.boxTemp.path
-        options.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-        options.appMarketingVersion = appVersion
-        var error: NSError?
-        LibboxSetup(options, &error)
     }
 
     // MARK: - Lifecycle
