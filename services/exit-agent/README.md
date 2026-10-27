@@ -167,6 +167,24 @@ The copy holds every client UUID in plain text; these are the VLESS
 credentials (hy2's allowlist keeps only hashes). It is mode 0600 and owned by
 the agent's user; keep it out of VPS snapshots and backups.
 
+### Revocation the Xray API keeps refusing (opt-in restart, default off)
+
+A removal that fails is reported, never acknowledged, kept in the inventory and
+retried every round; the control plane alerts once the roster ACK is 15 minutes
+old. With `TONO_RESTART_XRAY_ON_STUCK_REVOCATION=1` the agent also runs
+`systemctl --no-ask-password restart tono-xray.service` once a `u:` client's
+removal has failed in 3 consecutive reporting rounds. Before the restart it
+reads and folds the counters (and refuses to restart when the start marker is
+unreadable), saves the attempt time, and allows at most one attempt per hour of
+roster time, failed or not. After the restart it reinstalls the roster and
+checks that the revoked client is gone; that round still exits non-zero and the
+next round acknowledges. The restart drops **every** connection on the node for
+a few seconds. Leave it off until it has been exercised on a real node and the
+owner has decided to enable it ([decision 140](../../docs/decisions/140-2026-10-27-exit-agent-stuck-revocation-restart.md)). The
+agent's unit must be allowed to restart `tono-xray` (root, or a polkit/sudo rule
+limited to that unit); without it the attempt fails, is reported, and the hourly
+limit still applies.
+
 Run the regression suite with:
 
 ```bash

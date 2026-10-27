@@ -2620,7 +2620,8 @@ class MeteringAcrossFailedRounds(unittest.TestCase):
         if restart:
             self.live.clear()
         self.fetch.side_effect = [("node-under-test", at, self.roster, False, None)]
-        self.counters.return_value = reading
+        if reading is not None:
+            self.counters.return_value = reading
         self.marker.return_value = boot
         if raises is None:
             agent.run_once(self.path)
@@ -2679,6 +2680,74 @@ class MeteringAcrossFailedRounds(unittest.TestCase):
         self.assertEqual(self.ack_roster.call_count, 2)
         self.assertEqual((self.billed("usr_a"), self.billed("usr_b")), (350, 40))
         self.assertEqual(sum(r["userId"] == "usr_b" for r in self.delivered), 2)
+
+    def revoke_b_stuck_for_three_rounds(self) -> None:
+        self.run_round(1_000, {self.label_a: 100, self.label_b: 10}, "boot:1")
+        self.roster = self.roster[:1]
+        self.failing_remove.add(self.label_b)
+        self.run_round(1_060, {self.label_a: 300, self.label_b: 40}, "boot:1", raises=agent.Refusal)
+        self.run_round(1_120, {self.label_a: 400, self.label_b: 50}, "boot:1", raises=agent.Refusal)
+
+    def fake_systemctl(self, returncode: int):
+        calls: list[list[str]] = []
+
+        def run(arguments, **_kwargs):
+            calls.append(arguments)
+            if returncode == 0:
+                # What a real restart does: API-added clients and counters go.
+                self.live.clear()
+                self.marker.return_value = "boot:2"
+                self.counters.side_effect = None
+                self.counters.return_value = {}
+            return agent.subprocess.CompletedProcess(arguments, returncode, "", "denied")
+        self.start(patch.object(agent.subprocess, "run", side_effect=run))
+        return calls
+
+    def test_stuck_revocation_never_restarts_xray_by_default(self) -> None:
+        calls = self.fake_systemctl(0)
+        self.revoke_b_stuck_for_three_rounds()
+        self.run_round(1_180, {self.label_a: 500, self.label_b: 60}, "boot:1", raises=agent.Refusal)
+        self.run_round(1_240, {self.label_a: 600, self.label_b: 70}, "boot:1", raises=agent.Refusal)
+        self.assertEqual(calls, [])
+        self.assertIn(self.label_b, self.live)
+
+    def test_opt_in_restart_clears_a_stuck_revocation_and_bills_each_byte_once(self) -> None:
+        self.start(patch.dict(agent.os.environ, {"TONO_RESTART_XRAY_ON_STUCK_REVOCATION": "1"}))
+        calls = self.fake_systemctl(0)
+        self.revoke_b_stuck_for_three_rounds()
+        # Third failing round: the round's reading (500/60), then the reading
+        # taken just before the restart (520/65), which must not be lost.
+        self.counters.side_effect = [{self.label_a: 500, self.label_b: 60},
+                                     {self.label_a: 520, self.label_b: 65}]
+        with self.assertRaisesRegex(agent.Refusal, "1 revoked client.s. gone, roster restored"):
+            self.run_round(1_180, None, "boot:1")
+        self.assertEqual(calls, [[agent.SYSTEMCTL, "--no-ask-password", "restart", agent.XRAY_UNIT]])
+        # The revoked client is gone and the other customer is back right away;
+        # nothing claimed convergence in the restart round.
+        self.assertEqual(self.live, {self.label_a})
+        self.ack_roster.assert_called_once()
+        self.counters.side_effect = None
+        self.run_round(1_240, {self.label_a: 30}, "boot:2")
+        self.assertEqual(self.ack_roster.call_count, 2)
+        self.assertEqual((self.billed("usr_a"), self.billed("usr_b")), (550, 65))
+
+    def test_a_failed_restart_is_not_acknowledged_and_is_not_retried_within_the_hour(self) -> None:
+        self.start(patch.dict(agent.os.environ, {"TONO_RESTART_XRAY_ON_STUCK_REVOCATION": "1"}))
+        calls = self.fake_systemctl(1)
+        self.revoke_b_stuck_for_three_rounds()
+        with self.assertRaisesRegex(agent.Refusal, "restart failed: systemctl exited 1"):
+            self.run_round(1_180, {self.label_a: 500, self.label_b: 60}, "boot:1")
+        with self.assertRaisesRegex(agent.Refusal, "restart skipped"):
+            self.run_round(1_240, {self.label_a: 600, self.label_b: 70}, "boot:1")
+        self.assertEqual(len(calls), 1)
+        self.ack_roster.assert_called_once()
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertIn(self.label_b, saved["installedClients"])
+        self.assertEqual((self.billed("usr_a"), self.billed("usr_b")), (600, 70))
+        # An hour of roster time later the next attempt is allowed.
+        with self.assertRaisesRegex(agent.Refusal, "restart failed"):
+            self.run_round(1_180 + 3_600, {self.label_a: 700, self.label_b: 80}, "boot:1")
+        self.assertEqual(len(calls), 2)
 
     def test_an_undeliverable_queue_replay_keeps_the_new_reading_across_a_restart(self) -> None:
         # Complete rounds: the queued report from an earlier round cannot be
