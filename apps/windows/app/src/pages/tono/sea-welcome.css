@@ -295,3 +295,93 @@
     animation: none;
   }
 }
+
+/* Sign-in card: glass over the scene by default (narrow windows, 200% zoom). */
+.sea-login {
+  --sea-login-card-bg: rgb(23 21 28 / 0.78);
+  --sea-login-card-border: 1px solid #ffffff14;
+  --sea-login-card-shadow:
+    inset 0 1px 0 #ffffff1f, 0 24px 60px -24px rgb(0 0 0 / 0.6);
+  --sea-login-card-blur: blur(24px) saturate(1.2);
+  --sea-login-card-padding: 28px;
+  --sea-login-card-radius: var(--tono-radius-card-lg);
+  --sea-login-panel: clamp(380px, 46vw, 460px);
+}
+.sea-login-story {
+  display: none;
+}
+/* Split: the scene and its words on the left, the form on an opaque panel that runs under
+   the transparent title bar so the window controls sit on it. The app's minimum window
+   (860 px) always splits; browser zoom or large text falls back to the card above. */
+@media (min-width: 760px) {
+  .sea-login:not(.sea-login--suspended) {
+    --sea-login-card-bg: #111018;
+    --sea-login-card-border: 0;
+    --sea-login-card-shadow: inset 1px 0 0 #ffffff14;
+    --sea-login-card-blur: none;
+    --sea-login-card-padding: 88px 40px 32px;
+    --sea-login-card-radius: 0;
+    --sea-login-title-size: 34px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--sea-login-panel);
+    padding: 0;
+    margin-top: -48px;
+    /* Exactly the window: a tall form scrolls inside its panel, not the whole split. */
+    height: calc(100% + 48px);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .sea-login:not(.sea-login--suspended) .sea-welcome-scene {
+    inset: 0 var(--sea-login-panel) 0 0;
+  }
+  .sea-login:not(.sea-login--suspended) .sea-login-card {
+    width: auto;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    /* `safe`: when the form is taller than the window, start at its top, not mid-way. */
+    justify-content: safe center;
+    min-height: 0;
+    overflow-y: auto;
+    animation: none;
+  }
+  .sea-login:not(.sea-login--suspended) .sea-login-notice,
+  .sea-login:not(.sea-login--suspended) .sea-login-fields {
+    width: 100%;
+  }
+  /* The email field gives way to the button inside the fixed-width panel. */
+  .sea-login:not(.sea-login--suspended):not([data-code-step="true"])
+    .sea-login-fields {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .sea-login-story {
+    display: grid;
+    gap: 14px;
+    align-content: center;
+    max-width: 440px;
+    padding: 96px 48px 48px 56px;
+    animation: sea-welcome-in 320ms ease-out both;
+  }
+  .sea-login-story .sea-login-story__title {
+    margin: 0;
+    white-space: pre-line;
+    font-size: 36px;
+    font-weight: 300;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+    color: var(--sea-text, #f6f2ec);
+    word-break: keep-all;
+    text-wrap: balance;
+  }
+  .sea-login-story p:last-child {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--sea-secondary);
+  }
+}
+@media (min-width: 760px) and (prefers-reduced-motion: reduce) {
+  .sea-login-story {
+    animation: none;
+  }
+}
