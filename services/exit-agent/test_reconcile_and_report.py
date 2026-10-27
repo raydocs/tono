@@ -2748,6 +2748,16 @@ class MeteringAcrossFailedRounds(unittest.TestCase):
         with self.assertRaisesRegex(agent.Refusal, "restart failed"):
             self.run_round(1_180 + 3_600, {self.label_a: 700, self.label_b: 80}, "boot:1")
         self.assertEqual(len(calls), 2)
+        # Two attempts that never converged: no more hourly node-wide restarts.
+        with self.assertRaisesRegex(agent.Refusal, "restart stopped"):
+            self.run_round(1_180 + 7_200, {self.label_a: 800, self.label_b: 90}, "boot:1")
+        self.assertEqual(len(calls), 2)
+        # A converged round restores the budget for a later stuck revocation.
+        self.failing_remove.clear()
+        self.run_round(1_180 + 7_260, {self.label_a: 800, self.label_b: 90}, "boot:1")
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertNotIn("xrayRestartsUnconverged", saved)
+        self.assertNotIn("stuckRemovals", saved)
 
     def test_an_undeliverable_queue_replay_keeps_the_new_reading_across_a_restart(self) -> None:
         # Complete rounds: the queued report from an earlier round cannot be

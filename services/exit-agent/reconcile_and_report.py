@@ -102,7 +102,10 @@ CLIENT_LABEL_PREFIX = "u:"
 # Opt-in stuck-revocation restart (TONO_RESTART_XRAY_ON_STUCK_REVOCATION=1).
 STUCK_REVOCATION_ROUNDS = 3
 XRAY_RESTART_INTERVAL_SECONDS = 60 * 60
-RESTART_SETTLE_ATTEMPTS = 5
+MAX_RESTARTS_UNCONVERGED = 2
+# Up to ~30 s for the API to come back before the roster is reinstalled; past
+# that the next timer round (60 s after this one ends) restores it.
+RESTART_SETTLE_ATTEMPTS = 16
 RESTART_SETTLE_SECONDS = 2
 SYSTEMCTL = "/usr/bin/systemctl"
 XRAY_UNIT = "tono-xray.service"
@@ -751,7 +754,7 @@ def load_state(path: Path) -> dict:
     # not corruption — it is the case that has to remove nothing.
     for key, kind in (("installedClients", list), ("sourceId", str), ("startMarker", str),
                       ("lastReportObservedAt", int), ("stuckRemovals", dict),
-                      ("xrayRestartAt", int)):
+                      ("xrayRestartAt", int), ("xrayRestartsUnconverged", int)):
         if key in state and not isinstance(state[key], kind):
             raise Refusal(f"state file is corrupt: {key}")
     # Used as a set of labels before revocation; a non-string entry would crash it.
@@ -1898,6 +1901,12 @@ def restart_for_stuck_revocation(
                    if isinstance(rounds, int) and rounds >= STUCK_REVOCATION_ROUNDS)
     if not stuck:
         return None
+    attempts = state.get("xrayRestartsUnconverged", 0)
+    if isinstance(attempts, int) and attempts >= MAX_RESTARTS_UNCONVERGED:
+        # A cause a restart does not fix (a wrong inbound tag, a broken API)
+        # must not drop every connection on the node once an hour forever.
+        return (f"tono-xray restart stopped: {attempts} attempt(s) did not converge the roster;"
+                " an operator must fix the removal")
     last = state.get("xrayRestartAt")
     if isinstance(last, int) and observed_at - last < XRAY_RESTART_INTERVAL_SECONDS:
         return f"tono-xray restart skipped: the last one was at {last} (at most one per hour)"
@@ -1913,6 +1922,7 @@ def restart_for_stuck_revocation(
     except (Refusal, OSError) as error:
         return f"tono-xray restart skipped: usage could not be kept first: {error}"
     state["xrayRestartAt"] = observed_at
+    state["xrayRestartsUnconverged"] = (attempts if isinstance(attempts, int) else 0) + 1
     save_state(path, state)
     print(f"restarting tono-xray: revocation of {len(stuck)} client(s) failed"
           f" {STUCK_REVOCATION_ROUNDS}+ rounds in a row", file=sys.stderr)
@@ -2292,6 +2302,9 @@ def run_once(path: Path) -> None:
     }
     if not state["stuckRemovals"]:
         state.pop("stuckRemovals")
+    if reconcile_error is None:
+        # Converged: a later stuck revocation gets its full restart budget.
+        state.pop("xrayRestartsUnconverged", None)
 
     # Persist before delivering: a crash after the server accepts must replay, and
     # replaying is safe. The reverse — delivering first — loses usage silently.
