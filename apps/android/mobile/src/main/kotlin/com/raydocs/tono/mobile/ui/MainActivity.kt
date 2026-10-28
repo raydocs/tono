@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity(), TonoActions {
             val snapshot by client.snapshot.collectAsStateWithLifecycle()
             val link by client.link.collectAsStateWithLifecycle()
             val pendingConsent by model.pendingConsent.collectAsStateWithLifecycle()
-            CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion()) {
+            CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion(), LocalPowerSave provides rememberSystemPowerSave()) {
                 TonoTheme {
                     TonoRoot(snapshot, this, link, consentSheet = pendingConsent?.let { prepare ->
                         {
