@@ -2,6 +2,7 @@ package com.raydocs.tono.mobile.ui
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -27,6 +28,22 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import kotlin.math.PI
 import kotlin.math.sin
 import kotlin.random.Random
+
+/**
+ * How much of the scene moves; the same rule as iOS `SeaMotion` and macOS Lite (owner-approved
+ * 2026-10-28). Battery Saver stops the decorative loops and keeps the sky's transitions between
+ * states; reduced motion always wins and leaves everything static.
+ */
+enum class SeaMotion {
+    FULL, LITE, STILL;
+
+    /** Star twinkle, drift, the breathing glow and the drifting glints. */
+    val ambient get() = this == FULL
+
+    companion object {
+        fun of(reduceMotion: Boolean, powerSave: Boolean) = if (reduceMotion) STILL else if (powerSave) LITE else FULL
+    }
+}
 
 /** Which sky the scene paints. Mirrors the desktop SeaScene destinations. */
 enum class SkyState { NIGHT, DAWN, RISING, DAY, DUSK_WARNING, EMBER }
@@ -62,14 +79,17 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
     // connecting sun (review: the two looked alike with a half disc on both).
     val disc by animateFloatAsState(if (sky == SkyState.EMBER) 0f else 1f, spec, label = "disc")
     val warn by animateFloatAsState(if (sky == SkyState.DUSK_WARNING || sky == SkyState.EMBER) 1f else 0f, if (reduce) tween(0) else TonoMotion.ambient, label = "warn")
-    // Reduced motion runs no infinite animation at all (also saves battery); values stay at rest.
-    val still = remember { mutableFloatStateOf(0f) }
-    val (driftState, breathState) = if (reduce) {
-        still to still
+    // Reduced motion and Battery Saver run no infinite animation at all. The loops stop where they were
+    // last drawn and start again from there, so neither switch makes the glints or the glow jump.
+    val motion = SeaMotion.of(reduce, LocalPowerSave.current)
+    val last = remember { floatArrayOf(0f, 0f) }
+    val (driftState, breathState) = if (!motion.ambient) {
+        remember(motion) { mutableFloatStateOf(last[0]) } to remember(motion) { mutableFloatStateOf(last[1]) }
     } else {
+        val resume = remember { StartOffset((last[0] * 26_000).toInt()) to StartOffset((last[1] * 2_400).toInt()) }
         val transition = rememberInfiniteTransition(label = "sea")
-        transition.animateFloat(0f, 1f, infiniteRepeatable(tween(26_000, easing = LinearEasing)), label = "drift") to
-            transition.animateFloat(0f, 1f, infiniteRepeatable(tween(2_400), RepeatMode.Reverse), label = "breath")
+        transition.animateFloat(0f, 1f, infiniteRepeatable(tween(26_000, easing = LinearEasing), initialStartOffset = resume.first), label = "drift") to
+            transition.animateFloat(0f, 1f, infiniteRepeatable(tween(2_400), RepeatMode.Reverse, resume.second), label = "breath")
     }
     val drift by driftState
     val breath by breathState
@@ -77,6 +97,7 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
     val connecting = sky == SkyState.DAWN || sky == SkyState.RISING
 
     Canvas(modifier.clearAndSetSemantics { }) {
+        last[0] = drift; last[1] = breath
         val horizonY = size.height * horizon
         // Leaving protection is immediate; an old full sun must not outlive the state word.
         val t = if (sky == SkyState.NIGHT || sky == SkyState.EMBER) target else sunRise
