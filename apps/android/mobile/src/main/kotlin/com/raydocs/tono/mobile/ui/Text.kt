@@ -48,6 +48,9 @@ fun reasonText(code: String): String = when (code) {
     "SESSION_ENDED" -> stringResource(R.string.reason_SESSION_ENDED)
     "CATALOG_ROLLBACK" -> stringResource(R.string.reason_CATALOG_ROLLBACK)
     "CORE_STOPPED" -> stringResource(R.string.reason_CORE_STOPPED)
+    "ACCOUNT_EXPIRED" -> stringResource(R.string.reason_ACCOUNT_EXPIRED)
+    "QUOTA_EXCEEDED" -> stringResource(R.string.reason_QUOTA_EXCEEDED)
+    "ENTITLEMENT_REQUIRED" -> stringResource(R.string.reason_ENTITLEMENT_REQUIRED)
     else -> stringResource(R.string.reason_generic, code)
 }
 
@@ -64,6 +67,9 @@ fun shortReasonRes(code: String): Int? = when (code) {
     "SESSION_ENDED" -> R.string.short_SESSION_ENDED
     "CATALOG_ROLLBACK" -> R.string.short_CATALOG_ROLLBACK
     "CORE_STOPPED" -> R.string.short_CORE_STOPPED
+    "ACCOUNT_EXPIRED" -> R.string.short_ACCOUNT_EXPIRED
+    "QUOTA_EXCEEDED" -> R.string.short_QUOTA_EXCEEDED
+    "ENTITLEMENT_REQUIRED" -> R.string.short_ENTITLEMENT_REQUIRED
     else -> null
 }
 
@@ -78,6 +84,11 @@ fun signInError(code: String): String = when (code) {
     "NETWORK" -> stringResource(R.string.signin_error_NETWORK)
     "RATE_LIMITED" -> stringResource(R.string.signin_error_RATE_LIMITED)
     "DEVICE_LIMIT" -> stringResource(R.string.signin_error_DEVICE_LIMIT)
+    // Plan states are not sign-in failures: say what the account needs. The
+    // signed-in wording ("you do not need to sign out") does not fit here.
+    "ACCOUNT_EXPIRED" -> stringResource(R.string.signin_error_ACCOUNT_EXPIRED)
+    "QUOTA_EXCEEDED" -> stringResource(R.string.signin_error_QUOTA_EXCEEDED)
+    "ENTITLEMENT_REQUIRED" -> stringResource(R.string.reason_ENTITLEMENT_REQUIRED)
     else -> stringResource(R.string.signin_error_generic, code)
 }
 

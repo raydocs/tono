@@ -39,7 +39,28 @@ data class LoginView(
     val challengeId: String? = null,
     val busy: Boolean = false,
     val errorCode: String? = null,
-)
+    /** Registration mode as of this code request: null invite-only (or unknown), "open", or "paused". */
+    val signup: String? = null,
+    /** The mail provider failed recently. */
+    val mailDegraded: Boolean = false,
+) {
+    companion object {
+        /**
+         * A code request's answer. Its mail state is global, never about this address (decision 138),
+         * and an older control plane that sends none reads as invite-only, the conditional copy.
+         */
+        fun requested(email: String, body: Map<String, Any?>) = LoginView(
+            email = email,
+            challengeId = body["challengeId"] as? String,
+            signup = when {
+                body["publicSignup"] != true -> null
+                body["signupPaused"] == true -> "paused"
+                else -> "open"
+            },
+            mailDegraded = body["deliveryDegraded"] == true,
+        )
+    }
+}
 
 data class EngineSnapshot(
     val phase: Phase = Phase.SIGNED_OUT,
@@ -82,7 +103,10 @@ data class EngineSnapshot(
             "phase" to phase.name,
             "reasonCode" to reasonCode,
             "email" to email,
-            "login" to linkedMapOf("email" to login.email, "challengeId" to login.challengeId, "busy" to login.busy, "errorCode" to login.errorCode),
+            "login" to linkedMapOf(
+                "email" to login.email, "challengeId" to login.challengeId, "busy" to login.busy, "errorCode" to login.errorCode,
+                "signup" to login.signup, "mailDegraded" to login.mailDegraded,
+            ),
             "nodes" to nodes.map { linkedMapOf("name" to it.name, "city" to it.city, "label" to it.label, "latencyMs" to it.latencyMs) },
             "selectedNode" to selectedNode,
             "homeKind" to homeKind.name,
@@ -129,7 +153,10 @@ data class EngineSnapshot(
                 phase = Phase.valueOf(m["phase"] as String),
                 reasonCode = m["reasonCode"] as String?,
                 email = m["email"] as String?,
-                login = LoginView(login["email"] as String, login["challengeId"] as String?, login["busy"] as Boolean, login["errorCode"] as String?),
+                login = LoginView(
+                    login["email"] as String, login["challengeId"] as String?, login["busy"] as Boolean, login["errorCode"] as String?,
+                    login["signup"] as String?, login["mailDegraded"] as Boolean? ?: false,
+                ),
                 nodes = m["nodes"].asArray().map { n ->
                     val o = n.asObject()
                     NodeView(o["name"] as String, o["city"] as String, o["label"] as String, (o["latencyMs"] as Number?)?.toLong())
