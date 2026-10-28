@@ -40,7 +40,7 @@ import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.engine.TunnelAuthority
 import com.raydocs.tono.routing.RoutingMode
 
-enum class Screen { HOME, SETTINGS, APPS, LICENSES }
+enum class Screen { HOME, SETTINGS, ROUTING_RULES, APPS, LICENSES }
 
 /** Everything the UI can ask of the engine. Implemented by MainActivity over the AIDL client. */
 interface TonoActions {
@@ -99,7 +99,8 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink =
                                         s,
                                         onRecheck = { actions.command("recheck") },
                                         onOpenLines = { detailsOpen = false; linesOpen = true },
-                                        onOpenSettings = { detailsOpen = false; screen = Screen.SETTINGS },
+                                        onMode = { m: RoutingMode -> actions.command("setMode", "mode" to m.name) },
+                                        onExplain = actions::explain,
                                         onDismiss = { detailsOpen = false },
                                     )
                                     if (linesOpen && current) LinesSheet(
@@ -114,12 +115,12 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink =
                             Screen.SETTINGS -> SettingsScreen(
                                 s,
                                 onBack = { screen = Screen.HOME },
-                                onMode = { m: RoutingMode -> actions.command("setMode", "mode" to m.name) },
+                                onOpenRoutingRules = { screen = Screen.ROUTING_RULES },
                                 onOpenApps = { screen = Screen.APPS },
-                                onExplain = actions::explain,
                                 onSignOut = { actions.command("signOut") },
                                 onOpenLicenses = { screen = Screen.LICENSES },
                             )
+                            Screen.ROUTING_RULES -> RoutingRulesScreen(s, onBack = { screen = Screen.SETTINGS })
                             Screen.LICENSES -> LicensesScreen(onBack = { screen = Screen.SETTINGS })
                             Screen.APPS -> AppsScreen(
                                 s.excludedPackages,
