@@ -2654,11 +2654,17 @@ mod tests {
         );
         assert_eq!(not_present.len(), 1);
         let (present, _) = security::split_tunnel_rows(
-            vec![row("TONO", IfOperStatusDown), row("Tono 1", IfOperStatusUp)],
+            vec![
+                row("TONO", IfOperStatusDown),
+                row("Tono", IfOperStatusUp),
+                row("Tono 1", IfOperStatusUp),
+            ],
             "Tono",
         );
-        assert_eq!(present.len(), 1, "{present:?}");
+        assert_eq!(present.len(), 2, "{present:?}");
         assert_eq!(present[0].alias, "TONO");
+        assert_eq!(present[0].oper_status, IfOperStatusDown);
+        assert_eq!(present[1].oper_status, IfOperStatusUp);
     }
 
     #[test]
