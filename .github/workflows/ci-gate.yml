@@ -43,7 +43,7 @@ jobs:
       # path filter does not select the native macOS jobs.
       - name: Desktop routing-domain contract
         run: |
-          node --test tooling/scripts/tests/routing-domains-sync.test.mjs
+          node --test tooling/scripts/tests/routing-domains-sync.test.mjs tooling/scripts/tests/macos-anti-leak.test.mjs
           node tooling/scripts/sync-routing-domains.mjs --check
       # Mobile copies are generated from the desktop list. Their own CI is not
       # on every pull request, so a desktop-only edit would otherwise drift.

@@ -1,0 +1,12 @@
+PASS threeTier DoT/DoQ before routing
+PASS threeTier STUN ports before routing
+PASS threeTier public STUN before routing
+PASS threeTier overseas IPv4 before routing
+PASS threeTier overseas IPv6 before routing
+PASS threeTier HTTPS/SVCB before DNS routing
+PASS aiHome DoT/DoQ before routing
+PASS aiHome STUN ports before routing
+PASS aiHome public STUN before routing
+PASS aiHome overseas IPv4 before routing
+PASS aiHome overseas IPv6 before routing
+PASS aiHome HTTPS/SVCB before DNS routing

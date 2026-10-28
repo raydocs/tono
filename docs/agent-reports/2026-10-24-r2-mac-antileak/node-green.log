@@ -1,0 +1,15 @@
+✔ DoT and DoQ rejected before DIRECT (1.341042ms)
+✔ raw STUN ports rejected before DIRECT (0.581ms)
+✔ public STUN suffixes rejected before DIRECT (0.244792ms)
+✔ overseas IPv4 UDP rejected before DIRECT (0.242334ms)
+✔ overseas IPv6 UDP rejected before DIRECT (0.248458ms)
+✔ HTTPS and SVCB suppressed before DNS routing (0.454458ms)
+✔ the CLI preserves ordered policy, detects drift and refuses ambiguous source without writing (305.368917ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 375.594791

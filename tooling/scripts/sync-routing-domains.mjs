@@ -51,6 +51,32 @@ try {
   }
   if (home.some(host => video.includes(host))) throw new Error('Home and video contain the same suffix')
 
+  function antiLeakArray(name, numeric = false) {
+    const matches = [...rust.matchAll(new RegExp(`pub const ${name}: \\[(?:&str|u16); (\\d+)\\] = \\[([\\s\\S]*?)\\];`, 'g'))]
+    if (matches.length !== 1) throw new Error(`expected one bounded anti-leak declaration ${name}`)
+    const match = matches[0]
+    const values = JSON.parse(`[${match[2].trim().replace(/,$/, '')}]`)
+    if (values.length !== Number(match[1]) || values.some(v => numeric ? !Number.isInteger(v) || v < 1 || v > 65535 : typeof v !== 'string')) {
+      throw new Error(`invalid anti-leak declaration ${name}`)
+    }
+    return values
+  }
+  const antiLeakRules = [
+    { port: antiLeakArray('ENCRYPTED_DNS_PORTS', true), action: 'reject' },
+    { network: ['udp', 'icmp'], port: antiLeakArray('STUN_UDP_PORTS', true), action: 'reject' },
+    { network: ['udp', 'icmp'], domain_suffix: antiLeakArray('PUBLIC_STUN_SUFFIXES'), action: 'reject' },
+    { network: ['udp', 'icmp'], ip_cidr: antiLeakArray('OVERSEAS_UDP_REJECT_IPV4_CIDRS'), action: 'reject' },
+    { ip_version: 6, network: ['udp', 'icmp'], ip_cidr: antiLeakArray('OVERSEAS_UDP_REJECT_IPV6_CIDRS'), action: 'reject' },
+  ]
+  function hardenGraph(graph) {
+    const result = structuredClone(graph)
+    const dns = result.route.rules.findIndex(rule => rule.action === 'hijack-dns' && (rule.port === 53 || (Array.isArray(rule.port) && rule.port.includes(53))))
+    if (dns < 0) throw new Error('missing DNS hijack in routing graph')
+    result.route.rules.splice(dns + 1, 0, ...antiLeakRules)
+    result.dns.rules.unshift({ query_type: [65, 64], action: 'predefined', rcode: 'NOERROR' })
+    return result
+  }
+
   const original = readFileSync(target, 'utf8')
   let updated = original
   function replace(name, hosts, prefix = '') {
@@ -101,7 +127,7 @@ try {
   const contractTarget = path.join(root, 'apps/macos/Tono/Core/ThreeTierRoutingContract.swift')
   const contractOriginal = readFileSync(contractTarget, 'utf8')
   let contractUpdated = contractOriginal
-  for (const [name, graph] of [['templateJSON', snapshot.graph], ['aiHomeTemplateJSON', aiHome.graph]]) {
+  for (const [name, graph] of [['templateJSON', hardenGraph(snapshot.graph)], ['aiHomeTemplateJSON', hardenGraph(aiHome.graph)], ['antiLeakRouteJSON', antiLeakRules]]) {
     const section = new RegExp(`    private static let ${name} = #"""[\\s\\S]*?\\n    """#`, 'g')
     if ([...contractUpdated.matchAll(section)].length !== 1) throw new Error(`expected one Swift graph template ${name}`)
     const graphJSON = JSON.stringify(expand(graph), null, 2)
