@@ -98,6 +98,16 @@ public enum AccountErrors {
     }
 }
 
+/// The control plane's global sign-in mail state (`auth/methods`, decision 138). Never about one
+/// address: the registration mode (false is invite-only), open registration paused because today's
+/// new-address budget is spent, and a recent failure of the mail provider. Fields an older control
+/// plane does not send read as false.
+public struct EmailSignInStatus: Equatable, Sendable {
+    public let publicSignup: Bool
+    public let signupPaused: Bool
+    public let deliveryDegraded: Bool
+}
+
 /// Email sign-in, token rotation and catalog fetch with rollback refusal.
 ///
 /// The actor re-enters at every network await, so each request holds a lease on the sign-in it
@@ -148,6 +158,14 @@ public actor AccountSession {
             throw APIError(status: 500, code: "SERVER_ERROR", message: "missing challengeId")
         }
         return challenge
+    }
+
+    /// nil when the control plane cannot be read; the copy then stays conditional.
+    public func emailSignInStatus() async -> EmailSignInStatus? {
+        guard let methods = try? await api.get("auth/methods", bearer: nil), let email = methods["email"] else { return nil }
+        return EmailSignInStatus(publicSignup: email["publicSignup"]?.bool ?? false,
+                                 signupPaused: email["signupPaused"]?.bool ?? false,
+                                 deliveryDegraded: email["deliveryDegraded"]?.bool ?? false)
     }
 
     /// Verifies the six-digit code and stores the tokens. Returns the account email the server reports.

@@ -73,6 +73,22 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(transport.header("X-Tono-Client", attempt: 0), "ios/0.1.0")
     }
 
+    func testEmailSignInStatusReadsTheGlobalMailStateAndDefaultsOlderServersToConditional() async {
+        func status(_ email: JSON) async -> EmailSignInStatus? {
+            let transport = ScriptedTransport { _, _ in json(200, .obj(("email", email))) }
+            return await AccountSession(api: ControlPlaneClient(clientVersion: "1", transport: transport),
+                                        tokens: MemoryTokens(nil), cache: MemoryCache()).emailSignInStatus()
+        }
+        let open = await status(.obj(("enabled", true), ("publicSignup", true), ("signupPaused", true), ("deliveryDegraded", true)))
+        XCTAssertEqual(open?.publicSignup, true)
+        XCTAssertEqual(open?.signupPaused, true)
+        XCTAssertEqual(open?.deliveryDegraded, true)
+        let older = await status(.obj(("enabled", true)))
+        XCTAssertEqual(older?.publicSignup, false)
+        XCTAssertEqual(older?.signupPaused, false)
+        XCTAssertEqual(older?.deliveryDegraded, false)
+    }
+
     func testAPIErrorIsFinalAndNotRetriedOnARelay() async {
         let transport = ScriptedTransport { _, _ in
             json(401, .obj(("error", .obj(("code", "INVALID_OR_EXPIRED_CODE"), ("message", "expired")))))

@@ -44,6 +44,8 @@ struct LoginState: Equatable {
     var challengeID: String?
     var busy = false
     var errorCode: String?
+    /// Global mail state read while a code is pending; nil until read.
+    var mail: EmailSignInStatus?
 }
 
 /// The app's single source of truth. The tunnel state comes from NEVPNStatus, what the tunnel runs
@@ -276,10 +278,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Reads the global mail state for the pending challenge's copy; a sign-in or another email
+    /// meanwhile drops the answer.
+    func refreshMailStatus() async {
+        guard let challenge = login.challengeID else { return }
+        let status = await session.emailSignInStatus()
+        guard login.challengeID == challenge, let status else { return }
+        login.mail = status
+    }
+
     func changeEmail() {
         guard !login.busy, !signingOut else { return }
         login.challengeID = nil
         login.errorCode = nil
+        login.mail = nil
     }
 
     func signOut() async {

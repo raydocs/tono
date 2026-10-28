@@ -42,6 +42,13 @@ struct SignInView: View {
 
     private var codeStep: Bool { model.login.challengeID != nil }
 
+    /// Open registration mails every address; invite-only, or open but paused for today, mails only
+    /// accounts and invitations, and the copy must not say which this address is.
+    private var codeSentKey: String {
+        guard let mail = model.login.mail, mail.publicSignup else { return "signin_code_sent" }
+        return mail.signupPaused ? "signin_code_sent_paused" : "signin_code_requested"
+    }
+
     private var form: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !codeStep {
@@ -58,7 +65,19 @@ struct SignInView: View {
                 PrimaryButton(title: L.t(model.login.busy ? "signin_sending" : "signin_send"),
                               enabled: !model.login.busy && !email.trimmingCharacters(in: .whitespaces).isEmpty, action: send)
             } else {
-                Text(L.t("signin_code_sent", model.login.email)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                // Open registration mails every address; otherwise only accounts and invitations get
+                // a code, and the copy must not say which this address is.
+                Text(L.t(codeSentKey, model.login.email))
+                    .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                    .task(id: model.login.challengeID) {
+                        await model.refreshMailStatus()
+                        try? await Task.sleep(nanoseconds: 60_000_000_000)
+                        guard !Task.isCancelled else { return }
+                        await model.refreshMailStatus()
+                    }
+                if model.login.mail?.deliveryDegraded == true {
+                    Text(L.t("signin_mail_degraded")).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.warning)
+                }
                 TonoField(title: L.t("signin_code"), text: $code, large: true)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)

@@ -76,6 +76,40 @@ struct LoginView: View {
         return nil
     }
     private var methods: TonoAuthMethodsResponse? { session.authMethods }
+    /// Global registration state, preferring the answer to this request.
+    private var openRegistration: Bool {
+        session.emailChallenge?.publicSignup ?? methods?.email.publicSignup ?? false
+    }
+    private var signupPaused: Bool {
+        session.emailChallenge?.signupPaused ?? methods?.email.signupPaused ?? false
+    }
+    private var mailDeliveryDegraded: Bool { methods?.email.deliveryDegraded == true }
+
+    /// Open registration mails every address; invite-only, or open but paused
+    /// for today, mails only accounts and invitations, and the copy must not
+    /// say which this one is. Its own property: inline, it pushed `body` past
+    /// the type checker. One `Text` per branch: the modifiers and the hint
+    /// timer at the call site must apply once.
+    @ViewBuilder private var codeRequestNotice: some View {
+        if openRegistration && !signupPaused {
+            Text("A sign-in code was requested for \(email). It usually arrives within a minute from Tono <login@lecvia.com>; check spam too. A code is valid for 10 minutes.")
+        } else if openRegistration {
+            Text("If \(email) can already sign in to Tono, a code is on its way from Tono <login@lecvia.com>; check spam too. New sign-ups are full for today, so new users should try again tomorrow. A code is valid for 10 minutes.")
+        } else {
+            Text("If \(email) can sign in to Tono, a code is on its way from Tono <login@lecvia.com>; check spam too. A code is valid for 10 minutes.")
+        }
+    }
+    private func revealNoEmailHint() async {
+        showNoEmailHint = false
+        try? await Task.sleep(for: SignInCodeNotReceivedHint.delay)
+        guard !Task.isCancelled else { return }
+        // Fresh global mail state for the hint; a failed read keeps the form.
+        await session.refreshMailState()
+        guard !Task.isCancelled else { return }
+        withAnimation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion)) {
+            showNoEmailHint = true
+        }
+    }
     private var nativeAppleSignInEnabled: Bool {
         #if DEBUG
         methods?.apple.enabled == true
@@ -393,24 +427,20 @@ struct LoginView: View {
                             sendCodeButton
                                 .padding(.top, seaAppearance ? 8 : 0)
                             if showsCodeStep {
-                                Text("Check \(email) for an email from Tono <login@lecvia.com>, including spam. A sign-in code is valid for 10 minutes.")
+                                codeRequestNotice
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
                                     .textSelection(.enabled)
                                     // `auth/email/start` answers 202 for every
-                                    // address and a failed delivery is silent, so
-                                    // each challenge gets its own one-minute clock.
+                                    // address and a failed delivery shows only as
+                                    // the global `deliveryDegraded`, so each
+                                    // challenge gets its own one-minute clock.
                                     .task(id: session.emailChallenge?.challengeId) {
-                                        showNoEmailHint = false
-                                        try? await Task.sleep(for: SignInCodeNotReceivedHint.delay)
-                                        guard !Task.isCancelled else { return }
-                                        withAnimation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion)) {
-                                            showNoEmailHint = true
-                                        }
+                                        await revealNoEmailHint()
                                     }
                                 if showNoEmailHint && error == nil && !busy {
-                                    SignInCodeNotReceivedHint()
+                                    SignInCodeNotReceivedHint(deliveryDegraded: mailDeliveryDegraded)
                                 }
                                 Button("Use another email") {
                                     showNoEmailHint = false
