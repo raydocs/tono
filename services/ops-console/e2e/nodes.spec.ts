@@ -24,6 +24,12 @@ test.describe('nodes page', () => {
 
     await expect(page.getByRole('heading', { name: '机器负载' })).toBeVisible();
     await expect(page.locator('.nodes-load-grid .chart-frame')).toHaveCount(4);
+    // The filter clicks scroll the page and leave the pointer over a row. A full-page
+    // capture then draws the fixed sidebar at that offset and a hovered row, so the
+    // baseline (top of page, nothing hovered) only matched when the click needed no scroll.
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await settle(page);
     await expect(page).toHaveScreenshot('dashboard.png', { fullPage: true });
   });
 
