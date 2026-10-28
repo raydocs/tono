@@ -3,6 +3,7 @@ package com.raydocs.tono.mobile.ui
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.StartOffsetType
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -86,7 +87,10 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
     val (driftState, breathState) = if (!motion.ambient) {
         remember(motion) { mutableFloatStateOf(last[0]) } to remember(motion) { mutableFloatStateOf(last[1]) }
     } else {
-        val resume = remember { StartOffset((last[0] * 26_000).toInt()) to StartOffset((last[1] * 2_400).toInt()) }
+        // FastForward: the default offset type delays the start instead (resumed still for up to 26 s).
+        val resume = remember {
+            StartOffset((last[0] * 26_000).toInt(), StartOffsetType.FastForward) to StartOffset((last[1] * 2_400).toInt(), StartOffsetType.FastForward)
+        }
         val transition = rememberInfiniteTransition(label = "sea")
         transition.animateFloat(0f, 1f, infiniteRepeatable(tween(26_000, easing = LinearEasing), initialStartOffset = resume.first), label = "drift") to
             transition.animateFloat(0f, 1f, infiniteRepeatable(tween(2_400), RepeatMode.Reverse, resume.second), label = "breath")
