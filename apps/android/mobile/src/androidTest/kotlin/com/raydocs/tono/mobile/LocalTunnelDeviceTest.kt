@@ -18,6 +18,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -288,6 +289,10 @@ class LocalTunnelDeviceTest {
         if (signOut == null) diagnose("local-sign-out-missing")
         assertNotNull("Sign out in Settings", signOut)
         signOut!!.click()
+        // Sign out asks first; the confirming button carries its own description.
+        val confirm = device.wait(Until.findObject(By.desc(text(R.string.a11y_confirm_sign_out))), 5_000)
+        assertNotNull("sign-out confirmation", confirm)
+        confirm!!.click()
         assertNotNull("signed out", find(text(R.string.signin_title)))
         note("sign-out: back to the sign-in screen")
     }
@@ -1049,6 +1054,7 @@ class LocalTunnelDeviceTest {
             compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
             await("Settings", text(R.string.settings_title), 10_000)
             tap(compose.onNodeWithText(text(R.string.settings_sign_out)))
+            tap(compose.onNodeWithTag("signOutConfirm"))
             await("signed out", text(R.string.signin_title), 20_000)
         }
         ActivityScenario.launch(MainActivity::class.java).use {
