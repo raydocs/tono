@@ -1,8 +1,8 @@
-name: sing-box alpha.12 check
+name: sing-box alpha.13 check
 
-# Parser check of the pinned v1.15.0-alpha.12 linux core. Not a customer install
+# Parser check of the pinned v1.15.0-alpha.13 linux core. Not a customer install
 # and not a Mac Studio soak. The frozen M0 candidate stays the default of
-# certify.py; this workflow passes the alpha.12 candidate explicitly.
+# certify.py; this workflow passes the alpha.13 candidate explicitly.
 # The file keeps its alpha9 name so ci-gate and its path filters stay unchanged.
 # darwin-arm64 and windows-amd64-v2 are rebuilt and digest-checked by
 # prepare-macos-sing-box.sh and prepare-windows-sing-box.sh in their own CI.
@@ -23,6 +23,45 @@ permissions:
   contents: read
 
 jobs:
+  # Capture: build every target with certify.py and upload the manifests so
+  # they are committed byte-for-byte from hosted CI, never from this MacBook.
+  manifests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux-amd64-v2, darwin-arm64, windows-amd64-v2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - name: Build ${{ matrix.target }} and print digests
+        run: |
+          set -eu
+          work=$(mktemp -d)
+          git init -q "$work/source"
+          git -C "$work/source" fetch -q --depth=1 https://github.com/SagerNet/sing-box \
+            824dbcfb4dd0a95921840b1737b950cde590241e
+          git -C "$work/source" checkout -q --detach FETCH_HEAD
+          export GOENV=off GOWORK=off GOTOOLCHAIN=local
+          export GOFLAGS=-mod=readonly GOTELEMETRY=off
+          go -C "$work/source" mod download
+          python3 tooling/scripts/sing-box/certify.py build \
+            --candidate tooling/scripts/sing-box/candidates/v1.15.0-alpha.13.json \
+            --source "$work/source" --go "$(command -v go)" \
+            --target "${{ matrix.target }}" --output "$work/out" | tee "$work/build.json"
+          mkdir -p captured
+          cp "$work/out/manifest.json" "captured/${{ matrix.target }}.json"
+          cp "$work/build.json" "captured/${{ matrix.target }}.build.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sing-box-alpha13-manifest-${{ matrix.target }}
+          path: captured/
+          if-no-files-found: error
+
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -39,12 +78,12 @@ jobs:
           trap 'rm -rf "$work"' EXIT
           git init -q "$work/source"
           git -C "$work/source" fetch -q --depth=1 https://github.com/SagerNet/sing-box \
-            25b0d5ea3e466d246c708ac0f20d0448110e566c
+            824dbcfb4dd0a95921840b1737b950cde590241e
           git -C "$work/source" checkout -q --detach FETCH_HEAD
           export GOENV=off GOWORK=off GOTOOLCHAIN=local
           export GOFLAGS=-mod=readonly GOTELEMETRY=off
           go -C "$work/source" mod download
-          cand=tooling/scripts/sing-box/candidates/v1.15.0-alpha.12.json
+          cand=tooling/scripts/sing-box/candidates/v1.15.0-alpha.13.json
           python3 tooling/scripts/sing-box/certify.py build \
             --candidate "$cand" \
             --source "$work/source" --go "$(command -v go)" \
@@ -86,7 +125,7 @@ jobs:
             --emitted tooling/scripts/sing-box/fixtures/hy2-certificate-sha256.json \
             --emitted "$work/three-tier.json" \
             --output "$work/check"
-          cmp "$work/linux/manifest.json" tooling/scripts/sing-box/manifests/alpha12/linux-amd64-v2.json
+          cmp "$work/linux/manifest.json" tooling/scripts/sing-box/manifests/alpha13/linux-amd64-v2.json
           # #1684: the Windows App proves a DIRECT reload against these /rules strings.
           python3 -m unittest discover -s tooling/scripts/sing-box -p 'test_clash_rules.py'
           python3 tooling/scripts/sing-box/clash_rules.py check --binary "$work/linux/sing-box"
