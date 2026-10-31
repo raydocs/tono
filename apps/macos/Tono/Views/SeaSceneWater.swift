@@ -114,6 +114,16 @@ final class SeaWaterRenderer: NSObject, CAMetalDisplayLinkDelegate {
 
     var running: Bool { link != nil }
 
+    /// `SeaWaterPace`: 60 while focused and cool; lower otherwise. Frame time
+    /// comes from the link's target timestamp, so a lower rate never slows the water.
+    var preferredFPS: Float = 60 {
+        didSet { if preferredFPS != oldValue { link?.preferredFrameRateRange = Self.range(preferredFPS) } }
+    }
+
+    private static func range(_ fps: Float) -> CAFrameRateRange {
+        CAFrameRateRange(minimum: min(30, fps / 2), maximum: fps, preferred: fps)
+    }
+
     /// Nil without a Metal device or command queue; the layer water then stays.
     static func make() -> SeaWaterRenderer? {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { return nil }
@@ -164,7 +174,7 @@ final class SeaWaterRenderer: NSObject, CAMetalDisplayLinkDelegate {
         guard link == nil else { return }
         let link = CAMetalDisplayLink(metalLayer: layer)
         link.delegate = self
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        link.preferredFrameRateRange = Self.range(preferredFPS)
         link.preferredFrameLatency = 2
         link.add(to: .main, forMode: .common)
         self.link = link

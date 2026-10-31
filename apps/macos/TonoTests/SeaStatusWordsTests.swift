@@ -37,6 +37,11 @@ final class SeaStatusWordsTests: XCTestCase {
                        "Not connected")
     }
 
+    func testADegradedConnectionHeadlineMatchesTheDuskInsteadOfReadingConnected() {
+        XCTAssertEqual(SeaStatusWords.key(kind: .degraded, connected: true, protectionBlocked: false, unknown: false, disconnecting: false),
+                       "Degraded")
+    }
+
     func testARetryDisplayKindWithoutABarrierNeverClaimsProtected() {
         XCTAssertEqual(SeaStatusWords.key(kind: .blocked, connected: false, protectionBlocked: false,
                                             unknown: false, disconnecting: false),

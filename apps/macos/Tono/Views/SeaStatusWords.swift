@@ -4,8 +4,12 @@ enum SeaStatusWords {
     static func key(kind: MenuBarProtectionStatus.Kind, connected: Bool, protectionBlocked: Bool, unknown: Bool, disconnecting: Bool) -> String {
         if unknown { return "Protection status unconfirmed" }
         switch kind {
-        case .connected, .degraded:
+        case .connected:
             return connected ? "Connected" : "Not connected"
+        // The scene shows the failure dusk; the headline matches it without a
+        // protection claim, so it reads the same in every routing mode.
+        case .degraded:
+            return connected ? "Degraded" : "Not connected"
         case .standby: return "Not connected"
         case .connecting:
             return disconnecting ? "sea.status.disconnecting" : "sea.status.connecting"
