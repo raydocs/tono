@@ -14,10 +14,11 @@
 .tono-sea-backdrop[data-visible="true"] {
   opacity: 1;
 }
-/* Inner pages: the paused home scene stays as a dim, blurred horizon under the
+/* Inner pages: the home scene stays as a dim, blurred horizon under the
    ground gradient, so leaving Home does not drop into a flat dark page. The
    negative inset hides the blur's soft edge (a scale transform here made the
-   page text above it render soft); the scene is paused, so the blur is paid once. */
+   page text above it render soft). The scene keeps moving here, so the blur is
+   paid every frame; SeaScene's `blurred` mode draws the water at about 15 fps. */
 .tono-root[data-sea-dimmed="true"] .tono-sea-backdrop {
   inset: -24px;
   opacity: 0.7;
