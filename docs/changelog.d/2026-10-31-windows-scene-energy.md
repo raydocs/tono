@@ -1,6 +1,6 @@
 ## 2026-10-31 · Windows 海景能耗与状态修复
 - 归属：ops/UI 工作（[运维计划](../ops/plan-2026-09-11.md)），非发布门；Windows 前端 `apps/windows/app/src/tono-ui`。
-- 来源：基线 origin/main `372a4cc6c` → 分支 `fix/windows-scene-energy-20261031`，草稿 PR 待开；未合 main。
+- 来源：基线 origin/main `372a4cc6c` → 分支 `fix/windows-scene-energy-20261031`，草稿 PR #1813；未合 main。
 - 缺陷修复：
   - WIN-UI-07：失焦但可见的主窗口不再冻结海景，托盘连接时日出相位转换照常完成；仅页面隐藏时保持画面。
   - WIN-UI-10：GL 渲染器 dispose 释放 program/shader/buffer 和 context；处理 `webglcontextrestored`。
