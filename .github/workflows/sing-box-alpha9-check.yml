@@ -23,45 +23,6 @@ permissions:
   contents: read
 
 jobs:
-  # Capture: build every target with certify.py and upload the manifests so
-  # they are committed byte-for-byte from hosted CI, never from this MacBook.
-  manifests:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [linux-amd64-v2, darwin-arm64, windows-amd64-v2]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-        with:
-          go-version: "1.27.1"
-          cache: false
-      - name: Build ${{ matrix.target }} and print digests
-        run: |
-          set -eu
-          work=$(mktemp -d)
-          git init -q "$work/source"
-          git -C "$work/source" fetch -q --depth=1 https://github.com/SagerNet/sing-box \
-            824dbcfb4dd0a95921840b1737b950cde590241e
-          git -C "$work/source" checkout -q --detach FETCH_HEAD
-          export GOENV=off GOWORK=off GOTOOLCHAIN=local
-          export GOFLAGS=-mod=readonly GOTELEMETRY=off
-          go -C "$work/source" mod download
-          python3 tooling/scripts/sing-box/certify.py build \
-            --candidate tooling/scripts/sing-box/candidates/v1.15.0-alpha.13.json \
-            --source "$work/source" --go "$(command -v go)" \
-            --target "${{ matrix.target }}" --output "$work/out" | tee "$work/build.json"
-          mkdir -p captured
-          cp "$work/out/manifest.json" "captured/${{ matrix.target }}.json"
-          cp "$work/build.json" "captured/${{ matrix.target }}.build.json"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: sing-box-alpha13-manifest-${{ matrix.target }}
-          path: captured/
-          if-no-files-found: error
-
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

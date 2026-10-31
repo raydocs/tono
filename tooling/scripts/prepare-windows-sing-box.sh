@@ -39,7 +39,7 @@ sh "$repo/tooling/scripts/build-sing-box.sh" verify \
   --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.13.json" \
   --go "$work/go/bin/go" --target windows-amd64-v2 \
   --binary "$work/windows/sing-box.exe" --manifest "$work/windows/manifest.json" \
-  --manifest-sha256 16620ed7f66e99873f603939eb17b3a3cdda08600fca1a4f98c99fb4e4a9cdf2
-echo "4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7  $work/windows/sing-box.exe" | sha256sum -c -
+  --manifest-sha256 239a63d8768466eaba818bf8addc2156ea3e2a6e4dc756dda7c027b50c87923b
+echo "fe5037d8f113c94597df4e2c5b76aac797838e7f24f65655003f9d38d52509a1  $work/windows/sing-box.exe" | sha256sum -c -
 mkdir -p "$repo/apps/windows/app/src-tauri/sidecar"
 install -m 755 "$work/windows/sing-box.exe" "$repo/apps/windows/app/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe"

@@ -34,12 +34,12 @@ export const STABLE_EXTERNAL_BINS = Object.freeze([
 ])
 
 /**
- * Windows sing-box v1.15.0-alpha.12-tono-a12.1. Same pin as
- * tooling/scripts/sing-box/manifests/alpha12/windows-amd64-v2.json.
+ * Windows sing-box v1.15.0-alpha.13-tono-a13.1. Same pin as
+ * tooling/scripts/sing-box/manifests/alpha13/windows-amd64-v2.json.
  * A different digest is not this product's core.
  */
 export const WINDOWS_SING_BOX_SHA256 =
-  '4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7'
+  'fe5037d8f113c94597df4e2c5b76aac797838e7f24f65655003f9d38d52509a1'
 
 export const FORBIDDEN_PAYLOAD_NAME_PATTERNS = Object.freeze([
   /verge-mihomo/i,
@@ -662,7 +662,7 @@ export function validateNsisAutomaticUpgradeFlow(source) {
 /**
  * Keep the privileged helper and the NSIS staging contract in lockstep. A protocol-revision
  * upgrade is safe only when the stopped-Service transaction owns Service, Mihomo,
- * sing-box (when the alpha.12 pin is present) and the GUI. This source gate complements the helper's file-level unit tests;
+ * sing-box (when the alpha.13 pin is present) and the GUI. This source gate complements the helper's file-level unit tests;
  * it cannot replace an elevated failure-injection upgrade test on a Windows VM.
  *
  * @param {string} source service/src/bin/install_service.rs source
@@ -877,7 +877,7 @@ export function validateExternalBin(externalBin) {
 export function validateSingBoxDigest(digest) {
   const normalized = String(digest ?? '').trim().toLowerCase()
   if (normalized !== WINDOWS_SING_BOX_SHA256) {
-    return `sing-box digest ${normalized || '(empty)'} is not the pinned alpha.12 digest ${WINDOWS_SING_BOX_SHA256}`
+    return `sing-box digest ${normalized || '(empty)'} is not the pinned alpha.13 digest ${WINDOWS_SING_BOX_SHA256}`
   }
   return null
 }

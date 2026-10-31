@@ -228,7 +228,7 @@ class CertificationTests(unittest.TestCase):
         self.assertEqual(list(args.output.iterdir()), [])
 
     def test_side_candidate_manifest_does_not_claim_the_frozen_m0_pin(self):
-        candidate = json.loads((c.ROOT / "tooling/scripts/sing-box/candidates/v1.15.0-alpha.12.json").read_text())
+        candidate = json.loads((c.ROOT / "tooling/scripts/sing-box/candidates/v1.15.0-alpha.13.json").read_text())
         path = self.root / "candidate.json"
         path.write_text(json.dumps(candidate))
         args = SimpleNamespace(source=self.root / "source", go=Path("/trusted/go"),
@@ -244,24 +244,24 @@ class CertificationTests(unittest.TestCase):
                 patch.object(c, "command", side_effect=fake_command):
             result = c.build(args)
         manifest = json.loads((args.output / "manifest.json").read_text())
-        self.assertEqual(manifest["scope"], "v1.15.0-alpha.12-offline-not-installable")
-        self.assertEqual(manifest["contract_commit"], "25b0d5ea3e466d246c708ac0f20d0448110e566c")
-        self.assertEqual(manifest["source"]["commit"], "25b0d5ea3e466d246c708ac0f20d0448110e566c")
+        self.assertEqual(manifest["scope"], "v1.15.0-alpha.13-offline-not-installable")
+        self.assertEqual(manifest["contract_commit"], "824dbcfb4dd0a95921840b1737b950cde590241e")
+        self.assertEqual(manifest["source"]["commit"], "824dbcfb4dd0a95921840b1737b950cde590241e")
         self.assertNotEqual(manifest["candidate_sha256"], c.CANDIDATE_SHA)
         self.assertEqual(result["manifest_sha256"], hashlib.sha256((args.output / "manifest.json").read_bytes()).hexdigest())
         frozen = json.loads((c.M0 / "candidate.json").read_bytes())
         self.assertEqual(frozen["source"]["commit"], "93fff5954390367dd456cad3cbd79be54f8b941f")
         expected = {
-            "linux-amd64-v2": "0106597a0e3a4ae2ecaaf1105b8109bc33ec9d7779a28143304172f40ec5ca19",
-            "darwin-arm64": "a4e886fde02f76f2c7ed12d1d00bb6fe50346475e73a1d1a815952279319f3f5",
-            "windows-amd64-v2": "4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7",
+            "linux-amd64-v2": "e2220c166373f5d2733d4dba4a84331e8626847d7edda393ba7b2d72c1616fe6",
+            "darwin-arm64": "647fb45b72a32b1cd324665010baf5141dedb347b4dedc66e61fce73e5076dce",
+            "windows-amd64-v2": "fe5037d8f113c94597df4e2c5b76aac797838e7f24f65655003f9d38d52509a1",
         }
         for name, binary in expected.items():
-            manifest = json.loads((c.ROOT / "tooling/scripts/sing-box/manifests/alpha12" / f"{name}.json").read_text())
-            self.assertEqual(manifest["source"]["commit"], "25b0d5ea3e466d246c708ac0f20d0448110e566c")
+            manifest = json.loads((c.ROOT / "tooling/scripts/sing-box/manifests/alpha13" / f"{name}.json").read_text())
+            self.assertEqual(manifest["source"]["commit"], "824dbcfb4dd0a95921840b1737b950cde590241e")
             self.assertEqual(manifest["binary_sha256"], binary)
             self.assertEqual(manifest["build"]["go_version"], "go1.27.1")
-            self.assertEqual(manifest["scope"], "v1.15.0-alpha.12-offline-not-installable")
+            self.assertEqual(manifest["scope"], "v1.15.0-alpha.13-offline-not-installable")
 
 
 if __name__ == "__main__":

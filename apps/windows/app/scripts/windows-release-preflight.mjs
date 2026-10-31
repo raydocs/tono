@@ -326,7 +326,7 @@ const assertNsisSingBoxPin = (sevenZip, installer, entries) => {
     .toLowerCase()
   if (shippedPin !== WINDOWS_SING_BOX_SHA256) {
     fail(
-      `NSIS sing-box-sha256.txt (${shippedPin}) is not the pinned alpha.12 digest`,
+      `NSIS sing-box-sha256.txt (${shippedPin}) is not the pinned alpha.13 digest`,
     )
   }
   for (const name of ['tono-service.exe', 'tono-service-install.exe']) {

@@ -71,7 +71,7 @@ jobs:
     needs: branch
     uses: ./.github/workflows/windows-core.yml
 
-  # sing-box.exe is not in git (#1159). Rebuild the reviewed alpha.12 input from the
+  # sing-box.exe is not in git (#1159). Rebuild the reviewed alpha.13 input from the
   # pinned source; the script refuses any bytes but the pinned digest. Gated on
   # `branch` like pinned-core, so a wrong ref never starts it.
   sing-box-input:
@@ -236,9 +236,9 @@ jobs:
           Set-Content -LiteralPath ../app/src-tauri/resources/core-sha256.txt -Value "$coreSha256" -Encoding ascii
           $singBox = (Resolve-Path '../app/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe').Path
           $singBoxSha256 = (Get-FileHash -LiteralPath $singBox -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expectedSingBox = '4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7'
+          $expectedSingBox = 'fe5037d8f113c94597df4e2c5b76aac797838e7f24f65655003f9d38d52509a1'
           if ($singBoxSha256 -ne $expectedSingBox) {
-            throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.12 digest $expectedSingBox"
+            throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.13 digest $expectedSingBox"
           }
           $env:TONO_SING_BOX_SHA256 = $singBoxSha256
           "TONO_SING_BOX_SHA256=$singBoxSha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
