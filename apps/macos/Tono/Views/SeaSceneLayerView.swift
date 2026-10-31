@@ -36,6 +36,7 @@ final class SeaSceneNativeView: NSView {
     private var active = true
     private var probe = SeaSceneQualityProbe()
     private var qualityDisplayLink: CADisplayLink?
+    private var probeRetryTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
     private var lastSize = CGSize.zero
     private var lastBackingScale: CGFloat = 0
@@ -165,14 +166,18 @@ final class SeaSceneNativeView: NSView {
         let center = NotificationCenter.default
         if let window {
             for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
-                         NSWindow.didDeminiaturizeNotification] {
+                         NSWindow.didDeminiaturizeNotification, NSWindow.didBecomeKeyNotification,
+                         NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification,
+                         NSWindow.didResignMainNotification] {
                 observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                     Task { @MainActor [weak self] in self?.reconcileVisibility() }
                 })
             }
         }
         for name in [NSApplication.didHideNotification, NSApplication.didUnhideNotification,
-                     Notification.Name.NSProcessInfoPowerStateDidChange] {
+                     NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+                     Notification.Name.NSProcessInfoPowerStateDidChange,
+                     ProcessInfo.thermalStateDidChangeNotification] {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.reconcileVisibility() }
             })
@@ -202,7 +207,14 @@ final class SeaSceneNativeView: NSView {
 
     private var currentQuality: SeaSceneQuality {
         SeaSceneQuality.requested(preference, reduceMotion: reduced,
-            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, automatic: probe.quality)
+            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, automatic: probe.quality,
+            thermal: ProcessInfo.processInfo.thermalState)
+    }
+
+    /// The window the user is working in. An unfocused but visible window
+    /// keeps moving water, at `SeaWaterPace`'s lower rate.
+    private var focused: Bool {
+        NSApp.isActive && (window?.isKeyWindow == true || window?.isMainWindow == true)
     }
 
     private func updateQuality(_ quality: SeaSceneQuality) {
@@ -233,6 +245,8 @@ final class SeaSceneNativeView: NSView {
         CATransaction.setDisableActions(true)
         placeWater()
         CATransaction.commit()
+        water?.preferredFPS = SeaWaterPace.preferredFPS(focused: focused,
+                                                        thermal: ProcessInfo.processInfo.thermalState)
         if run, let water, !water.running {
             waterLastTick = nil
             water.start()
@@ -317,12 +331,28 @@ final class SeaSceneNativeView: NSView {
         if probe.complete {
             link.invalidate()
             qualityDisplayLink = nil
+            scheduleProbeRetry()
+        }
+    }
+
+    /// A downgrade measured during launch work gets one clean re-measure later;
+    /// it samples only while visible, like the first probe.
+    private func scheduleProbeRetry() {
+        guard probe.quality != .full, !probe.retried, probeRetryTask == nil else { return }
+        probeRetryTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(SeaSceneQualityProbe.retryDelay)) }
+            catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.probeRetryTask = nil
+            if self.probe.retry() { self.reconcileVisibility() }
         }
     }
 
     func stop() {
         resizeTask?.cancel()
         resizeTask = nil
+        probeRetryTask?.cancel()
+        probeRetryTask = nil
         qualityDisplayLink?.invalidate()
         qualityDisplayLink = nil
         water?.stop()

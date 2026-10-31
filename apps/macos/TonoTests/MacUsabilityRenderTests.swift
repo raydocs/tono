@@ -642,7 +642,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
         try await capture("menubar-sea-degraded", width: 300, height: 480,
                           annotate: false, darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
-                          nativeLabels: ["Connected", "Exit not responding — checking", "Open Tono"]) {
+                          nativeLabels: ["Degraded", "Exit not responding — checking", "Open Tono"]) {
             MenuBarView().modifier(SeaPageAppearance()).environment(app).environment(account)
         }
         XCTAssertEqual(MenuBarProtectionStatus(app).kind, .degraded)

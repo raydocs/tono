@@ -13,4 +13,10 @@ final class SeaBackdropDimTests: XCTestCase {
         XCTAssertEqual(SeaBackdropDim.resolve(home: false, reduceTransparency: true),
                        SeaBackdropDim(sceneOpacity: 0, sceneBlur: 0, groundOpacity: 1))
     }
+
+    func testOnlyABackdropThatHidesTheSceneEntirelyPausesIt() {
+        XCTAssertTrue(SeaBackdropDim.resolve(home: false, reduceTransparency: false).showsScene,
+                      "the dimmed horizon behind inner pages is seen and keeps moving")
+        XCTAssertFalse(SeaBackdropDim.resolve(home: false, reduceTransparency: true).showsScene)
+    }
 }
