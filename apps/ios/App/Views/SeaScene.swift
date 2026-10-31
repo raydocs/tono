@@ -21,7 +21,7 @@ struct SeaScene: View {
     /// while nothing is watching or the phone is saving power (`SceneAnimationPolicy`).
     private var paused: Bool {
         reduceMotion || SceneAnimationPolicy.paused(appActive: scenePhase == .active, sheetCovering: covered,
-                                                    lowPowerMode: energy.lowPowerMode, thermal: energy.thermal)
+                                                    lowPowerMode: energy.lowPowerMode, thermal: energy.thermalPolicy)
     }
 
     var body: some View {
@@ -46,6 +46,16 @@ final class SceneEnergy: ObservableObject {
     @Published private(set) var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
     @Published private(set) var thermal = ProcessInfo.processInfo.thermalState
     private var observers: [NSObjectProtocol] = []
+
+    var thermalPolicy: SceneAnimationPolicy.Thermal {
+        switch thermal {
+        case .nominal: return .nominal
+        case .fair: return .fair
+        case .serious: return .serious
+        case .critical: return .critical
+        @unknown default: return .critical
+        }
+    }
 
     private init() {
         let center = NotificationCenter.default

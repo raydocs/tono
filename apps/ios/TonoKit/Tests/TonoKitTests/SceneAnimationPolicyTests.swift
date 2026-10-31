@@ -4,7 +4,7 @@ import XCTest
 final class SceneAnimationPolicyTests: XCTestCase {
     func testSceneRunsInTheForegroundAndHoldsItsFrameWhenUnseenOrPowerIsShort() {
         func paused(active: Bool = true, sheet: Bool = false, lowPower: Bool = false,
-                    thermal: ProcessInfo.ThermalState = .nominal) -> Bool {
+                    thermal: SceneAnimationPolicy.Thermal = .nominal) -> Bool {
             SceneAnimationPolicy.paused(appActive: active, sheetCovering: sheet, lowPowerMode: lowPower, thermal: thermal)
         }
         XCTAssertFalse(paused())

@@ -5,8 +5,12 @@ import Foundation
 /// to spend less: the app is not active (Notification Center, app switcher), a sheet covers Home,
 /// Low Power Mode is on, or the system is under serious or critical thermal pressure.
 public enum SceneAnimationPolicy {
+    /// `ProcessInfo.ThermalState` as the policy reads it. Foundation on Linux, where TonoKit's tests
+    /// also run, has no thermal state, so the app maps the system value into this.
+    public enum Thermal: Sendable { case nominal, fair, serious, critical }
+
     public static func paused(appActive: Bool, sheetCovering: Bool, lowPowerMode: Bool,
-                              thermal: ProcessInfo.ThermalState) -> Bool {
+                              thermal: Thermal) -> Bool {
         if !appActive || sheetCovering || lowPowerMode { return true }
         return thermal == .serious || thermal == .critical
     }
