@@ -48,6 +48,13 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertLessThan(held.sunRise, SkyState(.connected).sunRise)
     }
 
+    func testConnectedStatusClaimsTheWholePhoneOnlyForARunningStableGraph() {
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: .stable, home: false), "status_protected")
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: .threeTier, home: false), "status_split")
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: .threeTier, home: true), "status_split_home")
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: nil, home: false), "status_split")
+    }
+
     func testEndedSessionShowsSignInWithItsReason() {
         let (phase, reason) = ConnectionState.derive(ConnectionFacts(signedIn: false, tunnel: .disconnected, failure: "SESSION_ENDED"))
         XCTAssertEqual(phase, .signedOut)
