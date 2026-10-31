@@ -1,0 +1,13 @@
+## 2026-10-31 · Android 海面场景省电与连接计时器
+- 归属：ops/UI 工作（[运维计划](../ops/plan-2026-09-11.md)，非发布门）；2026-10-31 四端 UI 审计；apps/android/mobile。
+- 来源：基线 origin/main 372a4cc6c → 分支 fix/android-scene-energy-20261031；草稿 PR；未合 main。
+- 缺陷修复：
+  - AND-UI-01：海面环境动画改由 `SceneAnimationPolicy` 决定：可见时照常全帧率；Activity 低于 STARTED 或热状态 CRITICAL 及以上时停住，停住显示与「减少动画」相同的静帧（漂移 0、呼吸满、星不闪），恢复从该帧接着走。
+  - AND-UI-M4：省电模式或热状态 SEVERE 时降到约 15 fps，漂移、闪烁、呼吸、水面仍在动；实时监听 `ACTION_POWER_SAVE_MODE_CHANGED` 与 `OnThermalStatusChangedListener`。玻璃模糊不降级（会让可见画面变差）。
+  - AND-UI-09：连接计时器只在 Activity 至少 STARTED 时每秒走一次（`repeatOnLifecycle`），停止时不再唤醒主线程，回到前台立即补正。
+- 未修（原因见 PR）：AND-UI-06（详情/线路/授权 Sheet 为内容高度、45–55% 遮罩，天空仍可见，按修正规则不算遮住）；AND-UI-08（macOS #1724 三层路由仍为「已保护」，与 iOS #1810「分流保护」不一致，需产品决定）。
+- 新增/优化：无；星空、倒影、水面动态与四档画质均保留。
+- 工程与测试：新增 `SceneAnimationPolicyTest`（纯 JVM）与 `ConnectedTimerTickTest`（Robolectric）各一条。
+- 验证：本机未运行 Gradle/模拟器，交由托管 CI（android-ci `:mobile:testDebugUnitTest`）。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：待实机确认省电/热状态下约 15 fps 的观感与功耗、回到前台无跳帧；前台常态未加 30 fps 上限。
