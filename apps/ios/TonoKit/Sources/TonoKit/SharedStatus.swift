@@ -134,6 +134,21 @@ public struct SharedStatus: Equatable, Sendable {
         return next
     }
 
+    /// Whether a tunnel write is worth a WidgetKit reload (a background extension's reloads count
+    /// against the widget budget). A change a reader can see reloads at once. A write that only
+    /// moves `beatAt` reloads once the reload before it is two heartbeats old, so a widget still
+    /// gets a newer `beatAt` well before `StatusSnapshot.freshFor` (15 min) turns it to "last known":
+    /// the reload comes at about 10 min, not 5. `lastReloadedBeat` is the `beatAt` the previous
+    /// reload went with (nil: this process has not reloaded yet).
+    public static func tunnelWriteNeedsReload(old: TunnelReport?, new: TunnelReport, lastReloadedBeat: Date?) -> Bool {
+        guard let old, let lastReloadedBeat else { return true }
+        var same = new
+        same.beatAt = old.beatAt
+        if same != old { return true }
+        let sinceReload = new.beatAt.timeIntervalSince(lastReloadedBeat)
+        return sinceReload < 0 || sinceReload >= 2 * StatusSnapshot.heartbeat - 60
+    }
+
     /// The app's write; the tunnel's report stays (the app can neither renew nor replace it).
     public func writingApp(_ note: AppNote) -> SharedStatus? {
         guard note != app else { return nil }

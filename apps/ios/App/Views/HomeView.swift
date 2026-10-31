@@ -28,7 +28,7 @@ struct HomeView: View {
     var body: some View {
         ZStack(alignment: .top) {
             TonoColor.night.ignoresSafeArea()
-            SeaScene(sky: sky, horizon: 0.42)
+            SeaScene(sky: sky, horizon: 0.42, covered: showLines || showDetails || showSettings || model.showVPNPrimer)
             // Legibility scrim behind the lower controls; the sea stays visible above it.
             // Large text pushes the controls up over the sky, so the scrim starts higher there.
             // At accessibility sizes the text sits on the sky itself, so the scrim is near-opaque there.
@@ -123,14 +123,14 @@ struct HomeView: View {
         }
     }
 
-    private var sky: SkyState { SkyState(model.phase, reason: model.reason) }
+    private var sky: SkyState { SkyState(model.phase, reason: model.reason, mode: model.mode) }
 
     /// The glass takes the colour of the sky above it: indigo at night, rose once the sun is up,
     /// ember when something is wrong.
     private var glassTint: Color {
         switch sky {
         case .night, .dawn: return TonoColor.glassTint
-        case .rising, .reconnecting, .day: return Color(hex: 0x5A2E52)
+        case .rising, .reconnecting, .day, .split: return Color(hex: 0x5A2E52)
         case .duskWarning, .ember: return Color(hex: 0x5A2A2C)
         }
     }
@@ -142,7 +142,7 @@ struct HomeView: View {
     private var reflection: (color: Color, x: CGFloat) {
         switch sky {
         case .night: return (TonoColor.moon.opacity(0.4), 0.81)
-        case .dawn, .rising, .reconnecting, .day: return (TonoColor.sunMid, 0.5)
+        case .dawn, .rising, .reconnecting, .day, .split: return (TonoColor.sunMid, 0.5)
         case .duskWarning, .ember: return (TonoColor.sunEdge.opacity(0.8), 0.5)
         }
     }
@@ -769,7 +769,8 @@ enum PhaseText {
             if m.offline { return L.t("status_offline") }
             let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map { L.isChinese ? region($0) : $0.uppercased() } : nil)
             if let home { return L.t("status_protected_home", home) }
-            return L.t("status_protected")
+            // Three-tier sends only AI and video through Tono; the rest goes direct.
+            return L.t(m.mode == .threeTier ? "status_split" : "status_protected")
         default: return nil
         }
     }

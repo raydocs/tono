@@ -1,0 +1,12 @@
+## 2026-10-31 · iOS 海面场景省电与三层路由首页文案
+- 归属：SHIP_PLAN 0.0.76 范围（2026-10-31 四端 UI 审计发现的性能/能耗/状态修复）；iOS App、PacketTunnel、TonoKit。
+- 来源：基线 origin/main 372a4cc6c → 分支 fix/ios-scene-energy-20261031；草稿 PR（待开）；未合 main。
+- 缺陷修复：
+  - IOS-UI-1：海面 30 Hz 重绘在应用非活跃、Sheet 遮住首页、低电量模式、热状态 serious/critical 时停在最后一帧；前台画面不变。
+  - IOS-UI-5：隧道心跳仍每次写文件，但仅可见内容变化或每隔一次心跳（约 10 分钟，早于 15 分钟 `freshFor`）才重载小组件/控制中心，重载约减半。
+  - IOS-UI-6：三层路由已连接时首页写「分流保护 · 其余直连」并使用低于满白天的天空；稳定模式不变。
+- 新增/优化：无；星空、云、流星、颗粒、水面、四档画质均保留。
+- 工程与测试：TonoKit 新增三条回归（SceneAnimationPolicyTests、SharedStatusTests、ConnectionStateTests 各一条）。
+- 验证：本机未运行 Swift/Xcode 测试，交由托管 CI。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：待实机确认低电量/热压力/Sheet 下的暂停与恢复、WidgetKit 预算、小组件 15 分钟内不变「未知」、三层路由首页截图；三层路由有家宽探测结果时仍显示「已保护 · AI 走家宽」。

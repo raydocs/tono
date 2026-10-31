@@ -32,13 +32,16 @@ public enum SkyState: Sendable {
     /// below a partly working tunnel (nothing is confirmed yet), never as high as a working one; the
     /// session clock and the light running down the reflection tell it apart from a first start.
     case night, dawn, rising, reconnecting, day, duskWarning, ember
+    /// Connected in Three-tier: the sun is up for what goes through Tono, but short of the full
+    /// day Stable paints, because the rest of the phone's traffic goes direct.
+    case split
 
-    public init(_ phase: Phase, reason: String? = nil) {
+    public init(_ phase: Phase, reason: String? = nil, mode: RoutingMode = .stable) {
         if phase == .connecting, reason == "NETWORK_CHANGED" { self = .reconnecting; return }
         switch phase {
         case .preparing, .disconnecting: self = .dawn
         case .connecting: self = .rising
-        case .connected: self = .day
+        case .connected: self = mode == .threeTier ? .split : .day
         case .degraded: self = .duskWarning
         case .failed: self = .ember
         case .signedOut, .idle, .needsPermission: self = .night
@@ -53,6 +56,7 @@ public enum SkyState: Sendable {
         case .rising: return 0.7
         case .reconnecting: return 0.66
         case .day: return 1
+        case .split: return 0.85
         case .duskWarning: return 0.72
         case .ember: return 0.28
         }
