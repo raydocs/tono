@@ -67,31 +67,32 @@ it('keeps its phase DOM and follows reduced-motion and visibility changes', () =
   })
 })
 
-it('holds the scene while another app has focus and resumes on return', () => {
+it('keeps a visible window that lost focus moving, so a tray connect still plays its phase change', () => {
   vi.stubGlobal('CSS', { supports: () => true })
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   }))
-  const focus = vi.mocked(document.hasFocus)
-  const { container } = render(<SeaScene phase="connected" />)
-  const scene = container.firstElementChild
-  expect(scene?.getAttribute('data-paused')).toBe('false')
+  const transition = {
+    transitionProperty: 'transform',
+    playState: 'running',
+    pause: vi.fn(),
+  }
+  const { container, rerender } = render(<SeaScene phase="idle" />)
+  const scene = container.firstElementChild as HTMLElement
+  scene.getAnimations = vi.fn(() => [transition] as unknown as Animation[])
 
-  focus.mockReturnValue(false)
+  // The tray flyout takes focus; the main window stays on screen.
+  vi.mocked(document.hasFocus).mockReturnValue(false)
   act(() => {
     window.dispatchEvent(new Event('blur'))
   })
-  expect(scene?.getAttribute('data-paused')).toBe('true')
-  // Held, not switched off: the same quality comes back with focus.
-  expect(scene?.getAttribute('data-motion')).toBe('ambient')
-
-  focus.mockReturnValue(true)
-  act(() => {
-    window.dispatchEvent(new Event('focus'))
-  })
-  expect(scene?.getAttribute('data-paused')).toBe('false')
+  rerender(<SeaScene phase="connected" />)
+  expect(scene.getAttribute('data-phase')).toBe('connected')
+  expect(scene.getAttribute('data-paused')).toBe('false')
+  expect(scene.getAttribute('data-motion')).toBe('ambient')
+  expect(transition.pause).not.toHaveBeenCalled()
 })
 
 it('freezes hidden phase transitions and resumes only live scene transitions', () => {
