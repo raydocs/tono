@@ -1,3 +1,3 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-UI-01 | 内页时整窗场景（含 Full 档 Metal 水面）仍在暗化模糊层下全速运行 | in-PR | PR_LINK | 中·已确认 | 只在场景被完全遮住时暂停（降低透明度时内页底色不透明，`SeaBackdropDim.showsScene`）；普通内页的暗化地平线仍可见，按设计继续运动，不冻结；模糊开销待 GPU trace |
+| MAC-UI-01 | 内页时整窗场景（含 Full 档 Metal 水面）仍在暗化模糊层下全速运行 | in-PR | [#1811](https://github.com/raydocs/tono/pull/1811) | 中·已确认 | 只在场景被完全遮住时暂停（降低透明度时内页底色不透明，`SeaBackdropDim.showsScene`）；普通内页的暗化地平线仍可见，按设计继续运动，不冻结；模糊开销待 GPU trace |

@@ -1,6 +1,6 @@
 ## 2026-10-31 · macOS 海景能耗与状态修复（MAC-UI-01/02/03/08、MAC-MISS-01）
 - 归属：ops 计划 [plan-2026-09-11](../ops/plan-2026-09-11.md) 的 UI 工作，不是发布门；仅 macOS（`apps/macos`）。
-- 来源：origin/main `372a4cc6c` → 分支 `fix/macos-scene-energy-20261031`，PR PR_LINK（草稿，未合 main）。
+- 来源：origin/main `372a4cc6c` → 分支 `fix/macos-scene-energy-20261031`，PR [#1811](https://github.com/raydocs/tono/pull/1811)（草稿，未合 main）。
 - 缺陷修复：
   - MAC-UI-08：连接降级时首页与菜单栏海景标题写 “Connected”，场景却是失败黄昏 → 标题改为已有键 “Degraded”（已降级），不含保护范围措辞，所有路由模式相同；未连接时仍写 “Not connected”。
   - MAC-MISS-01：Auto 探测在启动卡顿时降档后整个会话锁死 → 降档后 20 s 再测一次，只在可见时采样，干净结果恢复 Full（或 Static→Lite），重测只升不降。
