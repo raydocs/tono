@@ -195,13 +195,15 @@ private fun rememberSceneMotion(): SceneMotion {
         }
         ContextCompat.registerReceiver(context, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         val listener = PowerManager.OnThermalStatusChangedListener { thermal = SceneAnimationPolicy.thermalFrom(it) }
-        power.addThermalStatusListener(context.mainExecutor, listener)
+        // The platform throws when the thermal service refuses the listener; the scene then
+        // keeps the status read below and the power-save broadcast.
+        val listening = runCatching { power.addThermalStatusListener(context.mainExecutor, listener) }.isSuccess
         // A change between the first read and the registration above is not missed.
         powerSave = power.isPowerSaveMode
         thermal = SceneAnimationPolicy.thermalFrom(power.currentThermalStatus)
         onDispose {
             context.unregisterReceiver(receiver)
-            power.removeThermalStatusListener(listener)
+            if (listening) power.removeThermalStatusListener(listener)
         }
     }
     return SceneAnimationPolicy.motion(lifecycle.isAtLeast(Lifecycle.State.STARTED), powerSave, thermal)
