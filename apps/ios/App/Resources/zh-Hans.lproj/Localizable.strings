@@ -128,7 +128,8 @@
 "a11y_cancel_connect" = "取消连接";
 "action_disconnect" = "断开";
 "status_protected" = "已保护";
-"status_split" = "分流保护 · 其余直连";
+"status_split" = "分流保护 · 规则外流量直连";
+"status_split_home" = "分流保护 · AI 走家宽（%1$@）";
 "sentence_permission_short" = "首次使用需允许一次 VPN";
 "short_HOME_UNREACHABLE" = "家宽没响应 · AI 已暂停";
 "short_CLOUD_UNREACHABLE" = "云端没响应 · 命中流量已拦住";

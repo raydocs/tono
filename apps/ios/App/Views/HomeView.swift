@@ -28,7 +28,9 @@ struct HomeView: View {
     var body: some View {
         ZStack(alignment: .top) {
             TonoColor.night.ignoresSafeArea()
-            SeaScene(sky: sky, horizon: 0.42, covered: showLines || showDetails || showSettings || model.showVPNPrimer)
+            // Settings and the VPN primer open full height and hide the sea; Lines and Details open at half
+            // height with the sky still in view, so the scene keeps moving under them.
+            SeaScene(sky: sky, horizon: 0.42, covered: showSettings || model.showVPNPrimer)
             // Legibility scrim behind the lower controls; the sea stays visible above it.
             // Large text pushes the controls up over the sky, so the scrim starts higher there.
             // At accessibility sizes the text sits on the sky itself, so the scrim is near-opaque there.
@@ -123,14 +125,14 @@ struct HomeView: View {
         }
     }
 
-    private var sky: SkyState { SkyState(model.phase, reason: model.reason, mode: model.mode) }
+    private var sky: SkyState { SkyState(model.phase, reason: model.reason) }
 
     /// The glass takes the colour of the sky above it: indigo at night, rose once the sun is up,
     /// ember when something is wrong.
     private var glassTint: Color {
         switch sky {
         case .night, .dawn: return TonoColor.glassTint
-        case .rising, .reconnecting, .day, .split: return Color(hex: 0x5A2E52)
+        case .rising, .reconnecting, .day: return Color(hex: 0x5A2E52)
         case .duskWarning, .ember: return Color(hex: 0x5A2A2C)
         }
     }
@@ -142,7 +144,7 @@ struct HomeView: View {
     private var reflection: (color: Color, x: CGFloat) {
         switch sky {
         case .night: return (TonoColor.moon.opacity(0.4), 0.81)
-        case .dawn, .rising, .reconnecting, .day, .split: return (TonoColor.sunMid, 0.5)
+        case .dawn, .rising, .reconnecting, .day: return (TonoColor.sunMid, 0.5)
         case .duskWarning, .ember: return (TonoColor.sunEdge.opacity(0.8), 0.5)
         }
     }
@@ -768,9 +770,11 @@ enum PhaseText {
         case .connected, .degraded:
             if m.offline { return L.t("status_offline") }
             let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map { L.isChinese ? region($0) : $0.uppercased() } : nil)
-            if let home { return L.t("status_protected_home", home) }
-            // Three-tier sends only AI and video through Tono; the rest goes direct.
-            return L.t(m.mode == .threeTier ? "status_split" : "status_protected")
+            // The mode the tunnel runs, not the saved choice; nothing confirmed takes the narrower claim.
+            var running: RoutingMode?
+            if case .graph(let s)? = m.routing { running = s.mode }
+            let key = ConnectedStatusKey.key(runningMode: running, home: home != nil)
+            return home.map { L.t(key, $0) } ?? L.t(key)
         default: return nil
         }
     }

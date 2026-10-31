@@ -2,17 +2,16 @@ import XCTest
 @testable import TonoKit
 
 final class SceneAnimationPolicyTests: XCTestCase {
-    func testSceneRunsInTheForegroundAndHoldsItsFrameWhenUnseenOrPowerIsShort() {
-        func paused(active: Bool = true, sheet: Bool = false, lowPower: Bool = false,
-                    thermal: SceneAnimationPolicy.Thermal = .nominal) -> Bool {
-            SceneAnimationPolicy.paused(appActive: active, sheetCovering: sheet, lowPowerMode: lowPower, thermal: thermal)
+    func testSceneKeepsMovingWhileSeenAndHoldsStillOnlyWhenUnseenOrCritical() {
+        func interval(active: Bool = true, sheet: Bool = false, lowPower: Bool = false,
+                      thermal: SceneAnimationPolicy.Thermal = .nominal) -> Double? {
+            SceneAnimationPolicy.frameInterval(appActive: active, sheetCovering: sheet, lowPowerMode: lowPower, thermal: thermal)
         }
-        XCTAssertFalse(paused())
-        XCTAssertFalse(paused(thermal: .fair))
-        XCTAssertTrue(paused(active: false))
-        XCTAssertTrue(paused(sheet: true))
-        XCTAssertTrue(paused(lowPower: true))
-        XCTAssertTrue(paused(thermal: .serious))
-        XCTAssertTrue(paused(thermal: .critical))
+        XCTAssertEqual(interval(), 1.0 / 30)
+        XCTAssertEqual(interval(lowPower: true), 1.0 / 15)
+        XCTAssertEqual(interval(thermal: .serious), 1.0 / 15)
+        XCTAssertNil(interval(active: false))
+        XCTAssertNil(interval(sheet: true))
+        XCTAssertNil(interval(thermal: .critical))
     }
 }

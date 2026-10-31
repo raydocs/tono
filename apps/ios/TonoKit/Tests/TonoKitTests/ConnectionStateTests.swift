@@ -48,13 +48,11 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertLessThan(held.sunRise, SkyState(.connected).sunRise)
     }
 
-    func testConnectedThreeTierSkyStaysBelowTheStableFullDay() {
-        XCTAssertEqual(SkyState(.connected, mode: .stable), .day)
-        XCTAssertEqual(SkyState(.connected), .day)
-        let split = SkyState(.connected, mode: .threeTier)
-        XCTAssertEqual(split, .split)
-        XCTAssertLessThan(split.sunRise, SkyState.day.sunRise)
-        XCTAssertEqual(SkyState(.degraded, mode: .threeTier), .duskWarning)
+    func testConnectedStatusClaimsTheWholePhoneOnlyForARunningStableGraph() {
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: .stable, home: false), "status_protected")
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: .threeTier, home: false), "status_split")
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: .threeTier, home: true), "status_split_home")
+        XCTAssertEqual(ConnectedStatusKey.key(runningMode: nil, home: false), "status_split")
     }
 
     func testEndedSessionShowsSignInWithItsReason() {

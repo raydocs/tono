@@ -128,7 +128,8 @@
 "a11y_cancel_connect" = "Cancel connecting";
 "action_disconnect" = "Disconnect";
 "status_protected" = "Protected";
-"status_split" = "Split protection · rest direct";
+"status_split" = "Split protection · unmatched traffic direct";
+"status_split_home" = "Split protection · AI via Home (%1$@)";
 "sentence_permission_short" = "Allow the VPN once to start";
 "short_HOME_UNREACHABLE" = "Home not answering · AI paused";
 "short_CLOUD_UNREACHABLE" = "Cloud not answering · matched traffic held";

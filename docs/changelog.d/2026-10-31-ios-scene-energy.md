@@ -1,12 +1,12 @@
 ## 2026-10-31 · iOS 海面场景省电与三层路由首页文案
-- 归属：SHIP_PLAN 0.0.76 范围（2026-10-31 四端 UI 审计发现的性能/能耗/状态修复）；iOS App、PacketTunnel、TonoKit。
+- 归属：ops 计划（2026-10-31 四端 UI 审计发现的性能/能耗/状态修复，不是客户发布门）；iOS App、PacketTunnel、TonoKit。
 - 来源：基线 origin/main 372a4cc6c → 分支 fix/ios-scene-energy-20261031；草稿 PR #1810；未合 main。
 - 缺陷修复：
-  - IOS-UI-1：海面 30 Hz 重绘在应用非活跃、Sheet 遮住首页、低电量模式、热状态 serious/critical 时停在最后一帧；前台画面不变。
-  - IOS-UI-5：隧道心跳仍每次写文件，但仅可见内容变化或每隔一次心跳（约 10 分钟，早于 15 分钟 `freshFor`）才重载小组件/控制中心，重载约减半。
-  - IOS-UI-6：三层路由已连接时首页写「分流保护 · 其余直连」并使用低于满白天的天空；稳定模式不变。
-- 新增/优化：无；星空、云、流星、颗粒、水面、四档画质均保留。
-- 工程与测试：TonoKit 新增三条回归（SceneAnimationPolicyTests、SharedStatusTests、ConnectionStateTests 各一条）。
-- 验证：本机未运行 Swift/Xcode 测试，交由托管 CI。
+  - IOS-UI-1：海面重绘按 `SceneAnimationPolicy.frameInterval` 决定：前台可见时 30 Hz；低电量模式或热状态 serious 时降到 15 Hz，动效照常（星星闪烁、倒影波光、太阳呼吸都在动）；只在应用非活跃、全高 Sheet（设置、VPN 引导）遮住首页、热状态 critical 时停下，停下时画的是「减少动态效果」的静态帧（呼吸满、扫光不残留）。半高的线路、详情 Sheet 下天空仍可见，继续动。
+  - IOS-UI-5（缓解，未根治）：隧道心跳仍每次写文件，仅可见内容变化或距上次重载两个心跳时才重载小组件/控制中心，重载约减半。
+  - IOS-UI-6：已连接时首页状态行只在实际运行的是稳定模式时写「已保护」；三层路由写「分流保护 · 规则外流量直连」，有家宽时「分流保护 · AI 走家宽（地区）」；路由图未确认时用较窄的分流说法。读取的是隧道确认的 `routing`，不是保存的选择。天空高度不变（视觉改动留待原型确认）。
+- 新增/优化：无；iOS 场景元素（星空、太阳与光晕、月牙、海面渐变、地平线、倒影波光、重连扫光）全部保留。
+- 工程与测试：TonoKit 三条回归：SceneAnimationPolicyTests、ConnectionStateTests（状态文案键）、SharedStatusTests。三条都引用新符号，旧代码上只会编译失败，不构成红检查。
+- 验证：本机未运行 Swift/Xcode；Linux TonoKit 与 macOS iOS 构建交给托管 CI（草稿 PR 上 macOS iOS 构建会跳过，需要 dispatch ci-gate）。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：待实机确认低电量/热压力/Sheet 下的暂停与恢复、WidgetKit 预算、小组件 15 分钟内不变「未知」、三层路由首页截图；三层路由有家宽探测结果时仍显示「已保护 · AI 走家宽」。
+- 剩余限制：低电量/热压力下的帧率与电量、Sheet 开关与恢复、WidgetKit 预算都要实机确认；IOS-UI-5 仍超过 WidgetKit 常见日预算，见该发现。

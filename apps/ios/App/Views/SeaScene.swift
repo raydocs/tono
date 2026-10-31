@@ -11,29 +11,30 @@ struct SeaScene: View {
     var horizon: CGFloat = 0.44
     /// Off where text scrolls over the moon's place in the sky (sign-in at accessibility sizes).
     var moon = true
-    /// A sheet covers the scene (Home's Lines, Details, Settings and VPN primer): it holds its last frame.
+    /// A sheet hides the scene (Home's Settings and VPN primer): it holds a still frame.
     var covered = false
     @Environment(\.tonoReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var energy = SceneEnergy.shared
 
-    /// Not Reduce Motion: that renders the destination statically. This only stops the redraw loop
-    /// while nothing is watching or the phone is saving power (`SceneAnimationPolicy`).
-    private var paused: Bool {
-        reduceMotion || SceneAnimationPolicy.paused(appActive: scenePhase == .active, sheetCovering: covered,
-                                                    lowPowerMode: energy.lowPowerMode, thermal: energy.thermalPolicy)
+    /// Seconds between redraws, or nil to hold the still frame Reduce Motion draws
+    /// (`SceneAnimationPolicy`): nothing can see it, or the phone is at critical thermal pressure.
+    private var interval: Double? {
+        reduceMotion ? nil : SceneAnimationPolicy.frameInterval(appActive: scenePhase == .active, sheetCovering: covered,
+                                                                 lowPowerMode: energy.lowPowerMode, thermal: energy.thermalPolicy)
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused)) { timeline in
+        let still = interval == nil
+        TimelineView(.animation(minimumInterval: interval ?? 1.0 / 30, paused: still)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             SeaCanvas(sunRise: sky.sunRise, warn: sky.warning ? 1 : 0, horizon: horizon,
-                      drift: reduceMotion ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
-                      breath: [.dawn, .rising, .reconnecting].contains(sky) && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
-                      animateStars: !reduceMotion, moon: moon,
-                      scan: sky == .reconnecting && !reduceMotion ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
+                      drift: still ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
+                      breath: [.dawn, .rising, .reconnecting].contains(sky) && !still ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
+                      animateStars: !still, moon: moon,
+                      scan: sky == .reconnecting && !still ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
         }
-        .animation(reduceMotion ? nil : ([.day, .split].contains(sky) ? TonoMotion.arrival : TonoMotion.ambient), value: sky)
+        .animation(reduceMotion ? nil : (sky == .day ? TonoMotion.arrival : TonoMotion.ambient), value: sky)
         .accessibilityHidden(true)
         .ignoresSafeArea()
     }
