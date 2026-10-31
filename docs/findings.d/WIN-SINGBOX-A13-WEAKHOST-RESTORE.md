@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-SINGBOX-A13-WEAKHOST-RESTORE | sing-box alpha.13 的 sing-tun 在 Windows `auto_route` 下把其他网卡已开启的 weak host send 关掉，原值只存在核心内存里、只在 `NativeTun.Close()` 时恢复；Tono Service 用 `TerminateJobObject` 强杀核心（断开、替换、看门狗），恢复永远不执行，这些网卡的设置一直保持关闭，直到重启或网卡重置 | open | [#1809](https://github.com/raydocs/tono/pull/1809) | 中·推导 | 未发布：#1809 只把 macOS 升到 alpha.13，Windows 保持 alpha.12，所以客户不受影响。Windows 升级前须在 Service 里记录核心启动前的 weak host send 状态，并在任何方式的核心退出（断开、替换、崩溃）后恢复核心改过的项；源码推导，未实机复现 |
+
+依据：上游 [`tun_bind_windows.go`](https://github.com/SagerNet/sing-tun/blob/611d83b7a57b/tun_bind_windows.go)（`enforceInterfaceBinding` 关闭、`restoreWeakHostSend` 恢复）与 [`tun_windows.go` 的 `Close`](https://github.com/SagerNet/sing-tun/blob/611d83b7a57b/tun_windows.go#L676-L695)；Tono 停止路径 `apps/windows/service/src/core/manager.rs` 的 `kill_now` → `TerminateJobObject`。影响面：只涉及本来开着 weak host send 的网卡（IPv4 少见；IPv6 上 Teredo 会打开），以及依赖它的多宿主流量。不是泄漏，也不放宽 WFP。由 #1809 的独立审查（Codex gpt-6.1-sol xhigh）发现，主会话核对上游源码与 Tono 停止路径确认。

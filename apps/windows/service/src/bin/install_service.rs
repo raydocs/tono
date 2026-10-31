@@ -820,16 +820,16 @@ const SING_BOX_DIGEST_PIN_FILE_NAME: &str = "sing-box-sha256.txt";
 #[cfg(windows)]
 const SING_BOX_BINARY_NAME: &str = "sing-box.exe";
 
-/// Windows sing-box v1.15.0-alpha.13-tono-a13.1. The only digest this installer will publish.
+/// Windows sing-box v1.15.0-alpha.12-tono-a12.1. The only digest this installer will publish.
 const SING_BOX_ALPHA9_SHA256: &str =
-    "fe5037d8f113c94597df4e2c5b76aac797838e7f24f65655003f9d38d52509a1";
+    "4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7";
 
 fn admit_sing_box_pin(pin: Option<&str>) -> Result<Option<[u8; 32]>, Error> {
     let Some(value) = pin.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
     if !value.eq_ignore_ascii_case(SING_BOX_ALPHA9_SHA256) {
-        bail!("sing-box pin is not the Windows alpha.13 digest");
+        bail!("sing-box pin is not the Windows alpha.12 digest");
     }
     let mut digest = [0_u8; 32];
     for (index, slot) in digest.iter_mut().enumerate() {
@@ -872,7 +872,7 @@ fn publish_core_digest_pin(install_dir: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Write the alpha.13 pin beside the Service. The compile-time pin or the
+/// Write the alpha.12 pin beside the Service. The compile-time pin or the
 /// resource file is the source; a development build with neither writes nothing.
 #[cfg(windows)]
 fn publish_sing_box_digest_pin(install_dir: &Path) -> Result<(), Error> {
@@ -1121,7 +1121,7 @@ fn sing_box_release_pin() -> Result<Option<[u8; 32]>, Error> {
 
 /// Staged sing-box plus the pin file that must land beside it. Absent pin and
 /// absent staged image is a development build: the three-member transaction
-/// is unchanged. A staged image without the alpha.13 pin is refused.
+/// is unchanged. A staged image without the alpha.12 pin is refused.
 #[cfg(windows)]
 fn sing_box_replacement_candidates(app_root: &Path) -> Result<Vec<InstalledBinaryCandidate>, Error> {
     let pin = sing_box_release_pin()?;
@@ -1139,7 +1139,7 @@ fn sing_box_replacement_candidates(app_root: &Path) -> Result<Vec<InstalledBinar
     };
     let Some(pin) = pin else {
         if staged_present {
-            bail!("staged sing-box.exe.next has no alpha.13 digest pin");
+            bail!("staged sing-box.exe.next has no alpha.12 digest pin");
         }
         return Ok(Vec::new());
     };
@@ -1147,7 +1147,7 @@ fn sing_box_replacement_candidates(app_root: &Path) -> Result<Vec<InstalledBinar
         bail!("sing-box digest is pinned but sing-box.exe.next is missing");
     }
     if sha256(&staged)? != pin {
-        bail!("staged sing-box.exe.next does not match the pinned alpha.13 digest");
+        bail!("staged sing-box.exe.next does not match the pinned alpha.12 digest");
     }
     let introduced = match std::fs::symlink_metadata(&target) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
@@ -2502,7 +2502,7 @@ fn main() -> anyhow::Result<()> {
             .join(SING_BOX_BINARY_NAME);
         if sha256(&live).ok() != Some(pin) {
             bail!(
-                "installed sing-box.exe is missing or does not match the pinned alpha.13 digest"
+                "installed sing-box.exe is missing or does not match the pinned alpha.12 digest"
             );
         }
     }

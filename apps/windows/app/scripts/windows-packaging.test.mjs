@@ -1102,7 +1102,7 @@ test('Windows release stops when a native preflight command fails', () => {
   )
   assert.match(serviceBlock, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
   assert.match(serviceBlock, /\$env:TONO_SING_BOX_SHA256 = \$singBoxSha256/)
-  assert.match(serviceBlock, /fe5037d8f113c94597df4e2c5b76aac797838e7f24f65655003f9d38d52509a1/)
+  assert.match(serviceBlock, /4af4031d19e32f01f3c252dfab0bcfedc8bf650dbd8350fb44fb70d77233bea7/)
   assert.match(serviceBlock, /GITHUB_ENV/)
   assert.match(serviceBlock, /core-sha256\.txt/)
   assert.match(serviceBlock, /tono-service\.exe/)
@@ -1184,10 +1184,10 @@ test('leftover Verge sidecar names are refused', () => {
   )
 })
 
-test('sing-box digest accepts only the pinned alpha.13 bytes', () => {
+test('sing-box digest accepts only the pinned alpha.12 bytes', () => {
   assert.equal(validateSingBoxDigest(WINDOWS_SING_BOX_SHA256), null)
-  assert.match(validateSingBoxDigest('ab'.repeat(32)), /not the pinned alpha\.13/)
-  assert.match(validateSingBoxDigest(''), /not the pinned alpha\.13/)
+  assert.match(validateSingBoxDigest('ab'.repeat(32)), /not the pinned alpha\.12/)
+  assert.match(validateSingBoxDigest(''), /not the pinned alpha\.12/)
 })
 
 test('externalBin accepts only the stable sidecar and pinned sing-box', () => {
