@@ -1,6 +1,6 @@
 ## 2026-10-31 · iOS 海面场景省电与三层路由首页文案
 - 归属：SHIP_PLAN 0.0.76 范围（2026-10-31 四端 UI 审计发现的性能/能耗/状态修复）；iOS App、PacketTunnel、TonoKit。
-- 来源：基线 origin/main 372a4cc6c → 分支 fix/ios-scene-energy-20261031；草稿 PR（待开）；未合 main。
+- 来源：基线 origin/main 372a4cc6c → 分支 fix/ios-scene-energy-20261031；草稿 PR #1810；未合 main。
 - 缺陷修复：
   - IOS-UI-1：海面 30 Hz 重绘在应用非活跃、Sheet 遮住首页、低电量模式、热状态 serious/critical 时停在最后一帧；前台画面不变。
   - IOS-UI-5：隧道心跳仍每次写文件，但仅可见内容变化或每隔一次心跳（约 10 分钟，早于 15 分钟 `freshFor`）才重载小组件/控制中心，重载约减半。
