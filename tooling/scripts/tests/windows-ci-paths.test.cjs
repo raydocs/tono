@@ -174,7 +174,7 @@ test('Windows candidate build and installer smoke agree with the product version
 test('Windows packaging pnpm pins match the frozen application package manager', () => {
   const app = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8'))
   assert.match(app.packageManager, /^pnpm@/)
-  for (const name of ['windows-candidate.yml', 'windows-release.yml', 'desktop-update-sign.yml']) {
+  for (const name of ['windows-candidate.yml', 'windows-release.yml', 'desktop-update-sign.yml', 'windows-ci.yml']) {
     const workflow = load(readFileSync(path.join(root, '.github/workflows', name), 'utf8'))
     const setups = Object.values(workflow.jobs).flatMap(job => job.steps ?? [])
       .filter(step => step.uses?.startsWith('pnpm/action-setup@'))
@@ -182,6 +182,20 @@ test('Windows packaging pnpm pins match the frozen application package manager',
     for (const setup of setups) {
       assert.equal(setup.with?.version, app.packageManager.slice('pnpm@'.length).split('+')[0], name)
     }
+  }
+})
+
+test('Windows CI caches the pnpm store before install', () => {
+  for (const id of ['app', 'app-rust']) {
+    const steps = workflow.jobs[id].steps
+    const pnpmAt = steps.findIndex(step => step.uses?.startsWith('pnpm/action-setup@'))
+    const nodeAt = steps.findIndex(step =>
+      step.uses?.startsWith('actions/setup-node@') && step.with?.cache === 'pnpm')
+    assert.ok(pnpmAt >= 0, `${id} is missing pnpm/action-setup`)
+    assert.ok(nodeAt > pnpmAt, `${id} must install pnpm before setup-node cache`)
+    assert.equal(steps[nodeAt].with['cache-dependency-path'], 'apps/windows/app/pnpm-lock.yaml')
+    assert.ok(!steps.some(step => /npm install --global pnpm@/.test(step.run || '')),
+      `${id} must not install an uncached global pnpm`)
   }
 })
 

@@ -232,9 +232,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.26.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/windows/app/pnpm-lock.yaml
 
       - name: Cargo caches are rust-cache, saved only on main
         shell: bash
@@ -271,9 +277,6 @@ jobs:
           if (crates.length !== 3) throw new Error('expected 3 workspace crate caches, got ' + crates.length)
           console.log('rust-cache: 3 jobs cache workspace crates, save on main push only; nextest is tono-core only')
           NODE
-
-      - name: Install pnpm as the project pins it
-        run: npm install --global pnpm@11.3.0
 
       - name: Install exactly what the lockfile pins
         run: pnpm install --frozen-lockfile
@@ -327,12 +330,15 @@ jobs:
         run: |
           echo "Cargo cache (windows-app-rust): cache-hit=${{ steps.rust-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.26.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
-
-      - name: Install pnpm as the project pins it
-        run: npm install --global pnpm@11.3.0
+          cache: pnpm
+          cache-dependency-path: apps/windows/app/pnpm-lock.yaml
 
       - name: Install exactly what the lockfile pins
         working-directory: apps/windows/app
