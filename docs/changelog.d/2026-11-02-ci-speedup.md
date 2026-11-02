@@ -1,0 +1,22 @@
+## 2026-11-02 · CI：缩短 PR 门墙钟
+
+- 归属：工程流程（CI 提速），不属于 SHIP_PLAN 门或运维计划条目。不改产品、签名或发布工作流。必选检查名仍是 `ci-gate`，path filter + `workflow_call` 结构不变。
+- 来源：main `372a4cc6c` → 分支 `cursor/ci-speedup-00f4`。未合 main。
+- 缺陷修复：无。
+- 新增/优化：
+  - `ci-gate` 的 `changes` 改为 `fetch-depth: 1`。`ci-gate-changes.mjs` 本就会对缺失的 base SHA 做 `--depth=1` fetch；全量历史没有读者。
+  - `windows-ci` 的 `app` / `app-rust` 用 `pnpm/action-setup`（`packageManager` 的 11.26.0）+ `setup-node` `cache: pnpm`。原先 `npm install -g pnpm@11.3.0` 既不缓存 store，也不是冻结的 pin。
+  - `macos / unit-tests` 打开 `-parallel-testing-enabled YES`（最多 4 个 worker），并关掉 `COMPILER_INDEX_STORE_ENABLE`。不拆 matrix：每条腿会再编一次 Debug，再占一个 `macos-26` 名额。
+  - `screenshots-nightly` 在同一 SHA 已有成功 run 时跳过（只对 `schedule`；dispatch / 重录基线照跑；API 失败 fail-closed）。
+  - `services-ci` 的 e2e 和 nightly 的 Playwright 作业按 `package-lock.json` 缓存浏览器；命中后 Linux 仍装 OS deps。没有 `restore-keys`。
+  - `dependency-audit`、`sing-box-alpha9-check`、`ops-console-baseline-reminder` 加 per-ref concurrency。被 `ci-gate` 调用的 sing-box 工作流对 `workflow_call` / `merge_group` 不取消，与其他成员一致。
+- 工程与测试：为 shallow clone、pnpm cache、parallel xcodebuild、nightly skip、Playwright cache、concurrency 各加了守护断言。
+- 验证：Linux `node --test` 跑 `ci-gate-changes`（9/9）、`windows-ci-paths`（15/15，临时装 js-yaml）、`macos-ci-skip-duplicate`、`screenshot-nightly-split`、`screenshots-nightly-skip`。`actionlint` v1.7.8 对整个 `.github/workflows` 通过。托管 CI 待本 PR。未执行：Windows `cargo test`、`xcodebuild`（本机无对应工具链）。
+- 候选/发布：无新包。
+- 剩余限制：
+  - 未改 rust-cache：2026-10-13 已用 `Swatinem/rust-cache` 且 `cache-workspace-crates: true`；只缓存依赖时 Tauri 重编到 11 分钟。
+  - 未把 Tauri 套件改成 nextest：每个测试一个进程会重载 Tauri harness，而现在的 `cargo test` 已在进程内并行。
+  - `windows-ci` ~466 行的 `cargo test` 不是重复：生命周期套件带 `test` feature，原生 DNS 编排必须不带它。
+  - 未改 e2e 分片，也未打开 `fail-fast`（e2e 分片是同一套 spec；Android emulator 的 system/tunnel/ui 是不同测试，关 fail-fast 才看得到各片信号）。
+  - 审计里 `changes` P90 排队约 55 分钟：仓库 ruleset 没有 merge queue 规则（只有必选 `ci-gate` + merge commit）；`changes` 跑在 `ubuntu-24.04` 且无 `needs`，不是 macOS runner 并发上限。更像是样本里叠了并行 agent dispatch / 账户并发打满后的极端值。macOS 排队仍然存在：一次 macOS PR 会占最多 4 个 `macos-26` 名额。
+  - 审计「3,077 min/month rerun waste」按要求忽略（从单次 rerun 外推）。
