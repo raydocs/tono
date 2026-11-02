@@ -256,6 +256,10 @@ jobs:
       # here and the only-testing list there are held equal by
       # tooling/scripts/tests/screenshot-nightly-split.test.mjs. macos-release.yml
       # still runs the whole target, captures included.
+      #
+      # Parallelize XCTest classes on this Mac. A job matrix would rebuild
+      # Debug on every leg and take another macos-26 slot; hosted macOS
+      # concurrency already queues these jobs. The index store is unused here.
       - name: Run the TonoTests unit tests
         env:
           TEST_RUNNER_TONO_EMIT_SINGBOX: ${{ runner.temp }}/sing-box-product.json
@@ -271,8 +275,11 @@ jobs:
             -skip-testing:TonoTests/MacSeaPolishRenderTests/testFullTransitionsWaterAndProcessCPU \
             -skip-testing:TonoTests/MacSeaPolishRenderTests/testSharedControlSurfacesAndAccessibilityVariants \
             -skip-testing:TonoTests/MacSeaPolishRenderTests/testNativeResizeCoverageBeforeAndAfterCachedTreeRebuild \
+            -parallel-testing-enabled YES \
+            -maximum-parallel-testing-workers 4 \
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             test
 
       - name: Require the shared update contract XCTest to execute

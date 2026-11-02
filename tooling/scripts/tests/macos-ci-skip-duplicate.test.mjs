@@ -144,3 +144,13 @@ test('a path-skipped or partial suite is not a prior pass', () => {
     ...passedChecks().filter((check) => check.name !== 'unit-tests'),
   ], ''), false)
 })
+
+test('TonoTests run with xcodebuild parallel testing on one Mac', () => {
+  const at = workflow.indexOf('\n  unit-tests:\n')
+  assert.ok(at > 0)
+  const body = workflow.slice(at, workflow.indexOf('\n  policy-tests:\n', at))
+  assert.match(body, /-parallel-testing-enabled YES/)
+  assert.match(body, /-maximum-parallel-testing-workers 4/)
+  assert.match(body, /COMPILER_INDEX_STORE_ENABLE=NO/)
+  assert.doesNotMatch(body, /strategy:\n {6}matrix:/)
+})
