@@ -152,6 +152,8 @@ jobs:
     if: ${{ !inputs.update_baselines && needs.skip-duplicate.result == 'success' && needs.skip-duplicate.outputs.skip != 'true' }}
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
     strategy:
       fail-fast: false
       matrix:
@@ -169,7 +171,15 @@ jobs:
       - name: Install exactly what the lockfile pins
         run: npm ci
 
+      - name: Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ github.workspace }}/.ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('services/ops-console/package-lock.json') }}
+
       - name: Install Playwright's Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
 
       - name: Screenshot baselines compared
@@ -191,6 +201,8 @@ jobs:
     if: ${{ inputs.update_baselines }}
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
     defaults:
       run:
         working-directory: services/ops-console
@@ -204,7 +216,15 @@ jobs:
       - name: Install exactly what the lockfile pins
         run: npm ci
 
+      - name: Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ github.workspace }}/.ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('services/ops-console/package-lock.json') }}
+
       - name: Install Playwright's Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
 
       - name: Screenshot baselines re-recorded

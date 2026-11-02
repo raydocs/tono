@@ -497,7 +497,11 @@ jobs:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
     strategy:
+      # Same specs, split for wall-clock. Keep fail-fast off so a red
+      # shard still reports which siblings would fail.
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
@@ -514,8 +518,20 @@ jobs:
       - name: Install exactly what the lockfile pins
         run: npm ci
 
+      - name: Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ github.workspace }}/.ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('services/ops-console/package-lock.json') }}
+
       - name: Install Playwright's Chromium and its OS deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Functional assertions only
         # Screenshot baselines were captured on macOS at DPR 2; Linux fonts
