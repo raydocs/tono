@@ -31,9 +31,12 @@ jobs:
       connect_bench: ${{ steps.filter.outputs.connect_bench }}
       ios: ${{ steps.filter.outputs.ios }}
     steps:
+      # Path detection diffs this checkout (PR merge commit or merge-group
+      # head) against the event base SHA. A full clone is unnecessary:
+      # ci-gate-changes.mjs fetches a missing SHA with --depth=1.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24

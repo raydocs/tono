@@ -231,6 +231,9 @@ test('merge_group diffs its base and head SHAs', () => {
 test('pull_request triggering moved into ci-gate', () => {
   const gate = workflow('ci-gate.yml')
   assert.match(gate, /^on:\n {2}pull_request:\n {2}merge_group:\n {4}types: \[checks_requested\]\n {2}workflow_dispatch:\n/m)
+  const changesCheckout = gate.match(/jobs:\n {2}changes:\n[\s\S]*?uses: actions\/checkout@[0-9a-f]+\n {8}with:\n {10}fetch-depth: (\d+)/)
+  assert.equal(changesCheckout?.[1], '1', 'changes should shallow-clone; detect() fetches a missing base')
+  assert.match(readFileSync(path.join(root, 'tooling/scripts/ci-gate-changes.mjs'), 'utf8'), /fetch', '--no-tags', '--depth=1', 'origin'/)
   assert.match(gate, /^ {2}ci-gate:\n {4}name: ci-gate\n {4}needs: \[changes, macos, windows, services, sing_box, connect_bench, ios\]\n {4}if: always\(\)/m)
   assert.match(gate, /uses: \.\/\.github\/workflows\/macos-ci\.yml/)
   assert.match(gate, /uses: \.\/\.github\/workflows\/windows-ci\.yml/)
