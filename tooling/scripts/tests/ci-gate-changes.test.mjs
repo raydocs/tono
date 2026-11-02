@@ -246,18 +246,16 @@ test('pull_request triggering moved into ci-gate', () => {
   assert.match(workflow('services-ci.yml'), /python3 services\/exit-agent\/test_systemd_cadence\.py/)
   assert.match(gate, /cancel-in-progress: \$\{\{ github\.event_name != 'merge_group' \}\}/)
   const keepCancel = "cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}"
-  for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'ios-ci.yml']) {
+  for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'ios-ci.yml', 'sing-box-alpha9-check.yml']) {
     const yaml = workflow(name)
     assert.doesNotMatch(yaml, /^ {2}pull_request:/m)
     assert.match(yaml, /^ {2}workflow_call:/m)
     assert.ok(yaml.includes(keepCancel), name)
   }
-  for (const name of ['sing-box-alpha9-check.yml', 'connect-bench.yml']) {
-    const yaml = workflow(name)
-    assert.doesNotMatch(yaml, /^ {2}pull_request:/m)
-    assert.match(yaml, /^ {2}workflow_call:/m)
-    assert.doesNotMatch(yaml, /cancel-in-progress:/)
-  }
+  const bench = workflow('connect-bench.yml')
+  assert.doesNotMatch(bench, /^ {2}pull_request:/m)
+  assert.match(bench, /^ {2}workflow_call:/m)
+  assert.doesNotMatch(bench, /cancel-in-progress:/)
   const pushBranches = 'push:\n    branches:\n      - main\n      - release/macos\n      - release/windows\n'
   for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'sing-box-alpha9-check.yml']) {
     assert.ok(workflow(name).includes(pushBranches), name)
@@ -269,6 +267,8 @@ test('pull_request triggering moved into ci-gate', () => {
   assert.match(workflow('connect-bench.yml'), /^ {2}workflow_dispatch:/m)
   assert.doesNotMatch(workflow('connect-bench.yml'), /^ {2}push:/m)
   assert.doesNotMatch(workflow('sing-box-alpha9-check.yml'), /^ {2}workflow_dispatch:/m)
+  assert.match(workflow('dependency-audit.yml'), /^concurrency:\n {2}group: dependency-audit-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: true\n/m)
+  assert.match(workflow('ops-console-baseline-reminder.yml'), /^concurrency:\n {2}group: ops-console-baseline-reminder-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: true\n/m)
 })
 
 test('aggregate command passes a docs-only skip and fails a cancelled job', () => {

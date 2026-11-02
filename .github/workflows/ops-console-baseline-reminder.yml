@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ops-console-baseline-reminder-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   remind:
     runs-on: ubuntu-24.04
