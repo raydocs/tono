@@ -524,7 +524,10 @@ nonisolated enum HelperProtocolVersion {
     ///   shared anti-leak rows (DoT 853, STUN including IPv6, overseas UDP,
     ///   Home aux, and X suffixes with `grok.x.com` still on Home). An older
     ///   daemon keeps the previous graph.
-    static let current = "4.52.68"
+    /// - 4.52.68 → 4.52.69: the AI Home graph pairs each Home TCP route with
+    ///   its UDP reject, and its DNS matches three-tier apart from the mode's
+    ///   tags. An older daemon keeps the previous AI Home graph.
+    static let current = "4.52.69"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

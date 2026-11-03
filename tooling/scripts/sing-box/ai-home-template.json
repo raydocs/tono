@@ -110,6 +110,15 @@
           "outbound": "$home_target"
         },
         {
+          "network": [
+            "udp",
+            "icmp"
+          ],
+          "ip_cidr": "$home_cidrs",
+          "action": "reject",
+          "no_drop": true
+        },
+        {
           "network": "tcp",
           "domain_suffix": "$mobile_home_aux",
           "action": "resolve",
@@ -128,15 +137,6 @@
             "icmp"
           ],
           "domain_suffix": "$mobile_home_aux",
-          "action": "reject",
-          "no_drop": true
-        },
-        {
-          "network": [
-            "udp",
-            "icmp"
-          ],
-          "ip_cidr": "$home_cidrs",
           "action": "reject",
           "no_drop": true
         },
@@ -364,12 +364,40 @@
             "Tono-Mixed"
           ],
           "query_type": [
+            "HTTPS",
+            "SVCB"
+          ],
+          "domain_suffix": "$video_suffixes",
+          "action": "predefined",
+          "rcode": "NOERROR"
+        },
+        {
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
             "A"
           ],
           "domain_suffix": "$home_suffixes",
           "action": "route",
           "server": "Tono-FakeIP",
           "rewrite_ttl": 30
+        },
+        {
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "HTTPS",
+            "SVCB"
+          ],
+          "domain_suffix": "$home_suffixes",
+          "action": "predefined",
+          "rcode": "NOERROR"
         },
         {
           "inbound": [
@@ -406,62 +434,81 @@
             "Tono-Mixed"
           ],
           "query_type": [
-            "A"
+            "HTTPS",
+            "SVCB"
           ],
-          "action": "route",
-          "server": "Tono-FakeIP",
-          "rewrite_ttl": 30
-        },
-        {
-          "inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"],
-          "query_type": ["HTTPS", "SVCB"],
-          "domain_suffix": "$video_suffixes",
-          "action": "predefined",
-          "rcode": "NOERROR"
-        },
-        {
-          "inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"],
-          "query_type": ["HTTPS", "SVCB"],
-          "domain_suffix": "$home_suffixes",
-          "action": "predefined",
-          "rcode": "NOERROR"
-        },
-        {
-          "inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"],
-          "query_type": ["HTTPS", "SVCB"],
           "domain": "$overseas_full",
           "action": "predefined",
           "rcode": "NOERROR"
         },
         {
-          "inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"],
-          "query_type": ["A"],
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "A"
+          ],
           "domain_suffix": "$mobile_home_aux",
           "action": "route",
           "server": "Tono-FakeIP",
           "rewrite_ttl": 30
         },
         {
-          "inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"],
-          "query_type": ["HTTPS", "SVCB"],
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "HTTPS",
+            "SVCB"
+          ],
           "domain_suffix": "$mobile_home_aux",
           "action": "predefined",
           "rcode": "NOERROR"
         },
         {
-          "inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"],
-          "query_type": ["A"],
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "A"
+          ],
           "domain_suffix": "$cloud_exit_suffixes",
           "action": "route",
           "server": "Tono-FakeIP",
           "rewrite_ttl": 30
         },
         {
-          "inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"],
-          "query_type": ["HTTPS", "SVCB"],
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "HTTPS",
+            "SVCB"
+          ],
           "domain_suffix": "$cloud_exit_suffixes",
           "action": "predefined",
           "rcode": "NOERROR"
+        },
+        {
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "A"
+          ],
+          "action": "route",
+          "server": "Tono-FakeIP",
+          "rewrite_ttl": 30
         },
         {
           "domain_suffix": "$video_suffixes",

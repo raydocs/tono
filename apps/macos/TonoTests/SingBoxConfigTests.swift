@@ -719,7 +719,8 @@ final class SingBoxConfigTests: XCTestCase {
                            && $0["ip_cidr"] == nil && $0["domain"] == nil },
                        "ordinary UDP is not refused")
         let homeRoutes = rules.indices.filter { rules[$0]["outbound"] as? String == "Tono-Home-Residential" }
-        XCTAssertEqual(homeRoutes.count, 4)
+        // Suffixes, Home CIDR, auxiliary Home suffixes, then the two late CIDR rechecks.
+        XCTAssertEqual(homeRoutes.count, 5)
         for index in homeRoutes {
             let rule = rules[index]
             XCTAssertEqual(rule["network"] as? String, "tcp")
@@ -915,9 +916,11 @@ final class SingBoxConfigTests: XCTestCase {
         // the refusal stays a reset however many connections retry at once.
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: replacement) as? [String: Any])
         let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
-        XCTAssertEqual(rules[2] as NSDictionary,
-                       ["ip_cidr": ["198.18.128.0/17", "198.18.16.0/20"], "action": "reject",
-                        "no_drop": true] as NSDictionary)
+        let fakeIP: NSDictionary = ["ip_cidr": ["198.18.128.0/17", "198.18.16.0/20"], "action": "reject",
+                                    "no_drop": true]
+        let index = try XCTUnwrap(rules.firstIndex { NSDictionary(dictionary: $0).isEqual(fakeIP) })
+        XCTAssertFalse(rules[..<index].contains { $0["outbound"] != nil },
+                       "the cached range is refused before a home, DIRECT or exit rule can dial it")
     }
 
     /// The full reload skips the Core restart when the document it wrote is the

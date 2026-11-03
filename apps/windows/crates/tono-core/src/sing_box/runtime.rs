@@ -1096,13 +1096,16 @@ mod tests {
         // before a home, DIRECT or exit rule can dial it, and so is one cached from a build
         // that still used the old pool. `no_drop`: the refusal stays a reset however many
         // connections retry at once.
-        assert_eq!(
-            replaced["route"]["rules"][3],
-            json!({
-                "ip_cidr": [SING_BOX_FAKE_IPV4, "198.18.16.0/20"],
-                "action": "reject",
-                "no_drop": true
-            })
+        let rules = replaced["route"]["rules"].as_array().unwrap();
+        let fake_ip = json!({
+            "ip_cidr": [SING_BOX_FAKE_IPV4, "198.18.16.0/20"],
+            "action": "reject",
+            "no_drop": true
+        });
+        let index = rules.iter().position(|rule| rule == &fake_ip).expect("fake-ip reject");
+        assert!(
+            rules[..index].iter().all(|rule| rule.get("outbound").is_none()),
+            "the cached range is refused before a home, DIRECT or exit rule can dial it"
         );
     }
 
@@ -1128,18 +1131,21 @@ mod tests {
         assert_eq!(servers[2]["detour"], "Tono-Exit");
         assert_eq!(servers[2]["tls"]["alpn"], json!(["h2"]));
         let rules = value["dns"]["rules"].as_array().unwrap();
-        assert_eq!(rules[1]["rewrite_ttl"], 30);
-        assert_eq!(rules[1]["server"], "Tono-FakeIP");
-        assert_eq!(rules[2]["action"], "evaluate");
-        assert_eq!(rules[2]["server"], "Tono-DoH");
-        assert_eq!(rules[2].get("race"), None);
-        assert_eq!(rules[3]["match_response"], "primary");
-        assert_eq!(rules[3]["response_rcode"], "NOERROR");
-        assert_eq!(rules[3]["action"], "respond");
-        assert_eq!(rules[4]["server"], "Tono-DoH-Backup");
-        assert_eq!(rules[4]["action"], "evaluate");
-        assert_eq!(rules[5]["match_response"], "backup");
-        assert_eq!(rules[5]["action"], "respond");
+        assert_eq!(rules[1]["query_type"], json!(["HTTPS", "SVCB"]));
+        assert_eq!(rules[1]["action"], "predefined");
+        assert_eq!(rules[1]["rcode"], "NOERROR");
+        assert_eq!(rules[2]["rewrite_ttl"], 30);
+        assert_eq!(rules[2]["server"], "Tono-FakeIP");
+        assert_eq!(rules[3]["action"], "evaluate");
+        assert_eq!(rules[3]["server"], "Tono-DoH");
+        assert_eq!(rules[3].get("race"), None);
+        assert_eq!(rules[4]["match_response"], "primary");
+        assert_eq!(rules[4]["response_rcode"], "NOERROR");
+        assert_eq!(rules[4]["action"], "respond");
+        assert_eq!(rules[5]["server"], "Tono-DoH-Backup");
+        assert_eq!(rules[5]["action"], "evaluate");
+        assert_eq!(rules[6]["match_response"], "backup");
+        assert_eq!(rules[6]["action"], "respond");
         assert!(rules.iter().all(|rule| rule.get("race").is_none()));
         let primary = rules
             .iter()
