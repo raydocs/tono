@@ -4,7 +4,7 @@
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
-import { CLIENT_PLATFORMS, clientIdentity, hy2AcceptHeaderForClient, recordClient, requireClientPlatformField } from '../src/client-identity';
+import { CLIENT_PLATFORMS, acceptedClientBody, clientIdentity, hy2AcceptHeaderForClient, recordClient, requireClientPlatformField } from '../src/client-identity';
 import type { Env } from '../src/env';
 
 const db = () => (env as unknown as Env).DB;
@@ -62,6 +62,8 @@ it('0103 lets the device row hold android and ios and still refuses anything els
   expect(clientIdentity(new Request('https://api.example.com/v1/exit-catalog?client_platform=linux'))).toBeNull();
   expect(clientIdentity(fieldReq, { client_platform: 'Android' })).toEqual({ platform: 'android', version: null });
 
+  expect(acceptedClientBody({ client_platform: 'ios' })).toEqual({ client_platform: 'ios' });
+  expect(() => acceptedClientBody({ client_platform: 'linux' })).toThrow(ApiError);
   expect(() => requireClientPlatformField(undefined)).not.toThrow();
   expect(() => requireClientPlatformField('ios')).not.toThrow();
   expect(() => requireClientPlatformField('linux')).toThrow(ApiError);

@@ -25,6 +25,12 @@ export function requireClientPlatformField(value: unknown): void {
   }
 }
 
+/** Same check, returning the body so a route can stay on one line. */
+export function acceptedClientBody(body: Row): Row {
+  requireClientPlatformField(body.client_platform);
+  return body;
+}
+
 /**
  * `X-Tono-Client: <macos|windows|android|ios>/<version>` wins when it is present.
  * Otherwise a JSON or query `client_platform` is used. `client_version` is optional;
