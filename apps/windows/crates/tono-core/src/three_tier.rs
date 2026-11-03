@@ -48,7 +48,16 @@ pub fn graph(home: &str, interface: &str, fake_range: &str) -> Result<Value, Str
         "$home_target": home, "$physical_interface": interface, "$fake_ipv4_range": fake_range,
         "$home_suffixes": CLAUDE_HOME_DOMAINS.as_slice(), "$home_cidrs": CLAUDE_HOME_IPV4_CIDRS.as_slice(),
         "$video_suffixes": CLOUD_VIDEO_DOMAINS.as_slice(),
-        "$domestic_full": snapshot["domestic_full"], "$overseas_full": snapshot["overseas_full"]
+        "$domestic_full": snapshot["domestic_full"], "$overseas_full": snapshot["overseas_full"],
+        "$encrypted_dns_ports": ENCRYPTED_DNS_PORTS.as_slice(),
+        "$stun_udp_ports": STUN_UDP_PORTS.as_slice(),
+        "$public_stun_suffixes": PUBLIC_STUN_SUFFIXES.as_slice(),
+        "$overseas_udp_reject_ipv4": OVERSEAS_UDP_REJECT_IPV4_CIDRS.as_slice(),
+        "$overseas_udp_reject_ipv6": OVERSEAS_UDP_REJECT_IPV6_CIDRS.as_slice(),
+        "$mobile_home_aux": MOBILE_HOME_AUX_SUFFIXES.as_slice(),
+        "$cloud_exit_suffixes": cloud_exit_suffixes(),
+        "$cloud_ipv4": CLOUD_IPV4_CIDRS.as_slice(),
+        "$cloud_ipv6": CLOUD_IPV6_CIDRS.as_slice(),
     });
     fn render(value: &Value, replacements: &Value) -> Value {
         match value {
@@ -58,73 +67,10 @@ pub fn graph(home: &str, interface: &str, fake_range: &str) -> Result<Value, Str
             _ => value.clone(),
         }
     }
-    let mut rendered = render(&snapshot["graph"], &replacements);
-    let cloud_suffixes = cloud_exit_suffixes();
-
-    if let Some(rules) = rendered
-        .pointer_mut("/route/rules")
-        .and_then(Value::as_array_mut)
-    {
-        // Insert DoT 853, STUN UDP, public STUN UDP, and overseas UDP CIDR reject rules
-        // right before the first $video_suffixes resolve rule.
-        if let Some(video_idx) = rules.iter().position(|rule| {
-            rule.get("domain_suffix")
-                .and_then(Value::as_array)
-                .is_some_and(|hosts| hosts.contains(&json!("youtube.com")))
-        }) {
-            let anti_leak = [
-                json!({"port": ENCRYPTED_DNS_PORTS.as_slice(), "action": "reject"}),
-                json!({"network": ["udp", "icmp"], "port": STUN_UDP_PORTS.as_slice(), "action": "reject"}),
-                json!({"network": ["udp", "icmp"], "domain_suffix": PUBLIC_STUN_SUFFIXES.as_slice(), "action": "reject"}),
-                json!({"network": ["udp", "icmp"], "ip_cidr": OVERSEAS_UDP_REJECT_IPV4_CIDRS.as_slice(), "action": "reject"}),
-                json!({"ip_version": 6, "network": ["udp", "icmp"], "ip_cidr": OVERSEAS_UDP_REJECT_IPV6_CIDRS.as_slice(), "action": "reject"}),
-            ];
-            rules.splice(video_idx..video_idx, anti_leak);
-        }
-
-        // Insert MOBILE_HOME_AUX_SUFFIXES right after the first $home_cidrs rule.
-        if let Some(home_cidr_idx) = rules.iter().position(|rule| {
-            rule.get("outbound").and_then(Value::as_str) == Some(home)
-                && rule.get("ip_cidr").is_some()
-        }) {
-            let home_aux = [
-                json!({"network": "tcp", "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "resolve", "server": HOME_DNS, "strategy": "ipv4_only"}),
-                json!({"network": "tcp", "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "outbound": home}),
-            ];
-            rules.splice(home_cidr_idx + 1..home_cidr_idx + 1, home_aux);
-        }
-
-        // Insert X_CLOUD_SUFFIXES + OVERSEAS_CLOUD_SUFFIXES + PUBLIC_STUN_SUFFIXES + CLOUD_IPV4/IPV6_CIDRS
-        // right after the $overseas_full route rule and before the ordinary China-DNS resolve rule.
-        if let Some(overseas_idx) = rules.iter().position(|rule| {
-            rule.get("outbound").and_then(Value::as_str) == Some("Tono-Exit")
-                && rule.get("domain").is_some()
-        }) {
-            let cloud_rules = [
-                json!({"network": "tcp", "domain_suffix": cloud_suffixes, "action": "resolve", "server": "Tono-DoH", "strategy": "ipv4_only"}),
-                json!({"network": "tcp", "domain_suffix": cloud_suffixes, "action": "route", "outbound": "Tono-Exit"}),
-                json!({"network": "tcp", "ip_cidr": CLOUD_IPV4_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
-                json!({"ip_version": 6, "network": "tcp", "ip_cidr": CLOUD_IPV6_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
-            ];
-            rules.splice(overseas_idx + 1..overseas_idx + 1, cloud_rules);
-        }
-    }
-
-    if let Some(dns_rules) = rendered
-        .pointer_mut("/dns/rules")
-        .and_then(Value::as_array_mut)
-    {
-        let insert_at = dns_rules.len().saturating_sub(1);
-        let extra_dns = [
-            json!({"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30}),
-            json!({"domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "server": HOME_DNS}),
-            json!({"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain_suffix": cloud_suffixes, "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30}),
-            json!({"domain_suffix": cloud_suffixes, "action": "route", "server": "Tono-DoH"}),
-        ];
-        dns_rules.splice(insert_at..insert_at, extra_dns);
-    }
-
-    Ok(rendered)
+    // Anti-leak ports, overseas UDP/STUN, Home aux, and X/cloud suffixes live in the
+    // shared template as `$…` bindings. Rendering them here keeps macOS (generated
+    // from the same template) and this graph on one contract.
+    Ok(render(&snapshot["graph"], &replacements))
 }
 
 /// Exact comparison, not a second permissive routing parser. The privileged
@@ -172,4 +118,57 @@ pub fn admit_runtime(runtime: &Value) -> Result<bool, String> {
         return Err(fail());
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rendered_graph_blocks_dot_stun_https_svcb_and_keeps_grok_on_home() {
+        let graph = graph("Tono-Home-Residential", "en0", "198.18.128.0/20").unwrap();
+        let rules = graph["route"]["rules"].as_array().unwrap();
+        assert!(rules.contains(&json!({"port": ENCRYPTED_DNS_PORTS.as_slice(), "action": "reject"})));
+        assert!(rules.contains(&json!({"network": ["udp", "icmp"], "port": STUN_UDP_PORTS.as_slice(), "action": "reject"})));
+        assert!(rules.contains(&json!({"ip_version": 6, "network": ["udp", "icmp"], "ip_cidr": OVERSEAS_UDP_REJECT_IPV6_CIDRS.as_slice(), "action": "reject"})));
+        let home_aux = rules.iter().find(|rule| {
+            rule["domain_suffix"] == json!(MOBILE_HOME_AUX_SUFFIXES.as_slice()) && rule["action"] == "route"
+        }).unwrap();
+        assert_eq!(home_aux["outbound"], "Tono-Home-Residential");
+        let x_rule = rules.iter().find(|rule| {
+            rule["action"] == "route"
+                && rule["domain_suffix"].as_array().is_some_and(|suffixes| suffixes.contains(&json!("x.com")))
+        }).unwrap();
+        assert_eq!(x_rule["outbound"], "Tono-Exit");
+        let home = rules.iter().find(|rule| {
+            rule["action"] == "route"
+                && rule["domain_suffix"].as_array().is_some_and(|suffixes| suffixes.contains(&json!("grok.x.com")))
+        }).unwrap();
+        assert_eq!(home["outbound"], "Tono-Home-Residential");
+        assert!(home_before_x(rules, "grok.x.com", "x.com"));
+        let blanket = rules.iter().position(|rule| rule == &json!({"ip_version": 6, "action": "reject", "no_drop": true})).unwrap();
+        let cloud_v6 = rules.iter().position(|rule| {
+            rule.get("ip_version") == Some(&json!(6)) && rule["outbound"] == "Tono-Exit"
+        }).unwrap();
+        let ipv6_udp = rules.iter().position(|rule| {
+            rule.get("ip_version") == Some(&json!(6)) && rule["network"] == json!(["udp", "icmp"])
+        }).unwrap();
+        assert!(ipv6_udp < blanket && cloud_v6 < blanket);
+        let dns = graph["dns"]["rules"].as_array().unwrap();
+        assert!(dns.iter().any(|rule| rule["query_type"] == json!(["HTTPS", "SVCB"])
+            && rule["action"] == "predefined"
+            && rule["rcode"] == "NOERROR"
+            && rule["domain_suffix"].as_array().is_some_and(|suffixes| suffixes.contains(&json!("claude.ai")))));
+    }
+
+    fn home_before_x(rules: &[Value], home_host: &str, cloud_host: &str) -> bool {
+        let home_at = rules.iter().position(|rule| {
+            rule["domain_suffix"].as_array().is_some_and(|suffixes| suffixes.iter().any(|suffix| suffix == home_host))
+        });
+        let cloud_at = rules.iter().position(|rule| {
+            rule["domain_suffix"].as_array().is_some_and(|suffixes| suffixes.iter().any(|suffix| suffix == cloud_host))
+                && rule["outbound"] == "Tono-Exit"
+        });
+        home_at.zip(cloud_at).is_some_and(|(home, cloud)| home < cloud)
+    }
 }

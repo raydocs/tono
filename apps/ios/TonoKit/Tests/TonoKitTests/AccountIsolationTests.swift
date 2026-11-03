@@ -141,7 +141,7 @@ final class AccountIsolationTests: XCTestCase {
         let tokens = MemoryTokens(SessionTokens(access: jwt(exp: now.timeIntervalSince1970 + 86_400), refresh: "refresh-a-0", binding: "login-a"))
         let cache = MemoryCache()
         let transport = serverA(jwt(exp: now.timeIntervalSince1970 + 86_400))
-        let gate = transport.hold("exit-catalog")
+        let gate = transport.hold("exit-catalog?client_platform=ios")
         let account = session(transport, tokens, cache)
         let load = Task { try await account.loadCatalog() }
         await gate.arrived()

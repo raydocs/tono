@@ -29,6 +29,7 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.parse import parse_qs, urlsplit
 
 CLOUD_IP, CLOUD_PORT = "198.20.0.10", 24443
 HOME_IP, HOME_PORT = "198.20.0.11", 21080
@@ -133,9 +134,13 @@ def serve(singbox: str, work: str) -> None:
             api_log.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
         def do_GET(self):
-            if self.path == "/healthz":
+            path = urlsplit(self.path).path
+            if path == "/healthz":
                 return self.reply(200, {"ok": True})
-            if self.path == "/api/v1/exit-catalog":
+            if path == "/api/v1/exit-catalog":
+                # The Android client stamps ?client_platform=android on every catalog GET.
+                if parse_qs(urlsplit(self.path).query).get("client_platform") != ["android"]:
+                    return self.reply(400, {"error": {"code": "VALIDATION_ERROR", "message": "client_platform"}})
                 if not (self.headers.get("Authorization") or "").startswith("Bearer "):
                     return self.reply(401, {"error": {"code": "UNAUTHORIZED", "message": "no token"}})
                 if scenario["name"] == "catalog-unavailable":

@@ -46,10 +46,23 @@ class ControlPlane internal constructor(
 
     data class Response(val status: Int, val body: Map<String, Any?>?)
 
-    fun get(path: String, bearer: String?): Map<String, Any?> = call("GET", path, null, bearer)
+    fun get(path: String, bearer: String?): Map<String, Any?> = call("GET", stampPath(path), null, bearer)
 
     fun post(path: String, body: Map<String, Any?>?, bearer: String? = null): Map<String, Any?> =
-        call("POST", path, body?.let { Json.write(it) }, bearer)
+        call("POST", path, stampBody(body), bearer)
+
+    /** Older workers ignore the field. A present header still wins on the server. */
+    private fun stampPath(path: String): String {
+        if (path.contains("client_platform=")) return path
+        return path + (if ('?' in path) "&" else "?") + "client_platform=android"
+    }
+
+    private fun stampBody(body: Map<String, Any?>?): String {
+        val stamped = LinkedHashMap<String, Any?>()
+        if (body != null) stamped.putAll(body)
+        stamped.putIfAbsent("client_platform", "android")
+        return Json.write(stamped)
+    }
 
     private fun call(method: String, path: String, body: String?, bearer: String?): Map<String, Any?> {
         var lastNetwork: IOException? = null

@@ -520,7 +520,14 @@ nonisolated enum HelperProtocolVersion {
     ///   `ampcode.com` and the sign-in, API and product hosts audited with it
     ///   (Amp's WorkOS script, Cursor, Copilot, Kiro, Windsurf, JetBrains AI,
     ///   Hark and others; 194 entries). An older daemon would route them DIRECT.
-    static let current = "4.52.67"
+    /// - 4.52.67 → 4.52.68: the generated three-tier contract now carries the
+    ///   shared anti-leak rows (DoT 853, STUN including IPv6, overseas UDP,
+    ///   Home aux, and X suffixes with `grok.x.com` still on Home). An older
+    ///   daemon keeps the previous graph.
+    /// - 4.52.68 → 4.52.69: the AI Home graph pairs each Home TCP route with
+    ///   its UDP reject, and its DNS matches three-tier apart from the mode's
+    ///   tags. An older daemon keeps the previous AI Home graph.
+    static let current = "4.52.69"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

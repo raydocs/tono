@@ -634,6 +634,23 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(statuses.filter((status) => status === 429)).toHaveLength(9);
   });
 
+  it('accepts an omitted client_platform and rejects an explicit invalid one', async () => {
+    const omitted = await api('auth/email/start', json({
+      email: 'platform-omitted@example.com',
+      deviceName: 'Phone',
+      installationId: 'install-platform-omitted',
+    }));
+    expect(omitted.status).toBe(202);
+    const invalid = await api('auth/email/start', json({
+      email: 'platform-invalid@example.com',
+      deviceName: 'Phone',
+      installationId: 'install-platform-invalid',
+      client_platform: 'linux',
+    }));
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json() as any).error.code).toBe('VALIDATION_ERROR');
+  });
+
   it('bounds request bodies before JSON parsing', async () => {
     const response = await api('auth/email/start', {
       method: 'POST',

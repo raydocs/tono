@@ -62,7 +62,7 @@ class ControlPlaneRetryTest {
         assertEquals(1, getReply.closeCalls)
         assertTrue(getEof.request.contains("X-Tono-Path: system_dns\r\n"))
         assertTrue(getReply.request.contains("X-Tono-Path: relay\r\n"))
-        assertTrue(getReply.request.startsWith("GET /api/v1/exit-catalog HTTP/1.1\r\n"))
+        assertTrue(getReply.request.startsWith("GET /api/v1/exit-catalog?client_platform=android HTTP/1.1\r\n"))
         assertTrue(getReply.request.contains("Authorization: Bearer fixture-bearer\r\n"))
 
         // A failed first write can already have delivered a prefix: marking after write is too late.
@@ -78,7 +78,7 @@ class ControlPlaneRetryTest {
 
         val lostReply = WireSocket("")
         assertNetworkWithoutReplay(lostReply, "auth/email/verify", mapOf("code" to "123456"))
-        assertTrue(lostReply.request.endsWith("\r\n\r\n{\"code\":\"123456\"}"))
+        assertTrue(lostReply.request.endsWith("\r\n\r\n{\"code\":\"123456\",\"client_platform\":\"android\"}"))
         assertEquals(2, lostReply.writeCalls)
         assertEquals(1, lostReply.inputOpens)
 
@@ -179,7 +179,7 @@ class ControlPlaneRetryTest {
 
     companion object {
         private val REFRESH_BODY = mapOf("refreshToken" to "fixture-refresh")
-        private const val REFRESH_JSON = "{\"refreshToken\":\"fixture-refresh\"}"
+        private const val REFRESH_JSON = "{\"refreshToken\":\"fixture-refresh\",\"client_platform\":\"android\"}"
         private fun http(status: Int, body: String): String =
             "HTTP/1.1 $status Fixture\r\nContent-Length: ${body.toByteArray(Charsets.UTF_8).size}\r\n\r\n$body"
     }

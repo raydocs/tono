@@ -77,10 +77,72 @@ try {
   }
   const cidr = /pub const CLAUDE_HOME_IPV4_CIDRS: \[&str; 1\] = \["(160\.79\.104\.0\/21)"\];/.exec(rust)
   if (!cidr) throw new Error('unrecognized protected Home CIDR contract')
+  function quoted(name) {
+    const matches = [...rust.matchAll(new RegExp(`pub const ${name}: \\[&str; (\\d+)\\] = \\[([\\s\\S]*?)\\];`, 'g'))]
+    if (matches.length !== 1) throw new Error(`expected one declaration for ${name}`)
+    const [, count, body] = matches[0]
+    const items = [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1])
+    if (items.length !== Number(count) || new Set(items).size !== items.length) {
+      throw new Error(`wrong count or duplicate literals in ${name}`)
+    }
+    return items
+  }
+  function ints(name) {
+    const matches = [...rust.matchAll(new RegExp(`pub const ${name}: \\[u16; (\\d+)\\] = \\[([\\s\\S]*?)\\];`, 'g'))]
+    if (matches.length !== 1) throw new Error(`expected one declaration for ${name}`)
+    const [, count, body] = matches[0]
+    const items = (body.match(/\d+/g) ?? []).map(Number)
+    if (items.length !== Number(count)) throw new Error(`wrong count in ${name}`)
+    return items
+  }
+  const encryptedDNSPorts = ints('ENCRYPTED_DNS_PORTS')
+  const stunUDPPorts = ints('STUN_UDP_PORTS')
+  const publicStunSuffixes = quoted('PUBLIC_STUN_SUFFIXES')
+  const mobileHomeAux = quoted('MOBILE_HOME_AUX_SUFFIXES')
+  const xCloudSuffixes = quoted('X_CLOUD_SUFFIXES')
+  const overseasCloudSuffixes = quoted('OVERSEAS_CLOUD_SUFFIXES')
+  const cloudIPv4 = quoted('CLOUD_IPV4_CIDRS')
+  const cloudIPv6 = quoted('CLOUD_IPV6_CIDRS')
+  const overseasUDPv4 = quoted('OVERSEAS_UDP_REJECT_IPV4_CIDRS')
+  const overseasUDPv6 = quoted('OVERSEAS_UDP_REJECT_IPV6_CIDRS')
+  if (encryptedDNSPorts.length !== 1 || encryptedDNSPorts[0] !== 853) throw new Error('DoT/DoQ port must stay 853')
+  if (stunUDPPorts.length !== 8 || stunUDPPorts[0] !== 19302 || stunUDPPorts[7] !== 19309) {
+    throw new Error('STUN UDP ports drifted from 19302-19309')
+  }
+  const cloudExitSuffixes = [...xCloudSuffixes, ...overseasCloudSuffixes, ...publicStunSuffixes]
+  if (new Set(cloudExitSuffixes).size !== cloudExitSuffixes.length) throw new Error('cloud exit suffixes overlap')
   const fixed = {
     $home_suffixes: home, $home_cidrs: [cidr[1]], $video_suffixes: video,
     $domestic_full: snapshot.domestic_full, $overseas_full: snapshot.overseas_full,
+    $encrypted_dns_ports: encryptedDNSPorts,
+    $stun_udp_ports: stunUDPPorts,
+    $public_stun_suffixes: publicStunSuffixes,
+    $overseas_udp_reject_ipv4: overseasUDPv4,
+    $overseas_udp_reject_ipv6: overseasUDPv6,
+    $mobile_home_aux: mobileHomeAux,
+    $cloud_exit_suffixes: cloudExitSuffixes,
+    $cloud_ipv4: cloudIPv4,
+    $cloud_ipv6: cloudIPv6,
   }
+  function swiftList(name, type, values) {
+    const rows = values.map((value) => `        ${type === 'Int' ? value : `"${value}"`},`).join('\n')
+    return `    static let ${name}: [${type}] = [\n${rows}\n    ]`
+  }
+  const antiLeak = [
+    swiftList('encryptedDNSPorts', 'Int', encryptedDNSPorts),
+    swiftList('stunUDPPorts', 'Int', stunUDPPorts),
+    swiftList('publicStunSuffixes', 'String', publicStunSuffixes),
+    swiftList('mobileHomeAuxSuffixes', 'String', mobileHomeAux),
+    swiftList('xCloudSuffixes', 'String', xCloudSuffixes),
+    swiftList('overseasCloudSuffixes', 'String', overseasCloudSuffixes),
+    swiftList('cloudIPv4CIDRs', 'String', cloudIPv4),
+    swiftList('cloudIPv6CIDRs', 'String', cloudIPv6),
+    swiftList('overseasUDPRejectIPv4CIDRs', 'String', overseasUDPv4),
+    swiftList('overseasUDPRejectIPv6CIDRs', 'String', overseasUDPv6),
+  ].join('\n')
+  const antiLeakMark = /    \/\/ BEGIN generated-anti-leak\n[\s\S]*?    \/\/ END generated-anti-leak/
+  if (!antiLeakMark.test(updated)) throw new Error('missing generated-anti-leak markers in ConfigPipeline.swift')
+  updated = updated.replace(antiLeakMark, `    // BEGIN generated-anti-leak\n${antiLeak}\n    // END generated-anti-leak`)
   function expand(value) {
     if (typeof value === 'string' && value.startsWith('$')) {
       if (Object.hasOwn(fixed, value)) return fixed[value]

@@ -15,7 +15,7 @@ final class AccountRestrictionTests: XCTestCase {
             XCTAssertEqual(AccountErrors.reasonCode(error), "PLAN_EXPIRED")
             XCTAssertFalse(AccountErrors.isSessionEnded(error))
         }
-        XCTAssertEqual(transport.attempts.map(\.0.path), ["exit-catalog"])
+        XCTAssertEqual(transport.attempts.map(\.0.path), ["exit-catalog?client_platform=ios"])
         XCTAssertEqual(tokens.tokens?.binding, "account-a")
     }
 

@@ -191,11 +191,25 @@ class DeviceEvidenceTest {
             val pb = IntArray(b.width * h).also { b.getPixels(it, 0, b.width, 0, top, b.width, h) }
             return pa.indices.count { pa[it] != pb[it] }.toDouble() / pa.size
         }
-        fun frames(gapMs: Long): Pair<Bitmap, Bitmap> {
+        fun capture(): Bitmap {
             dismissForeignAnr()
-            val a = shell.takeScreenshot()
+            var bitmap: Bitmap? = null
+            for (attempt in 1..5) {
+                bitmap = shell.takeScreenshot()
+                if (bitmap != null) break
+                if (attempt < 5) Thread.sleep(1_000)
+            }
+            // Run 41573833095: both emulator attempts died in diff() because the
+            // software-GPU capture returned null (first pair, then the resume pair).
+            // Same rule as shot(): try again, but a frame is still required. A missing
+            // capture is not a still scene, and the pixel comparison below is unchanged.
+            assertNotNull("takeScreenshot() returned null", bitmap)
+            return bitmap!!
+        }
+        fun frames(gapMs: Long): Pair<Bitmap, Bitmap> {
+            val a = capture()
             Thread.sleep(gapMs)
-            return a to shell.takeScreenshot()
+            return a to capture()
         }
         // Launched still: waiting for the activity to start needs an idle main thread, which the
         // animated sea on a slow software-GPU emulator does not give (run 39163947970: 9 minutes).

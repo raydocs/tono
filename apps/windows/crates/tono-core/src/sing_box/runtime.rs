@@ -302,6 +302,20 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         json!(format!("127.0.0.1:{}", ports.controller_port));
     runtime["experimental"]["clash_api"]["secret"] = json!(input.controller_secret);
     let rules = runtime["route"]["rules"].as_array_mut().unwrap();
+    // Same anti-leak rows as the mobile contract: DoT/DoQ 853, STUN (including
+    // IPv6), public STUN suffixes, and overseas UDP CIDRs. They sit ahead of the
+    // blanket IPv6 reject so an IPv6 STUN probe matches this rule.
+    rules.splice(
+        0..0,
+        [
+            json!({"port": crate::direct_domains::ENCRYPTED_DNS_PORTS.as_slice(), "action": "reject"}),
+            json!({"network": ["udp", "icmp"], "port": crate::direct_domains::STUN_UDP_PORTS.as_slice(), "action": "reject"}),
+            json!({"network": ["udp", "icmp"], "domain_suffix": crate::direct_domains::PUBLIC_STUN_SUFFIXES.as_slice(), "action": "reject"}),
+            json!({"network": ["udp", "icmp"], "ip_cidr": crate::direct_domains::OVERSEAS_UDP_REJECT_IPV4_CIDRS.as_slice(), "action": "reject"}),
+            json!({"ip_version": 6, "network": ["udp", "icmp"], "ip_cidr": crate::direct_domains::OVERSEAS_UDP_REJECT_IPV6_CIDRS.as_slice(), "action": "reject"}),
+            json!({"ip_version": 6, "network": "tcp", "ip_cidr": crate::direct_domains::CLOUD_IPV6_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
+        ],
+    );
     if let Some(home) = home
         && unavailable_nodes
             .iter()
@@ -362,6 +376,13 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             }
         }
     }
+    let shared_home = home_target.unwrap_or("Tono-Exit");
+    let cloud_suffixes = crate::three_tier::cloud_exit_suffixes();
+    rules.push(json!({"network":"tcp","domain_suffix":crate::direct_domains::MOBILE_HOME_AUX_SUFFIXES.as_slice(),"action":"route","outbound":shared_home}));
+    rules.push(json!({"network":"udp","domain_suffix":crate::direct_domains::MOBILE_HOME_AUX_SUFFIXES.as_slice(),"action":"reject"}));
+    rules.push(json!({"network":"tcp","domain_suffix":cloud_suffixes,"action":"route","outbound":"Tono-Exit"}));
+    rules.push(json!({"network":"udp","domain_suffix":cloud_suffixes,"action":"reject"}));
+    rules.push(json!({"network":"tcp","ip_cidr":crate::direct_domains::CLOUD_IPV4_CIDRS.as_slice(),"action":"route","outbound":"Tono-Exit"}));
     let mut direct_endpoints = BTreeSet::new();
     let mut hosts: BTreeMap<String, BTreeSet<Ipv4Addr>> = BTreeMap::new();
     if let Some(plan) = input.direct_plan {
@@ -473,6 +494,10 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             .push(json!({"type":"hosts","tag":"Tono-Hosts","predefined":hosts}));
         runtime["dns"]["rules"].as_array_mut().unwrap().insert(1, json!({"inbound":["Tono-TUN","Tono-DNS","Tono-Mixed"],"query_type":["A"],"domain":hosts.keys().collect::<Vec<_>>(),"action":"route","server":"Tono-Hosts"}));
     }
+    runtime["dns"]["rules"].as_array_mut().unwrap().insert(
+        1,
+        json!({"inbound":["Tono-TUN","Tono-DNS","Tono-Mixed"],"query_type":["HTTPS","SVCB"],"action":"predefined","rcode":"NOERROR"}),
+    );
     // Residential NAT: stamp keep_alive_period on every hysteria2 outbound
     // this compiler already built. This does not add an outbound and does not
     // relax the DER-pin refusal.
@@ -684,7 +709,10 @@ mod tests {
         assert!(rules[..ordinary].contains(&json!({"port": config::ENCRYPTED_DNS_PORTS, "action": "reject"})));
         assert!(rules[..ordinary].contains(&json!({"network": ["udp", "icmp"], "port": config::STUN_UDP_PORTS, "action": "reject"})));
         assert_eq!(document["route"]["final"], "Tono-ThreeTier-Direct");
-        assert_eq!(rules.first().unwrap()["ip_version"], 6);
+        let blanket_v6 = rules.iter().position(|rule| rule == &json!({"ip_version": 6, "action": "reject", "no_drop": true})).unwrap();
+        let ipv6_stun = rules.iter().position(|rule| rule.get("ip_version") == Some(&json!(6)) && rule["network"] == json!(["udp", "icmp"])).unwrap();
+        let cloud_v6 = rules.iter().position(|rule| rule.get("ip_version") == Some(&json!(6)) && rule["outbound"] == "Tono-Exit").unwrap();
+        assert!(ipv6_stun < blanket_v6 && cloud_v6 < blanket_v6, "IPv6 STUN and cloud TCP match before the blanket IPv6 reject");
         assert_eq!(rules.last().unwrap(), &json!({"action":"reject","no_drop":true}));
         assert!(rules[..domestic].iter().any(|rule| rule["network"] == json!(["udp", "icmp"]) && rule["action"] == "reject"));
         assert_eq!(document["dns"]["servers"][2]["detour"], "Tono-Home-Residential");
@@ -1068,13 +1096,33 @@ mod tests {
         // before a home, DIRECT or exit rule can dial it, and so is one cached from a build
         // that still used the old pool. `no_drop`: the refusal stays a reset however many
         // connections retry at once.
-        assert_eq!(
-            replaced["route"]["rules"][3],
-            json!({
-                "ip_cidr": [SING_BOX_FAKE_IPV4, "198.18.16.0/20"],
-                "action": "reject",
-                "no_drop": true
-            })
+        let rules = replaced["route"]["rules"].as_array().unwrap();
+        let fake_ip = json!({
+            "ip_cidr": [SING_BOX_FAKE_IPV4, "198.18.16.0/20"],
+            "action": "reject",
+            "no_drop": true
+        });
+        let index = rules.iter().position(|rule| rule == &fake_ip).expect("fake-ip reject");
+        // The cloud IPv6 TCP route sits above the blanket IPv6 reject, so it is
+        // also above this IPv4 rule. ip_version 6 plus IPv6 CIDRs cannot select
+        // 198.18.0.0/15. Any other outbound still has to follow the reject.
+        assert!(
+            rules[..index].iter().all(|rule| {
+                if rule.get("outbound").is_none() {
+                    return true;
+                }
+                rule.get("ip_version") == Some(&json!(6))
+                    && rule
+                        .get("ip_cidr")
+                        .and_then(|value| value.as_array())
+                        .is_some_and(|cidrs| {
+                            !cidrs.is_empty()
+                                && cidrs.iter().all(|cidr| {
+                                    cidr.as_str().is_some_and(|text| text.contains(':'))
+                                })
+                        })
+            }),
+            "the cached IPv4 range is refused before a home, DIRECT or exit rule can dial it"
         );
     }
 
@@ -1100,18 +1148,21 @@ mod tests {
         assert_eq!(servers[2]["detour"], "Tono-Exit");
         assert_eq!(servers[2]["tls"]["alpn"], json!(["h2"]));
         let rules = value["dns"]["rules"].as_array().unwrap();
-        assert_eq!(rules[1]["rewrite_ttl"], 30);
-        assert_eq!(rules[1]["server"], "Tono-FakeIP");
-        assert_eq!(rules[2]["action"], "evaluate");
-        assert_eq!(rules[2]["server"], "Tono-DoH");
-        assert_eq!(rules[2].get("race"), None);
-        assert_eq!(rules[3]["match_response"], "primary");
-        assert_eq!(rules[3]["response_rcode"], "NOERROR");
-        assert_eq!(rules[3]["action"], "respond");
-        assert_eq!(rules[4]["server"], "Tono-DoH-Backup");
-        assert_eq!(rules[4]["action"], "evaluate");
-        assert_eq!(rules[5]["match_response"], "backup");
-        assert_eq!(rules[5]["action"], "respond");
+        assert_eq!(rules[1]["query_type"], json!(["HTTPS", "SVCB"]));
+        assert_eq!(rules[1]["action"], "predefined");
+        assert_eq!(rules[1]["rcode"], "NOERROR");
+        assert_eq!(rules[2]["rewrite_ttl"], 30);
+        assert_eq!(rules[2]["server"], "Tono-FakeIP");
+        assert_eq!(rules[3]["action"], "evaluate");
+        assert_eq!(rules[3]["server"], "Tono-DoH");
+        assert_eq!(rules[3].get("race"), None);
+        assert_eq!(rules[4]["match_response"], "primary");
+        assert_eq!(rules[4]["response_rcode"], "NOERROR");
+        assert_eq!(rules[4]["action"], "respond");
+        assert_eq!(rules[5]["server"], "Tono-DoH-Backup");
+        assert_eq!(rules[5]["action"], "evaluate");
+        assert_eq!(rules[6]["match_response"], "backup");
+        assert_eq!(rules[6]["action"], "respond");
         assert!(rules.iter().all(|rule| rule.get("race").is_none()));
         let primary = rules
             .iter()

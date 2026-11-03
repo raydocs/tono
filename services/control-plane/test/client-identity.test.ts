@@ -3,7 +3,8 @@
 // dropped at the header or swallowed by a failing UPDATE.
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
-import { CLIENT_PLATFORMS, clientIdentity, recordClient } from '../src/client-identity';
+import { ApiError } from '../src/errors';
+import { CLIENT_PLATFORMS, acceptedClientBody, clientIdentity, hy2AcceptHeaderForClient, recordClient, requireClientPlatformField } from '../src/client-identity';
 import type { Env } from '../src/env';
 
 const db = () => (env as unknown as Env).DB;
@@ -41,6 +42,42 @@ it('0103 lets the device row hold android and ios and still refuses anything els
     expect(row).toEqual({ client_platform: id, client_version: '2.0.1' });
   }
   await expect(db().prepare(`UPDATE devices SET client_platform = 'linux' WHERE id = 'd-ci-ios'`).run()).rejects.toThrow(/CHECK/i);
+
+  const fieldReq = new Request('https://api.example.com/v1/auth/email/verify', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+  });
+  await recordClient(env as unknown as Env, fieldReq, 'd-ci-ios', { client_platform: 'android' });
+  const platformOnly = await db().prepare('SELECT client_platform, client_version FROM devices WHERE id = ?')
+    .bind('d-ci-ios').first();
+  expect(platformOnly).toEqual({ client_platform: 'android', client_version: '2.0.1' });
+
+  const headerWins = new Request('https://api.example.com/v1/auth/refresh', {
+    headers: { 'X-Tono-Client': 'windows/0.0.75' },
+  });
+  expect(clientIdentity(headerWins, { client_platform: 'android', client_version: '9.9.9' }))
+    .toEqual({ platform: 'windows', version: '0.0.75' });
+  expect(clientIdentity(new Request('https://api.example.com/v1/exit-catalog?client_platform=ios&client_version=3.1.0')))
+    .toEqual({ platform: 'ios', version: '3.1.0' });
+  expect(clientIdentity(new Request('https://api.example.com/v1/exit-catalog?client_platform=linux'))).toBeNull();
+  expect(clientIdentity(fieldReq, { client_platform: 'Android' })).toEqual({ platform: 'android', version: null });
+
+  expect(acceptedClientBody({ client_platform: 'ios' })).toEqual({ client_platform: 'ios' });
+  expect(() => acceptedClientBody({ client_platform: 'linux' })).toThrow(ApiError);
+  expect(() => requireClientPlatformField(undefined)).not.toThrow();
+  expect(() => requireClientPlatformField('ios')).not.toThrow();
+  expect(() => requireClientPlatformField('linux')).toThrow(ApiError);
+  try {
+    requireClientPlatformField('linux');
+  } catch (error) {
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
+    expect((error as ApiError).code).toBe('VALIDATION_ERROR');
+  }
+  expect(hy2AcceptHeaderForClient('android', 'hy2')).toBeNull();
+  expect(hy2AcceptHeaderForClient('ios', 'hy2')).toBeNull();
+  expect(hy2AcceptHeaderForClient('macos', 'hy2')).toBe('hy2');
+  expect(hy2AcceptHeaderForClient(null, 'hy2')).toBe('hy2');
   const cols = await db().prepare(`SELECT name FROM pragma_table_info('devices') WHERE name LIKE 'client_platform%'`).all<{ name: string }>();
   expect(cols.results.map((c) => c.name)).toEqual(['client_platform']);
 });

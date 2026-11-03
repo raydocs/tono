@@ -404,6 +404,33 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect((await headerAdmit.json() as any).yaml).toContain('type: hysteria2');
 
+    const mobile = await api('exit-catalog?client_platform=android', {
+      headers: {
+        authorization: `Bearer ${hidden.accessToken}`,
+        'X-Tono-Accept': 'hy2',
+        'X-Tono-Client': 'android/1.0.0',
+      },
+    });
+    expect(mobile.status).toBe(200);
+    expect((await mobile.json() as any).yaml).not.toContain('hysteria2');
+
+    const desktopField = await api('exit-catalog?client_platform=macos', {
+      headers: {
+        authorization: `Bearer ${hidden.accessToken}`,
+        'X-Tono-Accept': 'hy2',
+      },
+    });
+    expect((await desktopField.json() as any).yaml).toContain('type: hysteria2');
+
+    const ignored = await api('exit-catalog?client_platform=linux', {
+      headers: {
+        authorization: `Bearer ${hidden.accessToken}`,
+        'X-Tono-Accept': 'hy2',
+      },
+    });
+    expect(ignored.status).toBe(200);
+    expect((await ignored.json() as any).yaml).toContain('type: hysteria2');
+
     const adminFetched = await admin('exit-catalog', undefined, 'GET');
     expect((await adminFetched.json() as any).yaml).toContain('type: hysteria2');
   });

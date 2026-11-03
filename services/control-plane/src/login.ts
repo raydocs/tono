@@ -260,10 +260,10 @@ export async function deliverEmailCode(
   }
 }
 
-export async function completePasswordlessAuth(e: Env, req: Request, user: Row, deviceName: string, installationId: string) {
+export async function completePasswordlessAuth(e: Env, req: Request, user: Row, deviceName: string, installationId: string, fields?: Row) {
   requireAccountEntitlement(user);
   const device = await ensureDevice(e, user.id, deviceName, installationId);
-  await recordClient(e, req, String(device.id));
+  await recordClient(e, req, String(device.id), fields);
   return authResult(e, user, device);
 }
 
