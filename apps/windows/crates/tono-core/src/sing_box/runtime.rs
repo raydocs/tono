@@ -1103,9 +1103,26 @@ mod tests {
             "no_drop": true
         });
         let index = rules.iter().position(|rule| rule == &fake_ip).expect("fake-ip reject");
+        // The cloud IPv6 TCP route sits above the blanket IPv6 reject, so it is
+        // also above this IPv4 rule. ip_version 6 plus IPv6 CIDRs cannot select
+        // 198.18.0.0/15. Any other outbound still has to follow the reject.
         assert!(
-            rules[..index].iter().all(|rule| rule.get("outbound").is_none()),
-            "the cached range is refused before a home, DIRECT or exit rule can dial it"
+            rules[..index].iter().all(|rule| {
+                if rule.get("outbound").is_none() {
+                    return true;
+                }
+                rule.get("ip_version") == Some(&json!(6))
+                    && rule
+                        .get("ip_cidr")
+                        .and_then(|value| value.as_array())
+                        .is_some_and(|cidrs| {
+                            !cidrs.is_empty()
+                                && cidrs.iter().all(|cidr| {
+                                    cidr.as_str().is_some_and(|text| text.contains(':'))
+                                })
+                        })
+            }),
+            "the cached IPv4 range is refused before a home, DIRECT or exit rule can dial it"
         );
     }
 
