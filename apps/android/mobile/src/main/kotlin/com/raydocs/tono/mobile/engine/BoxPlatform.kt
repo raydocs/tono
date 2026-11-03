@@ -55,7 +55,7 @@ class BoxPlatform(
      * apps told they are offline after a Wi-Fi to cellular move). Generation-bound, see [UnderlyingSync].
      */
     internal val underlying = UnderlyingSync<android.net.Network> { network ->
-        runCatching { service.setUnderlyingNetworks(network?.let { arrayOf(it) }) }.getOrDefault(false)
+        runCatching { service.setUnderlyingNetworks(underlyingNetworkArgument(network).toTypedArray()) }.getOrDefault(false)
     }
     private val underlyingListener: (NetworkMonitor.Underlying?, Long) -> Unit = { u, seq -> underlying.onNetwork(u?.network, seq) }
 
@@ -104,7 +104,7 @@ class BoxPlatform(
         options.excludePackage.forEachString { pkg ->
             if (pkg != service.packageName) runCatching { builder.addDisallowedApplication(pkg) }
         }
-        builder.setUnderlyingNetworks(monitor.current?.network?.let { arrayOf(it) })
+        builder.setUnderlyingNetworks(underlyingNetworkArgument(monitor.current?.network).toTypedArray())
         val pfd = builder.establish() ?: throw IllegalStateException("VPN_PERMISSION_REVOKED")
         tun?.let { runCatching { it.close() } }
         tun = pfd

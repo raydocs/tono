@@ -1,6 +1,7 @@
-import { now, type Env } from './env';
+import { now, type Env, type Row } from './env';
 import { recordApiPath } from './api-paths';
 import { API_PATH_KINDS } from './ops/contract/api-paths';
+import { ApiError } from './errors';
 
 // Which client build is talking to the control plane. Recorded on sign-in,
 // token refresh and catalog fetch whatever the device's telemetry settings are,
@@ -14,10 +15,41 @@ export const CLIENT_HEADER = 'X-Tono-Client';
 export const CLIENT_PLATFORMS: ReadonlySet<string> = new Set(['macos', 'windows', 'android', 'ios']);
 const VERSION = /^[0-9][0-9A-Za-z.+-]{0,39}$/;
 
-export type ClientIdentity = { platform: string; version: string };
+export type ClientIdentity = { platform: string; version: string | null };
 
-/** `X-Tono-Client: <macos|windows|android|ios>/<version>`; anything else reads as absent. */
-export function clientIdentity(req: Request): ClientIdentity | null {
+/** Present-but-invalid `client_platform` on a write. Omitted is fine for older clients. */
+export function requireClientPlatformField(value: unknown): void {
+  if (value === undefined || value === null || value === '') return;
+  if (typeof value !== 'string' || !CLIENT_PLATFORMS.has(value.trim().toLowerCase())) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid client_platform');
+  }
+}
+
+/**
+ * `X-Tono-Client: <macos|windows|android|ios>/<version>` wins when it is present.
+ * Otherwise a JSON or query `client_platform` is used. `client_version` is optional;
+ * a missing version must not be stored as a placeholder. An invalid field reads as
+ * absent here; writes call [requireClientPlatformField] and answer 400.
+ */
+export function clientIdentity(req: Request, fields?: Row | null): ClientIdentity | null {
+  const header = identityFromHeader(req);
+  if (header) return header;
+  const query = new URL(req.url).searchParams;
+  const rawPlatform = fields && Object.prototype.hasOwnProperty.call(fields, 'client_platform')
+    ? fields.client_platform
+    : query.get('client_platform');
+  if (rawPlatform === undefined || rawPlatform === null || rawPlatform === '') return null;
+  if (typeof rawPlatform !== 'string') return null;
+  const platform = rawPlatform.trim().toLowerCase();
+  if (!CLIENT_PLATFORMS.has(platform)) return null;
+  const rawVersion = fields && Object.prototype.hasOwnProperty.call(fields, 'client_version')
+    ? fields.client_version
+    : query.get('client_version');
+  const version = typeof rawVersion === 'string' && VERSION.test(rawVersion) ? rawVersion : null;
+  return { platform, version };
+}
+
+function identityFromHeader(req: Request): ClientIdentity | null {
   const raw = req.headers.get(CLIENT_HEADER)?.trim() ?? '';
   const slash = raw.indexOf('/');
   if (raw.length > 64 || slash <= 0) return null;
@@ -25,6 +57,12 @@ export function clientIdentity(req: Request): ClientIdentity | null {
   const version = raw.slice(slash + 1);
   if (!CLIENT_PLATFORMS.has(platform) || !VERSION.test(version)) return null;
   return { platform, version };
+}
+
+/** Android and iOS sing-box builders are VLESS-only. A hy2 block can fail the whole catalog. */
+export function hy2AcceptHeaderForClient(platform: string | null | undefined, header: string | null): string | null {
+  if (platform === 'android' || platform === 'ios') return null;
+  return header;
 }
 
 export const PATH_HEADER = 'X-Tono-Path';
@@ -78,15 +116,23 @@ export function clientPathFailures(req: Request): string[] | null {
  * failed write here must never turn into a failed sign-in, refresh or catalog
  * response.
  */
-export async function recordClient(e: Env, req: Request, deviceId: string): Promise<void> {
-  const client = clientIdentity(req);
+export async function recordClient(e: Env, req: Request, deviceId: string, fields?: Row | null): Promise<void> {
+  const client = clientIdentity(req, fields);
   const path = clientPath(req);
   if (client) {
     try {
-      await e.DB.prepare(
-        `UPDATE devices SET client_platform = ?, client_version = ?
-         WHERE id = ? AND (client_platform IS NOT ? OR client_version IS NOT ?)`,
-      ).bind(client.platform, client.version, deviceId, client.platform, client.version).run();
+      const stamped = client.version
+        ? await e.DB.prepare(
+          `UPDATE devices SET client_platform = ?, client_version = ?
+           WHERE id = ? AND (client_platform IS NOT ? OR client_version IS NOT ?)`,
+        ).bind(client.platform, client.version, deviceId, client.platform, client.version).run()
+        : await e.DB.prepare(
+          `UPDATE devices SET client_platform = ?
+           WHERE id = ? AND client_platform IS NOT ?`,
+        ).bind(client.platform, deviceId, client.platform).run();
+      if (Number(stamped.meta?.changes ?? 0) > 0) {
+        console.info('client_platform recorded', client.platform);
+      }
     } catch {
       // Observability only; the caller's response does not depend on it.
     }

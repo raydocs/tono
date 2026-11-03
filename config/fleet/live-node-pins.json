@@ -1,0 +1,47 @@
+{
+  "note": "Reality SNI and kernel profile already applied on these four exits. Redeploy and reprovision must keep these values. This file records them; it does not change a server, publish a catalog, or contact a host.",
+  "measuredOn": "2026-10-23",
+  "reality": {
+    "serverNamesMatchTarget": true,
+    "nodes": [
+      {
+        "name": "Tokyo · Sakura",
+        "ipv4": "162.4.194.103",
+        "target": "www.uniqlo.com",
+        "serverNames": ["www.uniqlo.com"]
+      },
+      {
+        "name": "Tokyo · Fuji",
+        "ipv4": "45.8.173.206",
+        "target": "d1.awsstatic.com",
+        "serverNames": ["d1.awsstatic.com"]
+      },
+      {
+        "name": "JP-VLESS-Reality",
+        "ipv4": "199.30.91.172",
+        "target": "www.sony.co.jp",
+        "serverNames": ["www.sony.co.jp"]
+      },
+      {
+        "name": "Buffalo · Erie",
+        "ipv4": "198.46.140.254",
+        "target": "s.yimg.com",
+        "serverNames": ["s.yimg.com"]
+      }
+    ]
+  },
+  "kernel": {
+    "profile": "tune-tono-tcp.sh DESIRED",
+    "sysctl": {
+      "net.core.default_qdisc": "fq",
+      "net.ipv4.tcp_congestion_control": "bbr",
+      "net.ipv4.tcp_rmem": "4096 131072 16777216",
+      "net.ipv4.tcp_wmem": "4096 16384 16777216",
+      "net.core.rmem_max": "16777216",
+      "net.core.wmem_max": "16777216",
+      "net.ipv4.tcp_slow_start_after_idle": "0",
+      "net.ipv4.tcp_mtu_probing": "1",
+      "net.ipv4.tcp_fastopen": "3"
+    }
+  }
+}

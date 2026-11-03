@@ -538,24 +538,28 @@ pub fn apply_selective_anti_leak_and_routing(runtime: &mut Value, has_home_hop: 
         .pointer_mut("/route/rules")
         .and_then(Value::as_array_mut)
     {
-        // Insert DoT 853, STUN UDP, public STUN UDP, and overseas UDP CIDR reject rules
-        // right after the port 53 hijack-dns rule.
-        if let Some(dns_idx) = rules
-            .iter()
-            .position(|rule| rule.get("port").and_then(Value::as_u64) == Some(53))
-        {
+        // DoT 853, STUN (including IPv6), public STUN suffixes, overseas UDP, and
+        // cloud IPv6 TCP sit ahead of the blanket IPv6 reject.
+        let already = rules.iter().any(|rule| rule.get("port") == Some(&json!(ENCRYPTED_DNS_PORTS.as_slice())));
+        let has_dns_hijack = rules.iter().any(|rule| rule.get("port").and_then(Value::as_u64) == Some(53));
+        if !already && has_dns_hijack {
             let anti_leak = [
                 json!({"port": ENCRYPTED_DNS_PORTS.as_slice(), "action": "reject"}),
                 json!({"network": ["udp", "icmp"], "port": STUN_UDP_PORTS.as_slice(), "action": "reject"}),
                 json!({"network": ["udp", "icmp"], "domain_suffix": PUBLIC_STUN_SUFFIXES.as_slice(), "action": "reject"}),
                 json!({"network": ["udp", "icmp"], "ip_cidr": OVERSEAS_UDP_REJECT_IPV4_CIDRS.as_slice(), "action": "reject"}),
                 json!({"ip_version": 6, "network": ["udp", "icmp"], "ip_cidr": OVERSEAS_UDP_REJECT_IPV6_CIDRS.as_slice(), "action": "reject"}),
+                json!({"ip_version": 6, "network": "tcp", "ip_cidr": CLOUD_IPV6_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
             ];
-            rules.splice(dns_idx + 1..dns_idx + 1, anti_leak);
+            rules.splice(0..0, anti_leak);
         }
 
         // Insert MOBILE_HOME_AUX_SUFFIXES and Cloud exit rules right after CLAUDE_HOME_IPV4_CIDRS.
-        if let Some(home_cidr_idx) = rules.iter().position(|rule| {
+        let aux_present = rules.iter().any(|rule| {
+            rule.get("domain_suffix") == Some(&json!(MOBILE_HOME_AUX_SUFFIXES.as_slice()))
+        });
+        if !aux_present
+            && let Some(home_cidr_idx) = rules.iter().position(|rule| {
             rule.get("network").and_then(Value::as_str) == Some("tcp")
                 && rule.get("ip_cidr") == Some(&json!(CLAUDE_HOME_IPV4_CIDRS.to_vec()))
         }) {
@@ -563,14 +567,14 @@ pub fn apply_selective_anti_leak_and_routing(runtime: &mut Value, has_home_hop: 
                 json!({"network": "tcp", "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "outbound": home_target}),
                 json!({"network": "tcp", "domain_suffix": cloud_suffixes, "action": "route", "outbound": "Tono-Exit"}),
                 json!({"network": "tcp", "ip_cidr": CLOUD_IPV4_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
-                json!({"ip_version": 6, "network": "tcp", "ip_cidr": CLOUD_IPV6_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"}),
             ];
             rules.splice(home_cidr_idx + 1..home_cidr_idx + 1, extra_tcp);
         }
 
         // Also reject UDP to MOBILE_HOME_AUX_SUFFIXES, cloud_suffixes, and CLOUD_IPV4_CIDRS
         // before process/direct UDP rules.
-        if let Some(udp_home_idx) = rules.iter().position(|rule| {
+        if !aux_present
+            && let Some(udp_home_idx) = rules.iter().position(|rule| {
             rule.get("network").and_then(Value::as_str) == Some("udp")
                 && rule.get("ip_cidr") == Some(&json!(CLAUDE_HOME_IPV4_CIDRS.to_vec()))
         }) {
@@ -791,5 +795,10 @@ mod tests {
         assert!(rules.contains(&json!({"network": "tcp", "domain_suffix": MOBILE_HOME_AUX_SUFFIXES.as_slice(), "action": "route", "outbound": config::HOME_SOCKS5_OUTBOUND_NAME})));
         assert!(rules.contains(&json!({"network": "tcp", "ip_cidr": CLOUD_IPV4_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"})));
         assert!(rules.contains(&json!({"ip_version": 6, "network": "tcp", "ip_cidr": CLOUD_IPV6_CIDRS.as_slice(), "action": "route", "outbound": "Tono-Exit"})));
+        let blanket = rules.iter().position(|rule| rule == &json!({"ip_version": 6, "action": "reject"})).unwrap();
+        let ipv6_stun = rules.iter().position(|rule| {
+            rule.get("ip_version") == Some(&json!(6)) && rule["network"] == json!(["udp", "icmp"])
+        }).unwrap();
+        assert!(ipv6_stun < blanket);
     }
 }

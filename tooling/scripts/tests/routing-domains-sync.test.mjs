@@ -28,7 +28,17 @@ test('the CLI preserves ordered policy, detects drift and refuses ambiguous sour
     const rust = `pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 1] = ["ai.vendor.cn"];
 pub const CLAUDE_HOME_DOMAINS: [&str; 3] = [DEDICATED_MODEL_API_SUFFIXES[0], "z.example.com", "a.example.com"];
 pub const CLOUD_VIDEO_DOMAINS: [&str; 1] = ["video.z.example.com"];
-pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];`
+pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
+pub const ENCRYPTED_DNS_PORTS: [u16; 1] = [853];
+pub const STUN_UDP_PORTS: [u16; 8] = [19302, 19303, 19304, 19305, 19306, 19307, 19308, 19309];
+pub const PUBLIC_STUN_SUFFIXES: [&str; 1] = ["stun.example.net"];
+pub const MOBILE_HOME_AUX_SUFFIXES: [&str; 1] = ["aux.example.net"];
+pub const X_CLOUD_SUFFIXES: [&str; 1] = ["x.example.net"];
+pub const OVERSEAS_CLOUD_SUFFIXES: [&str; 1] = ["cloud.example.net"];
+pub const CLOUD_IPV4_CIDRS: [&str; 1] = ["203.0.113.0/24"];
+pub const CLOUD_IPV6_CIDRS: [&str; 1] = ["2001:db8::/32"];
+pub const OVERSEAS_UDP_REJECT_IPV4_CIDRS: [&str; 1] = ["198.51.100.0/24"];
+pub const OVERSEAS_UDP_REJECT_IPV6_CIDRS: [&str; 1] = ["2001:db8:1::/48"];`
     writeFileSync(source, rust)
     writeFileSync(target, `// before: untouched
     static let dedicatedModelAPISuffixes = [
@@ -40,6 +50,11 @@ pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];`
     static let cloudVideoDomainSuffixes = [
         "stale.test",
     ]
+    // BEGIN generated-anti-leak
+    static let encryptedDNSPorts: [Int] = [
+        1,
+    ]
+    // END generated-anti-leak
 // after: untouched
 `)
     const run = flag => spawnSync(process.execPath, [script, flag], { encoding: 'utf8' })
@@ -57,6 +72,45 @@ pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];`
     static let cloudVideoDomainSuffixes = [
         "video.z.example.com",
     ]
+    // BEGIN generated-anti-leak
+    static let encryptedDNSPorts: [Int] = [
+        853,
+    ]
+    static let stunUDPPorts: [Int] = [
+        19302,
+        19303,
+        19304,
+        19305,
+        19306,
+        19307,
+        19308,
+        19309,
+    ]
+    static let publicStunSuffixes: [String] = [
+        "stun.example.net",
+    ]
+    static let mobileHomeAuxSuffixes: [String] = [
+        "aux.example.net",
+    ]
+    static let xCloudSuffixes: [String] = [
+        "x.example.net",
+    ]
+    static let overseasCloudSuffixes: [String] = [
+        "cloud.example.net",
+    ]
+    static let cloudIPv4CIDRs: [String] = [
+        "203.0.113.0/24",
+    ]
+    static let cloudIPv6CIDRs: [String] = [
+        "2001:db8::/32",
+    ]
+    static let overseasUDPRejectIPv4CIDRs: [String] = [
+        "198.51.100.0/24",
+    ]
+    static let overseasUDPRejectIPv6CIDRs: [String] = [
+        "2001:db8:1::/48",
+    ]
+    // END generated-anti-leak
 // after: untouched
 `
     assert.equal(readFileSync(target, 'utf8'), expected)

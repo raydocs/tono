@@ -222,6 +222,10 @@ nonisolated extension ConfigPipeline {
              "detour": exitGroupName],
         ]
         var dnsRules: [[String: Any]] = [["query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"]]
+        // HTTPS (65) and SVCB (64) must not return real addresses or h3 hints to
+        // protected listeners. Outbound dial resolution does not arrive on these inbounds.
+        dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["HTTPS", "SVCB"],
+            "action": "predefined", "rcode": "NOERROR"])
         // Preserve hostname identity for protected listeners before the broad
         // Alibaba China-DNS rule; outbound lookups still use tunnelled real DNS.
         dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"],
@@ -236,6 +240,11 @@ nonisolated extension ConfigPipeline {
         var rules: [[String: Any]] = [
             ["inbound": ["Tono-DNS"], "action": "hijack-dns"],
             ["port": [53], "action": "hijack-dns"],
+            ["port": encryptedDNSPorts, "action": "reject"],
+            ["network": ["udp", "icmp"], "port": stunUDPPorts, "action": "reject"],
+            ["network": ["udp", "icmp"], "domain_suffix": publicStunSuffixes, "action": "reject"],
+            ["network": ["udp", "icmp"], "ip_cidr": overseasUDPRejectIPv4CIDRs, "action": "reject"],
+            ["ip_version": 6, "network": ["udp", "icmp"], "ip_cidr": overseasUDPRejectIPv6CIDRs, "action": "reject"],
             // #1258: an address cached from a replaced Core is outside this
             // document's fake-IP slot, so it arrives as a plain IP. Refuse it
             // before a home, DIRECT or exit rule dials it. A destination the
@@ -270,6 +279,15 @@ nonisolated extension ConfigPipeline {
         rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
         rules.append(["network": "udp", "domain_suffix": assistantHomeDomainSuffixes, "action": "reject"])
         rules.append(["network": "udp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "reject"])
+        // Auxiliary Anthropic/auth hosts follow Home. X suffixes follow the exit, after Home,
+        // so grok.x.com (a Home suffix) is not swallowed by x.com.
+        let cloudExitSuffixes = xCloudSuffixes + overseasCloudSuffixes + publicStunSuffixes
+        rules.append(["network": "tcp", "domain_suffix": mobileHomeAuxSuffixes, "action": "route", "outbound": assistant])
+        rules.append(["network": "udp", "domain_suffix": mobileHomeAuxSuffixes, "action": "reject"])
+        rules.append(["network": "tcp", "domain_suffix": cloudExitSuffixes, "action": "route", "outbound": exitGroupName])
+        rules.append(["network": "udp", "domain_suffix": cloudExitSuffixes, "action": "reject"])
+        rules.append(["network": "tcp", "ip_cidr": cloudIPv4CIDRs + cloudIPv6CIDRs, "action": "route", "outbound": exitGroupName])
+        rules.append(["network": "udp", "ip_cidr": cloudIPv4CIDRs + cloudIPv6CIDRs, "action": "reject"])
         rules.append(["network": "tcp", "process_name": assistantHomeProcessNames, "action": "route", "outbound": assistant])
         rules.append(["network": "tcp", "process_path_regex": assistantHomeProcessPathRegexes, "action": "route", "outbound": assistant])
         if let plan {

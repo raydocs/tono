@@ -63,7 +63,7 @@ class EngineUnitTest {
         t.join(5_000)
         server.close()
         assertEquals(true, body["ok"])
-        assertTrue(seen.toString(), seen.startsWith("GET /api/v1/exit-catalog HTTP/1.1\nHost: 127.0.0.1:${server.localPort}\n"))
+        assertTrue(seen.toString(), seen.startsWith("GET /api/v1/exit-catalog?client_platform=android HTTP/1.1\nHost: 127.0.0.1:${server.localPort}\n"))
     }
 
     @Test fun nonJsonBodyIsNull() {

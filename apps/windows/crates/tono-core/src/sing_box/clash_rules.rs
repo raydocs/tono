@@ -258,13 +258,15 @@ mod tests {
         })
         .unwrap();
         let rules = expected_clash_api_rules(runtime.runtime_json()).unwrap();
-        assert_eq!(rules[0].type_name, "default");
-        assert_eq!(rules[0].payload, "ip_version=6");
-        assert_eq!(rules[0].proxy, "reject");
-        assert_eq!(rules[1].payload, "inbound=Tono-DNS");
-        assert_eq!(rules[1].proxy, "hijack-dns");
-        assert_eq!(rules[2].payload, "port=53");
-        assert_eq!(rules[2].proxy, "hijack-dns");
+        let blanket = rules.iter().position(|rule| rule.payload == "ip_version=6" && rule.proxy == "reject").expect("blanket ipv6");
+        assert_eq!(rules[blanket].type_name, "default");
+        let hijack = rules.iter().position(|rule| rule.payload == "inbound=Tono-DNS").expect("dns hijack");
+        assert!(blanket < hijack, "public IPv6 is rejected before later routes");
+        assert_eq!(rules[hijack].proxy, "hijack-dns");
+        assert_eq!(rules[hijack + 1].payload, "port=53");
+        assert_eq!(rules[hijack + 1].proxy, "hijack-dns");
+        assert!(rules.iter().any(|rule| rule.payload.starts_with("port=853") && rule.proxy == "reject"));
+        assert!(rules.iter().any(|rule| rule.payload.contains("ip_version=6") && rule.payload.contains("network=[udp icmp]") && rule.proxy == "reject"));
         let ai = rules
             .iter()
             .position(|rule| {

@@ -97,8 +97,8 @@ public struct ControlPlaneClient: Sendable {
         self.paths = paths
     }
 
-    /// Headers for one attempt. `X-Tono-Client: ios/<version>`: the Worker records only platforms it
-    /// knows (macos|windows today) and reads any other value as absent, so this is safe to send.
+    /// Headers for one attempt. `X-Tono-Client: ios/<version>` is recorded with the
+    /// JSON/query `client_platform` field. The header wins when both are present.
     public func headers(path: APIPath, failed: [APIPath], bearer: String?, hasBody: Bool) -> [(String, String)] {
         var h: [(String, String)] = [
             ("Accept", "application/json"),
@@ -121,11 +121,12 @@ public struct ControlPlaneClient: Sendable {
     }
 
     func call(_ method: String, _ path: String, body: JSON?, bearer: String?) async throws -> JSON {
-        let payload = body.map { Data($0.serialized().utf8) }
+        let stamped = Self.stamp(method: method, path: path, body: body)
+        let payload = stamped.body.map { Data($0.serialized().utf8) }
         var failed: [APIPath] = []
         var lastNetwork = "Tono servers are unreachable"
         for route in paths {
-            let request = APIRequest(method: method, path: path, body: payload,
+            let request = APIRequest(method: method, path: stamped.path, body: payload,
                                      headers: headers(path: route, failed: failed, bearer: bearer, hasBody: payload != nil))
             let response: HTTPResponse
             do {
@@ -152,6 +153,19 @@ public struct ControlPlaneClient: Sendable {
                            message: error?["message"]?.string ?? "request failed")
         }
         throw APIError.network(lastNetwork)
+    }
+
+    /// Mobile catalog builders are VLESS-only. The field lets the control plane tell
+    /// this client from a desktop build when the header is absent.
+    static func stamp(method: String, path: String, body: JSON?) -> (path: String, body: JSON?) {
+        if method == "GET" {
+            guard !path.contains("client_platform=") else { return (path, body) }
+            let join = path.contains("?") ? "&" : "?"
+            return (path + join + "client_platform=ios", body)
+        }
+        var object = body?.object ?? JSONObject()
+        if object["client_platform"] == nil { object["client_platform"] = .string("ios") }
+        return (path, .object(object))
     }
 }
 

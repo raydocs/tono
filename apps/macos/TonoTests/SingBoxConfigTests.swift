@@ -494,7 +494,9 @@ final class SingBoxConfigTests: XCTestCase {
             "Darwin auto-route must not deliver link broadcast or multicast to utun")
         XCTAssertFalse(excluded.contains { $0.hasSuffix("/0") },
             "route exclusion must not punch out a default route")
-        let ipv6RejectIndex = try XCTUnwrap(rules.firstIndex { $0["ip_version"] as? Int == 6 })
+        let ipv6RejectIndex = try XCTUnwrap(rules.firstIndex {
+            $0["ip_version"] as? Int == 6 && $0["action"] as? String == "reject" && $0["ip_cidr"] == nil && $0["network"] == nil
+        })
         XCTAssertLessThan(localIndex, ipv6RejectIndex, "local IPv6 must bypass the public IPv6 reject")
         XCTAssertFalse(rules.contains {
             $0["outbound"] as? String == "DIRECT" && $0["process_path"] != nil

@@ -101,7 +101,7 @@ export async function tokens(
   };
 }
 
-export async function refreshSession(e: Env, req: Request, raw: string) {
+export async function refreshSession(e: Env, req: Request, raw: string, fields?: Row) {
   const t = now();
   const session = (where: string, key: string) => e.DB.prepare(
     `SELECT sessions.*, users.status user_status, users.quota_bytes, users.usage_bytes, users.expires_at user_expires_at,
@@ -145,6 +145,6 @@ export async function refreshSession(e: Env, req: Request, raw: string) {
     also: [e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, s.device_id)],
   });
   // Only after the rotation committed, as on the pre-#329 path (#578).
-  await recordClient(e, req, String(s.device_id));
+  await recordClient(e, req, String(s.device_id), fields);
   return issued;
 }

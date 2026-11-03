@@ -71,6 +71,9 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(transport.header("X-Tono-Path", attempt: 1), "relay")
         XCTAssertEqual(transport.header("X-Tono-Path-Failed", attempt: 1), "system_dns")
         XCTAssertEqual(transport.header("X-Tono-Client", attempt: 0), "ios/0.1.0")
+        let posted = try JSON.parse(transport.attempts[0].0.body ?? Data())
+        XCTAssertEqual(posted["client_platform"]?.string, "ios")
+        XCTAssertEqual(posted["email"]?.string, "a@example.com")
     }
 
     func testAPIErrorIsFinalAndNotRetriedOnARelay() async {
@@ -109,7 +112,7 @@ final class AccountTests: XCTestCase {
         let loaded = try await session.loadCatalog()
         XCTAssertFalse(loaded.fromCache)
         XCTAssertEqual(tokens.tokens?.refresh, "refresh-new-0123456789")
-        XCTAssertEqual(transport.attempts.map(\.0.path), ["auth/refresh", "exit-catalog"])
+        XCTAssertEqual(transport.attempts.map(\.0.path), ["auth/refresh", "exit-catalog?client_platform=ios"])
     }
 
     func testAccessRejectionCanRefreshBeforeReportingFinalSessionEnd() async throws {
@@ -128,7 +131,7 @@ final class AccountTests: XCTestCase {
                                      cache: MemoryCache(), now: { [now] in now })
         let loaded = try await session.loadCatalog()
         XCTAssertFalse(loaded.fromCache)
-        XCTAssertEqual(transport.attempts.map(\.0.path), ["exit-catalog", "auth/refresh", "exit-catalog"])
+        XCTAssertEqual(transport.attempts.map(\.0.path), ["exit-catalog?client_platform=ios", "auth/refresh", "exit-catalog?client_platform=ios"])
         XCTAssertEqual(tokens.tokens?.binding, "account-a")
         XCTAssertEqual(tokens.tokens?.refresh, "refresh-next")
     }

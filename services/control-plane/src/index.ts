@@ -25,7 +25,7 @@ import { consumeRateLimit } from './ops/ingest-limits';
 import { opsIngestRoutes } from './ops/ingest';
 import { tokenAdminWrite } from './ops/token-admin';
 import { ApiError } from './errors';
-import { recordClient } from './client-identity';
+import { clientIdentity, hy2AcceptHeaderForClient, recordClient, requireClientPlatformField } from './client-identity';
 import { exitIdentityRosterResponse } from './exit-identity-roster';
 import { parseBytesRange } from './http';
 import {
@@ -180,6 +180,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/auth/email/start' && m === 'POST') {
     const b = await body(req, 16 * 1024);
+    requireClientPlatformField(b.client_platform);
     const submittedEmail = email(b.email);
     const name = str(b.deviceName, 'deviceName', 1, 100);
     const inst = str(b.installationId, 'installationId', 8, 200);
@@ -251,6 +252,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/auth/email/verify' && m === 'POST') {
     const b = await body(req, 4 * 1024);
+    requireClientPlatformField(b.client_platform);
     const challenge = challengeID(b.challengeId);
     const code = str(b.code, 'code', 6, 6);
     if (!/^\d{6}$/.test(code)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid code');
@@ -276,11 +278,13 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       user,
       String(claimed.device_name),
       String(claimed.installation_id),
+      b,
     ));
   }
 
   if (p === '/api/v1/auth/oidc/challenge' && m === 'POST') {
     const b = await body(req, 8 * 1024);
+    requireClientPlatformField(b.client_platform);
     const provider = oidcProvider(b.provider);
     const name = str(b.deviceName, 'deviceName', 1, 100);
     const inst = str(b.installationId, 'installationId', 8, 200);
@@ -318,6 +322,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/auth/oidc/verify' && m === 'POST') {
     const b = await body(req, 24 * 1024);
+    requireClientPlatformField(b.client_platform);
     const provider = oidcProvider(b.provider);
     const challenge = challengeID(b.challengeId);
     const idToken = str(b.idToken, 'idToken', 100, 16_384);
@@ -373,6 +378,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       user,
       String(reserved.device_name),
       String(reserved.installation_id),
+      b,
     ));
   }
 
@@ -389,7 +395,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/auth/refresh' && m === 'POST') {
     const b = await body(req, 4 * 1024);
-    return Response.json(await refreshSession(e, req, str(b.refreshToken, 'refreshToken', 20, 500)));
+    requireClientPlatformField(b.client_platform);
+    return Response.json(await refreshSession(e, req, str(b.refreshToken, 'refreshToken', 20, 500), b));
   }
 
   if (p === '/api/v1/auth/logout' && m === 'POST') {
@@ -428,9 +435,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
     const a = await auth(req, e);
     ctx.waitUntil(recordClient(e, req, a.deviceId)); // best effort; off the poll's latency
+    const client = clientIdentity(req);
     return Response.json(await publicManagedCatalog(e, {
       userId: a.userId, deviceId: a.deviceId, filterHomeExits: true,
-      hy2AcceptHeader: req.headers.get('X-Tono-Accept'),
+      hy2AcceptHeader: hy2AcceptHeaderForClient(client?.platform, req.headers.get('X-Tono-Accept')),
     }));
   }
 
