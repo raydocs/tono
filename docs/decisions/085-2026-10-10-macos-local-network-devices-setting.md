@@ -1,4 +1,9 @@
 ## 2026-10-10 · macOS: "Allow local network devices" (default off) — what off withholds, and how a failed change stays fail-closed
+
+### 2026-11-04 · 所有者更新
+
+- LAN 集合新增 `100.64/10`（所有者接受 CGNAT／TunnelCrack 风险），与 `10/8`、`172.16/12`、`192.168/16`、`169.254/16` 一起用于 Stable 开启、AI Home 和三层模式。LAN DNS 的 TCP／UDP 53、853 阻断同步覆盖新增段。
+- 该设置仅控制 Stable；AI Home 和三层模式始终允许 LAN。三层模式在 Core 死亡、helper 持有阻断时仍保留 LAN／发现通行，公网仍 fail-closed。此条替代下文关于三层模式和无隧道状态的旧范围；详见决策 128 的同日更新。
 - Status: provisional (agent for backlog A29 under decision 079 D3-A; the owner authorised the redesign of 2026-10-10, including
   the helper protocol and failure-handling changes, after three review rounds; the owner may revisit)
 - Chosen:
