@@ -4,7 +4,7 @@ use crate::direct_domains::{
     CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_IPV4_CIDRS, CLOUD_IPV6_CIDRS,
     CLOUD_VIDEO_DOMAINS, ENCRYPTED_DNS_PORTS, MOBILE_HOME_AUX_SUFFIXES, OVERSEAS_CLOUD_SUFFIXES,
     OVERSEAS_UDP_REJECT_IPV4_CIDRS, OVERSEAS_UDP_REJECT_IPV6_CIDRS, PUBLIC_STUN_SUFFIXES,
-    STUN_UDP_PORTS, X_CLOUD_SUFFIXES,
+    STUN_UDP_PORTS, X_CLOUD_SUFFIXES, LAN_IPV4_CIDRS, LAN_IPV6_CIDRS,
 };
 use serde_json::{Value, json};
 
@@ -50,6 +50,9 @@ pub fn graph(home: &str, interface: &str, fake_range: &str) -> Result<Value, Str
         "$video_suffixes": CLOUD_VIDEO_DOMAINS.as_slice(),
         "$domestic_full": snapshot["domestic_full"], "$overseas_full": snapshot["overseas_full"],
         "$encrypted_dns_ports": ENCRYPTED_DNS_PORTS.as_slice(),
+        "$lan_ipv4": LAN_IPV4_CIDRS.as_slice(), "$lan_ipv6": LAN_IPV6_CIDRS.as_slice(),
+        "$lan_protected_suffixes": ([CLAUDE_HOME_DOMAINS.as_slice(), CLOUD_VIDEO_DOMAINS.as_slice(),
+            MOBILE_HOME_AUX_SUFFIXES.as_slice(), cloud_exit_suffixes().as_slice()].concat()),
         "$stun_udp_ports": STUN_UDP_PORTS.as_slice(),
         "$public_stun_suffixes": PUBLIC_STUN_SUFFIXES.as_slice(),
         "$overseas_udp_reject_ipv4": OVERSEAS_UDP_REJECT_IPV4_CIDRS.as_slice(),

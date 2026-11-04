@@ -68,6 +68,8 @@ def generate() -> str:
     cidrs = rust_array(rust_text, "CLAUDE_HOME_IPV4_CIDRS")
     stun_ports = rust_int_array(rust_text, "STUN_UDP_PORTS")
     encrypted_dns_ports = rust_int_array(rust_text, "ENCRYPTED_DNS_PORTS")
+    lan_ipv4 = rust_array(rust_text, "LAN_IPV4_CIDRS")
+    lan_ipv6 = rust_array(rust_text, "LAN_IPV6_CIDRS")
     public_stun_suffixes = rust_array(rust_text, "PUBLIC_STUN_SUFFIXES")
     mobile_home_aux = rust_array(rust_text, "MOBILE_HOME_AUX_SUFFIXES")
     x_cloud_suffixes = rust_array(rust_text, "X_CLOUD_SUFFIXES")
@@ -102,6 +104,8 @@ def generate() -> str:
         + swift_list("homeIPv4CIDRs", "Anthropic's own IPv4 range for raw-IP dials.", cidrs) + "\n"
         + swift_int_list("stunUDPPorts", "Google WebRTC STUN UDP ports rejected across routing modes so raw-IP STUN probes cannot leak the physical egress IP.", stun_ports) + "\n"
         + swift_int_list("encryptedDNSPorts", "Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP.", encrypted_dns_ports) + "\n"
+        + swift_list("desktopLANIPv4CIDRs", "Desktop-only LAN contract mirror; mobile routing is unchanged.", lan_ipv4) + "\n"
+        + swift_list("desktopLANIPv6CIDRs", "Desktop-only LAN contract mirror; mobile routing is unchanged.", lan_ipv6) + "\n"
         + swift_list("publicStunSuffixes", "Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across routing modes and whose TCP/DNS stays off DIRECT.", public_stun_suffixes) + "\n"
         + swift_list("overseasUDPRejectIPv4CIDRs", "Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP is rejected while domestic UDP stays direct.", overseas_udp_cidrs) + "\n"
         + swift_list("overseasUDPRejectIPv6CIDRs", "Overseas STUN, public DNS, CDN, AI and messaging IPv6 ranges whose UDP/ICMP is rejected on dual-stack networks while domestic IPv6 stays direct.", overseas_udp_v6_cidrs) + "\n"

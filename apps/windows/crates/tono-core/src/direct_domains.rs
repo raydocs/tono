@@ -328,6 +328,12 @@ pub const CLOUD_VIDEO_DOMAINS: [&str; 21] = [
 /// stay on `Tono-Exit`. `no-resolve` keeps the match on the packet address.
 pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
 
+/// Owner-approved desktop LAN set, including CGNAT (2026-11-04).
+pub const LAN_IPV4_CIDRS: [&str; 5] = [
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10",
+];
+pub const LAN_IPV6_CIDRS: [&str; 2] = ["fe80::/10", "fc00::/7"];
+
 /// Google WebRTC STUN UDP ports rejected across mobile routing modes so raw-IP
 /// STUN probes (e.g. 74.125.250.129:19302) cannot leak the physical egress IP,
 /// without blanket-blocking RFC 5389 port 3478 used by domestic P2P/IoT in China.

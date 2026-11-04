@@ -12,6 +12,56 @@
       "final": "Tono-AIHome-Direct",
       "rules": [
         {
+          "type": "logical",
+          "mode": "and",
+          "rules": [
+            {
+              "type": "logical",
+              "mode": "or",
+              "rules": [
+                {
+                  "ip_cidr": "$lan_ipv4"
+                },
+                {
+                  "ip_cidr": "$lan_ipv6"
+                }
+              ]
+            },
+            {
+              "port": [
+                53,
+                853
+              ]
+            }
+          ],
+          "action": "reject",
+          "no_drop": true
+        },
+        {
+          "type": "logical",
+          "mode": "and",
+          "rules": [
+            {
+              "ip_cidr": "$lan_ipv6"
+            },
+            {
+              "type": "logical",
+              "mode": "or",
+              "rules": [
+                {
+                  "domain_suffix": "$lan_protected_suffixes"
+                },
+                {
+                  "domain": "$overseas_full"
+                }
+              ],
+              "invert": true
+            }
+          ],
+          "action": "route",
+          "outbound": "Tono-AIHome-Direct"
+        },
+        {
           "ip_version": 6,
           "network": "tcp",
           "ip_cidr": "$cloud_ipv6",
@@ -46,7 +96,6 @@
         {
           "ip_cidr": [
             "0.0.0.0/8",
-            "100.64.0.0/10",
             "127.0.0.0/8",
             "224.0.0.0/3"
           ],
@@ -54,11 +103,25 @@
           "no_drop": true
         },
         {
-          "ip_cidr": [
-            "10.0.0.0/8",
-            "169.254.0.0/16",
-            "172.16.0.0/12",
-            "192.168.0.0/16"
+          "type": "logical",
+          "mode": "and",
+          "rules": [
+            {
+              "ip_cidr": "$lan_ipv4"
+            },
+            {
+              "type": "logical",
+              "mode": "or",
+              "rules": [
+                {
+                  "domain_suffix": "$lan_protected_suffixes"
+                },
+                {
+                  "domain": "$overseas_full"
+                }
+              ],
+              "invert": true
+            }
           ],
           "action": "route",
           "outbound": "Tono-AIHome-Direct"
@@ -154,7 +217,6 @@
         {
           "ip_cidr": [
             "0.0.0.0/8",
-            "100.64.0.0/10",
             "127.0.0.0/8",
             "224.0.0.0/3"
           ],
@@ -162,11 +224,25 @@
           "no_drop": true
         },
         {
-          "ip_cidr": [
-            "10.0.0.0/8",
-            "169.254.0.0/16",
-            "172.16.0.0/12",
-            "192.168.0.0/16"
+          "type": "logical",
+          "mode": "and",
+          "rules": [
+            {
+              "ip_cidr": "$lan_ipv4"
+            },
+            {
+              "type": "logical",
+              "mode": "or",
+              "rules": [
+                {
+                  "domain_suffix": "$lan_protected_suffixes"
+                },
+                {
+                  "domain": "$overseas_full"
+                }
+              ],
+              "invert": true
+            }
           ],
           "action": "route",
           "outbound": "Tono-AIHome-Direct"
@@ -246,7 +322,6 @@
         {
           "ip_cidr": [
             "0.0.0.0/8",
-            "100.64.0.0/10",
             "127.0.0.0/8",
             "224.0.0.0/3"
           ],
@@ -254,11 +329,25 @@
           "no_drop": true
         },
         {
-          "ip_cidr": [
-            "10.0.0.0/8",
-            "169.254.0.0/16",
-            "172.16.0.0/12",
-            "192.168.0.0/16"
+          "type": "logical",
+          "mode": "and",
+          "rules": [
+            {
+              "ip_cidr": "$lan_ipv4"
+            },
+            {
+              "type": "logical",
+              "mode": "or",
+              "rules": [
+                {
+                  "domain_suffix": "$lan_protected_suffixes"
+                },
+                {
+                  "domain": "$overseas_full"
+                }
+              ],
+              "invert": true
+            }
           ],
           "action": "route",
           "outbound": "Tono-AIHome-Direct"

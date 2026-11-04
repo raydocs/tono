@@ -96,6 +96,8 @@ try {
     return items
   }
   const encryptedDNSPorts = ints('ENCRYPTED_DNS_PORTS')
+  const lanIPv4 = quoted('LAN_IPV4_CIDRS')
+  const lanIPv6 = quoted('LAN_IPV6_CIDRS')
   const stunUDPPorts = ints('STUN_UDP_PORTS')
   const publicStunSuffixes = quoted('PUBLIC_STUN_SUFFIXES')
   const mobileHomeAux = quoted('MOBILE_HOME_AUX_SUFFIXES')
@@ -115,6 +117,8 @@ try {
     $home_suffixes: home, $home_cidrs: [cidr[1]], $video_suffixes: video,
     $domestic_full: snapshot.domestic_full, $overseas_full: snapshot.overseas_full,
     $encrypted_dns_ports: encryptedDNSPorts,
+    $lan_ipv4: lanIPv4, $lan_ipv6: lanIPv6,
+    $lan_protected_suffixes: [...home, ...video, ...mobileHomeAux, ...cloudExitSuffixes],
     $stun_udp_ports: stunUDPPorts,
     $public_stun_suffixes: publicStunSuffixes,
     $overseas_udp_reject_ipv4: overseasUDPv4,
@@ -163,6 +167,8 @@ try {
   const contractTarget = path.join(root, 'apps/macos/Tono/Core/ThreeTierRoutingContract.swift')
   const contractOriginal = readFileSync(contractTarget, 'utf8')
   let contractUpdated = contractOriginal
+  contractUpdated = contractUpdated.replace(/(?:    static let lanIPv4CIDRs: \[String\] = \[[\s\S]*?\n    \]\n    static let lanIPv6CIDRs: \[String\] = \[[\s\S]*?\n    \]\n)?(?=    static let direct =)/,
+    swiftList('lanIPv4CIDRs', 'String', lanIPv4) + '\n' + swiftList('lanIPv6CIDRs', 'String', lanIPv6) + '\n')
   for (const [name, graph] of [['templateJSON', snapshot.graph], ['aiHomeTemplateJSON', aiHome.graph]]) {
     const section = new RegExp(`    private static let ${name} = #"""[\\s\\S]*?\\n    """#`, 'g')
     if ([...contractUpdated.matchAll(section)].length !== 1) throw new Error(`expected one Swift graph template ${name}`)
