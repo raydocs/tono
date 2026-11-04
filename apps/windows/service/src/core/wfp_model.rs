@@ -88,8 +88,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// persistent alongside the block-alls; v13: `…9e0c…` local-network permits while locked,
 /// never on the DNS ports and never for the core (decision 048); v14: `…9e0d…` the Tono API
 /// relays in the app-scoped bootstrap API channel (decision 090); v15: `…9e0e…` a third
-/// API relay, 154.84.56.196:2053, in that channel (decision 089).)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e0e_0000_4a6c_0000_0000_0000_0000;
+/// API relay, 154.84.56.196:2053, in that channel (decision 089); v16: `…9e0f…`
+/// shared LAN set including CGNAT; strict LAN survives Core death (2026-11-04).)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e0f_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -201,9 +202,10 @@ pub struct RuleConfig {
     pub api_host_ips: Vec<IpAddr>,
     /// WinTUN LUID; only consulted in `Locked` mode.
     pub tun_luid: Option<u64>,
-    /// Stable sessions retain their reviewed LAN capability; strict routing never bypasses
-    /// the Core's LAN/IPv6/UDP rejection through physical on-link permits.
+    /// Stable sessions retain their reviewed LAN capability while the tunnel is live.
     pub allow_local_network: bool,
+    /// Root-owned Three-tier intent keeps LAN reachable, including Core DIRECT, without a TUN.
+    pub always_allow_lan: bool,
     /// Staged core path, folded into the endpoint permit's key: an installer that moves the
     /// binary must rekey the permit (Proton's upgrade lesson — app-path filters silently die
     /// when the exe moves), which the add-before-remove plan then swaps atomically.
@@ -612,15 +614,14 @@ fn emit_prefixes(mut start: u32, end: u32, out: &mut Vec<([u8; 4], u8)>) {
     }
 }
 
-/// The local network: RFC 1918 and IPv4 link-local. Static on purpose: a prefix computed from
-/// the adapter would let a hostile network declare any public range "local" (TunnelCrack
-/// LocalNet). Carrier NAT (100.64.0.0/10) is not here; the macOS anchor leaves it out too.
-const LAN_V4: [([u8; 4], u8); 4] = [
-    ([10, 0, 0, 0], 8),
-    ([172, 16, 0, 0], 12),
-    ([192, 168, 0, 0], 16),
-    ([169, 254, 0, 0], 16),
-];
+/// Never derived from an adapter's advertised prefix (TunnelCrack LocalNet).
+fn lan_v4() -> Vec<([u8; 4], u8)> {
+    crate::direct_domains::LAN_IPV4_CIDRS.iter().map(|cidr| {
+        let (address, prefix) = cidr.split_once('/').expect("compiled LAN CIDR");
+        (address.parse::<std::net::Ipv4Addr>().expect("compiled LAN address").octets(),
+            prefix.parse().expect("compiled LAN prefix"))
+    }).collect()
+}
 
 /// Link-local and unique-local IPv6 unicast.
 const LAN_V6: [([u8; 16], u8); 2] = [
@@ -690,7 +691,7 @@ fn v6_conditions(prefixes: &[([u8; 16], u8)]) -> Vec<Condition> {
 /// Windows routes out of the physical adapter (a more specific route, or any ULA, since the
 /// tunnel carries no IPv6) is permitted even when a router forwards it elsewhere. The macOS
 /// anchor permits the same ranges without an interface either.
-fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
+fn lan_rules(app_path: &str, core_lan_allowed: bool) -> Vec<FilterSpec> {
     use Condition as C;
     use FilterAction as A;
     use LayerKind as L;
@@ -699,7 +700,7 @@ fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
         addr: SSDP_GROUP,
         prefix: 32,
     };
-    let mut core_v4 = v4_conditions(&LAN_V4);
+    let mut core_v4 = v4_conditions(&lan_v4());
     core_v4.extend(v4_conditions(&LOCAL_DISCOVERY_V4));
     core_v4.push(ssdp.clone());
     let mut core_v6 = v6_conditions(&LAN_V6);
@@ -710,6 +711,7 @@ fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
         ("v4", L::AleAuthConnectV4, core_v4),
         ("v6", L::AleAuthConnectV6, core_v6),
     ] {
+        if core_lan_allowed { continue; }
         let mut conditions = vec![C::AleAppId];
         conditions.extend(addresses);
         filters.push(spec(
@@ -723,7 +725,7 @@ fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
         ));
     }
     for (tag, description, layer, addresses) in [
-        ("out-v4", "session permit local network", L::AleAuthConnectV4, v4_conditions(&LAN_V4)),
+        ("out-v4", "session permit local network", L::AleAuthConnectV4, v4_conditions(&lan_v4())),
         ("out-v6", "session permit local network", L::AleAuthConnectV6, v6_conditions(&LAN_V6)),
         (
             "discovery-v4",
@@ -743,7 +745,7 @@ fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
             "peers-v4",
             "session permit local network peers",
             L::AleAuthRecvAcceptV4,
-            v4_conditions(&LAN_V4),
+            v4_conditions(&lan_v4()),
         ),
         (
             "peers-v6",
@@ -1035,11 +1037,11 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
         }
     }
 
-    // I: the local network. Locked with a renderable tunnel only: in Bootstrap and Blocked
-    // nothing carries the rest of the traffic, and the user is told nothing gets out.
-    if config.mode == KillSwitchStatusMode::Locked && config.tun_luid.is_some()
-        && config.allow_local_network {
-        filters.extend(lan_rules(&config.app_path));
+    // On-link host traffic and Core DIRECT both need this path. Only strict intent keeps it
+    // without a live TUN; the LAN ports still exclude DNS, and public addresses never match.
+    if config.always_allow_lan || (config.mode == KillSwitchStatusMode::Locked
+        && config.tun_luid.is_some() && config.allow_local_network) {
+        filters.extend(lan_rules(&config.app_path, config.always_allow_lan));
     }
 
     // E: redundant block-all, always present while armed. This default-deny floor already blocks
@@ -1167,7 +1169,8 @@ pub fn without_unresolved_apps(
     core_unresolved: bool,
     tono_app_unresolved: bool,
 ) -> ChangePlan {
-    let lan_permit = |spec: &FilterSpec| core_unresolved && spec.weight == WEIGHT_LAN_PERMIT;
+    let requires_core_block = expected.iter().any(|spec| spec.weight == WEIGHT_CORE_LAN_BLOCK);
+    let lan_permit = |spec: &FilterSpec| core_unresolved && requires_core_block && spec.weight == WEIGHT_LAN_PERMIT;
     let mut remove = plan.remove.clone();
     for spec in expected.iter().filter(|spec| lan_permit(spec)) {
         if !remove.contains(&spec.key) {
@@ -1238,6 +1241,7 @@ mod tests {
             api_host_ips: vec!["1.1.1.1".parse().unwrap()],
             tun_luid: Some(0x1234_5678),
             allow_local_network: true,
+            always_allow_lan: false,
             app_path: r"C:\ProgramData\Tono\bin\mihomo.exe".to_owned(),
             tono_app_path: r"C:\Program Files\Tono\Tono.exe".to_owned(),
             direct_endpoints: Vec::new(),
@@ -2196,7 +2200,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_locked_session_withholds_physical_lan_ipv6_and_discovery_permits() {
+    fn stable_lan_setting_off_withholds_physical_lan_ipv6_and_discovery_permits() {
         use FilterAction::{Block, Permit};
         use IpProtocol::{Tcp, Udp};
         use LayerKind::{AleAuthConnectV4 as OutV4, AleAuthConnectV6 as OutV6};
@@ -2214,6 +2218,57 @@ mod tests {
         strict.allow_local_network = true;
         assert_eq!(arbitrate(&expected_filters(&strict), &packet(OutV4, Tcp, "192.168.1.1", 443)), Permit,
             "the stable contract is unchanged");
+    }
+
+    #[test]
+    fn strict_live_lan_includes_cgnat_and_core_direct_but_never_public_or_dns() {
+        use FilterAction::{Block, Permit};
+        use IpProtocol::{Tcp, Udp};
+        use LayerKind::{AleAuthConnectV4 as V4, AleAuthConnectV6 as V6};
+        let mut strict = config(KillSwitchStatusMode::Locked);
+        strict.always_allow_lan = true;
+        strict.allow_local_network = false;
+        let filters = expected_filters(&strict);
+        let verdict = |layer, protocol, ip, port| arbitrate(&filters, &packet(layer, protocol, ip, port));
+        assert_eq!(verdict(V4, Tcp, "10.1.2.3", 5000), Permit);
+        assert_eq!(verdict(V4, Tcp, "172.20.1.2", 5000), Permit);
+        assert_eq!(verdict(V4, Tcp, "192.168.1.2", 5000), Permit);
+        assert_eq!(verdict(V4, Tcp, "169.254.1.2", 5000), Permit);
+        assert_eq!(verdict(V4, Tcp, "100.64.1.2", 5000), Permit);
+        assert_eq!(verdict(V6, Tcp, "fe80::1", 5000), Permit);
+        assert_eq!(verdict(V6, Tcp, "fd12::7", 5000), Permit);
+        assert_eq!(verdict(V4, Udp, "239.255.255.250", 1900), Permit);
+        assert_eq!(verdict(V4, Udp, "224.0.0.251", 5353), Permit);
+        assert_eq!(verdict(V4, Udp, "100.64.1.2", 53), Block);
+        assert_eq!(verdict(V4, Tcp, "100.64.1.2", 853), Block);
+        assert_eq!(verdict(V4, Udp, "100.64.1.2", 853), Block);
+        assert_eq!(verdict(V4, Tcp, "100.64.1.2", 53), Block);
+        assert_eq!(verdict(V4, Tcp, "9.9.9.9", 5000), Block);
+        assert_eq!(verdict(V4, Udp, "9.9.9.9", 443), Block);
+        assert_eq!(verdict(V6, Tcp, "2001:db8::1", 443), Block);
+        let mut core = packet(V4, Tcp, "100.64.1.2", 5000);
+        core.app_id_matches = true;
+        assert_eq!(arbitrate(&filters, &core), Permit, "a LAN packet captured by TUN must leave through Core DIRECT");
+    }
+
+    #[test]
+    fn strict_blocked_lan_survives_core_death_without_a_tunnel_or_core_app_id() {
+        use FilterAction::{Block, Permit};
+        use IpProtocol::{Tcp, Udp};
+        use LayerKind::AleAuthConnectV4 as V4;
+        let mut strict = config(KillSwitchStatusMode::Blocked);
+        strict.always_allow_lan = true;
+        strict.tun_luid = None;
+        strict.endpoints.clear();
+        strict.api_host_ips.clear();
+        let filters = expected_filters(&strict);
+        let plan = without_unresolved_apps(&diff(&[], &filters), &filters, true, true);
+        assert_eq!(arbitrate(&plan.install, &packet(V4, Tcp, "192.168.1.2", 5000)), Permit);
+        assert_eq!(arbitrate(&plan.install, &packet(V4, Udp, "100.64.1.2", 27015)), Permit);
+        assert_eq!(arbitrate(&plan.install, &packet(V4, Udp, "100.64.1.2", 53)), Block);
+        assert_eq!(arbitrate(&plan.install, &packet(V4, Tcp, "100.64.1.2", 853)), Block);
+        assert_eq!(arbitrate(&plan.install, &packet(V4, Tcp, "9.9.9.9", 443)), Block);
+        assert!(plan.install.iter().any(|filter| filter.weight == WEIGHT_LAN_PERMIT));
     }
 
     #[test]
