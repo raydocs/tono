@@ -179,6 +179,109 @@ extension KillSwitchManager {
         return kept.isEmpty ? .keep : .targeted(kept)
     }
 
+    static func localNetworkRules(physicalInterfaces: [String], passesAllowed: Bool) -> [String] {
+        var lines: [String] = []
+        // LAN ranges bypass the TUN, so DNS sent straight to a LAN resolver
+        // would never meet `hijack-dns`. System DNS is the loopback listener;
+        // nothing protected needs plain DNS or DoT to the LAN. Scoped to the
+        // physical interfaces so a company VPN running beside Tono keeps the
+        // DNS it pushes to its own utun. With no physical interface found,
+        // the block stays unscoped: fail closed. PF only: the app's
+        // Protected DNS audit still holds the session on that VPN's split
+        // DNS (provisional product decision; see
+        // holdProtectedDNSSupplementalConflict).
+        let lanDNSScope = physicalInterfaces.isEmpty
+            ? ""
+            : "on { \(physicalInterfaces.joined(separator: ", ")) } "
+        lines.append(
+            "block drop out quick \(lanDNSScope)inet proto { tcp, udp } to { \(ThreeTierRoutingContract.lanIPv4CIDRs.joined(separator: ", ")) } port { 53, 853 } label \"tono-lan-dns\""
+        )
+        lines.append(
+            "block drop out quick \(lanDNSScope)inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\""
+        )
+        // Same bound for the discovery destinations `tono-multicast`
+        // passes below. That pass names no interface, so neither does this
+        // block: an interface that appears after the arm is covered at
+        // once, without waiting for the LAN scope to widen. As on main,
+        // lo0 and the Continuity interfaces pass everything before any
+        // block is reached. No VPN pushes a resolver at a multicast or
+        // broadcast address, so nothing beside Tono loses DNS to it. Its
+        // own label keeps it out of `lanDNSInterfaces`.
+        lines.append(
+            "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\""
+        )
+        // PF matches a fragment against address-only rules and skips every
+        // rule with a port (xnu `pf_test_fragment`), so the block above
+        // never sees one and the portless `tono-multicast` pass would.
+        // Before that pass existed a fragment to these destinations fell
+        // to the final block; this keeps it there. The IPv4 output hook
+        // runs before the stack fragments a datagram, so ordinary
+        // discovery traffic never arrives here as a fragment.
+        lines.append(
+            "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\""
+        )
+        // PF matches a fragment against address-only rules: it skips every
+        // rule with a port or a TCP flag set (xnu `pf_test_fragment`), so
+        // the port blocks above never see one. The stateful LAN pass had
+        // the implicit `flags S/SA` and was skipped too, which left a TCP
+        // fragment for the final block. The stateless passes below have no
+        // flag set, so these two rules keep that outcome: an outbound
+        // fragment PF reads as TCP, to a LAN or link-local destination, is
+        // dropped wherever these rules are reached (lo0 and the Continuity
+        // interfaces pass everything earlier). With path MTU discovery on,
+        // TCP sets DF and sizes segments to the path, so an ordinary
+        // connection sends none. Unchanged from the stateful passes: UDP
+        // fragments, which never met a flag set, and an IPv6 fragment
+        // header followed by another extension header, which PF matches
+        // by that header's protocol, not as TCP.
+        lines.append(
+            "block drop out quick inet proto tcp to { \(ThreeTierRoutingContract.lanIPv4CIDRs.joined(separator: ", ")) } fragment label \"tono-lan-fragment\""
+        )
+        lines.append(
+            "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
+        )
+        lines.append(
+            "block drop out quick inet proto udp to { \(ThreeTierRoutingContract.lanIPv4CIDRs.joined(separator: ", ")) } fragment label \"tono-lan-fragment\""
+        )
+        lines.append(
+            "block drop out quick inet6 proto udp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
+        )
+        // The local network itself (D7, decision D3-A): only when the user
+        // turned on "Allow local network devices". Off, nothing to the
+        // private, link-local or ULA ranges or to IPv6 multicast passes
+        // outbound, so the router page, printers, NAS, a LAN peer's reply,
+        // MLD, DHCPv6 and unicast DHCP renewal fall to the final block
+        // (DHCP renewal falls back to the broadcast `tono-dhcp` passes).
+        // Every block above, and mDNS, IGMP, Continuity, DHCP broadcast
+        // and NDP, render either way. On renders exactly the rules that
+        // were here before the setting existed.
+        if passesAllowed {
+            lines.append(
+                "pass out quick inet to { \(ThreeTierRoutingContract.lanIPv4CIDRs.joined(separator: ", ")) } no state label \"tono-lan\""
+            )
+            lines.append(
+                "pass in quick inet from { \(ThreeTierRoutingContract.lanIPv4CIDRs.joined(separator: ", ")) } keep state (if-bound) label \"tono-lan\""
+            )
+            lines.append(
+                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\""
+            )
+            lines.append(
+                "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
+            )
+        }
+        if passesAllowed {
+            lines.append("pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\"")
+            lines.append("pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\"")
+        }
+        return lines
+    }
+
     static func renderRules(
         state: KillSwitchState,
         allowedUID: uid_t,
@@ -190,10 +293,21 @@ extension KillSwitchManager {
                 "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
                 "pass out quick on lo0 all no state label \"tono-loopback\"",
             ]
+            rules += localNetworkRules(physicalInterfaces: physicalInterfaces, passesAllowed: true)
+            rules += [
+                "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass in quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
+            ]
             if let proof = state.strictProof {
                 let nic = proof.interface
                 // Deny non-public destinations before the address-free Core
-                // web grant. No IPv6, UDP, QUIC, LAN or all-process permit.
+                // web grant. LAN has already passed; public DIRECT is IPv4 TCP only.
                 rules.append("block drop out quick on \(nic) inet to { 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/3 } label \"tono-strict-local\"")
                 for endpoint in proof.exits {
                     rules.append("pass out quick on \(nic) inet proto tcp to \(endpoint.address) port \(endpoint.port) user root keep state (if-bound) label \"tono-exit\"")
@@ -210,7 +324,7 @@ extension KillSwitchManager {
             return rules.joined(separator: "\n") + "\n"
         }
         if state.aiHomeScoped {
-            return renderAIHomeRules(state: state)
+            return renderAIHomeRules(state: state, physicalInterfaces: physicalInterfaces)
         }
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
@@ -324,94 +438,7 @@ extension KillSwitchManager {
             lines.append(
                 "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\""
             )
-            // LAN ranges bypass the TUN, so DNS sent straight to a LAN resolver
-            // would never meet `hijack-dns`. System DNS is the loopback listener;
-            // nothing protected needs plain DNS or DoT to the LAN. Scoped to the
-            // physical interfaces so a company VPN running beside Tono keeps the
-            // DNS it pushes to its own utun. With no physical interface found,
-            // the block stays unscoped: fail closed. PF only: the app's
-            // Protected DNS audit still holds the session on that VPN's split
-            // DNS (provisional product decision; see
-            // holdProtectedDNSSupplementalConflict).
-            let lanDNSScope = physicalInterfaces.isEmpty
-                ? ""
-                : "on { \(physicalInterfaces.joined(separator: ", ")) } "
-            lines.append(
-                "block drop out quick \(lanDNSScope)inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 } label \"tono-lan-dns\""
-            )
-            lines.append(
-                "block drop out quick \(lanDNSScope)inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\""
-            )
-            // Same bound for the discovery destinations `tono-multicast`
-            // passes below. That pass names no interface, so neither does this
-            // block: an interface that appears after the arm is covered at
-            // once, without waiting for the LAN scope to widen. As on main,
-            // lo0 and the Continuity interfaces pass everything before any
-            // block is reached. No VPN pushes a resolver at a multicast or
-            // broadcast address, so nothing beside Tono loses DNS to it. Its
-            // own label keeps it out of `lanDNSInterfaces`.
-            lines.append(
-                "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\""
-            )
-            // PF matches a fragment against address-only rules and skips every
-            // rule with a port (xnu `pf_test_fragment`), so the block above
-            // never sees one and the portless `tono-multicast` pass would.
-            // Before that pass existed a fragment to these destinations fell
-            // to the final block; this keeps it there. The IPv4 output hook
-            // runs before the stack fragments a datagram, so ordinary
-            // discovery traffic never arrives here as a fragment.
-            lines.append(
-                "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\""
-            )
-            // PF matches a fragment against address-only rules: it skips every
-            // rule with a port or a TCP flag set (xnu `pf_test_fragment`), so
-            // the port blocks above never see one. The stateful LAN pass had
-            // the implicit `flags S/SA` and was skipped too, which left a TCP
-            // fragment for the final block. The stateless passes below have no
-            // flag set, so these two rules keep that outcome: an outbound
-            // fragment PF reads as TCP, to a LAN or link-local destination, is
-            // dropped wherever these rules are reached (lo0 and the Continuity
-            // interfaces pass everything earlier). With path MTU discovery on,
-            // TCP sets DF and sizes segments to the path, so an ordinary
-            // connection sends none. Unchanged from the stateful passes: UDP
-            // fragments, which never met a flag set, and an IPv6 fragment
-            // header followed by another extension header, which PF matches
-            // by that header's protocol, not as TCP.
-            lines.append(
-                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\""
-            )
-            lines.append(
-                "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
-            )
-            // The local network itself (D7, decision D3-A): only when the user
-            // turned on "Allow local network devices". Off, nothing to the
-            // private, link-local or ULA ranges or to IPv6 multicast passes
-            // outbound, so the router page, printers, NAS, a LAN peer's reply,
-            // MLD, DHCPv6 and unicast DHCP renewal fall to the final block
-            // (DHCP renewal falls back to the broadcast `tono-dhcp` passes).
-            // Every block above, and mDNS, IGMP, Continuity, DHCP broadcast
-            // and NDP, render either way. On renders exactly the rules that
-            // were here before the setting existed.
-            if state.allowLocalNetworkDevices {
-                lines.append(
-                    "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\""
-                )
-                lines.append(
-                    "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
-                )
-                lines.append(
-                    "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\""
-                )
-                lines.append(
-                    "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
-                )
-                lines.append(
-                    "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\""
-                )
-                lines.append(
-                    "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
-                )
-            }
+            lines += localNetworkRules(physicalInterfaces: physicalInterfaces, passesAllowed: state.allowLocalNetworkDevices)
         }
         // Every ruleset, tunnel or not. After a network move the Mac sits in the
         // no-tunnel bootstrap or preserve ruleset while it reconnects, and
@@ -445,22 +472,7 @@ extension KillSwitchManager {
         if !state.tunnelInterfaces.isEmpty {
             // Discovery beyond mDNS goes with the same setting: off, the
             // devices it would find are unreachable anyway.
-            if state.allowLocalNetworkDevices {
-                // Local discovery beyond mDNS. Link-local multicast (224.0.0.0/24)
-                // and the limited broadcast are never forwarded by a router. `no
-                // state`: answers come back unicast from a LAN address, which
-                // `tono-lan` passes.
-                lines.append(
-                    "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
-                )
-                // SSDP (DLNA casting) is the one routable group: its address and
-                // port only. A multicast router may forward it as far as its
-                // configuration allows (RFC 2365 section 10), and PF cannot bound
-                // the TTL a sender sets.
-                lines.append(
-                    "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
-                )
-            }
+
         }
         for interface in state.tunnelInterfaces.sorted() {
             // Host packets leave through the TUN while proxied replies return
@@ -610,7 +622,7 @@ extension KillSwitchManager {
     /// dies, before the watchdog's AI hold. AI names never reach this layer:
     /// they resolve to fake IPs through the Core. No `user` clause: the Core
     /// reaches Home through its cloud exit, never an AI address.
-    static func renderAIHomeRules(state: KillSwitchState) -> String {
+    static func renderAIHomeRules(state: KillSwitchState, physicalInterfaces: [String]) -> String {
         var lines = [
             "# Managed by Tono AI Home — do not edit",
             // Labels of their own: the whole-host ruleset carries the same
@@ -619,6 +631,7 @@ extension KillSwitchManager {
             "pass in quick on lo0 all keep state (if-bound) label \"tono-ai-home-loopback\"",
             "pass out quick on lo0 all no state label \"tono-ai-home-loopback\"",
         ]
+        lines += localNetworkRules(physicalInterfaces: physicalInterfaces, passesAllowed: false)
         for interface in state.tunnelInterfaces.sorted() {
             lines.append("pass in quick on \(interface) all keep state (if-bound) label \"tono-ai-home-tunnel\"")
             lines.append("pass out quick on \(interface) all keep state (if-bound) label \"tono-ai-home-tunnel\"")

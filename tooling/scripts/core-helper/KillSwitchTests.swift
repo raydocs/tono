@@ -916,6 +916,8 @@ extension KillSwitchManager {
     }
 
     static func runSelfTests() -> Bool {
+        let strictLAN = [runStrictLANLiveSelfTest(), runStrictLANCoreDeathSelfTest(), runStrictLANDNSSelfTest()]
+        guard strictLAN.allSatisfy({ $0 }) else { return false }
         do {
             guard canonicalPublicAddress("8.8.8.8") == "8.8.8.8",
                   canonicalPublicAddress("2606:4700:4700::1111") != nil,
@@ -2510,9 +2512,48 @@ extension KillSwitchManager {
 }
 
 extension KillSwitchManager {
+    static func runStrictLANLiveSelfTest() -> Bool {
+        var state = aiHomeFixtureState(scoped: false, allowLAN: false)
+        state.strictBlocking = true
+        let rules = renderRules(state: state, allowedUID: 501, physicalInterfaces: ["en0"])
+        let passed = rules.contains("label \"tono-lan\"") && rules.contains("100.64.0.0/10")
+            && rules.contains("label \"tono-linklocal\"") && rules.contains("label \"tono-ssdp\"")
+            && rules.contains("label \"tono-mdns\"") && rules.contains("block drop out quick all")
+        print("strict-live-lan: \(passed ? "PASS" : "FAIL")")
+        return passed
+    }
+
+    static func runStrictLANCoreDeathSelfTest() -> Bool {
+        var previous = aiHomeFixtureState(scoped: false, allowLAN: false)
+        previous.strictBlocking = true
+        var held = emergencyState(preserving: previous)
+        held.strictBlocking = true // The persisted root intent is reasserted by installRules.
+        let rules = renderRules(state: held, allowedUID: 501, physicalInterfaces: ["en0"])
+        let passed = held.tunnelInterfaces.isEmpty && rules.contains("label \"tono-lan\"")
+            && rules.contains("label \"tono-linklocal\"") && rules.contains("label \"tono-ssdp\"")
+            && rules.contains("block drop out quick all") && !rules.contains("user root")
+        print("strict-core-death-lan: \(passed ? "PASS" : "FAIL")")
+        return passed
+    }
+
+    static func runStrictLANDNSSelfTest() -> Bool {
+        var state = emergencyState(preserving: nil)
+        state.strictBlocking = true
+        let lines = renderRules(state: state, allowedUID: 501, physicalInterfaces: ["en0"]).components(separatedBy: "\n")
+        let dns = lines.firstIndex { $0.contains("inet proto { tcp, udp }") && $0.contains("port { 53, 853 }") && $0.contains("tono-lan-dns") }
+        let pass = lines.firstIndex { $0.hasPrefix("pass out") && $0.contains("tono-lan\"") }
+        let passed = dns != nil && pass != nil && dns! < pass!
+            && ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"].allSatisfy { lines[dns!].contains($0) }
+            && lines.contains { $0.contains("proto udp") && $0.contains("100.64.0.0/10") && $0.contains("fragment label \"tono-lan-fragment\"") }
+        print("strict-lan-dns: \(passed ? "PASS" : "FAIL")")
+        return passed
+    }
+}
+
+extension KillSwitchManager {
     /// A session with every exception the whole-host ruleset can carry, so the
     /// AI Home rendering is seen to drop all of them.
-    static func aiHomeFixtureState(scoped: Bool) -> KillSwitchState {
+    static func aiHomeFixtureState(scoped: Bool, allowLAN: Bool = true) -> KillSwitchState {
         KillSwitchState(
             armed: true,
             tailscaleBootstrapEnabled: true,
@@ -2526,7 +2567,7 @@ extension KillSwitchManager {
             proxyTargets: [],
             sessionDirectEndpoints: [.init(address: "223.5.5.5", transport: "tcp", port: 443)],
             reviewedBundleDirectEnabled: true,
-            allowLocalNetworkDevices: true,
+            allowLocalNetworkDevices: allowLAN,
             aiHomeScoped: scoped
         )
     }

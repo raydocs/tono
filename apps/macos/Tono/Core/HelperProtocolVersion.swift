@@ -527,7 +527,9 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.68 → 4.52.69: the AI Home graph pairs each Home TCP route with
     ///   its UDP reject, and its DNS matches three-tier apart from the mode's
     ///   tags. An older daemon keeps the previous AI Home graph.
-    static let current = "4.52.69"
+    /// - 4.52.69 → 4.52.70: Three-tier always passes the shared LAN set,
+    ///   including 100.64/10, even while fail-closed; LAN DNS stays blocked.
+    static let current = "4.52.70"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
