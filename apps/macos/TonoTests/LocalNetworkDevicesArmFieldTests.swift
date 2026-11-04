@@ -9,13 +9,16 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
     private var savedIPC = KillSwitchService.armIPC
     private var savedArmed = false
     private var savedReader = LocalNetworkDevicesSync.readStoredSetting
+    private var savedModeReader = LocalNetworkDevicesSync.readRoutingMode
 
     override func setUp() {
         super.setUp()
         savedIPC = KillSwitchService.armIPC
         savedArmed = KillSwitchService.isArmed
         savedReader = LocalNetworkDevicesSync.readStoredSetting
+        savedModeReader = LocalNetworkDevicesSync.readRoutingMode
         LocalNetworkDevicesSync.readStoredSetting = { false }
+        LocalNetworkDevicesSync.readRoutingMode = { "stable" }
         LocalNetworkDevicesSync.resetForTesting()
     }
 
@@ -23,6 +26,7 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
         KillSwitchService.armIPC = savedIPC
         KillSwitchService.isArmed = savedArmed
         LocalNetworkDevicesSync.readStoredSetting = savedReader
+        LocalNetworkDevicesSync.readRoutingMode = savedModeReader
         LocalNetworkDevicesSync.resetForTesting()
         super.tearDown()
     }
@@ -41,6 +45,24 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
             helperPrepared: true,
             reviewedBundleDirect: false
         )
+    }
+
+    func testThreeTierAlwaysSendsLANWithoutChangingTheStablePreference() throws {
+        LocalNetworkDevicesSync.readRoutingMode = { "three-tier" }
+        XCTAssertTrue(LocalNetworkDevicesSync.desired.allow)
+        XCTAssertFalse(LocalNetworkDevicesSync.readStoredSetting())
+        XCTAssertEqual(HelperManager.localNetworkDevicesArmFields(LocalNetworkDevicesSync.desired.allow)["allowLocalNetworkDevices"] as? Bool, true)
+        KillSwitchService.armIPC.deliver = { _ in Self.reply(echo: true) }
+        try armSession()
+        LocalNetworkDevicesSync.readRoutingMode = { "stable" }
+        XCTAssertFalse(LocalNetworkDevicesSync.desired.allow)
+    }
+
+    func testAIHomeAlwaysAllowsLANWithoutChangingTheStablePreference() {
+        LocalNetworkDevicesSync.readRoutingMode = { "ai-home" }
+        XCTAssertTrue(LocalNetworkDevicesSync.desired.allow)
+        LocalNetworkDevicesSync.readRoutingMode = { "stable" }
+        XCTAssertFalse(LocalNetworkDevicesSync.desired.allow)
     }
 
     /// The Core installs a document built from `setting`.

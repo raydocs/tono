@@ -68,15 +68,19 @@ nonisolated enum LocalNetworkDevicesSync {
         SettingsKey.allowsLocalNetworkDevices()
     }
 
+    nonisolated(unsafe) static var readRoutingMode: () -> String? = {
+        DesktopRoutingModeAdmission.persistedSession()
+    }
+
     static var desired: Setting {
         lock.withLock { desiredLocked() }
     }
 
     private static func desiredLocked() -> Setting {
-        if let desiredValue { return desiredValue }
-        let initial = Setting(generation: 0, allow: readStoredSetting())
-        desiredValue = initial
-        return initial
+        let stored = desiredValue ?? Setting(generation: 0, allow: readStoredSetting())
+        desiredValue = stored
+        let alwaysAllowsLAN = ["three-tier", "ai-home"].contains(readRoutingMode() ?? "stable")
+        return Setting(generation: stored.generation, allow: stored.allow || alwaysAllowsLAN)
     }
 
     /// The user changed the setting: a new generation, a fresh budget, and

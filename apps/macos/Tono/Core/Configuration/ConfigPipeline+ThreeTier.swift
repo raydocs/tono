@@ -11,9 +11,7 @@ nonisolated extension ConfigPipeline {
         fakeIPSlot: Int = 0,
         variant: ThreeTierRoutingContract.Variant = .threeTier
     ) throws -> OwnedSingBoxRuntime {
-        // AI Home routes LAN DIRECT itself; strict three-tier never admits it.
-        guard overlay.claudeHomeSocks5 != nil, overlay.tonoTransport == nil,
-              variant == .aiHome || !overlay.allowLocalNetworkDevices else { throw SingBoxError.unsupportedPolicy }
+        guard overlay.claudeHomeSocks5 != nil, overlay.tonoTransport == nil else { throw SingBoxError.unsupportedPolicy }
         let compiled = try buildSingBoxRuntime(overlay: overlay, nodes: nodes, directPlan: nil, fakeIPSlot: fakeIPSlot)
         guard var runtime = try JSONSerialization.jsonObject(with: compiled.runtimeJSON) as? [String: Any],
               var outbounds = runtime["outbounds"] as? [[String: Any]],

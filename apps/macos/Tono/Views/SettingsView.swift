@@ -194,7 +194,7 @@ struct SettingsView: View {
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Ordinary DIRECT supports public IPv4 TCP ports 80/443 only. Application UDP/QUIC, IPv6 and LAN are blocked, even if Allow local network devices was enabled. If Core stops, protection stays fail-closed.")
+                Text("Ordinary DIRECT supports public IPv4 TCP ports 80/443 only; public UDP/QUIC and IPv6 remain blocked. LAN/intranet always passes, including while Core is stopped; LAN DNS ports 53/853 stay blocked.")
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -211,7 +211,7 @@ struct SettingsView: View {
         }
     }
 
-    private var strictLANUnavailable: Bool {
+    private var threeTierAlwaysAllowsLAN: Bool {
         desktopRoutingMode == "three-tier" || appState.coreRuntime.routingMode == "three-tier"
     }
 
@@ -272,17 +272,17 @@ struct SettingsView: View {
                     set: setAllowLocalNetworkDevices
                 )
             )
-            .disabled(strictLANUnavailable || aiHomeLANAlwaysOn)
+            .disabled(threeTierAlwaysAllowsLAN || aiHomeLANAlwaysOn)
 
-            if !strictLANUnavailable, aiHomeLANAlwaysOn {
+            if !threeTierAlwaysAllowsLAN, aiHomeLANAlwaysOn {
                 Text("AI Home always allows local network devices. Your LAN preference is kept for Stable.")
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if strictLANUnavailable {
-                Text("LAN access is unavailable while Three-tier is selected or retained by the session. Your LAN preference is kept for Stable. Select Stable, then explicitly disconnect and reconnect to use it.")
+            if threeTierAlwaysAllowsLAN {
+                Text("Three-tier always allows local network devices, even while fail-closed. Your LAN preference is kept for Stable; LAN DNS ports 53/853 stay blocked.")
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -758,7 +758,8 @@ final class SingBoxConfigTests: XCTestCase {
         overlay.allowLocalNetworkDevices = true
         XCTAssertNoThrow(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values,
             physicalInterface: "en0", variant: .aiHome))
-        XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0"))
+        let withLANPreference = try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0", fakeIPSlot: 3)
+        XCTAssertEqual(withLANPreference.runtimeJSON, threeTier.runtimeJSON, "Three-tier LAN does not depend on the Stable setting")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-ai-home-check-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
