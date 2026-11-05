@@ -669,7 +669,7 @@ mod tests {
         assert_eq!(rules[domestic]["network"], "tcp");
         assert_eq!(rules[domestic]["port"], json!([80, 443]));
         let cloud = rules.iter().position(|rule| rule["domain"].as_array().is_some_and(|hosts| hosts.contains(&json!("www.wikipedia.org"))) && rule["action"] == "route").unwrap();
-        let ordinary = rules.iter().position(|rule| rule["outbound"] == "Tono-ThreeTier-Direct" && rule.get("domain").is_none()).unwrap();
+        let ordinary = rules.iter().position(|rule| rule["outbound"] == "Tono-ThreeTier-Direct" && rule.get("domain").is_none() && rule.get("type").is_none()).unwrap();
         assert!(home < cloud && cloud < ordinary, "protected routes terminate before ordinary DIRECT");
         assert_eq!(rules[cloud]["outbound"], "Tono-Exit");
         // This unconditional supported-port rule also accepts a new ordinary
@@ -680,10 +680,15 @@ mod tests {
         // A sequential graph interpreter with injected DNS answers, not a
         // network/Core test: resolve enriches metadata and never rewinds to
         // an earlier CIDR rule. Start with a fake-IP-restored hostname only.
-        let routed = |host: &str, answer: Ipv4Addr| -> String {
-            let mut destination: Option<Ipv4Addr> = None;
-            for rule in rules {
-                if rule.get("ip_version").is_some_and(|value| value != 4)
+        // Follows sing-box's logical rules: a LAN row is an `and` of the CIDR and
+        // the protected-name exclusion, so reading only its top level would make
+        // it unconditional.
+        fn matches(rule: &Value, host: &str, destination: Option<Ipv4Addr>) -> bool {
+            let matched = if rule["type"] == "logical" {
+                let mut inner = rule["rules"].as_array().unwrap().iter().map(|inner| matches(inner, host, destination));
+                if rule["mode"] == "and" { inner.all(|hit| hit) } else { inner.any(|hit| hit) }
+            } else {
+                !(rule.get("ip_version").is_some_and(|value| value != 4)
                     || rule.get("inbound").is_some_and(|value| !value.as_array().unwrap().contains(&json!("Tono-TUN")))
                     || rule.get("network").is_some_and(|value| value != "tcp" && !value.as_array().is_some_and(|items| items.contains(&json!("tcp"))))
                     || rule.get("port").is_some_and(|value| !value.as_array().unwrap().contains(&json!(443)))
@@ -694,9 +699,19 @@ mod tests {
                     }))
                     || rule.get("ip_cidr").is_some_and(|value| !destination.is_some_and(|ip| value.as_array().unwrap().iter().any(|cidr| {
                         let (network, bits) = cidr.as_str().unwrap().split_once('/').unwrap();
-                        let mask = u32::MAX << (32 - bits.parse::<u32>().unwrap());
-                        u32::from(ip) & mask == u32::from(network.parse::<Ipv4Addr>().unwrap()) & mask
-                    }))) {
+                        // An IPv4 destination never falls in an IPv6 CIDR.
+                        network.parse::<Ipv4Addr>().is_ok_and(|network| {
+                            let mask = u32::MAX << (32 - bits.parse::<u32>().unwrap());
+                            u32::from(ip) & mask == u32::from(network) & mask
+                        })
+                    }))))
+            };
+            matched != rule.get("invert").is_some_and(|invert| invert == true)
+        }
+        let routed = |host: &str, answer: Ipv4Addr| -> String {
+            let mut destination: Option<Ipv4Addr> = None;
+            for rule in rules {
+                if !matches(rule, host, destination) {
                     continue;
                 }
                 match rule["action"].as_str().unwrap() {
@@ -713,7 +728,12 @@ mod tests {
         assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 103, 255)), "Tono-ThreeTier-Direct");
         assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 112, 0)), "Tono-ThreeTier-Direct");
         assert_eq!(routed("www.bilibili.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-ThreeTier-Direct");
-        assert_eq!(routed("unlisted.example", Ipv4Addr::new(10, 2, 3, 4)), "reject");
+        // Owner decision 2026-11-04: Three-tier LAN, CGNAT included, is DIRECT.
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(10, 2, 3, 4)), "Tono-ThreeTier-Direct");
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(100, 64, 1, 2)), "Tono-ThreeTier-Direct");
+        // A LAN answer must not pull a protected name out of Home or the cloud.
+        assert_eq!(routed("auth.workos.com", Ipv4Addr::new(10, 2, 3, 4)), "Tono-Home-Residential");
+        assert_eq!(routed("www.wikipedia.org", Ipv4Addr::new(192, 168, 1, 1)), "Tono-Exit");
         assert_eq!(routed("youtubei.googleapis.com", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
         assert_eq!(routed("www.wikipedia.org", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
         assert_eq!(routed("auth.workos.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-Home-Residential");
