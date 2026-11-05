@@ -2110,9 +2110,16 @@ async fn strict_start_binds_the_session_and_only_explicit_release_opens_it() -> 
     locked.core_instance = Some(core);
     let config = rule_config_for(&locked, Some(core));
     assert_eq!(config.tun_luid, Some(7));
-    assert!(!config.allow_local_network, "a live strict tunnel cannot inherit stable LAN bypasses");
-    assert!(!wfp_model::expected_filters(&config).iter()
+    // Owner decision 2026-11-04: Three-tier always reaches the LAN.
+    assert!(config.always_allow_lan, "a live strict tunnel reaches the LAN");
+    assert!(wfp_model::expected_filters(&config).iter()
         .any(|filter| filter.weight == wfp_model::WEIGHT_LAN_PERMIT));
+    locked.tun_luid = None;
+    locked.core_instance = None;
+    let core_gone = rule_config_for(&locked, None);
+    assert_eq!(core_gone.tun_luid, None);
+    assert!(wfp_model::expected_filters(&core_gone).iter()
+        .any(|filter| filter.weight == wfp_model::WEIGHT_LAN_PERMIT), "the LAN stays reachable after Core dies");
     assert!(arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await.is_err());
     assert!(begin_direct_runtime_reload(17).await.is_err());
     release_applying_narrow().await?;

@@ -584,7 +584,11 @@ final class SingBoxConfigTests: XCTestCase {
         let rules = try XCTUnwrap((document["route"] as? [String: Any])?["rules"] as? [[String: Any]])
         let video = try XCTUnwrap(rules.firstIndex { ($0["domain_suffix"] as? [String])?.contains("youtubei.googleapis.com") == true && $0["action"] as? String == "route" })
         let home = try XCTUnwrap(rules.firstIndex { ($0["domain_suffix"] as? [String])?.contains("googleapis.com") == true && $0["action"] as? String == "route" })
-        let domestic = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" })
+        let domestic = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" && ($0["domain"] as? [String])?.contains("www.bilibili.com") == true })
+        let earlyLAN = rules[..<home].filter { $0["outbound"] as? String == "Tono-ThreeTier-Direct" }
+        XCTAssertFalse(earlyLAN.isEmpty, "LAN routes precede Home")
+        XCTAssertTrue(earlyLAN.allSatisfy { $0["type"] as? String == "logical" && $0["mode"] as? String == "and" },
+                      "A direct row before Home is only a LAN row that also excludes protected names")
         XCTAssertLessThan(video, home)
         XCTAssertLessThan(home, domestic)
         XCTAssertEqual(rules[video]["outbound"] as? String, "Tono-Exit")
@@ -593,7 +597,7 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertNil(rules[domestic]["domain_suffix"])
         XCTAssertEqual(rules[domestic]["network"] as? String, "tcp")
         let cloud = try XCTUnwrap(rules.firstIndex { ($0["domain"] as? [String])?.contains("www.wikipedia.org") == true && $0["action"] as? String == "route" })
-        let ordinary = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" && $0["domain"] == nil })
+        let ordinary = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" && $0["domain"] == nil && $0["type"] == nil })
         XCTAssertLessThan(home, cloud)
         XCTAssertLessThan(cloud, ordinary)
         XCTAssertEqual(rules[cloud]["outbound"] as? String, "Tono-Exit")
