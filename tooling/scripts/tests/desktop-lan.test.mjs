@@ -77,11 +77,16 @@ test('a LAN DNS answer cannot divert Home or cloud names to DIRECT', () => {
   assert.equal(route('three-tier', {domain:'www.wikipedia.org', ip:'192.168.1.2'}), 'Tono-Exit')
   assert.equal(route('ai-home', {domain:'claude.ai', ip:'192.168.1.2'}), 'HOME')
 })
-test('LAN DNS is never DIRECT in either graph, including CGNAT', () => {
-  assert.notEqual(route('three-tier', {ip:'100.64.1.2', port:53}), 'Tono-ThreeTier-Direct')
+test('Three-tier refuses LAN DNS while AI Home preserves its existing DNS behaviour', () => {
+  const lanDNSReject = rule => rule.action === 'reject'
+    && rule.rules?.some(child => child.port?.includes(53) && child.port?.includes(853))
+    && JSON.stringify(rule).includes('100.64.0.0/10')
+  assert.ok(graph('three-tier').route.rules.some(lanDNSReject))
+  assert.ok(!graph('ai-home').route.rules.some(lanDNSReject))
+  assert.equal(route('three-tier', {ip:'100.64.1.2', port:53}), 'reject')
   assert.equal(route('three-tier', {ip:'100.64.1.2', network:'udp', port:853}), 'reject')
-  assert.notEqual(route('ai-home', {ip:'100.64.1.2', port:53}), 'Tono-AIHome-Direct')
-  assert.equal(route('ai-home', {ip:'100.64.1.2', port:853}), 'reject')
+  assert.equal(route('ai-home', {ip:'100.64.1.2', port:53}), 'hijack-dns')
+  assert.equal(route('ai-home', {ip:'100.64.1.2', port:853}), 'Tono-AIHome-Direct')
 })
 test('ordinary public DIRECT and reserved-address rejection do not widen', () => {
   assert.equal(route('three-tier', {ip:'9.9.9.9', port:5000}), 'reject')

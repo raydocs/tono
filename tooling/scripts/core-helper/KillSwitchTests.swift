@@ -1144,14 +1144,16 @@ extension KillSwitchManager {
                 "pass in quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
                 "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
                 "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
-                "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 } label \"tono-lan-dns\"",
+                "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } port { 53, 853 } label \"tono-lan-dns\"",
                 "block drop out quick on { en0, en7 } inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\"",
                 "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\"",
                 "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\"",
-                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\"",
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } fragment label \"tono-lan-fragment\"",
                 "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\"",
-                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\"",
-                "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\"",
+                "block drop out quick inet proto udp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } fragment label \"tono-lan-fragment\"",
+                "block drop out quick inet6 proto udp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\"",
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } no state label \"tono-lan\"",
+                "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } keep state (if-bound) label \"tono-lan\"",
                 "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\"",
                 "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\"",
                 "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\"",
@@ -1221,7 +1223,7 @@ extension KillSwitchManager {
                 // IGMP (protocol 2, group membership that mDNS needs), the four
                 // mDNS passes (group and port) and the DHCP broadcast.
                 let localDestinations = [
-                    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10",
                     "fe80::", "fc00::/7", "ff00::/8", "ff02::", "224.0.0.0/4",
                     "224.0.0.0/24", "224.0.0.251", "239.", "255.255.255.255",
                 ]
@@ -1474,7 +1476,7 @@ extension KillSwitchManager {
             let continuityOffWithoutTunnel = !continuityNeedles.contains(where: rules.contains)
             // Scoped to the physical interfaces, so a company VPN's DNS on its
             // own utun is not blocked.
-            let lanDNSBlock = "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 }"
+            let lanDNSBlock = "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } port { 53, 853 }"
             let lanDNSBlockedFirst: Bool = {
                 guard let block = cloudRules.range(of: lanDNSBlock),
                       let lan = cloudRules.range(of: "label \"tono-lan\"") else { return false }
@@ -1537,7 +1539,7 @@ extension KillSwitchManager {
             // passes therefore keep no state.
             let establishedFlowNeedles = [
                 "pass out quick on lo0 all no state label \"tono-loopback\"",
-                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\"",
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } no state label \"tono-lan\"",
                 "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\"",
                 "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\"",
             ]
@@ -1554,7 +1556,7 @@ extension KillSwitchManager {
             // would match it by address and carry it past the port 53/853
             // block. TCP fragments to those destinations are dropped first.
             let tcpFragmentBlocks = [
-                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\"",
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } fragment label \"tono-lan-fragment\"",
                 "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\"",
             ]
             let tcpFragmentsStayBlocked: Bool = {
@@ -2572,6 +2574,24 @@ extension KillSwitchManager {
         )
     }
 
+    static func runAIHomeCoreDeadLANSelfTest() -> Bool {
+        let state = KillSwitchState(
+            armed: true, tailscaleBootstrapEnabled: false,
+            apiHosts: [], exitHints: [], tunnelInterfaces: [],
+            resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+            cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: true,
+            aiHomeScoped: true
+        )
+        let rules = renderRules(state: state, allowedUID: 501, physicalInterfaces: ["en0"])
+        let passed = rules.contains("label \"tono-ai-home\"")
+            && !rules.contains("tono-lan-dns")
+            && !rules.contains("tono-lan-fragment")
+            && !rules.contains("block drop out quick all")
+        print("ai-home-core-dead-ordinary-dns: \(passed ? "PASS" : "FAIL")")
+        return passed
+    }
+
     /// Decision 130: AI Home holds the AI prefixes only. Strict intent and
     /// every other mode keep their rulesets.
     static func runAIHomeScopeSelfTests() -> Bool {
@@ -2602,6 +2622,7 @@ extension KillSwitchManager {
         let rendered = renderRules(state: scoped, allowedUID: 501, physicalInterfaces: ["en0"])
         check("ai-home-rules-exact", rendered == expected)
         check("ai-home-no-whole-host-block", !rendered.contains("block drop out quick all") && !rendered.contains(" user "))
+        check("ai-home-core-dead-ordinary-dns", runAIHomeCoreDeadLANSelfTest())
         let wholeRules = renderRules(state: whole, allowedUID: 501, physicalInterfaces: ["en0"])
         check("whole-host-unchanged-by-flag", wholeRules.contains("block drop out quick all label \"tono-block\"")
             && !wholeRules.contains("tono-ai-home"))

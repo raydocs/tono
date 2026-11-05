@@ -225,15 +225,18 @@ extension KillSwitchManager {
         // the port blocks above never see one. The stateful LAN pass had
         // the implicit `flags S/SA` and was skipped too, which left a TCP
         // fragment for the final block. The stateless passes below have no
-        // flag set, so these two rules keep that outcome: an outbound
+        // flag set, so the TCP blocks keep that outcome: an outbound
         // fragment PF reads as TCP, to a LAN or link-local destination, is
         // dropped wherever these rules are reached (lo0 and the Continuity
         // interfaces pass everything earlier). With path MTU discovery on,
         // TCP sets DF and sizes segments to the path, so an ordinary
-        // connection sends none. Unchanged from the stateful passes: UDP
-        // fragments, which never met a flag set, and an IPv6 fragment
-        // header followed by another extension header, which PF matches
-        // by that header's protocol, not as TCP.
+        // connection sends none. UDP fragment blocks also preserve LAN DNS
+        // blocking: a portless pass must not bypass the 53/853 block. They
+        // apply to Stable and strict Three-tier, never AI Home's AI-only hold.
+        // Unfragmented LAN UDP does not match these blocks; pre-fragmented
+        // UDP can be dropped regardless of port. An IPv6 fragment followed
+        // by another extension header is matched by that header's protocol,
+        // not as TCP or UDP.
         lines.append(
             "block drop out quick inet proto tcp to { \(ThreeTierRoutingContract.lanIPv4CIDRs.joined(separator: ", ")) } fragment label \"tono-lan-fragment\""
         )
@@ -246,15 +249,15 @@ extension KillSwitchManager {
         lines.append(
             "block drop out quick inet6 proto udp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
         )
-        // The local network itself (D7, decision D3-A): only when the user
-        // turned on "Allow local network devices". Off, nothing to the
+        // Stable follows "Allow local network devices"; Three-tier always
+        // allows LAN, including while fail-closed. With passes off, nothing to the
         // private, link-local or ULA ranges or to IPv6 multicast passes
         // outbound, so the router page, printers, NAS, a LAN peer's reply,
         // MLD, DHCPv6 and unicast DHCP renewal fall to the final block
         // (DHCP renewal falls back to the broadcast `tono-dhcp` passes).
         // Every block above, and mDNS, IGMP, Continuity, DHCP broadcast
-        // and NDP, render either way. On renders exactly the rules that
-        // were here before the setting existed.
+        // and NDP, render either way for Stable. Strict Three-tier uses the
+        // same LAN set with additional strict-mode rules.
         if passesAllowed {
             lines.append(
                 "pass out quick inet to { \(ThreeTierRoutingContract.lanIPv4CIDRs.joined(separator: ", ")) } no state label \"tono-lan\""
@@ -275,11 +278,14 @@ extension KillSwitchManager {
                 "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
             )
         }
-        if passesAllowed {
-            lines.append("pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\"")
-            lines.append("pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\"")
-        }
         return lines
+    }
+
+    static func localNetworkDiscoveryRules() -> [String] {
+        [
+            "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\"",
+            "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\"",
+        ]
     }
 
     static func renderRules(
@@ -294,6 +300,7 @@ extension KillSwitchManager {
                 "pass out quick on lo0 all no state label \"tono-loopback\"",
             ]
             rules += localNetworkRules(physicalInterfaces: physicalInterfaces, passesAllowed: true)
+            rules += localNetworkDiscoveryRules()
             rules += [
                 "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
                 "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
@@ -324,7 +331,7 @@ extension KillSwitchManager {
             return rules.joined(separator: "\n") + "\n"
         }
         if state.aiHomeScoped {
-            return renderAIHomeRules(state: state, physicalInterfaces: physicalInterfaces)
+            return renderAIHomeRules(state: state)
         }
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
@@ -469,10 +476,10 @@ extension KillSwitchManager {
         lines.append(
             "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } \(ndpState) label \"tono-ndp\""
         )
-        if !state.tunnelInterfaces.isEmpty {
+        if !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices {
             // Discovery beyond mDNS goes with the same setting: off, the
             // devices it would find are unreachable anyway.
-
+            lines += localNetworkDiscoveryRules()
         }
         for interface in state.tunnelInterfaces.sorted() {
             // Host packets leave through the TUN while proxied replies return
@@ -622,7 +629,7 @@ extension KillSwitchManager {
     /// dies, before the watchdog's AI hold. AI names never reach this layer:
     /// they resolve to fake IPs through the Core. No `user` clause: the Core
     /// reaches Home through its cloud exit, never an AI address.
-    static func renderAIHomeRules(state: KillSwitchState, physicalInterfaces: [String]) -> String {
+    static func renderAIHomeRules(state: KillSwitchState) -> String {
         var lines = [
             "# Managed by Tono AI Home — do not edit",
             // Labels of their own: the whole-host ruleset carries the same
@@ -631,7 +638,6 @@ extension KillSwitchManager {
             "pass in quick on lo0 all keep state (if-bound) label \"tono-ai-home-loopback\"",
             "pass out quick on lo0 all no state label \"tono-ai-home-loopback\"",
         ]
-        lines += localNetworkRules(physicalInterfaces: physicalInterfaces, passesAllowed: false)
         for interface in state.tunnelInterfaces.sorted() {
             lines.append("pass in quick on \(interface) all keep state (if-bound) label \"tono-ai-home-tunnel\"")
             lines.append("pass out quick on \(interface) all keep state (if-bound) label \"tono-ai-home-tunnel\"")

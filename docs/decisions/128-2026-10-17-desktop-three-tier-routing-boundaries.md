@@ -4,8 +4,8 @@
 
 - 所有者决定：「三层模式 … 局域网内网的都能用」，「再加 100.64/10」。AI 只走 Home；海外走 cloud；局域网／内网与国内站点 DIRECT。此更新替代下文关于 LAN 拒绝的旧边界，不扩大公网 DIRECT。
 - macOS、Windows 共用 LAN 集合：`10/8`、`172.16/12`、`192.168/16`、`169.254/16`、`100.64/10`，保留既有 mDNS、SSDP、局域网组播／广播、IPv6 链路本地／ULA。所有者接受新增 CGNAT 的 TunnelCrack 风险；不根据网卡通告扩大地址表。
-- 三层模式与 AI Home 始终允许 LAN，不依赖 Stable 的「允许局域网设备」设置；Stable 开启时使用同一地址表。Core 死亡、helper／Service 保持 fail-closed 时 LAN 仍放行，非 LAN 继续阻断；Windows 同时覆盖物理 on-link 与 TUN → Core DIRECT 路径。
-- LAN 远端 TCP／UDP 53、853 仍阻断／不获准。Home／AI／cloud 名称及既有海外 UDP／STUN／853 防漏规则不变；普通 DIRECT 仍仅公网 IPv4 TCP 80/443，公网 UDP／QUIC、非 LAN IPv6 不新增放行。
+- 三层模式与 AI Home 始终允许 LAN，不依赖 Stable 的「允许局域网设备」设置；Stable 开启时使用同一地址表。三层模式在 Core 死亡、helper／Service 保持 fail-closed 时 LAN 仍放行，非 LAN 继续阻断；Windows 同时覆盖物理 on-link 与 TUN → Core DIRECT 路径。
+- Stable／三层模式的 LAN 远端 TCP／UDP 53、853 仍阻断／不获准。macOS AI Home 的 PF 仍仅持有 AI CIDR，不阻断普通 LAN DNS／分片；AI Home 图也不新增 LAN 53／853 拒绝行，Core 死亡后仍保留路由器／DHCP DNS 与普通网络（决策 130）。Home／AI／cloud 名称及既有海外 UDP／STUN／853 防漏规则不变；三层普通 DIRECT 仍仅公网 IPv4 TCP 80/443，公网 UDP／QUIC、非 LAN IPv6 不新增放行。
 
 - Status: owner-decided default policy, updated 2026-10-17: “名单以外的都直连就好了呀”. This explicitly supersedes the earlier provisional unknown-refusal choice, not the matched-protection or Core-death safety boundaries. The existing named Home group (including non-AI services) and 21 cloud-video exceptions remain unchanged.
 - Chosen priority: specific video exceptions → cloud; AI/named Home group → cloud → assigned Home; explicit cloud hosts → cloud; other supported ordinary traffic, including unclassified destinations → DIRECT. The ten named domestic hosts remain explicit DIRECT, but comprehensive geographic data is not a prerequisite. A recognized Home/cloud route or its fixed DoH failure terminates that operation, never retries through ordinary DIRECT. Core/privileged-component death keeps the new mode fail-closed; ordinary-network independence applies only while Core remains healthy. Explicitly ending protection uses the separate existing release contract. Stable mode is unchanged.

@@ -16,32 +16,6 @@
           "mode": "and",
           "rules": [
             {
-              "type": "logical",
-              "mode": "or",
-              "rules": [
-                {
-                  "ip_cidr": "$lan_ipv4"
-                },
-                {
-                  "ip_cidr": "$lan_ipv6"
-                }
-              ]
-            },
-            {
-              "port": [
-                53,
-                853
-              ]
-            }
-          ],
-          "action": "reject",
-          "no_drop": true
-        },
-        {
-          "type": "logical",
-          "mode": "and",
-          "rules": [
-            {
               "ip_cidr": "$lan_ipv6"
             },
             {

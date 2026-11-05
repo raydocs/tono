@@ -4212,41 +4212,6 @@ nonisolated enum ThreeTierRoutingContract {
             "mode": "and",
             "rules": [
               {
-                "type": "logical",
-                "mode": "or",
-                "rules": [
-                  {
-                    "ip_cidr": [
-                      "10.0.0.0/8",
-                      "172.16.0.0/12",
-                      "192.168.0.0/16",
-                      "169.254.0.0/16",
-                      "100.64.0.0/10"
-                    ]
-                  },
-                  {
-                    "ip_cidr": [
-                      "fe80::/10",
-                      "fc00::/7"
-                    ]
-                  }
-                ]
-              },
-              {
-                "port": [
-                  53,
-                  853
-                ]
-              }
-            ],
-            "action": "reject",
-            "no_drop": true
-          },
-          {
-            "type": "logical",
-            "mode": "and",
-            "rules": [
-              {
                 "ip_cidr": [
                   "fe80::/10",
                   "fc00::/7"
