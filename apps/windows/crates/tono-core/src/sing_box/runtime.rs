@@ -641,8 +641,26 @@ mod tests {
         let rules = document["route"]["rules"].as_array().unwrap();
         let video = rules.iter().position(|rule| rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com"))) && rule["action"] == "route").unwrap();
         let home = rules.iter().position(|rule| rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("googleapis.com"))) && rule["action"] == "route").unwrap();
-        let domestic = rules.iter().position(|rule| rule["outbound"] == "Tono-ThreeTier-Direct").unwrap();
+        let domestic = rules.iter().position(|rule| rule["domain"].as_array().is_some_and(|hosts| hosts.contains(&json!("www.12306.cn"))) && rule["outbound"] == "Tono-ThreeTier-Direct").unwrap();
         assert!(video < home && home < domestic);
+        let template: Value = serde_json::from_str(include_str!("../../../../../../tooling/scripts/sing-box/three-tier-template.json")).unwrap();
+        let protected_suffixes = [
+            config::CLAUDE_HOME_DOMAINS.as_slice(),
+            config::CLOUD_VIDEO_DOMAINS.as_slice(),
+            config::MOBILE_HOME_AUX_SUFFIXES.as_slice(),
+            crate::three_tier::cloud_exit_suffixes().as_slice(),
+        ].concat();
+        let protected_names = json!({
+            "type": "logical", "mode": "or", "invert": true,
+            "rules": [{"domain_suffix": protected_suffixes}, {"domain": template["overseas_full"]}],
+        });
+        let early_lan = rules[..home].iter().filter(|rule| rule["outbound"] == "Tono-ThreeTier-Direct").collect::<Vec<_>>();
+        assert!(!early_lan.is_empty(), "LAN routes precede Home");
+        for rule in early_lan {
+            assert_eq!(rule["type"], "logical");
+            assert_eq!(rule["mode"], "and");
+            assert!(rule["rules"].as_array().unwrap().contains(&protected_names), "every LAN row before Home excludes all protected Home/AI/cloud names");
+        }
         assert_eq!(rules[video]["outbound"], "Tono-Exit");
         assert_eq!(rules[home]["outbound"], "Tono-Home-Residential");
         assert!(rules[home]["domain_suffix"].as_array().unwrap().contains(&json!("dashscope.aliyuncs.com")));

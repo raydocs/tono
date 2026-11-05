@@ -1416,7 +1416,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0e_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0f_0000_4a6c);
     }
 
     #[test]
@@ -2175,7 +2175,13 @@ mod tests {
         assert_eq!(verdict(OutV4, Tcp, "192.168.1.1", 853), Block, "DNS over TLS on the LAN");
         assert_eq!(verdict(OutV4, Udp, "224.0.0.251", 53), Block, "DNS to a multicast group");
         assert_eq!(verdict(OutV4, Udp, "239.255.255.250", 3702), Block, "routable multicast beyond SSDP");
-        assert_eq!(verdict(OutV4, Tcp, "100.64.0.1", 443), Block, "carrier NAT is not the LAN");
+        assert_eq!(verdict(OutV4, Tcp, "100.64.0.1", 443), Permit, "carrier NAT is owner-approved LAN");
+        assert_eq!(verdict(OutV4, Udp, "100.64.0.1", 443), Permit, "ordinary carrier-NAT UDP");
+        for protocol in [Tcp, Udp] {
+            for port in [53, 853] {
+                assert_eq!(verdict(OutV4, protocol, "100.64.0.1", port), Block, "carrier-NAT DNS stays blocked");
+            }
+        }
         assert_eq!(verdict(OutV4, Tcp, "9.9.9.9", 443), Block, "the Internet");
         assert_eq!(verdict(OutV6, Tcp, "2001:db8::1", 443), Block, "global IPv6");
 
