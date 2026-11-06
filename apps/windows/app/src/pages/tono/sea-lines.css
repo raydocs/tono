@@ -65,6 +65,31 @@
   font-size: 13px;
   margin: 4px 0;
 }
+.sea-lines-reassurance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--sea-divider);
+  background: #ffffff08;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sea-secondary);
+}
+.sea-lines-reassurance-copy {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.sea-lines-reassurance-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  color: var(--sea-text);
+}
 .sea-lines h3 {
   font-size: 11.5px;
   letter-spacing: 0.12em;

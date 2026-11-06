@@ -79,6 +79,8 @@ interface Props {
   onReadRetry: () => void
   regionLabel: (code: string) => string
   now: number
+  canTestAll?: boolean
+  reachability?: { reachable: number; tested: number; total: number } | null
 }
 
 /** A new arrangement of existing actions; all native IO stays in ServersPage. */
@@ -117,6 +119,8 @@ export const SeaLines = ({
   feedback,
   onConnect,
   regionLabel,
+  canTestAll = false,
+  reachability = null,
 }: Props) => {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -396,6 +400,30 @@ export const SeaLines = ({
             )
           ))}
       </SeaPanel>
+      {reachability && (
+        <div className="sea-lines-reassurance">
+          <div className="sea-lines-reassurance-copy">
+            <div>{t('tono.nodes.homeIpFixedHint')}</div>
+            {reachability.tested === 0 && canTestAll && (
+              <div>{t('tono.nodes.reachabilityPrompt')}</div>
+            )}
+          </div>
+          {reachability.tested > 0 && (
+            <span className="sea-lines-reassurance-meta">
+              <SeaTag kind={reachability.reachable > 0 ? 'good' : 'quiet'}>
+                {reachability.reachable > 0
+                  ? t('tono.nodes.reachabilitySummary', {
+                      reachable: reachability.reachable,
+                      tested: reachability.tested,
+                    })
+                  : t('tono.nodes.reachabilityNone', {
+                      tested: reachability.tested,
+                    })}
+              </SeaTag>
+            </span>
+          )}
+        </div>
+      )}
       <SeaPopover anchor={help} onClose={() => setHelp(null)}>
         <p>{t('tono.routes.preferenceHint')}</p>
         <p>

@@ -1061,6 +1061,7 @@ export interface TranslationResources {
         errors: {
           bfeNotRunning: string
           browserDnsPreflight: string
+          claudeDnsLeak: string
           coreMismatch: string
           coreUnpinned: string
           dnsPortBusy: string
@@ -1429,6 +1430,7 @@ export interface TranslationResources {
         empty: string
         exitLatency: string
         exitLatencySlow: string
+        homeIpFixedHint: string
         identityPropagating: string
         identityStuck: string
         lastSynced: string
@@ -1438,6 +1440,9 @@ export interface TranslationResources {
           cloud: string
           vlessReality: string
         }
+        reachabilityNone: string
+        reachabilityPrompt: string
+        reachabilitySummary: string
         readyToConnect: string
         refresh: string
         refreshing: string
@@ -1695,8 +1700,39 @@ export interface TranslationResources {
           themeMode: string
           title: string
         }
+        compatibility: {
+          claudeHomeActive: string
+          claudeHomeCloudOnly: string
+          claudeHomeHint: string
+          claudeHomeLabel: string
+          claudeHomeStandby: string
+          dnsIpv6Hint: string
+          dnsIpv6Label: string
+          dnsIpv6Standby: string
+          dnsIpv6Verified: string
+          dnsIpv6Warning: string
+          effectHint: string
+          systemProxyClean: string
+          systemProxyCleanHint: string
+          systemProxyClear: string
+          systemProxyCleared: string
+          systemProxyLabel: string
+          systemProxyStaleHint: string
+          terminalEnvCleanHint: string
+          terminalEnvClear: string
+          terminalEnvCleared: string
+          terminalEnvConflict: string
+          terminalEnvConflictHint: string
+          terminalEnvLabel: string
+          terminalEnvReady: string
+          terminalEnvRecheck: string
+          title: string
+        }
         general: {
           effectHint: string
+          lanAccess: string
+          lanAccessHint: string
+          lanAlwaysOn: string
           language: string
           languageHint: string
           launchAtStartup: string
@@ -1711,6 +1747,7 @@ export interface TranslationResources {
           routingMode: string
           routingScope: string
           routingStable: string
+          routingStableScope: string
           routingThreeTier: string
           saveFailed: string
           title: string

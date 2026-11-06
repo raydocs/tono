@@ -400,6 +400,14 @@ pub(super) async fn run_stages(
             .wait(label, super::probes::verify_three_tier_data_plane())
             .await?
             .map_err(StageFailure::error)?;
+        super::probes::spawn_deferred_exit_delay_probe(
+            state,
+            app,
+            &secret,
+            controller_port,
+            generation,
+        )
+        .await;
         status
     } else {
         verify_post_lock(

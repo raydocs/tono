@@ -68,7 +68,7 @@ pub async fn tono_servers(state: tauri::State<'_, Arc<TonoState>>) -> Result<Vec
         .collect())
 }
 
-fn catalog_status_of(inner: &TonoInner) -> TonoCatalogStatus {
+pub(super) fn catalog_status_of(inner: &TonoInner) -> TonoCatalogStatus {
     let revision = inner.catalog_tracker.current_revision();
     TonoCatalogStatus {
         revision: (revision >= 0).then_some(revision),
@@ -76,11 +76,14 @@ fn catalog_status_of(inner: &TonoInner) -> TonoCatalogStatus {
         last_synced_at_ms: inner.catalog_last_synced_at_ms,
         error: inner.catalog_sync_error.clone(),
         stale_system_proxy: inner.stale_system_proxy.clone(),
+        probe_results: inner.server_probe_results.values().cloned().collect(),
+        probe_at_ms: inner.server_probe_at_ms,
     }
 }
 
 #[tauri::command]
 pub async fn tono_catalog_status(state: tauri::State<'_, Arc<TonoState>>) -> Result<TonoCatalogStatus, String> {
+    crate::core::stale_proxy::inspect(state.inner()).await;
     let inner = state.lock().await;
     Ok(catalog_status_of(&inner))
 }
@@ -151,9 +154,9 @@ pub(super) async fn test_server_endpoint(
     }
 }
 
-/// Measure each usable catalog endpoint without selecting it. This is allowed only while fully
-/// disconnected and unarmed: connected WFP intentionally permits only the selected endpoint,
-/// and widening that permit for a UI test would weaken the connection safety contract.
+/// Measure each usable catalog endpoint without selecting it. Allowed while disconnected and
+/// unarmed, and while connected in `AI Home` (where off-tunnel WFP only holds AI prefixes and
+/// non-AI endpoints egress on the physical interface without widening WFP).
 #[tauri::command]
 pub async fn tono_test_available_servers(
     state: tauri::State<'_, Arc<TonoState>>,
@@ -164,7 +167,7 @@ pub async fn tono_test_available_servers(
         if inner.account_close.is_some() || !matches!(inner.account_state, AccountState::Ready) {
             return Err("sign in before testing servers".to_string());
         }
-        if inner.fsm.status().is_connected || inner.fsm.status().is_connecting || inner.fsm.kill_switch_armed() {
+        if !can_test_all_servers(&inner) {
             return Err("disconnect before testing all servers".to_string());
         }
         if inner.server_test_cancellation.is_some() {
@@ -209,13 +212,16 @@ pub async fn tono_test_available_servers(
     if stale {
         return Err("server test cancelled or superseded".to_string());
     }
-    if let Some(selected) = inner.selected_node.clone() {
-        if let Some(result) = results.iter().find(|result| result.name == selected) {
-            if let Some(latency_ms) = result.latency_ms {
-                inner.record_tcp_delay(&selected, latency_ms);
-                emit_status(&app, &status_of(&inner));
-            }
+    let selected = inner.selected_node.clone();
+    let mut updated_selected = false;
+    for result in &results {
+        if selected.as_deref() == Some(result.name.as_str()) && result.latency_ms.is_some() {
+            updated_selected = true;
         }
+        inner.record_server_probe_result(result.clone());
+    }
+    if updated_selected {
+        emit_status(&app, &status_of(&inner));
     }
     Ok(results)
 }

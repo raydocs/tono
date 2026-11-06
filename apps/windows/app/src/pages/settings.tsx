@@ -1,9 +1,10 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
+import { useTonoStatus } from '@/hooks/use-tono'
 import {
   useTonoPreferences,
   readGeneralSave,
@@ -22,6 +23,10 @@ import { useThemeMode } from '@/services/states'
 import {
   tonoAuditEnabled,
   tonoAuditLogPath,
+  tonoCatalogStatus,
+  tonoCheckTerminalEnv,
+  tonoClearTerminalProxyEnv,
+  tonoDisableStaleSystemProxy,
   tonoInternalBuild,
   tonoPeriodicTelemetryEnabled,
   tonoSetAuditEnabled,
@@ -42,7 +47,7 @@ import { AppearanceCard } from '@/tono-ui/AppearanceCard'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { PrivacyDescription } from '@/tono-ui/PrivacyDescription'
-import { SeaSegmented, SeaToggle } from '@/tono-ui/SeaControls'
+import { SeaButton, SeaSegmented, SeaTag, SeaToggle } from '@/tono-ui/SeaControls'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
@@ -61,6 +66,8 @@ const tonoNetworkLogUploadEnabledQueryKey = [
 ] as const
 const tonoInternalBuildQueryKey = ['tonoInternalBuild'] as const
 const tonoPrivacySavesQueryKey = ['tonoPrivacySaves'] as const
+const tonoSettingsCatalogStatusQueryKey = ['tono', 'catalog-status'] as const
+const tonoTerminalEnvQueryKey = ['tono', 'terminal-env'] as const
 type PrivacySaves = Record<
   string,
   { phase: 'saving' | 'saved' | 'failed'; error?: TonoActionErrorDescription }
@@ -283,7 +290,11 @@ export const GeneralCard = () => {
               {t('tono.settings.general.routingEffect')}
             </>
           ) : (
-            t('tono.settings.general.routingEffect')
+            <>
+              {t('tono.settings.general.routingStableScope')}
+              <br />
+              {t('tono.settings.general.routingEffect')}
+            </>
           )
         }
       >
@@ -341,6 +352,21 @@ export const GeneralCard = () => {
             </option>
           </select>
         )}
+      </Row>
+      <Row
+        label={t('tono.settings.general.lanAccess')}
+        subtitle={t('tono.settings.general.lanAccessHint')}
+      >
+        <span
+          style={{
+            flexShrink: 0,
+            fontSize: 12,
+            fontWeight: 500,
+            color: TONO_COLORS.latencyGood,
+          }}
+        >
+          {t('tono.settings.general.lanAlwaysOn')}
+        </span>
       </Row>
       <Row
         label={t('tono.settings.general.launchAtStartup')}
@@ -914,6 +940,256 @@ const AboutCard = () => {
   )
 }
 
+export const SystemCompatibilityCard = () => {
+  const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
+  const dark = useThemeMode() !== 'light'
+  const text = tonoText(dark)
+  const { status } = useTonoStatus()
+  const [clearingProxy, setClearingProxy] = useState(false)
+  const [proxyFeedback, setProxyFeedback] = useState<string | null>(null)
+  const [proxyError, setProxyError] =
+    useState<TonoActionErrorDescription | null>(null)
+  const [clearingEnv, setClearingEnv] = useState(false)
+  const [envFeedback, setEnvFeedback] = useState<string | null>(null)
+  const [envError, setEnvError] = useState<TonoActionErrorDescription | null>(
+    null,
+  )
+
+  const { data: catalog, refetch: refetchCatalog } = useQuery({
+    queryKey: tonoSettingsCatalogStatusQueryKey,
+    queryFn: tonoCatalogStatus,
+  })
+  const terminalEnvQuery = useQuery({
+    queryKey: tonoTerminalEnvQueryKey,
+    queryFn: tonoCheckTerminalEnv,
+  })
+
+  const staleProxyServer = catalog?.staleSystemProxy
+    ? catalog.staleSystemProxy.replace(/^TONO_STALE_SYSTEM_PROXY:\s*/, '')
+    : null
+  const terminalEnv = terminalEnvQuery.data
+  const conflictKeys =
+    terminalEnv?.entries.map((entry) => entry.key).join(', ') ||
+    'HTTP_PROXY, HTTPS_PROXY'
+
+  const handleClearProxy = useLockFn(async () => {
+    setClearingProxy(true)
+    setProxyFeedback(null)
+    setProxyError(null)
+    try {
+      await tonoDisableStaleSystemProxy()
+      await refetchCatalog()
+      setProxyFeedback(t('tono.settings.compatibility.systemProxyCleared'))
+    } catch (error) {
+      setProxyError(describeTonoActionError(error, t))
+    } finally {
+      setClearingProxy(false)
+    }
+  })
+
+  const handleClearTerminalEnv = useLockFn(async () => {
+    setClearingEnv(true)
+    setEnvFeedback(null)
+    setEnvError(null)
+    try {
+      await tonoClearTerminalProxyEnv()
+      await terminalEnvQuery.refetch()
+      setEnvFeedback(t('tono.settings.compatibility.terminalEnvCleared'))
+    } catch (error) {
+      setEnvError(describeTonoActionError(error, t))
+    } finally {
+      setClearingEnv(false)
+    }
+  })
+
+  const renderBadge = (label: string, good: boolean, warn = false) => {
+    if (newAppearance) {
+      return <SeaTag kind={good ? 'good' : 'quiet'}>{label}</SeaTag>
+    }
+    const tone = warn
+      ? TONO_COLORS.error
+      : good
+        ? TONO_COLORS.latencyGood
+        : text.secondary
+    return (
+      <span
+        style={{
+          flexShrink: 0,
+          fontSize: 11,
+          fontWeight: 600,
+          color: tone,
+        }}
+      >
+        {label}
+      </span>
+    )
+  }
+
+  const renderAction = (
+    label: string,
+    onClick: () => void,
+    disabled: boolean,
+  ) => {
+    if (newAppearance) {
+      return (
+        <SeaButton disabled={disabled} onClick={onClick}>
+          {label}
+        </SeaButton>
+      )
+    }
+    return (
+      <button
+        type="button"
+        className="tono-button"
+        disabled={disabled}
+        onClick={onClick}
+        style={{
+          padding: '6px 12px',
+          fontSize: 11,
+          color: text.primary,
+          background: dark
+            ? 'rgba(255,255,255,0.08)'
+            : 'rgba(255,255,255,0.62)',
+          border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
+        }}
+      >
+        {label}
+      </button>
+    )
+  }
+
+  const claudeBadgeLabel =
+    status?.uiState === 'connected'
+      ? status.claudeHomeActive !== false
+        ? t('tono.settings.compatibility.claudeHomeActive')
+        : t('tono.settings.compatibility.claudeHomeCloudOnly')
+      : t('tono.settings.compatibility.claudeHomeStandby')
+  const claudeBadgeGood =
+    status?.uiState === 'connected' && status.claudeHomeActive !== false
+
+  const dnsWarning = status?.resolverPolicyWarning
+  const dnsVerified =
+    !dnsWarning &&
+    status?.uiState === 'connected' &&
+    Boolean(status?.killSwitch?.live)
+
+  return (
+    <GlassCard>
+      <CardHeader
+        icon={<TonoIcon name="globe" size={18} />}
+        title={t('tono.settings.compatibility.title')}
+        tint={`${TONO_COLORS.latencyGood}26`}
+      />
+      <p className="tono-settings-effect-hint">
+        {t('tono.settings.compatibility.effectHint')}
+      </p>
+      <Row
+        label={t('tono.settings.compatibility.claudeHomeLabel')}
+        subtitle={t('tono.settings.compatibility.claudeHomeHint')}
+      >
+        {renderBadge(claudeBadgeLabel, claudeBadgeGood)}
+      </Row>
+      <Row
+        label={t('tono.settings.compatibility.systemProxyLabel')}
+        subtitle={
+          staleProxyServer
+            ? t('tono.settings.compatibility.systemProxyStaleHint', {
+                server: staleProxyServer,
+              })
+            : t('tono.settings.compatibility.systemProxyCleanHint')
+        }
+        feedback={
+          proxyError ? (
+            <div className="tono-setting-feedback" role="alert">
+              {proxyError.message}
+            </div>
+          ) : proxyFeedback ? (
+            <span className="tono-setting-feedback" role="status">
+              {proxyFeedback}
+            </span>
+          ) : null
+        }
+      >
+        {staleProxyServer
+          ? renderAction(
+              t('tono.settings.compatibility.systemProxyClear'),
+              () => void handleClearProxy(),
+              clearingProxy,
+            )
+          : renderBadge(t('tono.settings.compatibility.systemProxyClean'), true)}
+      </Row>
+      <Row
+        label={t('tono.settings.compatibility.terminalEnvLabel')}
+        subtitle={
+          terminalEnv?.hasConflict
+            ? t('tono.settings.compatibility.terminalEnvConflictHint', {
+                keys: conflictKeys,
+              })
+            : t('tono.settings.compatibility.terminalEnvCleanHint')
+        }
+        feedback={
+          envError ? (
+            <div className="tono-setting-feedback" role="alert">
+              {envError.message}
+            </div>
+          ) : envFeedback ? (
+            <span className="tono-setting-feedback" role="status">
+              {envFeedback}
+            </span>
+          ) : null
+        }
+      >
+        {terminalEnv?.hasConflict || terminalEnvQuery.error ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              flexShrink: 0,
+              flexWrap: 'wrap',
+            }}
+          >
+            {terminalEnv?.hasConflict &&
+              terminalEnv.canAutoClear &&
+              renderAction(
+                t('tono.settings.compatibility.terminalEnvClear'),
+                () => void handleClearTerminalEnv(),
+                clearingEnv || terminalEnvQuery.isFetching,
+              )}
+            {renderAction(
+              t('tono.settings.compatibility.terminalEnvRecheck'),
+              () => void terminalEnvQuery.refetch(),
+              clearingEnv || terminalEnvQuery.isFetching,
+            )}
+          </span>
+        ) : (
+          renderBadge(t('tono.settings.compatibility.terminalEnvReady'), true)
+        )}
+      </Row>
+      <Row
+        label={t('tono.settings.compatibility.dnsIpv6Label')}
+        subtitle={t('tono.settings.compatibility.dnsIpv6Hint')}
+      >
+        {dnsWarning
+          ? renderBadge(
+              t('tono.settings.compatibility.dnsIpv6Warning', {
+                warning: dnsWarning,
+              }),
+              false,
+              true,
+            )
+          : renderBadge(
+              dnsVerified
+                ? t('tono.settings.compatibility.dnsIpv6Verified')
+                : t('tono.settings.compatibility.dnsIpv6Standby'),
+              dnsVerified,
+            )}
+      </Row>
+    </GlassCard>
+  )
+}
+
 const SettingPage = () => {
   const { t } = useTranslation()
   const { newAppearance } = useAppearancePreferences()
@@ -923,6 +1199,7 @@ const SettingPage = () => {
         <PageHeader title={t('tono.settings.title')} />
         <div className="sea-settings-groups">
           <GeneralCard />
+          <SystemCompatibilityCard />
           <AppearanceCard />
           <PrivacyCard />
           <AboutCard />
@@ -945,6 +1222,9 @@ const SettingPage = () => {
       >
         <GeneralCard />
         <AboutCard />
+      </div>
+      <div style={{ marginBottom: 18 }}>
+        <SystemCompatibilityCard />
       </div>
       <AppearanceCard />
       <PrivacyCard />

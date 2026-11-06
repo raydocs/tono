@@ -265,6 +265,14 @@ impl DesktopSessionMode {
             Self::AiHome => Some(tono_core::three_tier::Variant::AiHome),
         }
     }
+
+    pub const fn wire_key(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::ThreeTier => "three-tier",
+            Self::AiHome => "ai-home",
+        }
+    }
 }
 
 pub struct TonoInner {
@@ -334,6 +342,11 @@ pub struct TonoInner {
     /// Read-only server reachability batch. It never changes selection or connection state.
     pub server_test_generation: u64,
     pub server_test_cancellation: Option<CancellationToken>,
+    /// Latest TCP reachability observations for the current catalog revision (from explicit
+    /// server tests or background unarmed probes). Cleared on catalog replacement or sign-out.
+    pub server_probe_results:
+        std::collections::BTreeMap<String, crate::tono::commands::TonoServerTestResult>,
+    pub server_probe_at_ms: Option<i64>,
     pub fsm: ConnectionFsm,
     /// Last observed kill switch aggregate.
     pub kill_switch: Option<KillSwitchStatus>,
@@ -643,6 +656,24 @@ impl TonoInner {
         }
     }
 
+    pub fn record_server_probe_result(
+        &mut self,
+        result: crate::tono::commands::TonoServerTestResult,
+    ) {
+        if let Some(latency_ms) = result.latency_ms
+            && self.selected_node.as_deref() == Some(result.name.as_str())
+        {
+            self.record_tcp_delay(&result.name, latency_ms);
+        }
+        self.server_probe_results.insert(result.name.clone(), result);
+        self.server_probe_at_ms = Some(now_ms());
+    }
+
+    pub fn clear_server_probe_results(&mut self) {
+        self.server_probe_results.clear();
+        self.server_probe_at_ms = None;
+    }
+
     /// Drop the latest attempt's live failure, steps and step clock. They belong to the account
     /// that made the attempt: account adoption and account close call this, while an ordinary
     /// same-account Disconnect keeps them for the UI and diagnostics.
@@ -903,6 +934,8 @@ impl TonoState {
                 catalog_identity_since_ms: None,
                 server_test_generation: 0,
                 server_test_cancellation: None,
+                server_probe_results: std::collections::BTreeMap::new(),
+                server_probe_at_ms: None,
                 fsm: ConnectionFsm::new(),
                 kill_switch: None,
                 resolver_policy_warning: None,

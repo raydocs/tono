@@ -152,12 +152,48 @@ const ServersPage = () => {
   )
     ? storedPreferences
     : undefined
+  const effectiveEndpointTests = useMemo<EndpointEvidence>(() => {
+    if (
+      endpointTests.scope === (scope ?? null) &&
+      endpointTests.revision === (status?.catalogRevision ?? null) &&
+      endpointTests.atMs >= (catalog?.probeAtMs ?? 0) &&
+      endpointTests.atMs > 0
+    ) {
+      return endpointTests
+    }
+    if (
+      catalog?.probeResults?.length &&
+      catalog.probeAtMs &&
+      catalog.revision !== null &&
+      catalog.revision === status?.catalogRevision
+    ) {
+      return {
+        scope: scope ?? null,
+        revision: catalog.revision,
+        atMs: catalog.probeAtMs,
+        latencies: Object.fromEntries(
+          catalog.probeResults.flatMap((result) =>
+            result.latencyMs === null ? [] : [[result.name, result.latencyMs]],
+          ),
+        ),
+        failures: Object.fromEntries(
+          catalog.probeResults
+            .filter((result) => result.latencyMs === null)
+            .map((result) => [
+              result.name,
+              result.error === 'timeout' ? 'timeout' : 'failed',
+            ]),
+        ),
+      }
+    }
+    return endpointTests
+  }, [catalog, endpointTests, scope, status?.catalogRevision])
   const recommendation = recommendRoute(
     servers ?? [],
     preferences,
     scope,
     status?.catalogRevision,
-    endpointTests,
+    effectiveEndpointTests,
     now,
     unstableRoute(status, now),
   )
@@ -201,7 +237,7 @@ const ServersPage = () => {
       preferences,
       scope,
       status?.catalogRevision,
-      endpointTests,
+      effectiveEndpointTests,
       Date.now(),
       unstableRoute(status, Date.now()),
     )
@@ -363,10 +399,12 @@ const ServersPage = () => {
     try {
       const results = await tonoTestAvailableServers()
       const current = await tonoStatus()
+      const currentAllowsTestAll =
+        current.canTestAllServers ?? current.uiState === 'notConnected'
       if (
         current.routePreferenceScope !== scope ||
         current.catalogRevision !== status?.catalogRevision ||
-        current.uiState !== 'notConnected'
+        !currentAllowsTestAll
       )
         return
       setNow(Date.now())
@@ -388,6 +426,7 @@ const ServersPage = () => {
             ]),
         ),
       })
+      void mutateCatalog().catch(() => {})
     } catch (error) {
       if (!cancelRequestedRef.current) {
         setSelectError(formatTonoActionError(error, t))
@@ -516,11 +555,41 @@ const ServersPage = () => {
       },
     ].filter((group) => group.servers.length > 0)
   }, [t, regionLabel, visibleServers])
+  const statusAllowsTestAll =
+    status?.canTestAllServers ??
+    (status?.uiState === 'notConnected' && !status?.protectionBlocked)
   const canTestAll =
-    status?.uiState === 'notConnected' &&
+    statusAllowsTestAll &&
     catalog?.revision !== null &&
     catalog?.revision !== undefined &&
     (servers ?? []).some((server) => server.available !== false)
+  const preferTestCurrent = status?.uiState === 'connected' && !canTestAll
+  const reachability = useMemo(() => {
+    const usable = (servers ?? []).filter(
+      (server) =>
+        server.available !== false && !hy2UdpIsVendorBlocked(server.name),
+    )
+    if (usable.length === 0) return null
+    const current = endpointEvidenceMatches(
+      effectiveEndpointTests,
+      scope,
+      status?.catalogRevision,
+      now,
+    )
+    if (!current) {
+      return { reachable: 0, tested: 0, total: usable.length }
+    }
+    let reachable = 0
+    let failed = 0
+    for (const server of usable) {
+      if (effectiveEndpointTests.latencies[server.name] !== undefined) {
+        reachable += 1
+      } else if (effectiveEndpointTests.failures[server.name] !== undefined) {
+        failed += 1
+      }
+    }
+    return { reachable, tested: reachable + failed, total: usable.length }
+  }, [effectiveEndpointTests, now, scope, servers, status?.catalogRevision])
 
   if (newAppearance)
     return (
@@ -534,6 +603,8 @@ const ServersPage = () => {
         search={searchText}
         onSearch={setSearchText}
         now={now}
+        canTestAll={canTestAll}
+        reachability={reachability}
         regionLabel={regionLabel}
         busy={switchingName !== null || selectingRecommendation}
         saving={savingPreferences}
@@ -543,19 +614,18 @@ const ServersPage = () => {
             ? t('tono.nodes.cancelTest')
             : testing
               ? '…'
-              : status?.uiState === 'connected'
+              : preferTestCurrent
                 ? t('tono.nodes.testCurrent')
                 : t('tono.nodes.testAll')
         }
         testDisabled={
           testing ||
-          (!testingAll &&
-            (status?.uiState === 'connected' ? !selected : !canTestAll))
+          (!testingAll && (preferTestCurrent ? !selected : !canTestAll))
         }
         onTest={() =>
           void (testingAll
             ? handleCancelTests()
-            : status?.uiState === 'connected'
+            : preferTestCurrent
               ? handleTestCurrent()
               : handleTestAll())
         }
@@ -604,16 +674,16 @@ const ServersPage = () => {
         onReadRetry={() => void mutateServers().catch(() => {})}
         latency={(server) => {
           const endpointCurrent = endpointEvidenceMatches(
-            endpointTests,
+            effectiveEndpointTests,
             scope,
             status?.catalogRevision,
             now,
           )
           const endpoint = endpointCurrent
-            ? endpointTests.latencies[server.name]
+            ? effectiveEndpointTests.latencies[server.name]
             : undefined
           const failure = endpointCurrent
-            ? endpointTests.failures[server.name]
+            ? effectiveEndpointTests.failures[server.name]
             : undefined
           const exit =
             currentExitTest?.name === server.name &&
@@ -810,14 +880,19 @@ const ServersPage = () => {
             {refreshing ? t('tono.nodes.refreshing') : t('tono.nodes.refresh')}
           </button>
         </div>
-        {(catalogFailure || refreshFeedback) && (
+        {(Boolean(catalog?.staleSystemProxy) ||
+          catalogFailure ||
+          refreshFeedback) && (
           <div
-            role={catalogFailure ? 'alert' : 'status'}
+            role={
+              catalogFailure || catalog?.staleSystemProxy ? 'alert' : 'status'
+            }
             style={{
               marginTop: 7,
-              color: catalogFailure
-                ? 'var(--tono-text-error)'
-                : TONO_COLORS.latencyGood,
+              color:
+                catalogFailure || catalog?.staleSystemProxy
+                  ? 'var(--tono-text-error)'
+                  : TONO_COLORS.latencyGood,
             }}
           >
             {catalog?.staleSystemProxy && (
@@ -876,6 +951,61 @@ const ServersPage = () => {
               >
                 {catalogFailure.detail}
               </div>
+            )}
+          </div>
+        )}
+        {reachability && (
+          <div
+            style={{
+              marginTop: 10,
+              paddingTop: 10,
+              borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'}`,
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '6px 12px',
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: text.secondary,
+            }}
+          >
+            <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+              <div>{t('tono.nodes.homeIpFixedHint')}</div>
+              {reachability.tested === 0 && canTestAll && (
+                <div style={{ color: text.tertiary }}>
+                  {t('tono.nodes.reachabilityPrompt')}
+                </div>
+              )}
+            </div>
+            {reachability.tested > 0 && (
+              <span
+                style={{
+                  flexShrink: 0,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  fontWeight: 650,
+                  color:
+                    reachability.reachable > 0
+                      ? TONO_COLORS.latencyGood
+                      : TONO_COLORS.error,
+                  background: hex(
+                    reachability.reachable > 0
+                      ? TONO_COLORS.latencyGood
+                      : TONO_COLORS.error,
+                    0.14,
+                  ),
+                }}
+              >
+                {reachability.reachable > 0
+                  ? t('tono.nodes.reachabilitySummary', {
+                      reachable: reachability.reachable,
+                      tested: reachability.tested,
+                    })
+                  : t('tono.nodes.reachabilityNone', {
+                      tested: reachability.tested,
+                    })}
+              </span>
             )}
           </div>
         )}
@@ -1140,16 +1270,16 @@ const ServersPage = () => {
               <div className="tono-server-grid">
                 {group.servers.map((server) => {
                   const endpointTestsCurrent = endpointEvidenceMatches(
-                    endpointTests,
+                    effectiveEndpointTests,
                     scope,
                     status?.catalogRevision,
                     now,
                   )
                   const endpointLatency = endpointTestsCurrent
-                    ? endpointTests.latencies[server.name]
+                    ? effectiveEndpointTests.latencies[server.name]
                     : undefined
                   const endpointFailure = endpointTestsCurrent
-                    ? endpointTests.failures[server.name]
+                    ? effectiveEndpointTests.failures[server.name]
                     : undefined
                   const exitLatency =
                     currentExitTest?.name === server.name &&

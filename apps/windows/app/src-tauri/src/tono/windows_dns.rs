@@ -4,12 +4,12 @@
 //! running after an async timeout. That is especially harmful immediately after
 //! changing adapter DNS: one stale query can occupy a worker while subsequent
 //! verification attempts pile up behind it. `DnsQueryEx` gives us the same
-//! system resolver with cache bypass, an A-only query, and a real cancellation
-//! handle.
+//! system resolver with cache bypass, explicit record types (`A` / `AAAA`), and
+//! a real cancellation handle.
 
 use std::{
     ffi::c_void,
-    net::Ipv4Addr,
+    net::{Ipv4Addr, Ipv6Addr},
     ptr,
     sync::{Arc, Condvar, Mutex},
     time::Duration,
@@ -19,24 +19,40 @@ use windows_sys::Win32::{
     Foundation::{DNS_REQUEST_PENDING, ERROR_SUCCESS},
     NetworkManagement::Dns::{
         DNS_QUERY_BYPASS_CACHE, DNS_QUERY_CANCEL, DNS_QUERY_NO_HOSTS_FILE, DNS_QUERY_REQUEST,
-        DNS_QUERY_REQUEST_VERSION1, DNS_QUERY_RESULT, DNS_QUERY_RESULTS_VERSION1, DNS_QUERY_TREAT_AS_FQDN, DNS_RECORDA,
-        DNS_TYPE_A, DnsCancelQuery, DnsFree, DnsFreeRecordList, DnsQueryEx,
+        DNS_QUERY_REQUEST_VERSION1, DNS_QUERY_RESULT, DNS_QUERY_RESULTS_VERSION1,
+        DNS_QUERY_TREAT_AS_FQDN, DNS_RECORDA, DNS_TYPE_A, DnsCancelQuery, DnsFree,
+        DnsFreeRecordList, DnsQueryEx,
     },
 };
 
+/// RFC 3596 `AAAA` record type (`0x001c`).
+const DNS_TYPE_AAAA_WIRE: u16 = 28;
+
+/// Win32 `DNS_INFO_NO_RECORDS` (`9501`): `NOERROR` response with zero records of
+/// the requested type (the exact `NODATA` answer `sing-box` returns for `AAAA`).
+const DNS_INFO_NO_RECORDS_STATUS: i32 = 9501;
+
 #[derive(Debug)]
-enum QueryOutcome {
-    Answer(Vec<Ipv4Addr>),
+enum QueryOutcome<T> {
+    Answer(Vec<T>),
     Error(i32),
 }
 
-#[derive(Default)]
-struct Completion {
-    outcome: Mutex<Option<QueryOutcome>>,
+struct Completion<T> {
+    outcome: Mutex<Option<QueryOutcome<T>>>,
     ready: Condvar,
 }
 
-impl Completion {
+impl<T> Default for Completion<T> {
+    fn default() -> Self {
+        Self {
+            outcome: Mutex::new(None),
+            ready: Condvar::new(),
+        }
+    }
+}
+
+impl<T> Completion<T> {
     fn callback_context(self: &Arc<Self>) -> *const c_void {
         Arc::into_raw(Arc::clone(self)).cast()
     }
@@ -46,7 +62,7 @@ impl Completion {
     /// SAFETY: `context` owns one `Arc` reference from `callback_context`, consumed exactly once.
     unsafe fn publish_from_callback(
         context: *const c_void,
-        outcome: QueryOutcome,
+        outcome: QueryOutcome<T>,
         notify: impl FnOnce(&Condvar),
     ) {
         let completion = unsafe { Arc::from_raw(context.cast::<Self>()) };
@@ -60,13 +76,56 @@ impl Completion {
     }
 }
 
-/// Run one A-only query through the Windows DNS Client. The returned future is
-/// bounded even though the native API is callback based; on timeout the worker
-/// asks DNSAPI to cancel and waits for the mandatory completion callback only
-/// on Tokio's blocking pool.
+/// Run one A-only query through the Windows DNS Client, bypassing both cache and
+/// `hosts` file. The returned future is bounded even though the native API is
+/// callback based; on timeout the worker asks DNSAPI to cancel and waits for
+/// the mandatory completion callback only on Tokio's blocking pool.
 pub async fn query_a(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, String> {
+    let options = u64::from(
+        DNS_QUERY_BYPASS_CACHE | DNS_QUERY_NO_HOSTS_FILE | DNS_QUERY_TREAT_AS_FQDN,
+    );
+    run_query_worker(host, timeout, "A", move |name| {
+        query_a_blocking(name, timeout, options)
+    })
+    .await
+}
+
+/// Run one A-only query through the Windows DNS Client while consulting the
+/// local `hosts` file (`DNS_QUERY_BYPASS_CACHE | DNS_QUERY_TREAT_AS_FQDN`),
+/// matching what applications observe via `getaddrinfo`.
+pub async fn query_a_effective(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, String> {
+    let options = u64::from(DNS_QUERY_BYPASS_CACHE | DNS_QUERY_TREAT_AS_FQDN);
+    run_query_worker(host, timeout, "A", move |name| {
+        query_a_blocking(name, timeout, options)
+    })
+    .await
+}
+
+/// Run one AAAA-only query through the Windows DNS Client while consulting the
+/// local `hosts` file (`DNS_QUERY_BYPASS_CACHE | DNS_QUERY_TREAT_AS_FQDN`).
+/// Returns `Ok(Vec::new())` when the resolver proves `NODATA` (`NOERROR` with
+/// zero `AAAA` records), and returns `Ok(addrs)` if any IPv6 `AAAA` record
+/// would be exposed to applications.
+pub async fn query_aaaa_effective(host: &str, timeout: Duration) -> Result<Vec<Ipv6Addr>, String> {
+    let options = u64::from(DNS_QUERY_BYPASS_CACHE | DNS_QUERY_TREAT_AS_FQDN);
+    run_query_worker(host, timeout, "AAAA", move |name| {
+        query_aaaa_blocking(name, timeout, options)
+    })
+    .await
+}
+
+async fn run_query_worker<T, F>(
+    host: &str,
+    timeout: Duration,
+    label: &'static str,
+    f: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(String) -> Result<T, String> + Send + 'static,
+{
     let host = host.to_owned();
-    let worker = tokio::task::spawn_blocking(move || query_a_blocking(&host, timeout));
+    let worker = tokio::task::spawn_blocking(move || f(host));
 
     // `DnsCancelQuery` is non-blocking. Leave a small cleanup margin for the
     // callback after the worker's own deadline, without ever stranding the
@@ -75,18 +134,56 @@ pub async fn query_a(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, Str
         Ok(Ok(result)) => result,
         Ok(Err(error)) => Err(format!("Windows DNS worker failed: {error}")),
         Err(_) => Err(format!(
-            "Windows system DNS A query exceeded {timeout:?} and cancellation did not settle"
+            "Windows system DNS {label} query exceeded {timeout:?} and cancellation did not settle"
         )),
     }
 }
 
-fn query_a_blocking(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, String> {
+fn query_a_blocking(host: String, timeout: Duration, options: u64) -> Result<Vec<Ipv4Addr>, String> {
+    let outcome = execute_dns_query(
+        &host,
+        DNS_TYPE_A,
+        options,
+        timeout,
+        "A",
+        query_a_complete,
+        collect_a_records,
+    )?;
+    format_a_outcome(outcome)
+}
+
+fn query_aaaa_blocking(
+    host: String,
+    timeout: Duration,
+    options: u64,
+) -> Result<Vec<Ipv6Addr>, String> {
+    let outcome = execute_dns_query(
+        &host,
+        DNS_TYPE_AAAA_WIRE,
+        options,
+        timeout,
+        "AAAA",
+        query_aaaa_complete,
+        collect_aaaa_records,
+    )?;
+    format_aaaa_outcome(outcome)
+}
+
+fn execute_dns_query<T>(
+    host: &str,
+    query_type: u16,
+    query_options: u64,
+    timeout: Duration,
+    label: &'static str,
+    callback: unsafe extern "system" fn(*const c_void, *mut DNS_QUERY_RESULT),
+    collector: fn(*mut DNS_RECORDA) -> Vec<T>,
+) -> Result<QueryOutcome<T>, String> {
     if host.is_empty() || host.encode_utf16().any(|unit| unit == 0) {
         return Err("Windows system DNS query received an invalid host name".to_string());
     }
 
     let wide_name: Vec<u16> = host.encode_utf16().chain(std::iter::once(0)).collect();
-    let completion = Arc::new(Completion::default());
+    let completion = Arc::new(Completion::<T>::default());
     let mut result = DNS_QUERY_RESULT {
         Version: DNS_QUERY_RESULTS_VERSION1,
         ..Default::default()
@@ -95,11 +192,11 @@ fn query_a_blocking(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, Stri
     let request = DNS_QUERY_REQUEST {
         Version: DNS_QUERY_REQUEST_VERSION1,
         QueryName: wide_name.as_ptr(),
-        QueryType: DNS_TYPE_A,
-        QueryOptions: u64::from(DNS_QUERY_BYPASS_CACHE | DNS_QUERY_NO_HOSTS_FILE | DNS_QUERY_TREAT_AS_FQDN),
+        QueryType: query_type,
+        QueryOptions: query_options,
         pDnsServerList: ptr::null_mut(),
         InterfaceIndex: 0,
-        pQueryCompletionCallback: Some(query_complete),
+        pQueryCompletionCallback: Some(callback),
         pQueryContext: completion.callback_context().cast_mut(),
     };
 
@@ -111,8 +208,8 @@ fn query_a_blocking(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, Stri
     if status != DNS_REQUEST_PENDING {
         // SAFETY: synchronous success/error never invokes the callback, so this
         // path must retire its unused reference. Pending queries retire it there.
-        unsafe { drop(Arc::from_raw(request.pQueryContext.cast::<Completion>())) };
-        return finish_sync_query(status, &mut result);
+        unsafe { drop(Arc::from_raw(request.pQueryContext.cast::<Completion<T>>())) };
+        return Ok(finish_sync_query(status, &mut result, collector));
     }
 
     let mut outcome = completion
@@ -139,27 +236,29 @@ fn query_a_blocking(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, Stri
                 .wait(outcome)
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
-        return Err(format!("Windows system DNS A query exceeded {timeout:?}"));
+        return Err(format!("Windows system DNS {label} query exceeded {timeout:?}"));
     }
 
-    match outcome.take() {
-        Some(outcome) => format_outcome(outcome),
-        None => Err("Windows DNS completion callback returned without a result".to_string()),
-    }
+    outcome
+        .take()
+        .ok_or_else(|| "Windows DNS completion callback returned without a result".to_string())
 }
 
-fn finish_sync_query(status: i32, result: &mut DNS_QUERY_RESULT) -> Result<Vec<Ipv4Addr>, String> {
-    let outcome = if status == ERROR_SUCCESS as i32 {
+fn finish_sync_query<T>(
+    status: i32,
+    result: &mut DNS_QUERY_RESULT,
+    collector: fn(*mut DNS_RECORDA) -> Vec<T>,
+) -> QueryOutcome<T> {
+    if status == ERROR_SUCCESS as i32 {
         // A synchronous DnsQueryEx reports its final status in the result too.
-        query_outcome(result)
+        query_outcome(result, collector)
     } else {
         free_records(result);
         QueryOutcome::Error(status)
-    };
-    format_outcome(outcome)
+    }
 }
 
-unsafe extern "system" fn query_complete(context: *const c_void, result: *mut DNS_QUERY_RESULT) {
+unsafe extern "system" fn query_a_complete(context: *const c_void, result: *mut DNS_QUERY_RESULT) {
     if context.is_null() || result.is_null() {
         return;
     }
@@ -167,18 +266,34 @@ unsafe extern "system" fn query_complete(context: *const c_void, result: *mut DN
     // SAFETY: the caller keeps `DNS_QUERY_RESULT` alive until this callback has
     // consumed its records. The supplied context owns a separate completion
     // reference, retired only after publication and notification finish.
-    let outcome = unsafe { query_outcome(&mut *result) };
+    let outcome = unsafe { query_outcome(&mut *result, collect_a_records) };
     unsafe { Completion::publish_from_callback(context, outcome, Condvar::notify_all) };
 }
 
-fn query_outcome(result: &mut DNS_QUERY_RESULT) -> QueryOutcome {
+unsafe extern "system" fn query_aaaa_complete(
+    context: *const c_void,
+    result: *mut DNS_QUERY_RESULT,
+) {
+    if context.is_null() || result.is_null() {
+        return;
+    }
+
+    // SAFETY: same lifetime invariant as `query_a_complete`.
+    let outcome = unsafe { query_outcome(&mut *result, collect_aaaa_records) };
+    unsafe { Completion::publish_from_callback(context, outcome, Condvar::notify_all) };
+}
+
+fn query_outcome<T>(
+    result: &mut DNS_QUERY_RESULT,
+    collector: fn(*mut DNS_RECORDA) -> Vec<T>,
+) -> QueryOutcome<T> {
     if result.QueryStatus != ERROR_SUCCESS as i32 {
         let status = result.QueryStatus;
         free_records(result);
         return QueryOutcome::Error(status);
     }
 
-    let addresses = collect_a_records(result.pQueryRecords);
+    let addresses = collector(result.pQueryRecords);
     free_records(result);
     QueryOutcome::Answer(addresses)
 }
@@ -203,6 +318,29 @@ fn collect_a_records(mut record: *mut DNS_RECORDA) -> Vec<Ipv4Addr> {
     addresses
 }
 
+fn collect_aaaa_records(mut record: *mut DNS_RECORDA) -> Vec<Ipv6Addr> {
+    let mut addresses = Vec::new();
+    for _ in 0..128 {
+        if record.is_null() {
+            break;
+        }
+        // SAFETY: `record` comes from the live DNSAPI result list and is only
+        // read before the list is freed. `DNS_AAAA_DATA` stores 16 network-order
+        // octets at offset 0 of `DNS_RECORDA::Data` when `wType == DNS_TYPE_AAAA`.
+        let item = unsafe { &*record };
+        if item.wType == DNS_TYPE_AAAA_WIRE
+            && usize::from(item.wDataLength) >= size_of::<[u8; 16]>()
+            && size_of_val(&item.Data) >= size_of::<[u8; 16]>()
+        {
+            let octets =
+                unsafe { ptr::from_ref(&item.Data).cast::<[u8; 16]>().read_unaligned() };
+            addresses.push(ipv6_from_dns_octets(octets));
+        }
+        record = item.pNext;
+    }
+    addresses
+}
+
 fn free_records(result: &mut DNS_QUERY_RESULT) {
     if !result.pQueryRecords.is_null() {
         // SAFETY: the pointer was allocated by DNSAPI for this result and this
@@ -218,7 +356,11 @@ fn ipv4_from_dns_word(raw: u32) -> Ipv4Addr {
     Ipv4Addr::from(raw.to_ne_bytes())
 }
 
-fn format_outcome(outcome: QueryOutcome) -> Result<Vec<Ipv4Addr>, String> {
+fn ipv6_from_dns_octets(octets: [u8; 16]) -> Ipv6Addr {
+    Ipv6Addr::from(octets)
+}
+
+fn format_a_outcome(outcome: QueryOutcome<Ipv4Addr>) -> Result<Vec<Ipv4Addr>, String> {
     match outcome {
         QueryOutcome::Answer(addresses) if addresses.is_empty() => {
             Err("Windows system DNS A query returned no A records".to_string())
@@ -231,10 +373,27 @@ fn format_outcome(outcome: QueryOutcome) -> Result<Vec<Ipv4Addr>, String> {
     }
 }
 
+fn format_aaaa_outcome(outcome: QueryOutcome<Ipv6Addr>) -> Result<Vec<Ipv6Addr>, String> {
+    match outcome {
+        QueryOutcome::Answer(addresses) => Ok(addresses),
+        QueryOutcome::Error(DNS_INFO_NO_RECORDS_STATUS) => Ok(Vec::new()),
+        QueryOutcome::Error(status) => Err(format!(
+            "Windows system DNS AAAA query failed with status {status}: {}",
+            std::io::Error::from_raw_os_error(status)
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Completion, QueryOutcome, format_outcome, ipv4_from_dns_word};
-    use std::{net::Ipv4Addr, sync::Arc};
+    use super::{
+        Completion, DNS_INFO_NO_RECORDS_STATUS, QueryOutcome, format_a_outcome,
+        format_aaaa_outcome, ipv4_from_dns_word, ipv6_from_dns_octets,
+    };
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr},
+        sync::Arc,
+    };
 
     #[test]
     fn dns_a_word_keeps_wire_octet_order() {
@@ -243,13 +402,38 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_success_is_not_a_dns_proof() {
-        assert!(format_outcome(QueryOutcome::Answer(Vec::new())).is_err());
+    fn dns_aaaa_octets_keep_wire_order() {
+        let octets = [
+            0x26, 0x06, 0x47, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x68, 0x12,
+            0x01, 0x02,
+        ];
+        assert_eq!(
+            ipv6_from_dns_octets(octets),
+            "2606:4700::6812:102".parse::<Ipv6Addr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn an_empty_success_is_not_a_dns_proof_for_a_records() {
+        assert!(format_a_outcome(QueryOutcome::Answer(Vec::new())).is_err());
+    }
+
+    #[test]
+    fn nodata_status_and_empty_answer_prove_aaaa_suppression() {
+        assert_eq!(
+            format_aaaa_outcome(QueryOutcome::Error(DNS_INFO_NO_RECORDS_STATUS)).unwrap(),
+            Vec::<Ipv6Addr>::new()
+        );
+        assert_eq!(
+            format_aaaa_outcome(QueryOutcome::Answer(Vec::new())).unwrap(),
+            Vec::<Ipv6Addr>::new()
+        );
+        assert!(format_aaaa_outcome(QueryOutcome::Error(9002)).is_err());
     }
 
     #[test]
     fn callback_storage_survives_the_waiter_consuming_its_result() {
-        let caller = Arc::new(Completion::default());
+        let caller = Arc::new(Completion::<Ipv4Addr>::default());
         let weak = Arc::downgrade(&caller);
         let context = caller.callback_context();
 

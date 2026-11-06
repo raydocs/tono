@@ -24,10 +24,21 @@ const mocks = vi.hoisted(() => ({
   write: vi.fn(),
   preferenceRead: vi.fn(),
   preferenceWrite: vi.fn(),
+  catalogStatus: vi.fn(),
+  disableStaleProxy: vi.fn(),
+  checkTerminalEnv: vi.fn(),
+  clearTerminalEnv: vi.fn(),
+  tonoStatus: vi.fn(),
 }))
 vi.mock('@/services/cmds', () => ({
   getTonoPreferences: mocks.preferenceRead,
   patchTonoPreferences: mocks.preferenceWrite,
+}))
+vi.mock('@/hooks/use-tono', () => ({
+  useTonoStatus: () => ({
+    status: mocks.tonoStatus(),
+    mutateTonoStatus: async () => undefined,
+  }),
 }))
 vi.mock('@/services/tono', async (original) => ({
   ...(await original<typeof import('@/services/tono')>()),
@@ -37,13 +48,22 @@ vi.mock('@/services/tono', async (original) => ({
   tonoInternalBuild: async () => false,
   tonoNetworkLogUploadEnabled: mocks.read,
   tonoSetNetworkLogUploadEnabled: mocks.write,
+  tonoCatalogStatus: mocks.catalogStatus,
+  tonoDisableStaleSystemProxy: mocks.disableStaleProxy,
+  tonoCheckTerminalEnv: mocks.checkTerminalEnv,
+  tonoClearTerminalProxyEnv: mocks.clearTerminalEnv,
 }))
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 vi.mock('@/components/setting/mods/update-viewer', () => ({
   UpdateViewer: () => null,
 }))
 
-import { GeneralCard, PrivacyCard } from './settings'
+import { formatTonoActionError } from '@/services/tono'
+import {
+  GeneralCard,
+  PrivacyCard,
+  SystemCompatibilityCard,
+} from './settings'
 
 afterEach(async () => {
   cleanup()
@@ -58,10 +78,17 @@ afterEach(async () => {
       'tonoGeneralSave',
     ].map((key) => removeCacheData([key])),
   )
+  await removeCacheData(['tono', 'catalog-status'])
+  await removeCacheData(['tono', 'terminal-env'])
   mocks.read.mockReset()
   mocks.write.mockReset()
   mocks.preferenceRead.mockReset()
   mocks.preferenceWrite.mockReset()
+  mocks.catalogStatus.mockReset()
+  mocks.disableStaleProxy.mockReset()
+  mocks.checkTerminalEnv.mockReset()
+  mocks.clearTerminalEnv.mockReset()
+  mocks.tonoStatus.mockReset()
 })
 
 it('privacy choices wait for confirmation and recover failed reads or ambiguous saves by reloading', async () => {
@@ -371,6 +398,11 @@ it('general settings confirm saved choices across navigation and apply language 
   await waitFor(() =>
     expect(routing('stable').getAttribute('aria-pressed')).toBe('true'),
   )
+  expect(
+    screen.getByText(/Stable: Routes all non-LAN traffic/).textContent,
+  ).toContain('ToDesk / UU')
+  expect(screen.getByText('Local network & intranet')).toBeTruthy()
+  expect(screen.getByText('Automatic')).toBeTruthy()
   expect(routing('three-tier').disabled).toBe(false)
   expect(screen.queryByRole('alert')).toBeNull()
 
@@ -385,4 +417,91 @@ it('general settings confirm saved choices across navigation and apply language 
     desktop_routing_mode: 'ai-home',
   })
   expect(actual).toMatchObject({ desktop_routing_mode: 'ai-home' })
+})
+
+it('system compatibility card inspects and repairs stale Windows proxy and terminal proxy variables and surfaces Claude Home / IPv6 status', async () => {
+  await i18n.use(initReactI18next).init({
+    resources: { en: { translation: { tono: enTono, settings: enSettings } } },
+    lng: 'en',
+  })
+  setNewAppearance(true)
+  mocks.tonoStatus.mockReturnValue({
+    uiState: 'connected',
+    claudeHomeActive: true,
+    killSwitch: { wanted: true, live: true, mode: 'locked', endpoints: [], last_error: null },
+    resolverPolicyWarning: null,
+  })
+  mocks.catalogStatus.mockResolvedValueOnce({
+    revision: 54,
+    nodeCount: 3,
+    lastSyncedAtMs: Date.now(),
+    error: null,
+    staleSystemProxy: 'TONO_STALE_SYSTEM_PROXY: 127.0.0.1:7890',
+  })
+  mocks.checkTerminalEnv.mockResolvedValueOnce({
+    hasConflict: true,
+    claudeCodeReady: false,
+    canAutoClear: true,
+    entries: [
+      {
+        key: 'HTTPS_PROXY',
+        value: 'http://127.0.0.1:7890',
+        source: 'user',
+        guidance: 'clear',
+        autoClearable: true,
+      },
+    ],
+  })
+  mocks.disableStaleProxy.mockResolvedValue(undefined)
+  mocks.clearTerminalEnv.mockResolvedValue(undefined)
+
+  render(
+    <SWRConfig
+      value={{
+        errorRetryCount: 0,
+        dedupingInterval: 0,
+        revalidateOnFocus: false,
+      }}
+    >
+      <SystemCompatibilityCard />
+    </SWRConfig>,
+  )
+
+  expect(await screen.findByText('Home IP locked')).toBeTruthy()
+  expect(screen.getByText('Verified')).toBeTruthy()
+  expect(await screen.findByText(/127\.0\.0\.1:7890/)).toBeTruthy()
+  expect(await screen.findByText(/HTTPS_PROXY/)).toBeTruthy()
+
+  mocks.catalogStatus.mockResolvedValue({
+    revision: 54,
+    nodeCount: 3,
+    lastSyncedAtMs: Date.now(),
+    error: null,
+    staleSystemProxy: null,
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Clear proxy' }))
+  await waitFor(() => expect(mocks.disableStaleProxy).toHaveBeenCalledOnce())
+  expect(await screen.findByText('Clean')).toBeTruthy()
+  expect(
+    screen.getByText('Cleared dead Windows system proxy.'),
+  ).toBeTruthy()
+
+  mocks.checkTerminalEnv.mockResolvedValue({
+    hasConflict: false,
+    claudeCodeReady: true,
+    canAutoClear: false,
+    entries: [],
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Clear variables' }))
+  await waitFor(() => expect(mocks.clearTerminalEnv).toHaveBeenCalledOnce())
+  expect(await screen.findByText('Ready')).toBeTruthy()
+
+  expect(
+    formatTonoActionError(
+      new Error(
+        'fake-ip verification failed: Claude IPv6 anti-leak check failed: claude.ai returned IPv6 AAAA [2606:4700::1] via Windows DNS Client instead of protected NODATA',
+      ),
+      i18n.t as unknown as (key: string) => string,
+    ),
+  ).toContain('Claude DNS / IPv6 anti-leak check failed')
 })

@@ -119,13 +119,47 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                         schedule.note_down(&name);
                         continue;
                     };
-                    if tcp_open(&node).await {
-                        let endpoint = format!("{}:{}", node.server, node.port);
-                        state.unarmed_proofs.lock().remember(&endpoint, now_ms());
-                        proven = Some(schedule.proven(&name));
-                        break;
+                    match tcp_probe(&node).await {
+                        Ok(latency_ms) => {
+                            let endpoint = format!("{}:{}", node.server, node.port);
+                            state.unarmed_proofs.lock().remember(&endpoint, now_ms());
+                            {
+                                let mut inner = state.lock().await;
+                                if inner.connect_generation == generation
+                                    && inner.account_state == AccountState::Ready
+                                    && inner.nodes.iter().any(|n| n.name == node.name)
+                                {
+                                    inner.record_server_probe_result(
+                                        crate::tono::commands::TonoServerTestResult {
+                                            name: node.name.clone(),
+                                            latency_ms: Some(latency_ms),
+                                            error: None,
+                                        },
+                                    );
+                                }
+                            }
+                            proven = Some(schedule.proven(&name));
+                            break;
+                        }
+                        Err(error) => {
+                            if let Some(error) = error {
+                                let mut inner = state.lock().await;
+                                if inner.connect_generation == generation
+                                    && inner.account_state == AccountState::Ready
+                                    && inner.nodes.iter().any(|n| n.name == node.name)
+                                {
+                                    inner.record_server_probe_result(
+                                        crate::tono::commands::TonoServerTestResult {
+                                            name: node.name.clone(),
+                                            latency_ms: None,
+                                            error: Some(error),
+                                        },
+                                    );
+                                }
+                            }
+                            schedule.note_down(&name);
+                        }
                     }
-                    schedule.note_down(&name);
                 }
                 let Some(name) = proven else {
                     continue;
@@ -201,19 +235,25 @@ fn probe_targets(nodes: &[ValidatedNode]) -> Vec<ProbeTarget> {
         .collect()
 }
 
-async fn tcp_open(node: &ValidatedNode) -> bool {
+async fn tcp_probe(node: &ValidatedNode) -> Result<u64, Option<String>> {
     if node.is_hysteria2() {
-        return false;
+        return Err(None);
     }
     let address = SocketAddr::new(IpAddr::V4(node.server), node.port);
-    tokio::time::timeout(
+    let started = Instant::now();
+    match tokio::time::timeout(
         Duration::from_millis(unarmed_probe::TCP_PROOF_MS),
         tokio::net::TcpStream::connect(address),
     )
     .await
-    .ok()
-    .and_then(|result| result.ok())
-    .is_some()
+    {
+        Ok(Ok(stream)) => {
+            drop(stream);
+            Ok(started.elapsed().as_millis().max(1).min(u64::MAX as u128) as u64)
+        }
+        Ok(Err(err)) => Err(Some(err.to_string())),
+        Err(_) => Err(Some("timeout".to_string())),
+    }
 }
 
 async fn still_owner(state: &TonoState, ticket: u64, generation: u64) -> bool {

@@ -26,12 +26,14 @@ const {
   mutateTonoStatusMock,
   toastMock,
   uiStateMock,
+  canTestAllServersMock,
   statusMock,
   scopeMock,
   preferencesMock,
   updatePreferencesMock,
   catalogStatusMock,
   refreshCatalogMock,
+  disableStaleProxyMock,
   testServersMock,
 } = vi.hoisted(() => ({
   serversMock: vi.fn(),
@@ -40,12 +42,14 @@ const {
   mutateTonoStatusMock: vi.fn(),
   toastMock: vi.fn(),
   uiStateMock: vi.fn(),
+  canTestAllServersMock: vi.fn(),
   statusMock: vi.fn(),
   scopeMock: vi.fn(),
   preferencesMock: vi.fn(),
   updatePreferencesMock: vi.fn(),
   catalogStatusMock: vi.fn(),
   refreshCatalogMock: vi.fn(),
+  disableStaleProxyMock: vi.fn(),
   testServersMock: vi.fn(),
 }))
 vi.mock('@/services/tono', async (original) => ({
@@ -58,6 +62,7 @@ vi.mock('@/services/tono', async (original) => ({
   tonoUpdateRoutePreferences: updatePreferencesMock,
   tonoCatalogStatus: catalogStatusMock,
   tonoRefreshCatalog: refreshCatalogMock,
+  tonoDisableStaleSystemProxy: disableStaleProxyMock,
   tonoTestAvailableServers: testServersMock,
   tonoCancelServerTests: async () => {},
 }))
@@ -70,6 +75,7 @@ vi.mock('@/hooks/use-tono', () => ({
       accountState: 'ready',
       routePreferenceScope: scopeMock(),
       catalogRevision: 54,
+      canTestAllServers: canTestAllServersMock(),
     },
     mutateTonoStatus: mutateTonoStatusMock,
   }),
@@ -93,6 +99,7 @@ beforeEach(() => {
   connectMock.mockResolvedValue(undefined)
   mutateTonoStatusMock.mockResolvedValue(undefined)
   uiStateMock.mockReturnValue('notConnected')
+  canTestAllServersMock.mockReturnValue(undefined)
   statusMock.mockImplementation(async () => ({ uiState: uiStateMock() }))
   scopeMock.mockReturnValue(undefined)
   preferencesMock.mockReset()
@@ -103,6 +110,7 @@ beforeEach(() => {
     lastSyncedAtMs: null,
     error: null,
   })
+  disableStaleProxyMock.mockResolvedValue(undefined)
   testServersMock.mockReset()
 })
 afterEach(cleanup)
@@ -859,4 +867,76 @@ it('does not paint the in-use mark as good while protection has no live evidence
     unmount()
     setNewAppearance(false)
   }
+})
+
+it('hydrates backend probeResults for reachability summary and allows Test all while connected in AI Home', async () => {
+  uiStateMock.mockReturnValue('connected')
+  canTestAllServersMock.mockReturnValue(true)
+  catalogStatusMock.mockResolvedValue({
+    revision: 54,
+    nodeCount: 2,
+    lastSyncedAtMs: Date.now() - 5_000,
+    error: null,
+    probeAtMs: Date.now() - 10_000,
+    probeResults: [
+      { name: 'Buffalo · Niagara', latencyMs: 68, error: null },
+      { name: 'Buffalo · Niagara · hy2', latencyMs: null, error: 'timeout' },
+    ],
+  })
+  statusMock.mockResolvedValue({
+    uiState: 'connected',
+    routePreferenceScope: 'account-a:7',
+    catalogRevision: 54,
+    canTestAllServers: true,
+    selectedServer: 'Buffalo · Niagara',
+  })
+  testServersMock.mockResolvedValue([
+    { name: 'Buffalo · Niagara', latencyMs: 52, error: null },
+    { name: 'Buffalo · Niagara · hy2', latencyMs: 95, error: null },
+  ])
+  const { unmount } = renderSeaRoutes()
+  try {
+    expect(await screen.findByText('1 / 2 reachable')).toBeTruthy()
+    expect(
+      screen.getByText(/Whichever available cloud server you switch to/),
+    ).toBeTruthy()
+    expect((await screen.findAllByText('68 ms')).length).toBeGreaterThan(0)
+
+    const testAll = screen.getByRole('button', { name: 'Test all' })
+    expect((testAll as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(testAll)
+    await waitFor(() => expect(testServersMock).toHaveBeenCalledOnce())
+    expect(await screen.findByText('2 / 2 reachable')).toBeTruthy()
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
+})
+
+it('surfaces and clears a dead Windows system proxy in classic ServersPage even when catalog.error is null', async () => {
+  serversMock.mockResolvedValue(routeServers)
+  catalogStatusMock.mockResolvedValue({
+    revision: 54,
+    nodeCount: 2,
+    lastSyncedAtMs: Date.now(),
+    error: null,
+    staleSystemProxy: 'TONO_STALE_SYSTEM_PROXY: 127.0.0.1:7890',
+  })
+  renderPage()
+  expect(
+    await screen.findByText(/127\.0\.0\.1:7890/),
+  ).toBeTruthy()
+  const clearButton = screen.getByRole('button', { name: 'Clear stale proxy' })
+  catalogStatusMock.mockResolvedValue({
+    revision: 54,
+    nodeCount: 2,
+    lastSyncedAtMs: Date.now(),
+    error: null,
+    staleSystemProxy: null,
+  })
+  fireEvent.click(clearButton)
+  await waitFor(() => expect(disableStaleProxyMock).toHaveBeenCalledOnce())
+  await waitFor(() =>
+    expect(screen.queryByText(/127\.0\.0\.1:7890/)).toBeNull(),
+  )
 })
