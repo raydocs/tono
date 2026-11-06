@@ -10,6 +10,7 @@
 | 403 | QUOTA_EXCEEDED | 额度用完；保留账户、令牌、VPN 配置，显示“流量已用完，请续费或联系家人” |
 | 401 | UNAUTHORIZED（access）/ INVALID_REFRESH_TOKEN（refresh） | 账户已恢复，但旧设备网络授权仍已撤销；进入已发布桌面客户端的重新登录流程，不自动恢复网络身份。移动端可保留配置并提供重新登录动作 |
 | 403 | ENTITLEMENT_REQUIRED | 开放注册的新账户从未有过套餐（[决策 138](decisions/138-2026-10-27-public-signup-without-plan.md)）；验证登录时不签发 token。显示“账户已创建，尚未开通套餐”，不是登录失败或服务故障。两端桌面客户端已把它列入 entitlement 码 |
+| 401 | EMAIL_OWNERSHIP_UNVERIFIED | Apple/Google 证明了提供商账户，但不能为该邮箱作保（Google 非 Gmail 且 `hd` 不符；Apple 非 iCloud/隐藏邮箱，[决策 072](decisions/072-2026-10-07-google-sign-in-authoritative-addresses-only.md)、[决策 141](decisions/141-2026-10-27-oidc-release-and-identity-linking.md)）。响应顶层带 `linkTicket`（10 分钟）。客户端提示「请用邮箱验证码登录以关联」；票据只放内存，发送前必须明确询问用户是否把该 Apple/Google 账号关联到这个账户，同意后才在同一 installation 的 `auth/email/verify` 里带上 `linkTicket`（取消、换邮箱、切换账户或超时即丢弃）。只有登录成功时才关联；成功响应多一个 `identityLink`：`{provider,status:'linked'}`、`{provider,status:'conflict'}`（该提供商账户已关联别的 Tono 账户，或本账户已有另一个该提供商身份，均不移动）或 `{status:'expired'}`（票据过期、换了设备或验证码邮箱与提供商给的邮箱不同）。不自动合并 |
 | 403 | USER_DISABLED | 验证登录后账户被停用；拒绝授权，不等于套餐到期。已撤销的旧会话仍为 401 |
 | 401 | UNAUTHORIZED / INVALID_REFRESH_TOKEN | 凭据失效、过期、主动撤销或设备撤权；沿用认证恢复流程 |
 | 429 | RATE_LIMITED | 不登出、不删除报告；保留待发数据，按 `Retry-After`（整数秒）等待后重试 |
