@@ -174,7 +174,7 @@ test('Windows candidate build and installer smoke agree with the product version
 test('Windows packaging pnpm pins match the frozen application package manager', () => {
   const app = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8'))
   assert.match(app.packageManager, /^pnpm@/)
-  for (const name of ['windows-candidate.yml', 'windows-release.yml', 'desktop-update-sign.yml', 'windows-ci.yml']) {
+  for (const name of ['windows-candidate.yml', 'windows-release.yml', 'desktop-update-sign.yml', 'windows-ci.yml', 'release-qualification.yml']) {
     const workflow = load(readFileSync(path.join(root, '.github/workflows', name), 'utf8'))
     const setups = Object.values(workflow.jobs).flatMap(job => job.steps ?? [])
       .filter(step => step.uses?.startsWith('pnpm/action-setup@'))
@@ -197,6 +197,13 @@ test('Windows CI caches the pnpm store before install', () => {
     assert.ok(!steps.some(step => /npm install --global pnpm@/.test(step.run || '')),
       `${id} must not install an uncached global pnpm`)
   }
+})
+
+test('tono-core coverage downloads cargo-llvm-cov instead of compiling it', () => {
+  const steps = workflow.jobs['core-coverage'].steps
+  assert.ok(steps.some(step =>
+    step.uses?.startsWith('taiki-e/install-action@') && step.with?.tool === 'cargo-llvm-cov@0.9.1'))
+  assert.ok(!steps.some(step => /cargo .*install cargo-llvm-cov/.test(step.run || '')))
 })
 
 test('paired candidates share one source and sequence without granting signing or publication', () => {

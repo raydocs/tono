@@ -16,8 +16,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-gate-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+  # Cancel only consecutive pushes on the same PR. Other workflows on that PR
+  # keep their own group. Never cancel main, tags, release branches, or the
+  # merge queue (and this workflow has no push trigger on those refs).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:

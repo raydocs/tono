@@ -153,4 +153,5 @@ test('TonoTests run with xcodebuild parallel testing on one Mac', () => {
   assert.match(body, /-maximum-parallel-testing-workers 4/)
   assert.match(body, /COMPILER_INDEX_STORE_ENABLE=NO/)
   assert.doesNotMatch(body, /strategy:\n {6}matrix:/)
+  assert.match(body, /name: Preserve native test results and render attachments\n {8}if: failure\(\)/)
 })

@@ -25,8 +25,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   XCODEGEN_VERSION: 2.44.1

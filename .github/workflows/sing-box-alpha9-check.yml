@@ -23,8 +23,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: sing-box-alpha9-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:

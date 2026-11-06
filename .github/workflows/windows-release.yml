@@ -36,6 +36,7 @@ jobs:
   branch:
     needs: qualify
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Refuse a ref that is not the release line
         env:
@@ -95,6 +96,7 @@ jobs:
     needs: [branch, pinned-core, sing-box-input]
     environment: windows-release
     runs-on: windows-2025
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: apps/windows/app
@@ -366,6 +368,7 @@ jobs:
   attest:
     needs: build-draft
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
@@ -404,6 +407,7 @@ jobs:
   publish-draft:
     needs: [build-draft, attest]
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
     env:

@@ -32,6 +32,7 @@ concurrency:
 jobs:
   dmg:
     runs-on: macos-26
+    timeout-minutes: 60
     env:
       TONO_MACOS_NOTARY_PROFILE: tono-macos-release
     steps:
@@ -145,6 +146,7 @@ jobs:
   attest:
     needs: dmg
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write

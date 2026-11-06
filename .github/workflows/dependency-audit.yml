@@ -30,8 +30,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: dependency-audit-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   audit:
@@ -43,6 +43,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.26.0
+
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-audit@0.22.2
 
       - name: Report advisory audits
         run: |
@@ -66,16 +74,10 @@ jobs:
             note "npm audit --omit=dev ($dir)" "$log"
           done
           log=$(mktemp)
-          npm install --global pnpm@11.26.0 > "$log" 2>&1
-          (cd apps/windows/app && pnpm audit --prod) >> "$log" 2>&1
+          (cd apps/windows/app && pnpm audit --prod) > "$log" 2>&1
           note 'pnpm audit --prod (apps/windows/app)' "$log"
           log=$(mktemp)
-          if command -v cargo >/dev/null 2>&1; then
-            cargo install cargo-audit > "$log" 2>&1
-            (cd apps/windows && cargo audit) >> "$log" 2>&1
-          else
-            echo 'cargo is not on PATH; Rust advisories were not scanned.' > "$log"
-          fi
+          (cd apps/windows && cargo-audit audit) > "$log" 2>&1
           note 'cargo audit (apps/windows)' "$log"
           log=$(mktemp)
           resolved=apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved

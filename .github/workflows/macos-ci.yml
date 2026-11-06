@@ -41,8 +41,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: macos-ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sing-box-input:
@@ -120,6 +120,7 @@ jobs:
     # "value of type 'some View' has no member 'glassEffect'", which reads like a
     # code error and is really a missing SDK.
     runs-on: macos-26
+    timeout-minutes: 15
     env:
       TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
     steps:
@@ -219,6 +220,7 @@ jobs:
     needs: [sing-box-input, helper]
     if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true' && needs.helper.result == 'success'
     runs-on: macos-26
+    timeout-minutes: 20
     env:
       TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
     steps:
@@ -293,7 +295,7 @@ jobs:
           PY
 
       - name: Preserve native test results and render attachments
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: tono-macos-tests-${{ github.sha }}
@@ -319,6 +321,7 @@ jobs:
     needs: sing-box-input
     if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true'
     runs-on: macos-26
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -413,6 +416,7 @@ jobs:
     needs: [sing-box-input, helper]
     if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true' && needs.helper.result == 'success'
     runs-on: macos-26
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 

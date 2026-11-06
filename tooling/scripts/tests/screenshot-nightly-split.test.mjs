@@ -34,6 +34,7 @@ test('every screenshot test the PR gate skips runs in the nightly, and only ther
   assert.ok(services.includes('npx playwright install-deps chromium'), 'cache hit still installs OS deps')
   assert.doesNotMatch(services, /playwright-[\s\S]{0,80}restore-keys:/)
   assert.doesNotMatch(nightly, /playwright-[\s\S]{0,80}restore-keys:/)
+  assert.match(services, /cache: npm\n {10}cache-dependency-path: services\/ops-console\/package-lock\.json/)
 
   assert.ok(/^on:\n {2}schedule:\n {4}- cron: /m.test(nightly), 'the nightly needs a schedule')
   assert.ok(/^ {2}workflow_dispatch:/m.test(nightly), 'the nightly needs workflow_dispatch')

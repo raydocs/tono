@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -244,18 +244,20 @@ test('pull_request triggering moved into ci-gate', () => {
   assert.match(gate, /python3 apps\/ios\/tools\/sync-desktop-routing\.py --check/)
   assert.match(gate, /python3 apps\/android\/scripts\/routing\/sync-desktop-routing\.py --desktop "\$GITHUB_WORKSPACE" --check/)
   assert.match(workflow('services-ci.yml'), /python3 services\/exit-agent\/test_systemd_cadence\.py/)
-  assert.match(gate, /cancel-in-progress: \$\{\{ github\.event_name != 'merge_group' \}\}/)
-  const keepCancel = "cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}"
-  for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'ios-ci.yml', 'sing-box-alpha9-check.yml']) {
+  const pullRequestCancel = "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"
+  const concurrencyGroup = 'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}'
+  assert.ok(gate.includes(pullRequestCancel))
+  assert.ok(gate.includes(concurrencyGroup))
+  for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'ios-ci.yml', 'sing-box-alpha9-check.yml', 'connect-bench.yml']) {
     const yaml = workflow(name)
     assert.doesNotMatch(yaml, /^ {2}pull_request:/m)
     assert.match(yaml, /^ {2}workflow_call:/m)
-    assert.ok(yaml.includes(keepCancel), name)
+    assert.ok(yaml.includes(pullRequestCancel), name)
+    assert.ok(yaml.includes(concurrencyGroup), name)
   }
   const bench = workflow('connect-bench.yml')
   assert.doesNotMatch(bench, /^ {2}pull_request:/m)
   assert.match(bench, /^ {2}workflow_call:/m)
-  assert.doesNotMatch(bench, /cancel-in-progress:/)
   const pushBranches = 'push:\n    branches:\n      - main\n      - release/macos\n      - release/windows\n'
   for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'sing-box-alpha9-check.yml']) {
     assert.ok(workflow(name).includes(pushBranches), name)
@@ -267,8 +269,46 @@ test('pull_request triggering moved into ci-gate', () => {
   assert.match(workflow('connect-bench.yml'), /^ {2}workflow_dispatch:/m)
   assert.doesNotMatch(workflow('connect-bench.yml'), /^ {2}push:/m)
   assert.doesNotMatch(workflow('sing-box-alpha9-check.yml'), /^ {2}workflow_dispatch:/m)
-  assert.match(workflow('dependency-audit.yml'), /^concurrency:\n {2}group: dependency-audit-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: true\n/m)
-  assert.match(workflow('ops-console-baseline-reminder.yml'), /^concurrency:\n {2}group: ops-console-baseline-reminder-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: true\n/m)
+  for (const name of ['dependency-audit.yml', 'ops-console-baseline-reminder.yml', 'android-ci.yml']) {
+    const yaml = workflow(name)
+    assert.ok(yaml.includes(concurrencyGroup), name)
+    assert.ok(yaml.includes(pullRequestCancel), name)
+  }
+})
+
+test('services-ci restores the npm cache from lockfiles', () => {
+  const yaml = workflow('services-ci.yml')
+  assert.equal([...yaml.matchAll(/^ {10}cache: npm$/gm)].length, 4)
+  assert.ok(yaml.includes('cache-dependency-path: services/control-plane/package-lock.json'))
+  assert.ok(yaml.includes('cache-dependency-path: services/ops-console/package-lock.json'))
+})
+
+test('coverage and advisory tools download pinned binaries', () => {
+  assert.match(workflow('windows-ci.yml'), /tool: cargo-llvm-cov@0\.9\.1/)
+  assert.doesNotMatch(workflow('windows-ci.yml'), /install cargo-llvm-cov --locked/)
+  assert.match(workflow('dependency-audit.yml'), /tool: cargo-audit@0\.22\.2/)
+  assert.doesNotMatch(workflow('dependency-audit.yml'), /cargo install cargo-audit/)
+  assert.doesNotMatch(workflow('dependency-audit.yml'), /npm install --global pnpm/)
+  assert.doesNotMatch(workflow('release-qualification.yml'), /npm install --global pnpm/)
+  assert.match(workflow('release-qualification.yml'), /cache: pnpm/)
+})
+
+test('every hosted job sets timeout-minutes', () => {
+  const dir = path.join(root, '.github/workflows')
+  for (const name of readdirSync(dir).filter((file) => file.endsWith('.yml'))) {
+    const text = readFileSync(path.join(dir, name), 'utf8')
+    const jobsAt = text.search(/^jobs:\n/m)
+    assert.ok(jobsAt >= 0, name)
+    const body = text.slice(jobsAt + 'jobs:\n'.length)
+    const jobRe = /^  ([A-Za-z0-9_-]+):\n((?:    .*\n|\n)+)/gm
+    let match
+    while ((match = jobRe.exec(body))) {
+      const [, job, block] = match
+      if (/^    runs-on:/m.test(block)) {
+        assert.match(block, /^    timeout-minutes: [1-9][0-9]*$/m, `${name} / ${job}`)
+      }
+    }
+  }
 })
 
 test('aggregate command passes a docs-only skip and fails a cancelled job', () => {
