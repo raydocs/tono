@@ -68,6 +68,8 @@ def generate(desktop: pathlib.Path) -> str:
     cidrs = rust_array(rust, "CLAUDE_HOME_IPV4_CIDRS")
     stun_ports = rust_int_array(rust, "STUN_UDP_PORTS")
     encrypted_dns_ports = rust_int_array(rust, "ENCRYPTED_DNS_PORTS")
+    lan_ipv4 = rust_array(rust, "LAN_IPV4_CIDRS")
+    lan_ipv6 = rust_array(rust, "LAN_IPV6_CIDRS")
     public_stun_suffixes = rust_array(rust, "PUBLIC_STUN_SUFFIXES")
     mobile_home_aux = rust_array(rust, "MOBILE_HOME_AUX_SUFFIXES")
     x_cloud_suffixes = rust_array(rust, "X_CLOUD_SUFFIXES")
@@ -111,6 +113,8 @@ def generate(desktop: pathlib.Path) -> str:
         + kotlin_int_list("STUN_UDP_PORTS", stun_ports) + "\n"
         "    /** Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP. */\n"
         + kotlin_int_list("ENCRYPTED_DNS_PORTS", encrypted_dns_ports) + "\n"
+        + kotlin_list("DESKTOP_LAN_IPV4_CIDRS", lan_ipv4) + "\n"
+        + kotlin_list("DESKTOP_LAN_IPV6_CIDRS", lan_ipv6) + "\n"
         "    /** Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across routing modes and whose TCP/DNS stays off DIRECT. */\n"
         + kotlin_list("PUBLIC_STUN_SUFFIXES", public_stun_suffixes) + "\n"
         "    /** Overseas STUN, public DNS, CDN, AI and messaging IPv4 ranges whose UDP/ICMP is rejected while domestic UDP stays direct. */\n"

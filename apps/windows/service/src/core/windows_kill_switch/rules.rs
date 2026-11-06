@@ -25,7 +25,8 @@ pub(super) fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>)
             .filter_map(|ip| ip.parse::<IpAddr>().ok())
             .collect() },
         tun_luid,
-        allow_local_network: !armed.intent.strict_kill_switch,
+        allow_local_network: true,
+        always_allow_lan: armed.intent.strict_kill_switch,
         app_path: armed.intent.app_path.clone(),
         tono_app_path: installed_tono_app_path(),
         // DIRECT is a bypass of a live tunnel, never an independent escape hatch. A missing or

@@ -243,7 +243,7 @@ extension AppState {
                     claudeHomeNodeName: self.managedCatalogRouting?.homeProxy,
                     defaultNodeName: self.managedCatalogRouting?.defaultProxy,
                     claudeHomeSocks5: self.managedCatalogRouting?.homeSocks5,
-                    allowLocalNetworkDevices: localNetwork.allow,
+                    allowLocalNetworkDevices: capturedRoutingMode != "stable" || localNetwork.allow,
                     localNetworkDevicesGeneration: localNetwork.generation
                 )
                 let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)

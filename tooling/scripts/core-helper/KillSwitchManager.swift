@@ -278,7 +278,7 @@ final class KillSwitchManager {
         var object = object
         if Self.strictIntentActive {
             // The root snapshot, not an IPC allowlist, owns every physical
-            // grant. No resolver, relay, LAN or stable media fallback.
+            // grant. No resolver, relay or stable media fallback; LAN is always local.
             object["apiHosts"] = [String]()
             object["exitHints"] = [String]()
             object["proxyEndpoints"] = [[String: Any]]()
@@ -287,7 +287,7 @@ final class KillSwitchManager {
             object["allowSystemResolution"] = false
             object["bootstrapPins"] = [String: [String]]()
             object["reviewedBundleDirect"] = false
-            object["allowLocalNetworkDevices"] = false
+            object["allowLocalNetworkDevices"] = true
             object["aiHomeScoped"] = false
             let tunnels = try Self.validateTunnels(object["tunnelInterfaces"] ?? [])
             guard tunnels.isEmpty || tunnels == ["utun199"] else {
@@ -534,7 +534,8 @@ final class KillSwitchManager {
             // a later heal or sleep barrier renders as the stricter block.
             try? saveState(state)
         }
-        lastCommittedLocalNetwork = !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices
+        lastCommittedLocalNetwork = Self.strictIntentActive || state.strictBlocking
+            || (!state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices)
         if Self.commitEndsProtectedFault(state) {
             localNetworkFaultLocked = false
             Self.clearProtectedFault()
@@ -560,7 +561,8 @@ final class KillSwitchManager {
         )
         // Echo what this ruleset enforces. An app reads a reply without it as
         // a helper too old for the setting and refuses to report it applied.
-        committed["allowLocalNetworkDevices"] = state.allowLocalNetworkDevices
+        committed["allowLocalNetworkDevices"] = Self.strictIntentActive || state.strictBlocking
+            || state.allowLocalNetworkDevices
         // What was rendered: false under strict intent, whatever was asked.
         committed["aiHomeScoped"] = state.aiHomeScoped && !Self.strictIntentActive
         return committed

@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "cd467ede1b2cf52e8171f6e86c67f204b1e82ceca7e633f43461ed0f156f7be0"
+    public static let sourceDigest = "ee489e597ffb226e95e05e90c651d161ef5fe3ac96b18d5d2a8bdc9baaa21931"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -401,6 +401,21 @@ public enum DesktopRoutingContract {
     /// Encrypted DNS (DoT/DoQ) port rejected in TUN so apps fall back to port-53 DNS where sing-box serves FakeIP.
     public static let encryptedDNSPorts: [Int] = [
         853,
+    ]
+
+    /// Desktop-only LAN contract mirror; mobile routing is unchanged.
+    public static let desktopLANIPv4CIDRs: [String] = [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "100.64.0.0/10",
+    ]
+
+    /// Desktop-only LAN contract mirror; mobile routing is unchanged.
+    public static let desktopLANIPv6CIDRs: [String] = [
+        "fe80::/10",
+        "fc00::/7",
     ]
 
     /// Third-party public STUN/TURN suffixes whose UDP/ICMP is rejected across routing modes and whose TCP/DNS stays off DIRECT.

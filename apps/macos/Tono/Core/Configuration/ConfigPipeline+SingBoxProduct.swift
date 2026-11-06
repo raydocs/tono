@@ -47,10 +47,8 @@ nonisolated extension ConfigPipeline {
     /// Destinations "Allow local network devices" off refuses in the Core:
     /// the private, link-local and ULA ranges PF's `tono-lan` /
     /// `tono-linklocal` pass when the setting is on, and CGNAT.
-    static let localNetworkDeviceCIDRs = [
-        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
-        "169.254.0.0/16", "fe80::/10", "fc00::/7",
-    ]
+    static let localNetworkDeviceCIDRs = ThreeTierRoutingContract.lanIPv4CIDRs
+        + ThreeTierRoutingContract.lanIPv6CIDRs
 
     /// Off: a flow a DIRECT rule matches by name or process (a web-direct
     /// suffix, a reviewed app's port rule, UDP 5353) is resolved where it is
@@ -366,7 +364,7 @@ nonisolated extension ConfigPipeline {
         dnsRules.append(["match_response": "primary", "response_rcode": "NOERROR", "action": "respond"])
         dnsRules.append(["action": "evaluate", "server": "Tono-DoH-Backup", "tag": "backup"])
         dnsRules.append(["match_response": "backup", "action": "respond"])
-        rules.append(["ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8", "127.0.0.0/8", "::1/128"], "action": "route", "outbound": "DIRECT"])
+        rules.append(["ip_cidr": localNetworkDeviceCIDRs + ["224.0.0.0/4", "255.255.255.255/32", "ff00::/8", "127.0.0.0/8", "::1/128"], "action": "route", "outbound": "DIRECT"])
         rules.append(["network": "udp", "port": [5353], "action": "route", "outbound": "DIRECT"])
         rules.append(["ip_version": 6, "action": "reject"])
         rules.append(["network": ["udp", "icmp"], "action": "reject"])
