@@ -239,9 +239,15 @@ final class TonoUITests: XCTestCase {
 
     /// Simulator CPU / memory while Home shows a connected session (sea animating). Mac-host
     /// numbers, not an iPhone; printed for the record, no threshold.
-    @MainActor func testSimulatorPerformanceSample() {
+    @MainActor func testSimulatorPerformanceSample() { performanceSample([]) }
+
+    /// The same sample in Low Power's Lite scene (`-TonoLowPower`): a simulator proxy to compare with
+    /// the one above, not an energy measurement.
+    @MainActor func testSimulatorPerformanceSampleLowPower() { performanceSample(["-TonoLowPower"]) }
+
+    @MainActor private func performanceSample(_ extra: [String]) {
         let app = XCUIApplication()
-        app.launchArguments = ["-TonoPreview", "CONNECTED", "-AppleLanguages", "(en)"]
+        app.launchArguments = ["-TonoPreview", "CONNECTED", "-AppleLanguages", "(en)"] + extra
         let options = XCTMeasureOptions()
         options.iterationCount = 3
         measure(metrics: [XCTCPUMetric(application: app), XCTMemoryMetric(application: app)], options: options) {

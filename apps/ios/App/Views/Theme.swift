@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -135,6 +136,8 @@ private func textStyle(forDesignSize size: CGFloat) -> Font.TextStyle? {
 /// presentation root (app root, sheets, covers).
 private struct TonoReduceMotionKey: EnvironmentKey { static let defaultValue = false }
 private struct TonoReduceTransparencyKey: EnvironmentKey { static let defaultValue = false }
+/// Low Power Mode, followed live (`NSProcessInfoPowerStateDidChange`); `-TonoLowPower` in DEBUG.
+private struct TonoLowPowerKey: EnvironmentKey { static let defaultValue = false }
 
 extension EnvironmentValues {
     var tonoReduceMotion: Bool {
@@ -145,18 +148,24 @@ extension EnvironmentValues {
         get { self[TonoReduceTransparencyKey.self] }
         set { self[TonoReduceTransparencyKey.self] = newValue }
     }
+    var tonoLowPower: Bool {
+        get { self[TonoLowPowerKey.self] }
+        set { self[TonoLowPowerKey.self] = newValue }
+    }
 }
 
 enum DebugAccessibility {
     #if DEBUG
     static let reduceMotion = CommandLine.arguments.contains("-TonoReduceMotion")
     static let reduceTransparency = CommandLine.arguments.contains("-TonoReduceTransparency")
+    static let lowPower = CommandLine.arguments.contains("-TonoLowPower")
     /// Sheets open at the large detent. iOS 26 draws the medium detent slightly scaled, which the
     /// audit reads as clipped text; the same content is audited at full size.
     static let largeSheets = CommandLine.arguments.contains("-TonoLargeSheets")
     #else
     static let reduceMotion = false
     static let reduceTransparency = false
+    static let lowPower = false
     static let largeSheets = false
     #endif
 }
@@ -164,11 +173,17 @@ enum DebugAccessibility {
 private struct TonoAccessibilityRoot: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     func body(content: Content) -> some View {
         content
             .environment(\.tonoReduceMotion, systemReduceMotion || DebugAccessibility.reduceMotion)
             .environment(\.tonoReduceTransparency, systemReduceTransparency || DebugAccessibility.reduceTransparency)
+            .environment(\.tonoLowPower, lowPower || DebugAccessibility.lowPower)
+            // Posted on any thread; read on the main one.
+            .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: DispatchQueue.main)) { _ in
+                lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+            }
     }
 }
 

@@ -15,7 +15,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.database.ContentObserver
+import android.os.PowerManager
+import androidx.core.content.ContextCompat
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -71,6 +77,8 @@ object TonoMotion {
 }
 
 val LocalReduceMotion = compositionLocalOf { false }
+/** Battery Saver ([rememberSystemPowerSave]): the scene's ambient loops stop ([SeaMotion.LITE]). */
+val LocalPowerSave = compositionLocalOf { false }
 
 /**
  * Settings' editorial type: one weight, no tracking; the hierarchy is size and tone alone. The
@@ -129,4 +137,22 @@ fun rememberSystemReduceMotion(): Boolean {
         onDispose { resolver.unregisterContentObserver(observer) }
     }
     return reduce
+}
+
+/** Android's Battery Saver, observed live; many phones' saver leaves the animator scale alone. */
+@Composable
+fun rememberSystemPowerSave(): Boolean {
+    val context = LocalContext.current
+    val power = context.getSystemService(PowerManager::class.java)
+    var saving by remember { mutableStateOf(power?.isPowerSaveMode == true) }
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) { saving = power?.isPowerSaveMode == true }
+        }
+        // A protected system broadcast: delivered to a not-exported receiver.
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        saving = power?.isPowerSaveMode == true
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    return saving
 }

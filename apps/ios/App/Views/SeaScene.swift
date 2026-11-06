@@ -5,24 +5,43 @@ import TonoKit
 /// glittering reflection. Night while off, dawn while connecting, day when connected, dusk when a
 /// route is down, ember on failure. A network change keeps the sun near the day height and sends a
 /// light down the reflection (reacquiring), so it never looks like a first start. Purely decorative; the state text lives above it. Reduced
-/// motion renders each destination statically.
+/// motion renders each destination statically. Low Power (`SeaMotion.lite`) stops the stars, drift,
+/// breathing glow and glints where they are and resumes them from there (no jump either way); the sky
+/// still moves between states and the reconnect scan still runs, and between them nothing redraws.
 struct SeaScene: View {
     let sky: SkyState
     var horizon: CGFloat = 0.44
     /// Off where text scrolls over the moon's place in the sky (sign-in at accessibility sizes).
     var moon = true
     @Environment(\.tonoReduceMotion) private var reduceMotion
+    @Environment(\.tonoLowPower) private var lowPower
+    /// When the ambient loops stopped, and how long they have been stopped before: their clock.
+    @State private var ambientStoppedAt: Date?
+    @State private var ambientSkipped: TimeInterval = 0
+
+    private var motion: SeaMotion { SeaMotion(reduceMotion: reduceMotion, lowPower: lowPower) }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
+        let scanning = sky == .reconnecting && motion.status
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !motion.ambient && !scanning)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
+            let a = (ambientStoppedAt.flatMap { motion.ambient ? nil : $0 } ?? timeline.date).timeIntervalSinceReferenceDate - ambientSkipped
             SeaCanvas(sunRise: sky.sunRise, warn: sky.warning ? 1 : 0, horizon: horizon,
-                      drift: reduceMotion ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
-                      breath: [.dawn, .rising, .reconnecting].contains(sky) && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
+                      drift: reduceMotion ? 0 : (a / 26).truncatingRemainder(dividingBy: 1),
+                      breath: [.dawn, .rising, .reconnecting].contains(sky) && !reduceMotion ? 0.5 + 0.5 * sin(a * .pi / 2.4) : 1,
                       animateStars: !reduceMotion, moon: moon,
-                      scan: sky == .reconnecting && !reduceMotion ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
+                      scan: scanning ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
         }
         .animation(reduceMotion ? nil : (sky == .day ? TonoMotion.arrival : TonoMotion.ambient), value: sky)
+        .onAppear { if !motion.ambient { ambientStoppedAt = Date() } }
+        .onChange(of: motion.ambient) { running in
+            if running, let stopped = ambientStoppedAt {
+                ambientSkipped += Date().timeIntervalSince(stopped)
+                ambientStoppedAt = nil
+            } else if !running {
+                ambientStoppedAt = Date()
+            }
+        }
         .accessibilityHidden(true)
         .ignoresSafeArea()
     }
