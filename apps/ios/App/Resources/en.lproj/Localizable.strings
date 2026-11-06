@@ -63,6 +63,9 @@
 "signin_send" = "Send a sign-in code";
 "signin_sending" = "Sending…";
 "signin_code_sent" = "If this email is enabled for Tono, a code is on its way to %1$@. Check spam too.";
+"signin_code_sent_paused" = "If this email can already sign in to Tono, a code is on its way to %1$@. Check spam too. New sign-ups are full for today; new users, please try again tomorrow.";
+"signin_code_requested" = "A sign-in code was requested for %1$@. It usually arrives within a minute; check spam too.";
+"signin_mail_degraded" = "Tono's email service is having trouble right now, so the code may be late or may not arrive. Try again in a few minutes.";
 "signin_code" = "6-digit code";
 "signin_verify" = "Sign in";
 "signin_verifying" = "Verifying…";
@@ -75,6 +78,7 @@
 "signin_error_RATE_LIMITED" = "Too many attempts. Try again later.";
 "signin_error_DEVICE_LIMIT" = "This account is on its device limit. Remove a device on another signed-in device.";
 "signin_error_generic" = "Sign-in didn't finish (%1$@).";
+"signin_error_ENTITLEMENT_REQUIRED" = "Your Tono account is ready, but it has no plan yet. Contact Tono to activate it, then sign in again.";
 "settings_title" = "Settings";
 "settings_back" = "Back";
 "settings_routing" = "Routing mode";

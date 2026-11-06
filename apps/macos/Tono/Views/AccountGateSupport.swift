@@ -160,16 +160,31 @@ struct GateSecondaryButtonStyle: ButtonStyle {
 /// recovery has been exhausted. Only decision093's request outcome permits support.
 struct SignInCodeNotReceivedHint: View {
     static let delay: Duration = .seconds(60)
+    /// The control plane reports a recent mail-provider failure; global, so
+    /// it says nothing about this address.
+    var deliveryDegraded = false
 
     var body: some View {
         VStack(spacing: 6) {
-            Text("No email yet?")
-                .font(.caption.weight(.semibold))
-            Text("Check spam and the address above, or send a new code.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+            // if/else, not a ternary: a ternary of literals is a String,
+            // which `Text` shows verbatim instead of localizing.
+            if deliveryDegraded {
+                Text("Email may be delayed")
+                    .font(.caption.weight(.semibold))
+                Text("Tono's email service is having trouble right now, so the code may be late or may not arrive. Try again in a few minutes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("No email yet?")
+                    .font(.caption.weight(.semibold))
+                Text("Check spam and the address above, or send a new code.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity)
     }

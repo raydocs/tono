@@ -37,6 +37,10 @@ final class TelemetryRateLimitTests: XCTestCase {
         XCTAssertNotEqual(plan.errorDescription, quota.errorDescription)
         XCTAssertNotEqual(device.errorDescription, plan.errorDescription)
         XCTAssertNotEqual(device, .unauthorized)
+        // An open registration with no plan yet is not a disabled account.
+        let noPlan = TonoAPIClient.APIError.entitlementBlocked(code: "ENTITLEMENT_REQUIRED", message: nil)
+        let disabled = TonoAPIClient.APIError.entitlementBlocked(code: "USER_DISABLED", message: nil)
+        XCTAssertNotEqual(noPlan.errorDescription, disabled.errorDescription)
     }
     func testRetryAfterPersistsAndDoesNotStarveTheIndependentP0Bucket() async throws {
         let name = "tono-rate-buckets-\(UUID().uuidString)"

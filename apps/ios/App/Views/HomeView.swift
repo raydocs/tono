@@ -797,7 +797,8 @@ enum PhaseText {
         if code == "ACCOUNT_EXPIRED" { return reason("PLAN_EXPIRED") }
         if code == "QUOTA_EXCEEDED" { return reason("QUOTA_EXHAUSTED") }
         if AccountErrors.restrictions.contains(code) || ["ACCOUNT_RELEASE_FAILED", "DEVICE_REAUTH_REQUIRED", "USER_DISABLED"].contains(code) { return reason(code) }
-        let known: Set<String> = ["INVALID_EMAIL", "INVALID_CODE", "INVALID_OR_EXPIRED_CODE", "NETWORK", "RATE_LIMITED", "DEVICE_LIMIT"]
+        let known: Set<String> = ["INVALID_EMAIL", "INVALID_CODE", "INVALID_OR_EXPIRED_CODE", "NETWORK", "RATE_LIMITED", "DEVICE_LIMIT",
+                                  "ENTITLEMENT_REQUIRED"]
         return known.contains(code) ? L.t("signin_error_\(code)") : L.t("signin_error_generic", code)
     }
 }

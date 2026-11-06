@@ -289,6 +289,20 @@ extension AccountSession {
         }
     }
 
+    /// Re-reads the global mail state (signup mode, today's budget, delivery
+    /// health) behind an open sign-in screen. Only a success publishes: a
+    /// failed background read keeps the methods and state the screen already
+    /// shows, so the code form a user is typing into never turns into an
+    /// outage screen.
+    func refreshMailState() async {
+        guard user == nil, authMethods != nil else { return }
+        let revision = accountReadRevision
+        guard let methods = try? await api.authMethods(),
+              !Task.isCancelled, user == nil, accountReadRevision == revision
+        else { return }
+        authMethods = methods
+    }
+
     /// Re-runs the complete token/account validation after a transient launch
     /// failure, or after the account state that blocked it has been settled.
     /// Retrying only the sign-in-method request would leave an existing refresh
