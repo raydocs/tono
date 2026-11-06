@@ -60,7 +60,7 @@ pub(super) async fn prepare_owned_core(
     ports: RuntimePorts,
     mihomo_path: &Path,
     image: Option<SingBoxImage>,
-    strict_interface: Option<&str>,
+    owned_graph: Option<(tono_core::three_tier::Variant, &str)>,
 ) -> Result<PreparedCore, StageFailure> {
     let installation_id = state.lock().await.installation_id.clone();
     let preferred = preferred_core(&preference_path(), &installation_id);
@@ -70,24 +70,65 @@ pub(super) async fn prepare_owned_core(
         _ => prove_sing_box_image(mihomo_path).await,
     };
     let service_probe = probe_service_sing_box().await;
-    let service_can_run = matches!(service_probe, ServiceSingBoxProbe::Supported);
+    let service_can_run = matches!(service_probe, ServiceSingBoxProbe::Supported { .. });
+    let service_supports_ai_home = matches!(
+        service_probe,
+        ServiceSingBoxProbe::Supported { ai_home: true }
+    );
     let home_proxy = routing.and_then(|routing| routing.home_proxy.as_deref());
     let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
-    if let Some(interface) = strict_interface {
-        if !matches!(resolve(tono_core::sing_box::PreferredCore::SingBox, proof, true, service_can_run), CoreSelection::Run(CoreChoice::SingBox)) {
-            return Err(StageFailure::error("three-tier requires authenticated sing-box and a supporting Service; fallback is forbidden"));
+    if let Some((variant, interface)) = owned_graph {
+        let mode_label = match variant {
+            tono_core::three_tier::Variant::ThreeTier => "three-tier",
+            tono_core::three_tier::Variant::AiHome => "AI Home",
+        };
+        if !matches!(
+            resolve(
+                tono_core::sing_box::PreferredCore::SingBox,
+                proof,
+                true,
+                service_can_run
+            ),
+            CoreSelection::Run(CoreChoice::SingBox)
+        ) {
+            return Err(StageFailure::error(format!(
+                "{mode_label} requires authenticated sing-box and a supporting Service; fallback is forbidden"
+            )));
+        }
+        if matches!(variant, tono_core::three_tier::Variant::AiHome) && !service_supports_ai_home {
+            return Err(StageFailure::error(ai_home_service_refusal_message(
+                &service_probe,
+            )));
         }
         let routing = routing.cloned().unwrap_or_default();
         let input = RuntimeInput {
-            nodes, selected, controller_secret: secret, direct_plan: None,
-            routing: &routing, platform: "windows-amd64-v2", ports,
-            required_capabilities: &[], home_process_names: &[],
-            home_process_path_regexes: &[], direct_process_names: &[],
+            nodes,
+            selected,
+            controller_secret: secret,
+            direct_plan: None,
+            routing: &routing,
+            platform: "windows-amd64-v2",
+            ports,
+            required_capabilities: &[],
+            home_process_names: &[],
+            home_process_path_regexes: &[],
+            direct_process_names: &[],
             fake_ip_slot: next_fake_ip_slot(state),
         };
-        let runtime = tono_core::sing_box::build_three_tier_runtime(input, interface)
-            .map_err(|error| StageFailure::error(error.to_string()))?;
-        return Ok(PreparedCore { document: runtime.runtime_json().to_owned(), core_path: binary, sing_box: true });
+        let runtime = match variant {
+            tono_core::three_tier::Variant::ThreeTier => {
+                tono_core::sing_box::build_three_tier_runtime(input, interface)
+            }
+            tono_core::three_tier::Variant::AiHome => {
+                tono_core::sing_box::build_ai_home_runtime(input, interface)
+            }
+        }
+        .map_err(|error| StageFailure::error(error.to_string()))?;
+        return Ok(PreparedCore {
+            document: runtime.runtime_json().to_owned(),
+            core_path: binary,
+            sing_box: true,
+        });
     }
     match resolve(preferred, proof, protection_armed, service_can_run) {
         CoreSelection::Run(CoreChoice::SingBox) => compile_sing_box(
@@ -271,7 +312,7 @@ fn sing_box_binary(mihomo: &Path) -> PathBuf {
 /// unparsed probe proves nothing and must not send the user to reinstall.
 #[derive(Debug)]
 enum ServiceSingBoxProbe {
-    Supported,
+    Supported { ai_home: bool },
     TooOld,
     Unconfirmed(String),
 }
@@ -279,7 +320,9 @@ enum ServiceSingBoxProbe {
 async fn probe_service_sing_box() -> ServiceSingBoxProbe {
     match tono_service_protocol::get_version().await {
         Ok(response) if response.code == 0 => match response.data.as_ref() {
-            Some(info) if info.supports_sing_box_core() => ServiceSingBoxProbe::Supported,
+            Some(info) if info.supports_sing_box_core() => ServiceSingBoxProbe::Supported {
+                ai_home: info.supports_ai_home(),
+            },
             Some(_) => ServiceSingBoxProbe::TooOld,
             None => ServiceSingBoxProbe::Unconfirmed("version probe returned no protocol".into()),
         },
@@ -297,8 +340,20 @@ fn service_refusal_message(probe: &ServiceSingBoxProbe) -> String {
         ServiceSingBoxProbe::Unconfirmed(detail) => format!(
             "could not confirm that the Tono Service can run sing-box ({detail}); try connecting again"
         ),
-        ServiceSingBoxProbe::Supported | ServiceSingBoxProbe::TooOld => {
+        ServiceSingBoxProbe::Supported { .. } | ServiceSingBoxProbe::TooOld => {
             "this Tono Service cannot run sing-box; install the current service before connecting"
+                .to_string()
+        }
+    }
+}
+
+fn ai_home_service_refusal_message(probe: &ServiceSingBoxProbe) -> String {
+    match probe {
+        ServiceSingBoxProbe::Unconfirmed(detail) => format!(
+            "could not confirm that the Tono Service supports AI Home ({detail}); try connecting again"
+        ),
+        ServiceSingBoxProbe::Supported { .. } | ServiceSingBoxProbe::TooOld => {
+            "this Tono Service cannot run AI Home; install the current service before connecting"
                 .to_string()
         }
     }
@@ -306,7 +361,10 @@ fn service_refusal_message(probe: &ServiceSingBoxProbe) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServiceSingBoxProbe, advance_fake_ip_slot, service_refusal_message};
+    use super::{
+        ServiceSingBoxProbe, advance_fake_ip_slot, ai_home_service_refusal_message,
+        service_refusal_message,
+    };
 
     #[test]
     fn a_failed_version_probe_is_retryable_not_an_old_service() {
@@ -317,6 +375,16 @@ mod tests {
         assert!(
             service_refusal_message(&ServiceSingBoxProbe::TooOld)
                 .contains("install the current service")
+        );
+        assert!(
+            ai_home_service_refusal_message(&ServiceSingBoxProbe::Unconfirmed(
+                "pipe busy".to_string()
+            ))
+            .contains("try connecting again")
+        );
+        assert!(
+            ai_home_service_refusal_message(&ServiceSingBoxProbe::Supported { ai_home: false })
+                .contains("cannot run AI Home")
         );
     }
 

@@ -33,6 +33,11 @@ pub(super) const EXIT_PROBE_URL: &str = crate::tono::protected_probe::PROBE_ORIG
 /// §6.8: the probe also proves fake-ip DNS via this lookup.
 pub(super) const FAKE_IP_LOOKUP_HOST: &str = "www.gstatic.com";
 
+/// Dedicated Claude anti-leak verification target: owned sing-box graphs (`AI Home` and
+/// `Three-tier`) must resolve `claude.ai` exclusively to Tono FakeIPv4 (`198.18.x.x`) and
+/// return empty `AAAA` (`NODATA`) through the real Windows DNS Client.
+pub(super) const CLAUDE_DNS_PROOF_HOST: &str = "claude.ai";
+
 /// §6.7 DNS verification retry count.
 pub(super) const VERIFY_ATTEMPTS: u32 = 3;
 
@@ -149,13 +154,14 @@ pub(super) async fn verify_post_lock(
     // join: a failed connect then does not pay the 8 s advisory budget serially
     // after the data-plane budget.
     set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
-    let outcomes = {
+    let (outcomes, session_mode) = {
         let inner = state.lock().await;
-        if inner.connect_generation == generation {
+        let outcomes = if inner.connect_generation == generation {
             inner.attempt_history.current.as_ref().map(|attempt| attempt.probe_outcomes.clone())
         } else {
             None
-        }
+        };
+        (outcomes, inner.session_mode)
     };
     set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
     let mut last = String::from("post-lock verification did not run");
@@ -176,7 +182,7 @@ pub(super) async fn verify_post_lock(
             let outcome = transaction
                 .wait("real TUN verification with proxy cross-check and advisory exit measurement",
                     verify_final_round(
-                        verify_locked_data_plane(tun_recorder.as_ref()),
+                        verify_locked_data_plane(session_mode, tun_recorder.as_ref()),
                         verify_mixed_proxy_data_plane(mixed_port, proxy_recorder.as_ref()),
                         async {
                             let began = std::time::Instant::now();
@@ -190,7 +196,7 @@ pub(super) async fn verify_post_lock(
         } else {
             (
                 transaction
-                    .wait("real TUN data-plane verification", verify_locked_data_plane(tun_recorder.as_ref()))
+                    .wait("real TUN data-plane verification", verify_locked_data_plane(session_mode, tun_recorder.as_ref()))
                     .await?,
                 None,
                 None,
@@ -239,27 +245,7 @@ pub(super) async fn verify_post_lock(
                 // The data plane already succeeded. Wait before the advisory
                 // sample so the first page does not share the tunnel with a
                 // second Reality handshake. The UI still gets a delay.
-                let delay_state = state.clone();
-                let delay_secret = secret.to_string();
-                let measured_node = state.lock().await.selected_node.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(ADVISORY_EXIT_PROBE_DEFER).await;
-                    if delay_state.lock().await.connect_generation != generation {
-                        return;
-                    }
-                    let Ok(delay) = probe_exit_once(&delay_secret, controller_port).await else {
-                        return;
-                    };
-                    if delay == 0 {
-                        return;
-                    }
-                    let mut inner = delay_state.lock().await;
-                    if inner.connect_generation == generation {
-                        if let Some(node) = measured_node.as_deref() {
-                            inner.record_exit_delay(node, delay);
-                        }
-                    }
-                });
+                spawn_deferred_exit_delay_probe(state, app, secret, controller_port, generation).await;
                 log_current_stage_duration(state, generation, started).await;
                 return Ok(status);
             }
@@ -290,6 +276,41 @@ pub(super) async fn verify_post_lock(
             .await?;
     }
     Err(StageFailure::error(last))
+}
+
+pub(super) async fn spawn_deferred_exit_delay_probe(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    secret: &str,
+    controller_port: u16,
+    generation: u64,
+) {
+    let delay_state = state.clone();
+    let delay_app = app.clone();
+    let delay_secret = secret.to_string();
+    let measured_node = state.lock().await.selected_node.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(ADVISORY_EXIT_PROBE_DEFER).await;
+        if delay_state.lock().await.connect_generation != generation {
+            return;
+        }
+        let Ok(delay) = probe_exit_once(&delay_secret, controller_port).await else {
+            return;
+        };
+        if delay == 0 {
+            return;
+        }
+        let mut inner = delay_state.lock().await;
+        if inner.connect_generation == generation {
+            if let Some(node) = measured_node.as_deref() {
+                inner.record_exit_delay(node, delay);
+                crate::tono::commands::emit_status(
+                    &delay_app,
+                    &crate::tono::commands::status_of(&inner),
+                );
+            }
+        }
+    });
 }
 
 /// Result of the final verification round.
@@ -625,15 +646,33 @@ pub fn verify_lock_retry_window() -> Duration {
 /// ~1.5 s-decaying cache refreshed by a 1 s loop — so a slow-but-successful verify reads
 /// `live: false`. Retrying only re-*reads*: nothing but a `wanted && live && Locked` answer
 /// passes, so the fail-closed verdict is unchanged, it is merely no longer decided by one sample.
-pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
+pub(super) async fn verify_locked_for_mode(
+    session_mode: crate::tono::state::DesktopSessionMode,
+) -> Result<KillSwitchStatus, String> {
+    let expected_ai_home = session_mode.is_ai_home();
     let mut last = String::from("no answer");
     for attempt in 0..VERIFY_LOCK_ATTEMPTS {
         match service::tono_kill_switch_status().await {
             Ok(status) => {
-                if status.wanted && status.live && status.mode == KillSwitchStatusMode::Locked {
+                if status.wanted
+                    && status.live
+                    && status.mode == KillSwitchStatusMode::Locked
+                    && status.ai_home_scoped == expected_ai_home
+                {
                     return Ok(status);
                 }
-                last = kill_switch_not_locked(&status);
+                last = if status.wanted
+                    && status.live
+                    && status.mode == KillSwitchStatusMode::Locked
+                    && status.ai_home_scoped != expected_ai_home
+                {
+                    format!(
+                        "kill switch scope mismatch (expected ai_home_scoped={expected_ai_home}, got {})",
+                        status.ai_home_scoped
+                    )
+                } else {
+                    kill_switch_not_locked(&status)
+                };
             }
             Err(err) => last = err.to_string(),
         }
@@ -669,14 +708,20 @@ pub(super) fn lock_unverified_error(last: &str) -> String {
 /// The authoritative connection verdict: an ordinary fresh App flow must traverse the protected
 /// Windows data plane. With WFP locked, a physical-interface fallback is blocked and only the
 /// recorded WinTUN LUID is permitted, so a valid Google HTTPS 200 is evidence of tunnel traffic.
-pub(super) async fn verify_locked_data_plane(recorder: Option<&ProbeRecorder>) -> Result<KillSwitchStatus, String> {
+pub(super) async fn verify_locked_data_plane(
+    session_mode: crate::tono::state::DesktopSessionMode,
+    recorder: Option<&ProbeRecorder>,
+) -> Result<KillSwitchStatus, String> {
     let began = std::time::Instant::now();
-    let status = verify_locked().await.map_err(|error| {
+    let status = verify_locked_for_mode(session_mode).await.map_err(|error| {
         if let Some(recorder) = recorder {
             recorder.record("WFP", false, "protection", None, began.elapsed().as_millis() as u64);
         }
         error
     })?;
+    if session_mode.uses_owned_graph() {
+        verify_owned_graph_windows_dns().await?;
+    }
     verify_tun_data_plane_observed(recorder).await?;
     Ok(status)
 }
@@ -685,44 +730,125 @@ pub(super) async fn verify_tun_data_plane() -> Result<(), String> {
     verify_tun_data_plane_observed(None).await
 }
 
-/// Strict admission needs the Windows DNS Client's own result as well as the
-/// listener/TUN TLS proof. A successful explicit listener must not mask NRPT,
-/// GPO or OS DoH bypassing the protected resolver.
-pub(super) async fn verify_three_tier_data_plane() -> Result<(), String> {
+/// Pure verdict for owned sing-box graphs (`AI Home` and `Three-tier`):
+/// 1. `FAKE_IP_LOOKUP_HOST` (`www.gstatic.com`) resolves exclusively to Tono FakeIPv4.
+/// 2. `CLAUDE_DNS_PROOF_HOST` (`claude.ai`) resolves exclusively to Tono FakeIPv4 when
+///    consulting the Windows DNS Client (including `hosts`, NRPT, and adapter DNS).
+/// 3. `CLAUDE_DNS_PROOF_HOST` (`claude.ai`) returns zero `AAAA` records (`NODATA`), proving
+///    no dual-stack IPv6 DNS server, OS DoH, NRPT override, or `hosts` entry can steer
+///    Claude around the IPv4-only `Tono-TUN` adapter onto the physical ISP IPv6 path.
+pub(super) fn validate_owned_graph_claude_dns(
+    probe_a: &[std::net::Ipv4Addr],
+    claude_a: &[std::net::Ipv4Addr],
+    claude_aaaa: &[std::net::Ipv6Addr],
+) -> Result<(), String> {
+    if probe_a.is_empty() || !probe_a.iter().all(|ip| is_fake_ip(IpAddr::V4(*ip))) {
+        return Err(format!(
+            "owned sing-box graph requires a protected fake-IP A answer from the Windows DNS Client for {FAKE_IP_LOOKUP_HOST}, got {probe_a:?}"
+        ));
+    }
+    if claude_a.is_empty() || !claude_a.iter().all(|ip| is_fake_ip(IpAddr::V4(*ip))) {
+        return Err(format!(
+            "Claude anti-leak check failed: {CLAUDE_DNS_PROOF_HOST} resolved to non-protected IPv4 {claude_a:?} via Windows DNS Client (check C:\\Windows\\System32\\drivers\\etc\\hosts, Encrypted DNS/DoH, or foreign NRPT rules)"
+        ));
+    }
+    if !claude_aaaa.is_empty() {
+        return Err(format!(
+            "Claude IPv6 anti-leak check failed: {CLAUDE_DNS_PROOF_HOST} returned IPv6 AAAA {claude_aaaa:?} via Windows DNS Client instead of protected NODATA"
+        ));
+    }
+    Ok(())
+}
+
+/// Bounded Windows DNS Client proof for owned sing-box graphs (`AI Home` and `Three-tier`).
+/// Retries up to [`VERIFY_ATTEMPTS`] times so adapter/NRPT propagation right after
+/// `dns::enable` never causes a single-sample false negative, while strictly refusing any
+/// non-FakeIPv4 or IPv6 `AAAA` leak.
+pub(super) async fn verify_owned_graph_windows_dns() -> Result<(), String> {
     #[cfg(windows)]
     {
-        let addresses = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, FAKE_IP_LOOKUP_TIMEOUT).await?;
-        if !addresses.into_iter().any(|ip| is_fake_ip(IpAddr::V4(ip))) {
-            return Err("three-tier requires a protected fake-IP answer from the Windows DNS Client".into());
+        let mut last = String::from("no answer");
+        for attempt in 0..VERIFY_ATTEMPTS {
+            let timeout = fake_ip_attempt_timeout(attempt);
+            let (probe_a, claude_a, claude_aaaa) = tokio::join!(
+                crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, timeout),
+                crate::tono::windows_dns::query_a_effective(CLAUDE_DNS_PROOF_HOST, timeout),
+                crate::tono::windows_dns::query_aaaa_effective(CLAUDE_DNS_PROOF_HOST, timeout),
+            );
+            match (probe_a, claude_a, claude_aaaa) {
+                (Ok(probe_a), Ok(claude_a), Ok(claude_aaaa)) => {
+                    match validate_owned_graph_claude_dns(&probe_a, &claude_a, &claude_aaaa) {
+                        Ok(()) => return Ok(()),
+                        Err(err) => last = err,
+                    }
+                }
+                (probe_a, claude_a, claude_aaaa) => {
+                    let mut parts = Vec::new();
+                    if let Err(err) = probe_a {
+                        parts.push(format!("{FAKE_IP_LOOKUP_HOST} A: {err}"));
+                    }
+                    if let Err(err) = claude_a {
+                        parts.push(format!("{CLAUDE_DNS_PROOF_HOST} A: {err}"));
+                    }
+                    if let Err(err) = claude_aaaa {
+                        parts.push(format!("{CLAUDE_DNS_PROOF_HOST} AAAA: {err}"));
+                    }
+                    last = parts.join("; ");
+                }
+            }
+            if attempt + 1 < VERIFY_ATTEMPTS {
+                tokio::time::sleep(VERIFY_RETRY_INTERVAL).await;
+            }
         }
+        return Err(fake_ip_verification_error(&last));
     }
+    #[cfg(not(windows))]
+    {
+        let _ = CLAUDE_DNS_PROOF_HOST;
+        let _ = validate_owned_graph_claude_dns;
+        Ok(())
+    }
+}
+
+/// Strict/owned-graph admission needs the Windows DNS Client's own result as well as the
+/// listener/TUN TLS proof. A successful explicit listener must not mask NRPT,
+/// GPO, `hosts`, IPv6 RDNSS, or OS DoH bypassing the protected resolver.
+pub(super) async fn verify_three_tier_data_plane() -> Result<(), String> {
+    verify_owned_graph_windows_dns().await?;
     verify_tun_data_plane().await
 }
 
 pub(super) async fn verify_session_data_plane(state: &TonoState) -> Result<(), String> {
-    let three_tier = state.lock().await.three_tier_routing;
-    if three_tier { verify_three_tier_data_plane().await } else { verify_tun_data_plane().await }
+    let session_mode = state.lock().await.session_mode;
+    if session_mode.uses_owned_graph() {
+        verify_three_tier_data_plane().await
+    } else {
+        verify_tun_data_plane().await
+    }
 }
 
 /// Health only, never admission or a node-switch verdict. `Some` preserves the
 /// cloud failure: a domestic proof says nothing about Home or cloud reachability.
 pub(super) async fn verify_session_health(state: &TonoState) -> Result<Option<String>, String> {
-    let (generation, controller_generation, strict) = {
+    let (generation, controller_generation, session_mode) = {
         let inner = state.lock().await;
-        (inner.connect_generation, inner.controller_generation, inner.three_tier_routing)
+        (inner.connect_generation, inner.controller_generation, inner.session_mode)
     };
-    if !strict {
+    let Some(variant) = session_mode.graph_variant() else {
         return verify_tun_data_plane().await.map(|()| None);
-    }
+    };
     let result = match verify_three_tier_data_plane().await {
         Ok(()) => Ok(None),
-        Err(cloud) => verify_strict_domestic_data_plane().await
+        Err(cloud) => verify_owned_graph_domestic_data_plane(session_mode, variant)
+            .await
             .map(|()| Some(cloud.clone()))
             .map_err(|domestic| format!("cloud: {cloud}; domestic: {domestic}")),
     };
     let inner = state.lock().await;
-    if inner.connect_generation != generation || inner.controller_generation != controller_generation
-        || !inner.fsm.status().is_connected || inner.three_tier_routing != strict
+    if inner.connect_generation != generation
+        || inner.controller_generation != controller_generation
+        || !inner.fsm.status().is_connected
+        || inner.session_mode != session_mode
     {
         return Err("session changed during health proof".into());
     }
@@ -733,26 +859,63 @@ pub(super) async fn verify_session_health(state: &TonoState) -> Result<Option<St
 /// only on protected DNS and pin that fake IP with the original TLS name; no
 /// proxy, physical DNS, redirects, certificate bypass or new privileged grant.
 /// A single unavailable domestic origin conservatively retains normal recovery.
-async fn verify_strict_domestic_data_plane() -> Result<(), String> {
+async fn verify_owned_graph_domestic_data_plane(
+    session_mode: crate::tono::state::DesktopSessionMode,
+    variant: tono_core::three_tier::Variant,
+) -> Result<(), String> {
     const HOST: &str = "www.jd.com";
     // Ask the same compiled graph used by the runtime/Service, rather than
     // maintaining another domain classification or expanding the snapshot.
-    let graph = tono_core::three_tier::graph(
-        "Tono-Home-Residential", "Ethernet", "198.18.128.0/20",
-    )?;
-    let domestic = graph["route"]["rules"].as_array().is_some_and(|rules| rules.iter().any(|rule| {
-        rule["outbound"] == tono_core::three_tier::DIRECT
-            && rule["domain"].as_array().is_some_and(|hosts| hosts.iter().any(|host| host == HOST))
-    }));
+    let domestic = match variant {
+        tono_core::three_tier::Variant::ThreeTier => {
+            let graph = tono_core::three_tier::graph(
+                "Tono-Home-Residential",
+                "Ethernet",
+                "198.18.128.0/20",
+            )?;
+            graph["route"]["rules"].as_array().is_some_and(|rules| {
+                rules.iter().any(|rule| {
+                    rule["outbound"] == tono_core::three_tier::DIRECT
+                        && rule["domain"]
+                            .as_array()
+                            .is_some_and(|hosts| hosts.iter().any(|host| host == HOST))
+                })
+            })
+        }
+        tono_core::three_tier::Variant::AiHome => {
+            let graph = tono_core::three_tier::ai_home_graph(
+                "Tono-Home-Residential",
+                "Ethernet",
+                "198.18.128.0/20",
+            )?;
+            graph["route"]["final"] == tono_core::three_tier::AI_HOME_DIRECT
+                && graph["route"]["rules"].as_array().is_some_and(|rules| {
+                    !rules.iter().any(|rule| {
+                        rule["outbound"] != tono_core::three_tier::AI_HOME_DIRECT
+                            && (rule["domain"]
+                                .as_array()
+                                .is_some_and(|hosts| hosts.iter().any(|host| host == HOST))
+                                || rule["domain_suffix"].as_array().is_some_and(|suffixes| {
+                                    suffixes.iter().any(|suffix| {
+                                        suffix.as_str().is_some_and(|suffix| {
+                                            HOST == suffix || HOST.ends_with(&format!(".{suffix}"))
+                                        })
+                                    })
+                                }))
+                    })
+                })
+        }
+    };
     if !domestic {
-        return Err("domestic health origin is not in the compiled exact-host graph".into());
+        return Err("domestic health origin is not routed direct by the compiled graph".into());
     }
     tokio::time::timeout(TUN_DATA_PLANE_TIMEOUT, async {
-        verify_locked().await?;
+        verify_locked_for_mode(session_mode).await?;
+        verify_owned_graph_windows_dns().await?;
         #[cfg(windows)]
         {
             let addresses = crate::tono::windows_dns::query_a(HOST, FAKE_IP_LOOKUP_TIMEOUT).await?;
-            if !addresses.into_iter().any(|ip| is_fake_ip(IpAddr::V4(ip))) {
+            if addresses.is_empty() || !addresses.into_iter().all(|ip| is_fake_ip(IpAddr::V4(ip))) {
                 return Err("domestic health requires protected Windows DNS".into());
             }
         }
@@ -771,7 +934,7 @@ async fn verify_strict_domestic_data_plane() -> Result<(), String> {
         if response.status() != reqwest::StatusCode::OK {
             return Err(format!("domestic TLS origin answered {}", response.status()));
         }
-        verify_locked().await?;
+        verify_locked_for_mode(session_mode).await?;
         Ok(())
     }).await.map_err(|_| "domestic health proof timed out".to_owned())?
 }
@@ -994,5 +1157,41 @@ mod tests {
         .await;
         assert_eq!(outcome.data_plane, Err("tun failed".to_string()));
         assert_eq!(outcome.advisory, Some("advisory"));
+    }
+
+    #[test]
+    fn owned_graph_claude_dns_requires_fake_ipv4_only_and_empty_aaaa() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        let fake_probe = [Ipv4Addr::new(198, 18, 128, 4)];
+        let fake_claude = [Ipv4Addr::new(198, 18, 128, 5)];
+        let real_cloudflare_v4 = [Ipv4Addr::new(104, 18, 32, 47)];
+        let mixed_claude_v4 = [
+            Ipv4Addr::new(198, 18, 128, 5),
+            Ipv4Addr::new(104, 18, 32, 47),
+        ];
+        let real_cloudflare_v6 = ["2606:4700::6812:202f".parse::<Ipv6Addr>().unwrap()];
+
+        assert_eq!(
+            super::validate_owned_graph_claude_dns(&fake_probe, &fake_claude, &[]),
+            Ok(())
+        );
+        assert!(
+            super::validate_owned_graph_claude_dns(&[], &fake_claude, &[]).is_err(),
+            "empty probe A must fail closed"
+        );
+        assert!(
+            super::validate_owned_graph_claude_dns(&fake_probe, &[], &[]).is_err(),
+            "empty claude.ai A must fail closed"
+        );
+        let v4_leak = super::validate_owned_graph_claude_dns(&fake_probe, &real_cloudflare_v4, &[])
+            .expect_err("real Cloudflare IPv4 on claude.ai must fail closed");
+        assert!(v4_leak.contains("Claude anti-leak check failed"), "{v4_leak}");
+        assert!(
+            super::validate_owned_graph_claude_dns(&fake_probe, &mixed_claude_v4, &[]).is_err(),
+            "mixed fake+real IPv4 on claude.ai must fail closed"
+        );
+        let v6_leak = super::validate_owned_graph_claude_dns(&fake_probe, &fake_claude, &real_cloudflare_v6)
+            .expect_err("any AAAA answer for claude.ai must fail closed");
+        assert!(v6_leak.contains("Claude IPv6 anti-leak check failed"), "{v6_leak}");
     }
 }

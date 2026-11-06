@@ -630,6 +630,7 @@ mod tests {
             direct_endpoint_digest: String::new(),
             last_error: None,
             reconnect_after_release: false,
+            ai_home_scoped: false,
         };
         assert!(
             !kill_switch_unhealthy_for_monitor(Some(&retracted), true),

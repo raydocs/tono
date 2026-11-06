@@ -125,8 +125,10 @@ async fn emergency_disarm_with(
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: None,
+        ai_home_scoped: false,
     });
     tombstone.wanted = false;
+    tombstone.ai_home_scoped = false;
     tombstone.reconnect_after_release = false;
     tombstone.reconnect_owner_key = None;
     if follow_up.is_some() {

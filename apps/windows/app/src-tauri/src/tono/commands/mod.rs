@@ -143,6 +143,14 @@ pub struct TonoStatus {
     /// heard it (`ACCOUNT_EXPIRED`, `QUOTA_EXCEEDED`, `ENTITLEMENT_REQUIRED`, `INVALID_REFRESH_TOKEN`...).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_refusal: Option<String>,
+    /// True when testing every catalog endpoint over TCP is safe without widening WFP: either
+    /// disconnected and unarmed, or connected in `AI Home` (where off-tunnel WFP only holds AI
+    /// prefixes and non-AI endpoints egress on the physical interface).
+    pub can_test_all_servers: bool,
+    /// Active session's captured routing contract (`"ai-home"` | `"stable"` | `"three-tier"`)
+    /// while connected, connecting, or armed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_routing_mode: Option<String>,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -250,9 +258,15 @@ pub struct TonoCatalogStatus {
     /// Set when a dead loopback system proxy should be shown to the user.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale_system_proxy: Option<String>,
+    /// Latest TCP reachability results for this catalog revision (from explicit tests or
+    /// background unarmed probes).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probe_results: Vec<TonoServerTestResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_at_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TonoServerTestResult {
     pub name: String,
@@ -262,6 +276,21 @@ pub struct TonoServerTestResult {
 
 const SERVER_TEST_CONCURRENCY: usize = 4;
 const SERVER_TEST_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Whether testing every catalog endpoint over TCP is safe without widening WFP.
+pub(crate) fn can_test_all_servers(inner: &TonoInner) -> bool {
+    if inner.account_close.is_some() || !matches!(inner.account_state, AccountState::Ready) {
+        return false;
+    }
+    let status = inner.fsm.status();
+    let disconnected_unarmed = !status.is_connected
+        && !status.is_connecting
+        && !status.is_disconnecting
+        && !inner.fsm.kill_switch_armed();
+    let connected_ai_home =
+        status.is_connected && !status.is_disconnecting && inner.session_mode.is_ai_home();
+    disconnected_unarmed || connected_ai_home
+}
 
 /// Stable wire key for a connect stage (`TonoStatus.stage`).
 pub fn stage_key(stage: ConnectStage) -> &'static str {
@@ -292,6 +321,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
     let status = inner.fsm.status();
     let stage = status.stage;
     let revision = inner.catalog_tracker.current_revision();
+    let session_active = status.is_connected || status.is_connecting || inner.fsm.kill_switch_armed();
     TonoStatus {
         account_state: inner.account_state.key().to_string(),
         ui_state: ui_state_key(status.ui_state()).to_string(),
@@ -341,6 +371,8 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         } else {
             None
         },
+        can_test_all_servers: can_test_all_servers(inner),
+        session_routing_mode: session_active.then(|| inner.session_mode.wire_key().to_string()),
     }
 }
 
@@ -970,5 +1002,56 @@ mod tests {
 
         assert_eq!(result.latency_ms, None);
         assert_eq!(result.error.as_deref(), Some("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn can_test_all_servers_allows_unarmed_and_connected_ai_home_only() {
+        use crate::tono::state::{AccountState, DesktopSessionMode, TonoState};
+
+        let state = TonoState::for_test();
+        let mut inner = state.lock().await;
+        assert!(!super::can_test_all_servers(&inner), "signed-out cannot test");
+
+        inner.account_state = AccountState::Ready;
+        assert!(super::can_test_all_servers(&inner), "ready unarmed can test");
+
+        // Record probe evidence and confirm catalog_status_of surfaces it until cleared.
+        inner.selected_node = Some("Tokyo 01".to_string());
+        inner.record_server_probe_result(super::TonoServerTestResult {
+            name: "Tokyo 01".to_string(),
+            latency_ms: Some(42),
+            error: None,
+        });
+        let cat = super::catalog::catalog_status_of(&inner);
+        assert_eq!(cat.probe_results.len(), 1);
+        assert_eq!(cat.probe_results[0].latency_ms, Some(42));
+        assert!(cat.probe_at_ms.is_some());
+        assert_eq!(inner.selected_tcp_delay_ms(), Some(42));
+
+        // Connecting is never allowed (even if session_mode is AiHome).
+        inner.session_mode = DesktopSessionMode::AiHome;
+        inner.fsm.begin_connect();
+        assert!(!super::can_test_all_servers(&inner));
+
+        // Connected in AI Home is allowed (off-tunnel WFP only holds AI prefixes).
+        inner.fsm.mark_kill_switch_armed();
+        inner.fsm.mark_session_verified();
+        inner.fsm.connect_succeeded().unwrap();
+        assert!(super::can_test_all_servers(&inner));
+        assert_eq!(
+            super::status_of(&inner).session_routing_mode.as_deref(),
+            Some("ai-home")
+        );
+
+        // Connected in Stable or Three-tier is refused (whole-host WFP permits only selected exit).
+        inner.session_mode = DesktopSessionMode::Stable;
+        assert!(!super::can_test_all_servers(&inner));
+        inner.session_mode = DesktopSessionMode::ThreeTier;
+        assert!(!super::can_test_all_servers(&inner));
+
+        // Catalog discard clears probe results.
+        inner.clear_server_probe_results();
+        assert!(super::catalog::catalog_status_of(&inner).probe_results.is_empty());
+        assert!(super::catalog::catalog_status_of(&inner).probe_at_ms.is_none());
     }
 }

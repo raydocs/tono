@@ -89,8 +89,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// never on the DNS ports and never for the core (decision 048); v14: `…9e0d…` the Tono API
 /// relays in the app-scoped bootstrap API channel (decision 090); v15: `…9e0e…` a third
 /// API relay, 154.84.56.196:2053, in that channel (decision 089); v16: `…9e0f…`
-/// shared LAN set including CGNAT; strict LAN survives Core death (2026-11-04).)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e0f_0000_4a6c_0000_0000_0000_0000;
+/// shared LAN set including CGNAT; strict LAN survives Core death (2026-11-04); v17:
+/// `…9e10…` AI Home AI-prefix-only rule set (`ai_home_scoped`, decision 130).)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e10_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -196,6 +197,10 @@ pub struct FilterSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleConfig {
     pub mode: KillSwitchStatusMode,
+    /// AI Home mode (decision 130): render only loopback permits, locked tunnel permits, and
+    /// outbound AI-prefix blocks — never the whole-host `intent_floor()` / `session/block-all`
+    /// default-deny filters.
+    pub ai_home_scoped: bool,
     /// Selected node endpoints the staged core may reach directly (usually exactly one).
     pub endpoints: Vec<ProxyEndpoint>,
     /// Resolved, validated, public-only API host IPs for the bootstrap channel.
@@ -1072,8 +1077,181 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     filters
 }
 
-/// The complete expected filter set: the persistent intent floor plus the session set.
+fn parse_cidr_v4(cidr: &str) -> Option<([u8; 4], u8)> {
+    let (ip, prefix) = cidr.split_once('/')?;
+    let addr = ip.parse::<std::net::Ipv4Addr>().ok()?.octets();
+    let prefix = prefix.parse::<u8>().ok().filter(|p| *p <= 32)?;
+    Some((addr, prefix))
+}
+
+fn parse_cidr_v6(cidr: &str) -> Option<([u8; 16], u8)> {
+    let (ip, prefix) = cidr.split_once('/')?;
+    let addr = ip.parse::<std::net::Ipv6Addr>().ok()?.octets();
+    let prefix = prefix.parse::<u8>().ok().filter(|p| *p <= 128)?;
+    Some((addr, prefix))
+}
+
+/// AI Home WFP scope (decision 130): no whole-host `WEIGHT_BLOCK_ALL` filter is installed, so
+/// ordinary TCP, UDP, STUN/NAT traversal, LAN, and native IPv6 traffic pass unimpeded and Core
+/// failure or app exit never takes the host offline. Listed AI destination prefixes are blocked
+/// persistently at `WEIGHT_BLOCK_ALL` on `ALE_AUTH_CONNECT` and permitted only on the verified
+/// WinTUN adapter (`WEIGHT_HARD_PERMIT` in `Locked` mode); Core itself reaches AI via `Tono-Exit`
+/// (a cloud node IP), never by dialing an AI prefix on a physical interface.
+fn ai_home_filters(config: &RuleConfig) -> Vec<FilterSpec> {
+    use Condition as C;
+    use FilterAction as A;
+    use LayerKind as L;
+
+    let mut filters = vec![
+        hard_permit(spec(
+            "ai-home/permit-loopback-address-v4".into(),
+            "ai-home permit loopback address v4",
+            L::AleAuthConnectV4,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::RemoteAddressV4 {
+                addr: [127, 0, 0, 0],
+                prefix: 8,
+            }],
+            true,
+        )),
+        hard_permit(spec(
+            "ai-home/permit-loopback-ale-v4".into(),
+            "ai-home permit loopback ALE v4",
+            L::AleAuthConnectV4,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::AleLoopback],
+            true,
+        )),
+        hard_permit(spec(
+            "ai-home/permit-loopback-address-v6".into(),
+            "ai-home permit loopback address v6",
+            L::AleAuthConnectV6,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::RemoteAddressV6 {
+                addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                prefix: 128,
+            }],
+            true,
+        )),
+        hard_permit(spec(
+            "ai-home/permit-loopback-ale-v6".into(),
+            "ai-home permit loopback ALE v6",
+            L::AleAuthConnectV6,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::AleLoopback],
+            true,
+        )),
+        hard_permit(spec(
+            "ai-home/permit-loopback-inbound-address-v4".into(),
+            "ai-home permit loopback inbound address v4",
+            L::AleAuthRecvAcceptV4,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::RemoteAddressV4 {
+                addr: [127, 0, 0, 0],
+                prefix: 8,
+            }],
+            true,
+        )),
+        hard_permit(spec(
+            "ai-home/permit-loopback-inbound-ale-v4".into(),
+            "ai-home permit loopback inbound ALE v4",
+            L::AleAuthRecvAcceptV4,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::AleLoopback],
+            true,
+        )),
+        hard_permit(spec(
+            "ai-home/permit-loopback-inbound-address-v6".into(),
+            "ai-home permit loopback inbound address v6",
+            L::AleAuthRecvAcceptV6,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::RemoteAddressV6 {
+                addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                prefix: 128,
+            }],
+            true,
+        )),
+        hard_permit(spec(
+            "ai-home/permit-loopback-inbound-ale-v6".into(),
+            "ai-home permit loopback inbound ALE v6",
+            L::AleAuthRecvAcceptV6,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::AleLoopback],
+            true,
+        )),
+    ];
+
+    if config.mode == KillSwitchStatusMode::Locked
+        && let Some(luid) = config.tun_luid
+    {
+        for (tag, layer) in [
+            ("out-v4", L::AleAuthConnectV4),
+            ("out-v6", L::AleAuthConnectV6),
+            ("in-v4", L::AleAuthRecvAcceptV4),
+            ("in-v6", L::AleAuthRecvAcceptV6),
+        ] {
+            filters.push(spec(
+                format!("ai-home/permit-tunnel/{luid}/{tag}"),
+                "ai-home permit tunnel interface",
+                layer,
+                WEIGHT_HARD_PERMIT,
+                A::Permit,
+                vec![C::LocalInterface(luid)],
+                false,
+            ));
+        }
+    }
+
+    for cidr in crate::three_tier::ai_home_held_ipv4_cidrs()
+        .expect("compiled AI Home IPv4 CIDRs must resolve")
+    {
+        let (addr, prefix) = parse_cidr_v4(&cidr).expect("compiled AI Home IPv4 CIDR must parse");
+        filters.push(spec(
+            format!("ai-home/block-ai-v4/{cidr}"),
+            "ai-home block AI prefix v4",
+            L::AleAuthConnectV4,
+            WEIGHT_BLOCK_ALL,
+            A::Block,
+            vec![C::RemoteAddressV4 { addr, prefix }],
+            true,
+        ));
+    }
+
+    let (v6_addr, v6_prefix) = parse_cidr_v6(crate::core::selective_fail_open::ANTHROPIC_IPV6)
+        .expect("compiled AI Home IPv6 CIDR must parse");
+    filters.push(spec(
+        format!(
+            "ai-home/block-ai-v6/{}",
+            crate::core::selective_fail_open::ANTHROPIC_IPV6
+        ),
+        "ai-home block AI prefix v6",
+        L::AleAuthConnectV6,
+        WEIGHT_BLOCK_ALL,
+        A::Block,
+        vec![C::RemoteAddressV6 {
+            addr: v6_addr,
+            prefix: v6_prefix,
+        }],
+        true,
+    ));
+
+    filters
+}
+
+/// The complete expected filter set: the persistent intent floor plus the session set, or the
+/// AI-prefix-only filter set when `config.ai_home_scoped` is true.
 pub fn expected_filters(config: &RuleConfig) -> Vec<FilterSpec> {
+    if config.ai_home_scoped {
+        return ai_home_filters(config);
+    }
     let mut filters = intent_floor();
     filters.extend(session_rules(config));
     filters
@@ -1237,6 +1415,7 @@ mod tests {
     fn config(mode: KillSwitchStatusMode) -> RuleConfig {
         RuleConfig {
             mode,
+            ai_home_scoped: false,
             endpoints: vec![endpoint("8.8.8.8", 443)],
             api_host_ips: vec!["1.1.1.1".parse().unwrap()],
             tun_luid: Some(0x1234_5678),
@@ -1416,7 +1595,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0f_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e10_0000_4a6c);
     }
 
     #[test]
@@ -3041,5 +3220,94 @@ mod tests {
         // Access denied and invalid parameter have no known transient cause.
         assert_eq!(tunnel_row_not_ready(3333, 5, 0), None);
         assert_eq!(tunnel_row_not_ready(3333, 87, 0), None);
+    }
+
+    fn arbitrate_sublayer(filters: &[FilterSpec], packet: &Packet) -> Option<FilterAction> {
+        let mut matched = filters
+            .iter()
+            .filter(|filter| filter_matches(filter, packet))
+            .collect::<Vec<_>>();
+        matched.sort_by_key(|filter| filter.weight);
+        matched.last().map(|filter| filter.action)
+    }
+
+    #[test]
+    fn ai_home_scoped_blocks_only_ai_prefixes_off_tunnel_and_leaves_ordinary_traffic_open() {
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Locked,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let mut cfg = config(mode);
+            cfg.ai_home_scoped = true;
+            let filters = expected_filters(&cfg);
+
+            assert!(
+                !filters
+                    .iter()
+                    .any(|f| f.action == FilterAction::Block && f.conditions.is_empty()),
+                "AI Home must never install a whole-host block-all in {mode:?}"
+            );
+
+            // Ordinary remote-desktop / UDP P2P / STUN / LAN / IPv6 traffic is unfiltered (`None`),
+            // so Windows Firewall governs normally and Core failure never takes the host offline.
+            for ordinary in [
+                packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "203.0.113.50", 3478),
+                packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "198.51.100.88", 54321),
+                packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "223.5.5.5", 443),
+                packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "192.168.1.25", 47998),
+                packet(LayerKind::AleAuthConnectV6, IpProtocol::Udp, "2001:4860:4860::8888", 443),
+                packet(LayerKind::AleAuthRecvAcceptV4, IpProtocol::Udp, "192.168.1.25", 47998),
+            ] {
+                assert_eq!(
+                    arbitrate_sublayer(&filters, &ordinary),
+                    None,
+                    "ordinary packet {ordinary:?} must stay unfiltered in {mode:?}"
+                );
+            }
+
+            // Loopback remains hard-permitted in every phase.
+            assert_eq!(
+                arbitrate_sublayer(
+                    &filters,
+                    &packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "127.0.0.1", 53),
+                ),
+                Some(FilterAction::Permit),
+            );
+
+            // AI prefixes fail closed on physical interfaces in every phase, and pass on WinTUN
+            // only once `Locked` has proven `tun_luid`.
+            let ai_v4 = packet(
+                LayerKind::AleAuthConnectV4,
+                IpProtocol::Tcp,
+                "160.79.104.10",
+                443,
+            );
+            let ai_v6 = packet(
+                LayerKind::AleAuthConnectV6,
+                IpProtocol::Tcp,
+                "2607:6bc0::10",
+                443,
+            );
+            assert_eq!(
+                arbitrate_sublayer(&filters, &ai_v4),
+                Some(FilterAction::Block),
+                "AI v4 prefix off-tunnel must fail closed in {mode:?}"
+            );
+            assert_eq!(
+                arbitrate_sublayer(&filters, &ai_v6),
+                Some(FilterAction::Block),
+                "AI v6 prefix off-tunnel must fail closed in {mode:?}"
+            );
+
+            let mut ai_on_tun = ai_v4;
+            ai_on_tun.local_interface = Some(0x1234_5678);
+            let expected_tun = if mode == KillSwitchStatusMode::Locked {
+                Some(FilterAction::Permit)
+            } else {
+                Some(FilterAction::Block)
+            };
+            assert_eq!(arbitrate_sublayer(&filters, &ai_on_tun), expected_tun);
+        }
     }
 }

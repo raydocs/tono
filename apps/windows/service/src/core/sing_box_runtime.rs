@@ -43,6 +43,14 @@ const FORBIDDEN_KEYS: &[&str] = &[
 const TUN_INTERFACE_NAME: &str = "Tono";
 const TUN_ADDRESS: &str = "198.18.0.1/30";
 
+#[derive(Clone, Copy)]
+enum RuntimeAdmission<'a> {
+    Stable(DirectBinding<'a>),
+    StrictThreeTier,
+    AiHome,
+    AnyOwned,
+}
+
 /// A new document a request brings (`StartClash`, `StageRuntime`): the shape check, and no rule
 /// may route to `Tono-China-Direct`. The App launches sing-box without a DIRECT plan and adds the
 /// overlay only through `ReplaceSingBoxRuntime`, which carries the signed policy (#1280), so
@@ -56,16 +64,15 @@ pub(crate) fn admit_new_runtime(text: &str) -> Result<(), String> {
 /// here; a document a request proposes goes through [`admit_new_runtime`] or
 /// [`admit_owned_runtime_bound`].
 pub fn admit_owned_runtime(text: &str) -> Result<(), String> {
-    admit_runtime_impl(text, DirectBinding::ShapeOnly, true)
+    admit_runtime_impl(text, RuntimeAdmission::AnyOwned)
 }
 
 pub(crate) fn admit_strict_runtime(text: &str) -> Result<(), String> {
-    admit_runtime_impl(text, DirectBinding::NoPolicy, true)?;
-    let value: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
-    if !crate::three_tier::admit_runtime(&value)? {
-        return Err("strict session requires the three-tier graph".into());
-    }
-    Ok(())
+    admit_runtime_impl(text, RuntimeAdmission::StrictThreeTier)
+}
+
+pub(crate) fn admit_ai_home_start_runtime(text: &str) -> Result<(), String> {
+    admit_runtime_impl(text, RuntimeAdmission::AiHome)
 }
 
 /// The same shape check, and every DIRECT rule must also be what `binding` allows (#1280).
@@ -73,10 +80,10 @@ pub(crate) fn admit_owned_runtime_bound(
     text: &str,
     binding: DirectBinding<'_>,
 ) -> Result<(), String> {
-    admit_runtime_impl(text, binding, false)
+    admit_runtime_impl(text, RuntimeAdmission::Stable(binding))
 }
 
-fn admit_runtime_impl(text: &str, binding: DirectBinding<'_>, allow_strict: bool) -> Result<(), String> {
+fn admit_runtime_impl(text: &str, admission: RuntimeAdmission<'_>) -> Result<(), String> {
     let FoldedJson(value) = serde_json::from_str(text)
         .map_err(|_| "runtime is not JSON with unambiguous keys".to_string())?;
     let root = value
@@ -84,13 +91,49 @@ fn admit_runtime_impl(text: &str, binding: DirectBinding<'_>, allow_strict: bool
         .ok_or_else(|| "runtime is not a JSON object".to_string())?;
     only_keys(root, TOP_LEVEL_KEYS, "top level")?;
     no_forbidden_keys(&value)?;
-    let three_tier = crate::three_tier::is_three_tier_runtime(&value);
-    if three_tier {
-        crate::three_tier::admit_runtime(&value)?;
-        if !allow_strict {
+    let mode = crate::three_tier::routing_mode(&value)
+        .ok_or_else(|| "runtime mixes three-tier and ai-home graph tags".to_string())?;
+    let (owned_graph, direct_binding) = match (admission, mode) {
+        (RuntimeAdmission::Stable(binding), "stable") => (false, binding),
+        (RuntimeAdmission::Stable(_), "three-tier") => {
             return Err("three-tier requires the strict StartClash session contract".into());
         }
-    }
+        (RuntimeAdmission::Stable(_), "ai-home") => {
+            return Err("ai-home requires the AI Home StartClash session contract".into());
+        }
+        (RuntimeAdmission::StrictThreeTier, "three-tier") => {
+            if !crate::three_tier::admit_runtime(&value)? {
+                return Err("strict session requires the three-tier graph".into());
+            }
+            (true, DirectBinding::NoPolicy)
+        }
+        (RuntimeAdmission::StrictThreeTier, _) => {
+            return Err("strict session requires the three-tier graph".into());
+        }
+        (RuntimeAdmission::AiHome, "ai-home") => {
+            if !crate::three_tier::admit_ai_home_runtime(&value)? {
+                return Err("AI Home session requires the ai-home graph".into());
+            }
+            (true, DirectBinding::NoPolicy)
+        }
+        (RuntimeAdmission::AiHome, _) => {
+            return Err("AI Home session requires the ai-home graph".into());
+        }
+        (RuntimeAdmission::AnyOwned, "three-tier") => {
+            if !crate::three_tier::admit_runtime(&value)? {
+                return Err("strict session requires the three-tier graph".into());
+            }
+            (true, DirectBinding::ShapeOnly)
+        }
+        (RuntimeAdmission::AnyOwned, "ai-home") => {
+            if !crate::three_tier::admit_ai_home_runtime(&value)? {
+                return Err("AI Home session requires the ai-home graph".into());
+            }
+            (true, DirectBinding::ShapeOnly)
+        }
+        (RuntimeAdmission::AnyOwned, "stable") => (false, DirectBinding::ShapeOnly),
+        (_, other) => return Err(format!("unknown runtime routing mode `{other}`")),
+    };
 
     let inbounds = root
         .get("inbounds")
@@ -128,46 +171,51 @@ fn admit_runtime_impl(text: &str, binding: DirectBinding<'_>, allow_strict: bool
     }
     admit_exit_selector(outbounds)?;
 
-    if !three_tier {
-    let route = root
-        .get("route")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "runtime has no route".to_string())?;
-    if route.get("final").and_then(Value::as_str) != Some("Tono-Exit") {
-        return Err("route.final must be Tono-Exit".to_string());
-    }
-    let rules = match route.get("rules") {
-        None => &[][..],
-        Some(rules) => rules
-            .as_array()
-            .ok_or_else(|| "route.rules is not a list".to_string())?
-            .as_slice(),
-    };
-    crate::core::direct_admission::admit_sing_box_direct_rules(outbounds, rules, binding)?;
+    if !owned_graph {
+        let route = root
+            .get("route")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "runtime has no route".to_string())?;
+        if route.get("final").and_then(Value::as_str) != Some("Tono-Exit") {
+            return Err("route.final must be Tono-Exit".to_string());
+        }
+        let rules = match route.get("rules") {
+            None => &[][..],
+            Some(rules) => rules
+                .as_array()
+                .ok_or_else(|| "route.rules is not a list".to_string())?
+                .as_slice(),
+        };
+        crate::core::direct_admission::admit_sing_box_direct_rules(
+            outbounds,
+            rules,
+            direct_binding,
+        )?;
 
-    let dns = root
-        .get("dns")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "runtime has no dns".to_string())?;
-    if dns.get("strategy").and_then(Value::as_str) != Some("ipv4_only") {
-        return Err("dns.strategy must be ipv4_only".to_string());
-    }
-    let servers = dns
-        .get("servers")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "runtime has no dns servers".to_string())?;
-    for server in servers {
-        let kind = server.get("type").and_then(Value::as_str).unwrap_or("");
-        if !DNS_SERVER_TYPES.contains(&kind) {
-            return Err("plaintext or unknown DNS server is not allowed".to_string());
+        let dns = root
+            .get("dns")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "runtime has no dns".to_string())?;
+        if dns.get("strategy").and_then(Value::as_str) != Some("ipv4_only") {
+            return Err("dns.strategy must be ipv4_only".to_string());
         }
-        if kind != "https" && server.get("path").is_some() {
-            return Err("only an https DNS server may carry a path".to_string());
+        let servers = dns
+            .get("servers")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "runtime has no dns servers".to_string())?;
+        for server in servers {
+            let kind = server.get("type").and_then(Value::as_str).unwrap_or("");
+            if !DNS_SERVER_TYPES.contains(&kind) {
+                return Err("plaintext or unknown DNS server is not allowed".to_string());
+            }
+            if kind != "https" && server.get("path").is_some() {
+                return Err("only an https DNS server may carry a path".to_string());
+            }
+            if kind == "https" && server.get("detour").and_then(Value::as_str) != Some("Tono-Exit")
+            {
+                return Err("an https DNS server must detour through Tono-Exit".to_string());
+            }
         }
-        if kind == "https" && server.get("detour").and_then(Value::as_str) != Some("Tono-Exit") {
-            return Err("an https DNS server must detour through Tono-Exit".to_string());
-        }
-    }
     }
 
     let experimental = root
@@ -512,6 +560,40 @@ mod tests {
         assert!(super::admit_strict_runtime(&weakened.to_string()).is_err());
         let folded = runtime.to_string().replace("\"dns\":", "\"DNS\":");
         assert!(admit_new_runtime(&folded).is_err());
+    }
+
+    #[test]
+    fn an_ai_home_graph_requires_ai_home_admission_and_rejects_mode_confusion() {
+        let graph = crate::three_tier::ai_home_graph(
+            "Tono-Home-Residential",
+            "Ethernet 7",
+            "198.18.176.0/20",
+        )
+        .unwrap();
+        let mut runtime = compiled();
+        runtime["route"] = graph["route"].clone();
+        runtime["dns"] = graph["dns"].clone();
+        runtime["outbounds"].as_array_mut().unwrap().extend([
+            json!({"type":"socks","tag":"Tono-Home-Residential","server":"isp.decodo.com","server_port":10001,
+                "version":"5","username":"fixture-user","password":"fixture-password","network":"tcp","detour":"Tono-Exit"}),
+            graph["direct_outbound"].clone(),
+        ]);
+        assert_eq!(crate::three_tier::admit_ai_home_runtime(&runtime), Ok(true));
+        assert!(admit_new_runtime(&runtime.to_string()).is_err());
+        assert!(super::admit_strict_runtime(&runtime.to_string()).is_err());
+        assert_eq!(
+            super::admit_ai_home_start_runtime(&runtime.to_string()),
+            Ok(())
+        );
+        assert!(super::admit_ai_home_start_runtime(&compiled().to_string()).is_err());
+        assert_eq!(admit_owned_runtime(&runtime.to_string()), Ok(()));
+
+        let mut mixed = runtime.clone();
+        mixed["outbounds"].as_array_mut().unwrap().push(
+            json!({"type":"direct","tag":"Tono-ThreeTier-Direct","bind_interface":"Ethernet 7"}),
+        );
+        assert!(super::admit_ai_home_start_runtime(&mixed.to_string()).is_err());
+        assert!(admit_owned_runtime(&mixed.to_string()).is_err());
     }
 
     #[test]

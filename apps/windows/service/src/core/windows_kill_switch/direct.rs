@@ -11,6 +11,7 @@ pub(super) fn canonical_direct_endpoints(
         proxy_endpoints: armed.intent.endpoints.clone(),
         bootstrap_api_hosts: Vec::new(),
         direct_endpoints: endpoints.to_vec(),
+        ai_home_scoped: false,
     };
     validate_direct_endpoints(&validation)?;
     crate::canonical_direct_endpoints(endpoints).map_err(anyhow::Error::msg)
@@ -138,7 +139,7 @@ pub(super) fn direct_state_may_be_live(armed: &Armed) -> bool {
 /// The connected sing-box session is a locked tunnel with no physical DIRECT set.
 pub(crate) fn sing_box_full_tunnel_is_locked() -> Result<()> {
     ensure_supported()?;
-    refuse_strict_mutation()?;
+    refuse_owned_graph_mutation()?;
     let armed = armed_guard().clone().context("kill switch is not armed")?;
     if armed.intent.mode != KillSwitchStatusMode::Locked {
         bail!("sing-box replacement requires a locked tunnel");
@@ -166,7 +167,7 @@ pub(crate) async fn commit_sing_box_direct_while_locked(
     ensure_supported()?;
     let failed = {
         let _operation = WFP_OPERATION.lock().await;
-        refuse_strict_mutation()?;
+        refuse_owned_graph_mutation()?;
         match commit_sing_box_direct_unlocked(endpoints, reviewed_ports, owner_generation).await {
             Ok(result) => return Ok(result),
             Err(error) => error,
@@ -293,7 +294,7 @@ pub(crate) async fn begin_direct_runtime_reload(
 ) -> Result<crate::DirectRuntimeReloadResult> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
-    refuse_strict_mutation()?;
+    refuse_owned_graph_mutation()?;
     let previous = armed_guard().clone().context("kill switch is not armed")?;
     if !matches!(
         previous.intent.mode,
@@ -328,7 +329,7 @@ pub(crate) async fn replace_direct_endpoints(
 ) -> Result<crate::DirectRuntimeReloadResult> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
-    refuse_strict_mutation()?;
+    refuse_owned_graph_mutation()?;
     let previous = armed_guard().clone().context("kill switch is not armed")?;
     let current_core = current_core_instance_authoritative().await;
     let lease = match direct_reload_matches(&previous, owner_generation, reload_id) {

@@ -12,7 +12,7 @@
 /// (`zoom.us` and similar stay tunnelled). The China-site suffixes below are
 /// product-direct: any process, TCP 80/443, same staged-core port permit as
 /// Bilibili.
-pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 52] = [
+pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 54] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -65,6 +65,8 @@ pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 52] = [
     "10086.cn",
     "cmecloud.cn",
     "miit.gov.cn",
+    "todesk.com",
+    "todesk.cn",
 ];
 
 pub fn is_address_free_web_suffix(host: &str) -> bool {
@@ -72,7 +74,7 @@ pub fn is_address_free_web_suffix(host: &str) -> bool {
 }
 /// Always attached to a native-app DIRECT plan, even if the published policy
 /// omitted them. Unidentified helpers and browsers hit these trees.
-pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 48] = [
+pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 50] = [
     "qq.com",
     "baidu.com",
     "aliyuncs.com",
@@ -121,6 +123,8 @@ pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 48] = [
     "10086.cn",
     "cmecloud.cn",
     "miit.gov.cn",
+    "todesk.com",
+    "todesk.cn",
 ];
 /// Dedicated Model Studio namespaces within Alibaba's general DIRECT tree.
 pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [

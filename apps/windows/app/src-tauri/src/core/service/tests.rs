@@ -290,6 +290,7 @@ fn mark_verified_reconciliation_is_bounded_and_requires_full_proof() {
         direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
         last_error: None,
         reconnect_after_release: false,
+        ai_home_scoped: false,
     };
     assert!(mark_verified_committed(&status));
 

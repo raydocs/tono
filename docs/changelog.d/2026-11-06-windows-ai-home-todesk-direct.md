@@ -1,0 +1,17 @@
+## 2026-11-06 · Windows AI Home 路由模式、Claude IPv6/DNS 防泄露、节点可达性透出与系统兼容一键修复
+
+- 归属：SHIP_PLAN G1（已连接=能用；Decision 130 / 131：无论选择哪台可用云服务器，名单内 Claude / AI 流量始终经由专属家宽 IP 出站且失败关闭、绝不退回直连或经 IPv6/DNS 泄露；AI Home 模式下普通业务、UDP P2P、STUN/NAT 穿透、局域网与原生 IPv6 直连不过滤；稳定模式与三层路由的整机失败关闭保护保持不变）。影响 Windows 核心/服务/桌面客户端、macOS 与控制面直连后缀、iOS 与 Android 桌面路由摘要同步。
+- 来源：基于 PR `#1822`（`origin/fix/desktop-three-tier-lan` `910f2aa7`）变基整合 → `feat/windows-ai-home-remote-desktop`。
+- 缺陷修复：
+  1. Windows `three_tier.rs` 原先只允许公网 IPv4 作为 Home SOCKS5 网关地址，遇到真实账号下发的供应商域名网关（如 `isp.decodo.com`）会在三层路由与 AI Home 下拒绝启动；桌面直连后缀名单缺少 ToDesk 官方域名（`todesk.com`、`todesk.cn`）。
+  2. Windows 自管 `sing-box` 图原先未对 `claude.ai` 的系统侧有效 `A` / `AAAA` 解析结果（含本机 `hosts`、NRPT 与网卡 DNS）做端到端防泄露门禁，若存在 `hosts` 覆盖、外部 DoH/NRPT 或双栈 IPv6 `AAAA` 响应可能绕开仅 IPv4 的 `Tono-TUN`。
+  3. 断连或网关/Reality 波动后，后台 `unarmed_probe` 与手动测速的节点可达性结果未持久化透出到节点页，且经典版节点页在 `catalog.error` 为空时会漏显残留死代理（如 `127.0.0.1:7890`）清理入口。
+- 新增/优化：
+  1. **PR `#1822` + P0 + P1 完整合入**：同步 `todesk.com`、`todesk.cn` 直连后缀（继续排除 `oray.net`、`orayer.com` 动态域名边界）及 iOS `DesktopRoutingContract.swift` / Android `DesktopRoutingContract.kt` 路由摘要；共享局域网五段 IPv4（含 CGNAT `100.64.0.0/10`）与 IPv6 ULA/链路本地直连契约及 `$lan_protected_suffixes` 毒化 DNS 防护；移植 `public_hostname` Home SOCKS5 准入；端到端落地 Windows `AI Home`（`"ai-home"`）模式与 `tono-service` 协议修订号 `23`、`ai_home_scoped` WFP 窄域保护（WFP `FILTER_NAMESPACE` 升至 `v17` `0x2f7c_9e10_0000_4a6c`）。
+  2. **Windows IPv6 / DNS / Claude 防泄露门禁**：`windows_dns.rs` 新增基于 `DnsQueryEx` 的有效解析查询 `query_a_effective` 与 `query_aaaa_effective`（覆盖本机 `hosts` 并识别 `DNS_INFO_NO_RECORDS = 9501` 空 `AAAA` `NODATA`）；`probes.rs` 在连接准入、健康检查与国内兜底复核中强制证明 `claude.ai` 仅返回 Tono FakeIPv4（`198.18.0.0/16`）且 `AAAA` 严格为空（`NODATA`），违例立即失败关闭并映射中英本地化错误 `tono.dashboard.errors.claudeDnsLeak`。
+  3. **节点页可用线路透出与固定家宽 IP 定心提示**：允许未设防断连态与 `AI Home` 已连接态安全执行「测试全部」（`can_test_all_servers`）；在 `TonoInner` 按当前目录修订号持久化 `tono_test_available_servers` 与断连后台 `unarmed_probe` 的 TCP 实测结果并经 `TonoCatalogStatus`（`probeResults` / `probeAtMs`）下发；节点页（Sea 与经典双主题）实时展示「实测可达 X / Y 条」汇总徽标、自动驱动推荐线路排序，并明确提示切换任意可用云服务器均保持专属家宽出口 IP 不变。
+  4. **设置页升级与系统/应用兼容一键修复**：`tono_catalog_status` 实时刷新 `stale_proxy::inspect` 并修复经典版节点页残留代理告警展示条件；设置页 `GeneralCard` 补齐三档路由范围说明与「局域网与内网直连 · 默认开启」状态行，新增 `SystemCompatibilityCard`（「网络与应用兼容」，支持双主题），集中展示并提供 **Claude 专属家宽固定 IP**、**Windows 系统代理残留一键清除**、**Claude Code / 终端代理环境变量冲突一键清理** 与 **IPv6 与 DNS 防泄露守卫** 状态。
+- 工程与测试：`.github/workflows/windows-ci.yml` 增加 `tooling/scripts/sing-box/ai-home-template.json` 触发路径并同步 `ci-gate-changes.test.mjs`；补齐 `windows_dns.rs`、`probes.rs`、`servers.test.tsx`（26 项）与 `settings.test.tsx`（4 项）回归测试。
+- 验证：跨平台路由与契约同步检查（`sync-routing-domains.mjs --check`、iOS/Android `sync-desktop-routing.py --check`、`desktop-lan.test.mjs` 等 37 项 Node 契约测试）全部通过；`cargo test --locked -p tono-core`（369 项单测 + 7 个集成测试二进制）与 `cargo clippy --locked -p tono-core --all-targets -- -D warnings` 通过；`TMPDIR` 隔离下 `apps/windows/service` `cargo test --locked --features standalone,client,test --lib` 614 项通过；`services/control-plane` `npm run typecheck`、ratchet（6 项）与 `vitest run test/worker-traffic-policy.test.ts`（18 项）通过；`apps/windows/app` `pnpm i18n:types`、`pnpm i18n:check`、`pnpm typecheck`（`unchecked-index` 69/79）、`pnpm test`（61 个测试文件 / 453 项单测）与 `pnpm test:dev-control`（126 项）全部通过。Linux 环境无 `libsoup-3.0` / `webkit2gtk-4.1` 头文件与 Windows 交叉工具链，`src-tauri` 原生测试由 GitHub Actions `windows-2025` 执行。
+- 候选/发布：仅源码与分支提交，无新候选包、签名产物或生产部署。
+- 剩余限制：`src-tauri` 与 Windows WFP / `DnsQueryEx` 真机行为需经 CI `windows-2025` 及 Windows 实机（ToDesk / UU 远程直连、双栈网络 `claude.ai` `AAAA` 阻断与系统兼容一键修复演练）进一步验证。

@@ -44,7 +44,12 @@ pub(crate) fn classify_route(chains: &[String]) -> RouteClass {
     if terminal == "REJECT" || terminal == "REJECT-DROP" {
         return RouteClass::Rejected;
     }
-    if terminal == "DIRECT" || terminal == DIRECT_GROUP_NAME || terminal == WEB_DIRECT_GROUP_NAME {
+    if terminal == "DIRECT"
+        || terminal == DIRECT_GROUP_NAME
+        || terminal == WEB_DIRECT_GROUP_NAME
+        || terminal == tono_core::three_tier::DIRECT
+        || terminal == tono_core::three_tier::AI_HOME_DIRECT
+    {
         return RouteClass::Direct;
     }
     if hops.iter().any(|hop| *hop == HOME_SOCKS5_OUTBOUND_NAME) {

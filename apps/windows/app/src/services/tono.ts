@@ -69,6 +69,8 @@ export interface TonoCatalogStatus {
   lastSyncedAtMs: number | null
   error: string | null
   staleSystemProxy?: string | null
+  probeResults?: TonoServerTestResult[]
+  probeAtMs?: number | null
 }
 
 export interface TonoServerTestResult {
@@ -134,6 +136,10 @@ export interface TonoStatus {
   signInRecovery?: TonoSignInRecovery
   /** While suspended: the server's refusal code, when this process heard it. */
   sessionRefusal?: string
+  /** Whether TCP batch probing of all catalog servers is safe without widening WFP. */
+  canTestAllServers?: boolean
+  /** Active/armed session routing mode (`ai-home` | `stable` | `three-tier`). */
+  sessionRoutingMode?: 'ai-home' | 'stable' | 'three-tier' | string | null
 }
 
 /**
@@ -363,6 +369,10 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
   {
     match: /kill switch release failed|protection stays on/i,
     key: 'tono.dashboard.errors.protectionReleaseFailed',
+  },
+  {
+    match: /Claude (?:IPv6 )?anti-leak check failed/i,
+    key: 'tono.dashboard.errors.claudeDnsLeak',
   },
   {
     match: /Encrypted DNS|EnableAutoDoh/i,
@@ -1077,10 +1087,8 @@ export interface TerminalEnvReport {
   canAutoClear: boolean
 }
 
-export const tonoCheckTerminalEnv = async (): Promise<TerminalEnvReport> => {
-  return await invoke<TerminalEnvReport>('tono_check_terminal_env')
-}
+export const tonoCheckTerminalEnv = (): Promise<TerminalEnvReport> =>
+  call<TerminalEnvReport>('tono_check_terminal_env')
 
-export const tonoClearTerminalProxyEnv = async (): Promise<void> => {
-  await invoke('tono_clear_terminal_proxy_env')
-}
+export const tonoClearTerminalProxyEnv = (): Promise<void> =>
+  call<void>('tono_clear_terminal_proxy_env')

@@ -672,7 +672,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   // A dry run canonicalises as trusted, so the PUT above never reaches the
   // allowlists. The unsigned path is what a published policy is read back through.
-  it('admits China Mobile Cloud and the MIIT filing site without a signature', () => {
+  it('admits China Mobile Cloud, MIIT filing, and ToDesk web suffixes without a signature', () => {
     const policy = canonicalTrafficPolicy({
       version: 3,
       domains: [],
@@ -681,18 +681,30 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         { host: 'ecloud.10086.cn', ports: [443] },
         { host: 'console.cmecloud.cn', ports: [443] },
         { host: 'beian.miit.gov.cn', ports: [443] },
+        { host: 'www.todesk.com', ports: [443] },
+        { host: 'api.todesk.cn', ports: [443] },
       ],
       directSuffixes: [
         { host: '10086.cn', ports: [80, 443] },
         { host: 'cmecloud.cn', ports: [80, 443] },
         { host: 'miit.gov.cn', ports: [80, 443] },
+        { host: 'todesk.com', ports: [80, 443] },
+        { host: 'todesk.cn', ports: [80, 443] },
       ],
     }, false);
-    expect(policy.directSuffixes?.map((entry) => entry.host)).toEqual(['10086.cn', 'cmecloud.cn', 'miit.gov.cn']);
-    expect(policy.webDomains?.map((entry) => entry.host)).toEqual(['beian.miit.gov.cn', 'console.cmecloud.cn', 'ecloud.10086.cn']);
+    expect(policy.directSuffixes?.map((entry) => entry.host)).toEqual([
+      '10086.cn', 'cmecloud.cn', 'miit.gov.cn', 'todesk.cn', 'todesk.com',
+    ]);
+    expect(policy.webDomains?.map((entry) => entry.host)).toEqual([
+      'api.todesk.cn', 'beian.miit.gov.cn', 'console.cmecloud.cn', 'ecloud.10086.cn', 'www.todesk.com',
+    ]);
     expect(() => canonicalTrafficPolicy({
       version: 3, domains: [], mediaEndpoints: [], webDomains: [],
       directSuffixes: [{ host: 'gov.cn', ports: [443] }],
+    }, false)).toThrow();
+    expect(() => canonicalTrafficPolicy({
+      version: 3, domains: [], mediaEndpoints: [], webDomains: [],
+      directSuffixes: [{ host: 'oray.net', ports: [443] }],
     }, false)).toThrow();
   });
 

@@ -3427,6 +3427,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
                 direct_endpoint_digest: String::new(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             };
             let mut fsm = ConnectionFsm::new();
             assert_eq!(control_plane_reach_of(&fsm, None), ControlPlaneReach::Unarmed);

@@ -216,6 +216,65 @@ impl TaskRegistry {
     }
 }
 
+/// Captured connect-time routing contract, never a live preference read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DesktopSessionMode {
+    #[default]
+    Stable,
+    ThreeTier,
+    AiHome,
+}
+
+impl DesktopSessionMode {
+    /// Resolve the explicit user Connect preference against the installed catalog's Home line.
+    /// Decision 131: `None` and `"ai-home"` default to `AiHome` when `home_socks5` is present on
+    /// the account and fall back to `Stable` when the account has no `home_socks5`.
+    pub fn resolve_explicit(preference: Option<&str>, has_home_socks5: bool) -> Self {
+        match preference {
+            Some("three-tier") => Self::ThreeTier,
+            Some("stable") => Self::Stable,
+            Some("ai-home") | None => {
+                if has_home_socks5 {
+                    Self::AiHome
+                } else {
+                    Self::Stable
+                }
+            }
+            Some(_) => Self::Stable,
+        }
+    }
+
+    pub const fn is_three_tier(self) -> bool {
+        matches!(self, Self::ThreeTier)
+    }
+
+    pub const fn is_ai_home(self) -> bool {
+        matches!(self, Self::AiHome)
+    }
+
+    /// True when the session runs a compiled sing-box graph (`ThreeTier` or `AiHome`) bound to a
+    /// proven physical interface with no Mihomo fallback and no in-place DIRECT overlay.
+    pub const fn uses_owned_graph(self) -> bool {
+        matches!(self, Self::ThreeTier | Self::AiHome)
+    }
+
+    pub const fn graph_variant(self) -> Option<tono_core::three_tier::Variant> {
+        match self {
+            Self::Stable => None,
+            Self::ThreeTier => Some(tono_core::three_tier::Variant::ThreeTier),
+            Self::AiHome => Some(tono_core::three_tier::Variant::AiHome),
+        }
+    }
+
+    pub const fn wire_key(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::ThreeTier => "three-tier",
+            Self::AiHome => "ai-home",
+        }
+    }
+}
+
 pub struct TonoInner {
     pub client: Arc<TonoApiClient>,
     /// Memory-first session credentials (never touches the vault on the
@@ -249,7 +308,7 @@ pub struct TonoInner {
     /// The core this connect armed. DIRECT in-place reload is mihomo-only.
     pub sing_box_core: bool,
     /// Captured connect-time routing contract, never a live preference read.
-    pub three_tier_routing: bool,
+    pub session_mode: DesktopSessionMode,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
     /// The cache itself is built on demand: `CatalogCache` boxes its safety
@@ -283,6 +342,11 @@ pub struct TonoInner {
     /// Read-only server reachability batch. It never changes selection or connection state.
     pub server_test_generation: u64,
     pub server_test_cancellation: Option<CancellationToken>,
+    /// Latest TCP reachability observations for the current catalog revision (from explicit
+    /// server tests or background unarmed probes). Cleared on catalog replacement or sign-out.
+    pub server_probe_results:
+        std::collections::BTreeMap<String, crate::tono::commands::TonoServerTestResult>,
+    pub server_probe_at_ms: Option<i64>,
     pub fsm: ConnectionFsm,
     /// Last observed kill switch aggregate.
     pub kill_switch: Option<KillSwitchStatus>,
@@ -592,6 +656,24 @@ impl TonoInner {
         }
     }
 
+    pub fn record_server_probe_result(
+        &mut self,
+        result: crate::tono::commands::TonoServerTestResult,
+    ) {
+        if let Some(latency_ms) = result.latency_ms
+            && self.selected_node.as_deref() == Some(result.name.as_str())
+        {
+            self.record_tcp_delay(&result.name, latency_ms);
+        }
+        self.server_probe_results.insert(result.name.clone(), result);
+        self.server_probe_at_ms = Some(now_ms());
+    }
+
+    pub fn clear_server_probe_results(&mut self) {
+        self.server_probe_results.clear();
+        self.server_probe_at_ms = None;
+    }
+
     /// Drop the latest attempt's live failure, steps and step clock. They belong to the account
     /// that made the attempt: account adoption and account close call this, while an ordinary
     /// same-account Disconnect keeps them for the UI and diagnostics.
@@ -838,7 +920,7 @@ impl TonoState {
                 session_marker: Default::default(),
                 installation_id,
                 sing_box_core: false,
-                three_tier_routing: false,
+                session_mode: DesktopSessionMode::Stable,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,
                 nodes: Vec::new(),
@@ -852,6 +934,8 @@ impl TonoState {
                 catalog_identity_since_ms: None,
                 server_test_generation: 0,
                 server_test_cancellation: None,
+                server_probe_results: std::collections::BTreeMap::new(),
+                server_probe_at_ms: None,
                 fsm: ConnectionFsm::new(),
                 kill_switch: None,
                 resolver_policy_warning: None,

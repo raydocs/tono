@@ -22,6 +22,7 @@ fn status_from(armed: Option<Armed>) -> KillSwitchStatus {
             direct_endpoint_digest: crate::direct_endpoint_digest(&[]).unwrap_or_default(),
             last_error: last_error_guard().clone(),
             reconnect_after_release: RECONNECT_AFTER_RELEASE.load(Ordering::Relaxed),
+            ai_home_scoped: false,
         };
     };
     let live = if ENGINE_LIVE {
@@ -48,6 +49,9 @@ fn status_from(armed: Option<Armed>) -> KillSwitchStatus {
         reconnect_after_release: !armed.intent.wanted
             && (armed.intent.reconnect_after_release
                 || RECONNECT_AFTER_RELEASE.load(Ordering::Relaxed)),
+        ai_home_scoped: armed.intent.wanted
+            && armed.intent.ai_home_scoped
+            && !armed.intent.strict_kill_switch,
     }
 }
 

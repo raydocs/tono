@@ -268,6 +268,8 @@ pub(crate) fn classify_protected_route(connection: &SampledConnection, residenti
     if terminal.eq_ignore_ascii_case("DIRECT")
         || terminal == config::DIRECT_GROUP_NAME
         || terminal == config::WEB_DIRECT_GROUP_NAME
+        || terminal == tono_core::three_tier::DIRECT
+        || terminal == tono_core::three_tier::AI_HOME_DIRECT
     {
         return ProtectedRoute::Direct;
     }
@@ -337,10 +339,12 @@ pub(crate) fn new_direct_samples(
         if seen.len() >= MAX_DIRECT_SAMPLES {
             break;
         }
-        let direct = connection
-            .chains
-            .iter()
-            .any(|hop| hop == config::DIRECT_GROUP_NAME || hop == config::WEB_DIRECT_GROUP_NAME);
+        let direct = connection.chains.iter().any(|hop| {
+            hop == config::DIRECT_GROUP_NAME
+                || hop == config::WEB_DIRECT_GROUP_NAME
+                || hop == tono_core::three_tier::DIRECT
+                || hop == tono_core::three_tier::AI_HOME_DIRECT
+        });
         if !direct {
             continue;
         }

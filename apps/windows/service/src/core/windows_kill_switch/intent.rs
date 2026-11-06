@@ -154,6 +154,7 @@ pub(super) fn disarmed_tombstone() -> IntentRecord {
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: Some(false),
+        ai_home_scoped: false,
     }
 }
 

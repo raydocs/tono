@@ -70,6 +70,7 @@ nonisolated extension ConfigPipeline {
         "xylink.com", "zhumu.me", "quanshi.com",
         "zhihu.com", "zhimg.com", "goofish.com", "1688.com",
         "10086.cn", "cmecloud.cn", "miit.gov.cn",
+        "todesk.com", "todesk.cn",
     ]
 
     /// Exact host families that may be placed in the application-direct

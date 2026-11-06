@@ -191,6 +191,7 @@ pub(crate) fn discard_account_catalog(inner: &mut TonoInner) {
     inner.nodes = Vec::new();
     inner.routing = None;
     inner.catalog_tracker = tono_core::CatalogTracker::new();
+    inner.clear_server_probe_results();
     connection::forget_hy2_choices(inner);
     // An offline verification described this catalog. The grant file stays: it binds the
     // discarded session's token hash and this catalog's digests, so no later session matches it.
@@ -375,6 +376,7 @@ where
                 inner.routing.as_ref(), &inner.nodes, routing.as_ref(), &effect.nodes,
             );
             inner.cancel_server_tests();
+            inner.clear_server_probe_results();
             inner.catalog_tracker = effect.tracker;
             inner.nodes = effect.nodes;
             inner.routing = routing;

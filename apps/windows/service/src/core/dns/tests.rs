@@ -2385,6 +2385,7 @@
             }],
             bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
             direct_endpoints: Vec::new(),
+            ai_home_scoped: false,
         }
     }
 

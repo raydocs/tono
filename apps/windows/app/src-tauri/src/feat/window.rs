@@ -892,6 +892,7 @@ mod tests {
                 direct_endpoint_digest: String::new(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             }
         }
         let live = status(true, true);
@@ -952,6 +953,7 @@ mod tests {
                 direct_endpoint_digest: String::new(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             }),
             network_events: Default::default(),
             update_attempt_pending: None,
@@ -1019,6 +1021,7 @@ mod tests {
                 direct_endpoint_digest: String::new(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             }),
             network_events: Default::default(),
             update_attempt_pending: None,

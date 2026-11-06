@@ -2308,6 +2308,7 @@ mod exhaustion_tests {
             }],
             bootstrap_api_hosts: vec!["1.1.1.1".into()],
             direct_endpoints: vec![],
+            ai_home_scoped: false,
         };
         crate::core::windows_kill_switch::arm_bootstrap(
             &kill_switch,

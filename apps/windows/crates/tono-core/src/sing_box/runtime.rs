@@ -528,6 +528,30 @@ pub fn build_three_tier_runtime(
     input: RuntimeInput<'_>,
     physical_interface: &str,
 ) -> Result<OwnedSingBoxRuntime, SingBoxError> {
+    build_owned_graph_runtime(
+        input,
+        physical_interface,
+        crate::three_tier::Variant::ThreeTier,
+    )
+}
+
+/// Compile the explicit bounded AI Home mode (`Tono-AIHome-*` graph).
+pub fn build_ai_home_runtime(
+    input: RuntimeInput<'_>,
+    physical_interface: &str,
+) -> Result<OwnedSingBoxRuntime, SingBoxError> {
+    build_owned_graph_runtime(
+        input,
+        physical_interface,
+        crate::three_tier::Variant::AiHome,
+    )
+}
+
+fn build_owned_graph_runtime(
+    input: RuntimeInput<'_>,
+    physical_interface: &str,
+    variant: crate::three_tier::Variant,
+) -> Result<OwnedSingBoxRuntime, SingBoxError> {
     if input.direct_plan.is_some() || input.routing.home_socks5.is_none() {
         return Err(SingBoxError::UnsupportedPolicy);
     }
@@ -536,19 +560,32 @@ pub fn build_three_tier_runtime(
         .map_err(|_| SingBoxError::UnsupportedPolicy)?;
     let fake = runtime["dns"]["servers"][0]["inet4_range"].as_str()
         .ok_or(SingBoxError::UnsupportedPolicy)?;
-    let graph = crate::three_tier::graph(config::HOME_SOCKS5_OUTBOUND_NAME, physical_interface, fake)
-        .map_err(|_| SingBoxError::UnsupportedPolicy)?;
+    let graph = crate::three_tier::graph_for_variant(
+        config::HOME_SOCKS5_OUTBOUND_NAME,
+        physical_interface,
+        fake,
+        variant,
+    )
+    .map_err(|_| SingBoxError::UnsupportedPolicy)?;
     runtime["route"] = graph["route"].clone();
     runtime["dns"] = graph["dns"].clone();
     let outbounds = runtime["outbounds"].as_array_mut().ok_or(SingBoxError::UnsupportedPolicy)?;
-    if outbounds.iter().any(|outbound| outbound["tag"] == crate::three_tier::DIRECT) {
+    if outbounds.iter().any(|outbound| {
+        outbound["tag"] == crate::three_tier::DIRECT
+            || outbound["tag"] == crate::three_tier::AI_HOME_DIRECT
+    }) {
         return Err(SingBoxError::UnsupportedPolicy);
     }
     if let Some(home) = outbounds.iter_mut().find(|outbound| outbound["type"] == "socks") {
         home["network"] = json!("tcp");
     }
     outbounds.push(graph["direct_outbound"].clone());
-    if !crate::three_tier::admit_runtime(&runtime).map_err(|_| SingBoxError::UnsupportedPolicy)? {
+    let admitted = match variant {
+        crate::three_tier::Variant::ThreeTier => crate::three_tier::admit_runtime(&runtime),
+        crate::three_tier::Variant::AiHome => crate::three_tier::admit_ai_home_runtime(&runtime),
+    }
+    .map_err(|_| SingBoxError::UnsupportedPolicy)?;
+    if !admitted {
         return Err(SingBoxError::UnsupportedPolicy);
     }
     compiled.runtime_json = runtime.to_string();
@@ -1310,5 +1347,32 @@ reality-opts:
 "#
         );
         node::admit_node(&serde_yaml_ng::from_str(&yaml).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn ai_home_and_three_tier_compile_hostname_home_gateways_and_reject_mixed_tags() {
+        let nodes = nodes();
+        let routing = CatalogRouting {
+            home_socks5: Some(crate::CatalogHomeSocks5 {
+                host: "isp.decodo.com".into(),
+                port: 10001,
+                username: "fixture-user".into(),
+                password: "fixture-password".into(),
+            }),
+            ..CatalogRouting::default()
+        };
+        let three_tier = build_three_tier_runtime(input(&nodes, &routing), "Ethernet 7").unwrap();
+        let ai_home = build_ai_home_runtime(input(&nodes, &routing), "Ethernet 7").unwrap();
+        let three_tier_doc: Value = serde_json::from_str(three_tier.runtime_json()).unwrap();
+        let mut ai_home_doc: Value = serde_json::from_str(ai_home.runtime_json()).unwrap();
+        assert_eq!(crate::three_tier::admit_runtime(&three_tier_doc), Ok(true));
+        assert_eq!(crate::three_tier::admit_ai_home_runtime(&three_tier_doc), Ok(false));
+        assert_eq!(crate::three_tier::admit_ai_home_runtime(&ai_home_doc), Ok(true));
+        assert_eq!(crate::three_tier::admit_runtime(&ai_home_doc), Ok(false));
+        assert_eq!(ai_home_doc["route"]["final"], "Tono-AIHome-Direct");
+
+        ai_home_doc["dns"]["servers"][2]["tag"] = json!(crate::three_tier::HOME_DNS);
+        assert!(crate::three_tier::admit_ai_home_runtime(&ai_home_doc).is_err());
+        assert!(crate::three_tier::admit_runtime(&ai_home_doc).is_err());
     }
 }
