@@ -61,7 +61,8 @@ object Captures {
     /**
      * The "FIXTURE · no tunnel" pill ([FixtureFrame]) is in the picture: enough pixels of its colour in
      * the status-bar band, as drawn or under an open sheet's scrim (45 % or 55 % of the sheets' night
-     * colour). A fixture capture without it could pass for the real app.
+     * colour; the sign-out dialog dims to the same 45 %). A fixture capture without it could pass for
+     * the real app.
      */
     fun fixtureMarked(file: java.io.File): Boolean {
         val b = android.graphics.BitmapFactory.decodeFile(file.path) ?: return false

@@ -10,7 +10,9 @@ import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.test.espresso.Espresso
 import com.raydocs.tono.mobile.engine.EngineSnapshot
@@ -72,9 +74,20 @@ class AccessibilityContractTest {
         found += check("details")
         Espresso.pressBack()
         compose.waitForIdle()
-        compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(com.raydocs.tono.mobile.R.string.settings_title)).performClick()
+        val app = RuntimeEnvironment.getApplication()
+        compose.onNodeWithContentDescription(app.getString(com.raydocs.tono.mobile.R.string.settings_title)).performClick()
         compose.waitForIdle()
         found += check("settings")
+        compose.onNodeWithText(app.getString(com.raydocs.tono.mobile.R.string.settings_routing_rules)).performClick()
+        compose.waitForIdle()
+        found += check("routing-rules")
+        Espresso.pressBack()
+        compose.waitForIdle()
+        compose.onNodeWithText(app.getString(com.raydocs.tono.mobile.R.string.settings_sign_out)).performScrollTo().performClick()
+        compose.waitForIdle()
+        found += check("sign-out-confirm")
+        Espresso.pressBack()
+        compose.waitForIdle()
         return found
     }
 

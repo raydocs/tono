@@ -68,10 +68,15 @@ class ScreenshotRender {
         UiFixtures.connected(System.currentTimeMillis()).copy(mode = RoutingMode.STABLE, homeKind = HomeKind.NONE, homeProbe = ExitProbe(), usingCachedCatalog = true),
     )
     @Test fun disconnecting() = home("10-home-disconnecting", base.copy(phase = Phase.DISCONNECTING))
-    @Test fun details() = sheet("11-details-degraded") { DetailsContent(UiFixtures.degraded(), {}, {}, {}) }
+    @Test fun details() = sheet("11-details-degraded") { DetailsContent(UiFixtures.degraded(), {}, {}, {}, { null }) }
     @Test fun lines() = sheet("12-lines-sheet") { LinesContent(base, zh = true, onSelect = {}, onTest = {}) }
     @Test fun consent() = sheet("15-consent-explainer") { ConsentContent({}, {}) }
-    @Test fun settings() = shot("13-settings") { SettingsScreen(base.copy(excludedPackages = listOf("com.example.bank")), {}, {}, {}, { null }, {}) }
+    @Test fun settings() = shot("13-settings") { SettingsScreen(base.copy(excludedPackages = listOf("com.example.bank")), {}, {}, {}, {}) }
+    @Test fun settingsRules() = shot("16-settings-routing-rules") { RoutingRulesScreen(base, {}) }
+    @Test fun settingsLargeText() {
+        RuntimeEnvironment.setFontScale(2f)
+        shot("17-settings-font-200") { SettingsScreen(base.copy(excludedPackages = listOf("com.example.bank")), {}, {}, {}, {}) }
+    }
     @Test fun largeText() {
         RuntimeEnvironment.setFontScale(1.3f)
         home("14-home-connected-font-130", UiFixtures.connected())

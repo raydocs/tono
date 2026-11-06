@@ -129,7 +129,8 @@ class HorizonUiDeviceTest {
         compose.onNodeWithContentDescription(str(R.string.settings_title)).performClick(); check("settings"); shot("fixture-11-settings")
         compose.onNodeWithText(str(R.string.system_verify_in_android)).performScrollTo()
         shot("fixture-11b-system-guidance")
-        compose.onNodeWithText(str(R.string.settings_apps_none)).performScrollTo().performClick()
+        compose.onNodeWithText(str(R.string.settings_routing_rules)).performClick(); check("routing-rules"); shot("fixture-11c-routing-rules"); back()
+        compose.onNodeWithText(str(R.string.settings_apps)).performScrollTo().performClick()
         // The list, not its loading spinner: wait for the installed apps to arrive.
         compose.waitUntil(30_000) { compose.onAllNodes(hasTestTag("app-row")).fetchSemanticsNodes().isNotEmpty() }
         check("apps"); shot("fixture-12-apps")
@@ -377,6 +378,8 @@ class HorizonUiDeviceTest {
         back()
         compose.onNodeWithContentDescription(zhContext.getString(R.string.settings_title)).performClick(); check("settings"); shot("fixture-24-zh-settings")
         assertTrue("Chinese copy is on screen", compose.onAllNodes(androidx.compose.ui.test.hasText(zhContext.getString(R.string.settings_title))).fetchSemanticsNodes().isNotEmpty())
+        compose.onNodeWithText(zhContext.getString(R.string.settings_routing_rules)).performClick(); check("routing-rules"); shot("fixture-24b-zh-routing-rules"); back()
+        compose.onNodeWithText(zhContext.getString(R.string.settings_sign_out)).performScrollTo().performClick(); check("sign-out-confirm"); shot("fixture-24c-zh-sign-out-confirm"); back()
         assertEquals(found.joinToString("\n"), 0, found.size)
     }
 
