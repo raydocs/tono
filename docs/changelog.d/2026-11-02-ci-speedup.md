@@ -65,3 +65,5 @@
   | services / e2e 分片 | 准备 74–83s；npm cache 命中后预期少 ~20–40s/片 | 4 片 × ~0.5 min |
   | main 上的 macos-ci | 不再被后一次 push 取消 | 避免整轮 macOS 10× 计费作废 |
   | 挂死作业 | 现在会在 timeout 杀掉 | 上限封顶 |
+
+- 续记（2026-11-06，ci-gate run 42183279487）：`changes` 判定六个成员都该跑，但 macos/windows/services/sing-box/connect-bench/ios 作业没有出现在 run 里，`needs.*.result` 全是 `failure`，聚合 22s 红。可复用工作流继承调用方的 `github.workflow`（都变成 `ci-gate`），子作业和父作业抢同一个 concurrency 组。组名改回每个文件自己的前缀（`macos-ci-` 等）+ PR 号；`cancel-in-progress` 仍只对 `pull_request`。测试禁止被调用工作流用 `github.workflow` 做组名。

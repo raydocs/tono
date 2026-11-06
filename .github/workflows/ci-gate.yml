@@ -16,10 +16,12 @@ permissions:
   contents: read
 
 concurrency:
-  # Cancel only consecutive pushes on the same PR. Other workflows on that PR
-  # keep their own group. Never cancel main, tags, release branches, or the
-  # merge queue (and this workflow has no push trigger on those refs).
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel only consecutive pushes on the same PR. Each workflow file uses its
+  # own prefix: a called reusable workflow inherits the caller's
+  # github.workflow, so ${{ github.workflow }} here would make macos/windows/
+  # services share this group and fail to start (ci-gate run 42183279487).
+  # Never cancel main, tags, release branches, or the merge queue.
+  group: ci-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

@@ -245,15 +245,26 @@ test('pull_request triggering moved into ci-gate', () => {
   assert.match(gate, /python3 apps\/android\/scripts\/routing\/sync-desktop-routing\.py --desktop "\$GITHUB_WORKSPACE" --check/)
   assert.match(workflow('services-ci.yml'), /python3 services\/exit-agent\/test_systemd_cadence\.py/)
   const pullRequestCancel = "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"
-  const concurrencyGroup = 'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}'
+  const groupSuffix = '${{ github.event.pull_request.number || github.ref }}'
   assert.ok(gate.includes(pullRequestCancel))
-  assert.ok(gate.includes(concurrencyGroup))
-  for (const name of ['macos-ci.yml', 'windows-ci.yml', 'services-ci.yml', 'ios-ci.yml', 'sing-box-alpha9-check.yml', 'connect-bench.yml']) {
+  assert.ok(gate.includes(`group: ci-gate-${groupSuffix}`))
+  const calledGroups = {
+    'macos-ci.yml': 'macos-ci',
+    'windows-ci.yml': 'windows-ci',
+    'services-ci.yml': 'services-ci',
+    'ios-ci.yml': 'ios-ci',
+    'sing-box-alpha9-check.yml': 'sing-box-alpha9',
+    'connect-bench.yml': 'connect-bench',
+  }
+  for (const [name, prefix] of Object.entries(calledGroups)) {
     const yaml = workflow(name)
     assert.doesNotMatch(yaml, /^ {2}pull_request:/m)
     assert.match(yaml, /^ {2}workflow_call:/m)
     assert.ok(yaml.includes(pullRequestCancel), name)
-    assert.ok(yaml.includes(concurrencyGroup), name)
+    assert.ok(yaml.includes(`group: ${prefix}-${groupSuffix}`), name)
+    // Called workflows inherit the caller's github.workflow (ci-gate). A shared
+    // group with the parent makes the children fail to start.
+    assert.equal(yaml.includes('github.workflow'), false, name)
   }
   const bench = workflow('connect-bench.yml')
   assert.doesNotMatch(bench, /^ {2}pull_request:/m)
@@ -269,9 +280,13 @@ test('pull_request triggering moved into ci-gate', () => {
   assert.match(workflow('connect-bench.yml'), /^ {2}workflow_dispatch:/m)
   assert.doesNotMatch(workflow('connect-bench.yml'), /^ {2}push:/m)
   assert.doesNotMatch(workflow('sing-box-alpha9-check.yml'), /^ {2}workflow_dispatch:/m)
-  for (const name of ['dependency-audit.yml', 'ops-console-baseline-reminder.yml', 'android-ci.yml']) {
+  for (const [name, prefix] of Object.entries({
+    'dependency-audit.yml': 'dependency-audit',
+    'ops-console-baseline-reminder.yml': 'ops-console-baseline-reminder',
+    'android-ci.yml': 'android-ci',
+  })) {
     const yaml = workflow(name)
-    assert.ok(yaml.includes(concurrencyGroup), name)
+    assert.ok(yaml.includes(`group: ${prefix}-${groupSuffix}`), name)
     assert.ok(yaml.includes(pullRequestCancel), name)
   }
 })
