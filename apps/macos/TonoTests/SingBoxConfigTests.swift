@@ -3,6 +3,120 @@ import CryptoKit
 @testable import Tono
 
 final class SingBoxConfigTests: XCTestCase {
+    private func strictAntiLeakDocuments() throws -> [[String: Any]] {
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeNodeName: "Fixture Alpha",
+            allowLocalNetworkDevices: true)
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [],
+            webDomainPins: [.init(host: "www.qq.com", addresses: ["101.32.104.4"], ports: [443])],
+            webDomainSuffixes: [.init(host: "example.cn", ports: [80, 443])],
+            mediaEndpoints: [], directResolverHosts: ["www.qq.com"], trusted: true, nativeAppDirect: true)
+        let stable = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+        return [
+            try XCTUnwrap(JSONSerialization.jsonObject(with: stable.runtimeJSON) as? [String: Any]),
+            try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential", physicalInterface: "en0",
+                                               fakeRange: "198.18.128.0/20", variant: .threeTier),
+        ]
+    }
+
+    private func isEarlyThreeTierLANRoute(_ rule: [String: Any]) -> Bool {
+        guard rule["action"] as? String == "route",
+              rule["type"] as? String == "logical",
+              rule["mode"] as? String == "and",
+              rule["outbound"] as? String == ThreeTierRoutingContract.direct,
+              let subrules = rule["rules"] as? [[String: Any]],
+              subrules.count == 2,
+              let cidrs = subrules[0]["ip_cidr"] as? [String],
+              cidrs == ThreeTierRoutingContract.lanIPv4CIDRs || cidrs == ThreeTierRoutingContract.lanIPv6CIDRs,
+              subrules[1]["invert"] as? Bool == true,
+              let excluded = subrules[1]["rules"] as? [[String: Any]],
+              let suffixes = excluded.compactMap({ $0["domain_suffix"] as? [String] }).first else {
+            return false
+        }
+        return Set(ConfigPipeline.publicStunSuffixes).isSubset(of: Set(suffixes))
+    }
+
+    private func assertAntiLeakReject(_ matches: ([String: Any]) -> Bool, precedesLAN: Bool = false,
+                                      file: StaticString = #filePath, line: UInt = #line) throws {
+        for document in try strictAntiLeakDocuments() {
+            let rules = try XCTUnwrap((document["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+            let reject = try XCTUnwrap(rules.firstIndex(where: matches), file: file, line: line)
+            let dns = try XCTUnwrap(rules.lastIndex { $0["action"] as? String == "hijack-dns" },
+                                    file: file, line: line)
+            let route = try XCTUnwrap(rules.firstIndex {
+                $0["action"] as? String == "route" && (precedesLAN || !isEarlyThreeTierLANRoute($0))
+            }, file: file, line: line)
+            XCTAssertEqual(rules[reject]["action"] as? String, "reject", file: file, line: line)
+            XCTAssertLessThan(dns, reject, file: file, line: line)
+            XCTAssertLessThan(reject, route, file: file, line: line)
+        }
+    }
+
+    func testEncryptedDNSRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject({ $0["port"] as? [Int] == ConfigPipeline.encryptedDNSPorts }, precedesLAN: true)
+    }
+
+    func testRawSTUNPortRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject {
+            $0["port"] as? [Int] == ConfigPipeline.stunUDPPorts && $0["network"] as? [String] == ["udp", "icmp"]
+        }
+    }
+
+    func testPublicSTUNRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject {
+            ($0["domain_suffix"] as? [String]) == ConfigPipeline.publicStunSuffixes
+                && $0["network"] as? [String] == ["udp", "icmp"]
+        }
+    }
+
+    func testOverseasIPv4UDPRejectPrecedesEveryDirectPermit() throws {
+        try assertAntiLeakReject {
+            ($0["ip_cidr"] as? [String]) == ConfigPipeline.overseasUDPRejectIPv4CIDRs
+                && $0["network"] as? [String] == ["udp", "icmp"]
+        }
+    }
+
+    func testOverseasIPv6UDPRejectPrecedesEveryDirectPermit() throws {
+        XCTAssertFalse(ConfigPipeline.overseasUDPRejectIPv6CIDRs.contains { cidr in
+            let lower = cidr.lowercased()
+            return lower.hasPrefix("fe80:") || lower.hasPrefix("fc") || lower.hasPrefix("fd")
+                || lower.hasPrefix("ff") || lower.hasPrefix("::1/")
+        }, "overseas IPv6 UDP reject must never swallow Continuity or LAN IPv6")
+        try assertAntiLeakReject {
+            ($0["ip_cidr"] as? [String]) == ConfigPipeline.overseasUDPRejectIPv6CIDRs
+                && $0["network"] as? [String] == ["udp", "icmp"] && $0["ip_version"] as? Int == 6
+        }
+    }
+
+    func testHTTPSAndSVCBAreSuppressedBeforeDNSResolvers() throws {
+        let documents = try strictAntiLeakDocuments() + [
+            try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential", physicalInterface: "en0",
+                                               fakeRange: "198.18.128.0/20", variant: .aiHome),
+        ]
+        for document in documents {
+            let rules = try XCTUnwrap((document["dns"] as? [String: Any])?["rules"] as? [[String: Any]])
+            let firstUpstream = try XCTUnwrap(rules.firstIndex {
+                $0["action"] as? String == "evaluate"
+                    || (($0["server"] as? String).map { $0 != "Tono-FakeIP" } == true)
+            })
+            let suppressed = rules.indices.filter { index in
+                rules[index]["query_type"] as? [String] == ["HTTPS", "SVCB"]
+                    && rules[index]["action"] as? String == "predefined"
+                    && rules[index]["rcode"] as? String == "NOERROR"
+            }
+            XCTAssertFalse(suppressed.isEmpty)
+            for index in suppressed {
+                XCTAssertEqual(Set(rules[index]["inbound"] as? [String] ?? []),
+                               ["Tono-DNS", "Tono-TUN", "Tono-Mixed"])
+                XCTAssertLessThan(index, firstUpstream)
+            }
+        }
+    }
+
     private typealias Snapshot = ConfigPipeline.SingBoxOfflineSnapshot
     private typealias Requirements = ConfigPipeline.SingBoxDerivedRequirements
     private let secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
