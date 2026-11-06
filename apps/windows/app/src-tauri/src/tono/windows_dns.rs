@@ -439,7 +439,7 @@ mod tests {
 
         // SAFETY: this is the query's sole callback, consuming its exact context once.
         unsafe {
-            Completion::publish_from_callback(context, QueryOutcome::Error(123), |_| {
+            Completion::<Ipv4Addr>::publish_from_callback(context, QueryOutcome::Error(123), |_| {
                 assert!(matches!(
                     caller.outcome.lock().unwrap().take(),
                     Some(QueryOutcome::Error(123))

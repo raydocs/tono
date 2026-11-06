@@ -417,7 +417,7 @@ pub(super) async fn tcp_proof_before_tunnel(
     if state.unarmed_proofs.lock().fresh(&endpoint, now_ms()) {
         return Ok(());
     }
-    if tcp_open(node).await {
+    if tcp_probe(node).await.is_ok() {
         state.unarmed_proofs.lock().remember(&endpoint, now_ms());
         return Ok(());
     }
