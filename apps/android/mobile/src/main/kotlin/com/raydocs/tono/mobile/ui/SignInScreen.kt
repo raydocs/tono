@@ -99,7 +99,17 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
                                 )
                                 PrimaryButton(stringResource(if (login.busy) R.string.signin_sending else R.string.signin_send), { onSend(email) }, enabled = !login.busy && email.isNotBlank())
                             } else {
-                                Text(stringResource(R.string.signin_code_sent, login.email), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
+                                // Open registration mails every address; invite-only, or open but paused for today,
+                                // mails only accounts and invitations, and the copy must not say which this one is.
+                                val sent = when (login.signup) {
+                                    "open" -> R.string.signin_code_requested
+                                    "paused" -> R.string.signin_code_sent_paused
+                                    else -> R.string.signin_code_sent
+                                }
+                                Text(stringResource(sent, login.email), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
+                                if (login.mailDegraded) {
+                                    Text(stringResource(R.string.signin_mail_degraded), style = MaterialTheme.typography.bodyMedium, color = TonoColors.SunEdge)
+                                }
                                 // The code field takes focus when it appears, so the keyboard is up without another tap.
                                 val codeFocus = remember { FocusRequester() }
                                 LaunchedEffect(Unit) { runCatching { codeFocus.requestFocus() } }
