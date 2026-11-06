@@ -84,6 +84,9 @@ import com.raydocs.tono.mobile.engine.HomeKind
 import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.engine.ProbeState
 import com.raydocs.tono.mobile.engine.TunnelAuthority
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -407,10 +410,24 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
     }
 }
 
+/**
+ * Calls [tick] at once and then every second while [lifecycle] is at least STARTED. A stopped
+ * activity (tunnel still up) gets no wakeups; the first tick on return brings the clock up to date.
+ */
+internal suspend fun tickEverySecondWhileStarted(lifecycle: Lifecycle, tick: () -> Unit) {
+    lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        while (true) {
+            tick()
+            delay(1000)
+        }
+    }
+}
+
 @Composable
 private fun ConnectedTimer(since: Long) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(since) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(since, lifecycle) { tickEverySecondWhileStarted(lifecycle) { now = System.currentTimeMillis() } }
     val sec = ((now - since) / 1000).coerceAtLeast(0)
     val text = if (sec >= 3600) String.format(Locale.ROOT, "%d:%02d:%02d", sec / 3600, sec / 60 % 60, sec % 60) else String.format(Locale.ROOT, "%02d:%02d", sec / 60, sec % 60)
     val a11y = stringResource(R.string.a11y_connected_for, text)

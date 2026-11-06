@@ -1,17 +1,24 @@
 package com.raydocs.tono.mobile.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.PowerManager
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -23,7 +30,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.sin
 import kotlin.random.Random
@@ -62,21 +75,22 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
     // connecting sun (review: the two looked alike with a half disc on both).
     val disc by animateFloatAsState(if (sky == SkyState.EMBER) 0f else 1f, spec, label = "disc")
     val warn by animateFloatAsState(if (sky == SkyState.DUSK_WARNING || sky == SkyState.EMBER) 1f else 0f, if (reduce) tween(0) else TonoMotion.ambient, label = "warn")
-    // Reduced motion runs no infinite animation at all (also saves battery); values stay at rest.
-    val still = remember { mutableFloatStateOf(0f) }
-    val (driftState, breathState) = if (reduce) {
-        still to still
-    } else {
-        val transition = rememberInfiniteTransition(label = "sea")
-        transition.animateFloat(0f, 1f, infiniteRepeatable(tween(26_000, easing = LinearEasing)), label = "drift") to
-            transition.animateFloat(0f, 1f, infiniteRepeatable(tween(2_400), RepeatMode.Reverse), label = "breath")
-    }
-    val drift by driftState
-    val breath by breathState
+    // Reduced motion runs no ambient loop at all (also saves battery). Otherwise the loop runs at the
+    // display rate, about 15 fps under Battery Saver or severe heat, and stops while nobody can see the
+    // scene or the phone is critically hot (SceneAnimationPolicy). Stopped, the scene shows the same
+    // still frame as reduced motion, never whatever phase the clock stopped on.
+    val policy = rememberSceneMotion()
+    val motion = if (reduce) SceneMotion.PAUSED else policy
+    val still = motion == SceneMotion.PAUSED
+    val clock = rememberAmbientClock(motion)
     val stars = remember { List(70) { Triple(Random(it * 31).nextFloat(), Random(it * 17 + 3).nextFloat() * 0.9f, Random(it * 7 + 1).nextFloat()) } }
     val connecting = sky == SkyState.DAWN || sky == SkyState.RISING
 
     Canvas(modifier.clearAndSetSemantics { }) {
+        // Read here, in the draw phase, so each tick redraws the canvas without recomposing.
+        val ms = clock.value
+        val drift = if (still) 0f else (ms % 26_000L) / 26_000f
+        val breath = if (still) 1f else breathAt(ms)
         val horizonY = size.height * horizon
         // Leaving protection is immediate; an old full sun must not outlive the state word.
         val t = if (sky == SkyState.NIGHT || sky == SkyState.EMBER) target else sunRise
@@ -89,7 +103,7 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         // Stars fade with daylight.
         val starAlpha = (1f - t * 1.6f).coerceIn(0f, 1f)
         if (starAlpha > 0f) stars.forEachIndexed { i, (x, y, tw) ->
-            val twinkle = if (reduce || i % 3 != 0) 1f else 0.55f + 0.45f * sin((drift * 12 + tw) * 2 * PI).toFloat()
+            val twinkle = if (still || i % 3 != 0) 1f else 0.55f + 0.45f * sin((drift * 12 + tw) * 2 * PI).toFloat()
             drawCircle(Color.White.copy(alpha = starAlpha * (0.25f + 0.6f * tw) * twinkle), radius = 0.6f + tw * 1.3f, center = Offset(x * size.width, y * horizonY * 0.85f))
         }
 
@@ -99,7 +113,7 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         // Wider than tall (a landscape phone): the sun moves off the controls column, towards the moon.
         val sunX = size.width * if (size.width > size.height) 0.68f else 0.5f
         val sunY = horizonY + sunR * 1.05f - t * sunR * 2.25f
-        val glowPulse = if (connecting && !reduce) 0.75f + 0.25f * breath else 1f
+        val glowPulse = if (connecting && !still) 0.75f + 0.25f * breath else 1f
         clipRect(bottom = horizonY) {
             if (t > 0.02f) {
                 drawCircle(
@@ -131,8 +145,68 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         val reflectAlpha = if (t > 0.02f) t.coerceAtMost(1f) * (0.35f + 0.65f * disc) else moonAlpha * 0.35f
         val reflectX = if (t > 0.02f) sunX else size.width * 0.80f
         val reflectColor = if (t > 0.02f) lerp(TonoColors.SunMid, TonoColors.Ember, warn) else TonoColors.Moon
-        reflection(reflectX, horizonY, reflectAlpha, reflectColor, if (reduce) 0f else drift, sunR, glow = t > 0.02f)
+        reflection(reflectX, horizonY, reflectAlpha, reflectColor, drift, sunR, glow = t > 0.02f)
     }
+}
+
+/** The breath of the connecting glow: 0..1 and back every 4.8 s, eased as the earlier tween, from 1 at 0 ms. */
+private fun breathAt(ms: Long): Float {
+    val u = (ms % 4_800L) / 2_400f
+    return FastOutSlowInEasing.transform(if (u <= 1f) 1f - u else u - 1f)
+}
+
+/**
+ * Milliseconds of ambient motion, advanced by the frame clock as an infinite animation (so UI tests,
+ * which hold infinite animations, still reach idle). Throttled, it ticks about
+ * [SceneAnimationPolicy.THROTTLED_FPS] times a second and keeps its phase across the switch. Paused, it
+ * returns to 0 (the still frame's phase), so the scene restarts from the frame it was holding.
+ */
+@Composable
+private fun rememberAmbientClock(motion: SceneMotion): State<Long> {
+    val ms = remember { mutableLongStateOf(0L) }
+    LaunchedEffect(motion) {
+        if (motion == SceneMotion.PAUSED) {
+            ms.longValue = 0L
+            return@LaunchedEffect
+        }
+        val origin = ms.longValue
+        val start = withInfiniteAnimationFrameNanos { it }
+        while (true) {
+            val now = withInfiniteAnimationFrameNanos { it }
+            ms.longValue = origin + (now - start) / 1_000_000L
+            if (motion == SceneMotion.THROTTLED) delay(1_000L / SceneAnimationPolicy.THROTTLED_FPS)
+        }
+    }
+    return ms
+}
+
+/** The scene's [SceneMotion] from the activity lifecycle, Battery Saver and the thermal status, observed live. */
+@Composable
+private fun rememberSceneMotion(): SceneMotion {
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val context = LocalContext.current
+    val power = remember(context) { context.getSystemService(PowerManager::class.java) }
+    var powerSave by remember(power) { mutableStateOf(power?.isPowerSaveMode == true) }
+    var thermal by remember(power) { mutableStateOf(SceneAnimationPolicy.thermalFrom(power?.currentThermalStatus ?: 0)) }
+    DisposableEffect(context, power) {
+        if (power == null) return@DisposableEffect onDispose { }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { powerSave = power.isPowerSaveMode }
+        }
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        val listener = PowerManager.OnThermalStatusChangedListener { thermal = SceneAnimationPolicy.thermalFrom(it) }
+        // The platform throws when the thermal service refuses the listener; the scene then
+        // keeps the status read below and the power-save broadcast.
+        val listening = runCatching { power.addThermalStatusListener(context.mainExecutor, listener) }.isSuccess
+        // A change between the first read and the registration above is not missed.
+        powerSave = power.isPowerSaveMode
+        thermal = SceneAnimationPolicy.thermalFrom(power.currentThermalStatus)
+        onDispose {
+            context.unregisterReceiver(receiver)
+            if (listening) power.removeThermalStatusListener(listener)
+        }
+    }
+    return SceneAnimationPolicy.motion(lifecycle.isAtLeast(Lifecycle.State.STARTED), powerSave, thermal)
 }
 
 private fun DrawScope.crescent(center: Offset, r: Float, alpha: Float) {
