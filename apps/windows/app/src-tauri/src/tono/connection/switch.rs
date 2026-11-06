@@ -27,7 +27,7 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
     let result = tokio::spawn(
         async move {
             let mut guard = Some(state.begin_privileged_release().await);
-            let releases = vanished_exit_releases(state.lock().await.three_tier_routing);
+            let releases = vanished_exit_releases(state.lock().await.session_mode.is_three_tier());
             let generation = {
                 let mut inner = state.lock().await;
                 let active = inner.fsm.status().is_connected || inner.fsm.status().is_connecting;
@@ -214,7 +214,7 @@ pub async fn switch_selected_node(
     // The catalog owner keeps this worker detached and holds the policy writer. Own the Core
     // exclusively too, before reading its session: a retired switch must never adopt B's proof.
     let guard = state.begin_privileged_release().await;
-    if state.lock().await.three_tier_routing {
+    if state.lock().await.session_mode.is_three_tier() {
         restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
     }
@@ -252,9 +252,10 @@ pub async fn switch_selected_node(
         let nodes = inner.nodes.clone();
         let secret = inner.controller_secret.clone();
         let port = inner.controller_port;
-        (previous, next, routing, nodes, secret, port)
+        let ai_home = inner.session_mode.is_ai_home();
+        (previous, next, routing, nodes, secret, port, ai_home)
     };
-    let (previous, next, routing, nodes, secret, port) = snapshot;
+    let (previous, next, routing, nodes, secret, port, ai_home) = snapshot;
     // The controller proxy the runtime dials now (` · hy2` for an automatic hop).
     let previous_dial = previous
         .as_ref()
@@ -263,9 +264,9 @@ pub async fn switch_selected_node(
         restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
     };
-    // UDP fallback rules are fixed when the runtime is built. A VLESS/HY2 change,
-    // or an unknown previous transport, needs a rebuild with WFP still armed.
-    if !hot_switch_allowed(previous.as_ref(), &next) {
+    // AI Home compiles `route_exclude_address` for the selected exit and forbids in-place
+    // endpoint mutations; UDP fallback rules are also fixed when the runtime is built.
+    if ai_home || !hot_switch_allowed(previous.as_ref(), &next) {
         cold_switch_selected_node(state, app, generation, guard).await;
         return;
     }
@@ -394,7 +395,7 @@ pub(super) async fn cold_switch_selected_node(
 ) {
     {
         let mut inner = state.lock().await;
-        if inner.connect_generation != generation || inner.three_tier_routing {
+        if inner.connect_generation != generation || inner.session_mode.is_three_tier() {
             return;
         }
         if !inner.fsm.status().is_connected && !inner.fsm.status().is_connecting {

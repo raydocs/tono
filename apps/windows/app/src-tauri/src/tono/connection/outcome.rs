@@ -149,7 +149,7 @@ pub(super) async fn record_connect_failure(
         if session_verified {
             inner.fsm.mark_session_verified();
         }
-        let strict_kill_switch = inner.three_tier_routing;
+        let strict_kill_switch = inner.session_mode.is_three_tier();
         let plan = plan_failure(armed, session_verified, was_disconnecting, strict_kill_switch);
         let action: &'static str = if was_disconnecting {
             "racedDisconnect"
@@ -324,7 +324,7 @@ mod tests {
             inner.fsm.mark_session_verified();
             inner.fsm.connect_succeeded().unwrap();
             // Keep the current-generation control on the strict failure branch, with no AI hook.
-            inner.three_tier_routing = true;
+            inner.session_mode = crate::tono::state::DesktopSessionMode::ThreeTier;
             inner.controller_secret = Some("session-B".into());
             inner.controller_port = Some(19091);
             (generation, owner, Arc::clone(&inner.client))

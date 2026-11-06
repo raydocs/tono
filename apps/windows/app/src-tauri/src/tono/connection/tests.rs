@@ -52,56 +52,80 @@ fn recovery_preflight_rejects_a_changed_or_cleared_selection() {
     assert!(!super::selection_still_current(captured, None));
 }
 
+#[test]
+fn desktop_session_mode_defaults_to_ai_home_with_home_socks5_and_falls_back_to_stable() {
+    use crate::tono::state::DesktopSessionMode;
+    assert_eq!(DesktopSessionMode::resolve_explicit(None, true), DesktopSessionMode::AiHome);
+    assert_eq!(DesktopSessionMode::resolve_explicit(None, false), DesktopSessionMode::Stable);
+    assert_eq!(DesktopSessionMode::resolve_explicit(Some("ai-home"), true), DesktopSessionMode::AiHome);
+    assert_eq!(DesktopSessionMode::resolve_explicit(Some("ai-home"), false), DesktopSessionMode::Stable);
+    assert_eq!(DesktopSessionMode::resolve_explicit(Some("stable"), true), DesktopSessionMode::Stable);
+    assert_eq!(DesktopSessionMode::resolve_explicit(Some("three-tier"), true), DesktopSessionMode::ThreeTier);
+}
+
 #[tokio::test]
 async fn routing_mode_is_captured_only_by_admitted_explicit_connect() {
     use super::attempt::begin_attempt_with_mode;
     use crate::core::service;
+    use crate::tono::state::DesktopSessionMode;
     let _epoch = service::RELEASE_EPOCH_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let state = crate::tono::state::TonoState::for_test();
     let _admission = state.begin_connect_mutation().await;
     let mut inner = state.lock().await;
     let owner = service::claim_user_connect(service::user_connect_stamp()).unwrap();
     let generation = inner.connect_generation;
-    let (stable, _, _) = begin_attempt_with_mode(&mut inner, generation, Some(owner), Some(false)).await.unwrap();
-    assert!(!inner.three_tier_routing);
+    let (stable, _, _) = begin_attempt_with_mode(&mut inner, generation, Some(owner), Some(DesktopSessionMode::Stable)).await.unwrap();
+    assert_eq!(inner.session_mode, DesktopSessionMode::Stable);
 
-    // Saving three-tier must not change Stable on an unarmed retry (including Retry Now).
+    // Saving three-tier or ai-home must not change Stable on an unarmed retry (including Retry Now).
     // Fail before compilation: admission, not successful startup, owns the mode latch.
     inner.fsm.connect_failed();
-    let (retry, _, _) = begin_attempt_with_mode(&mut inner, stable, None, Some(true)).await.unwrap();
-    assert!(!inner.three_tier_routing, "automatic recovery must not consume next-mode preferences");
-    assert!(begin_attempt_with_mode(&mut inner, retry, Some(owner), Some(true)).await.is_none());
-    assert!(!inner.three_tier_routing, "busy explicit Connect must not recapture");
+    let (retry, _, _) = begin_attempt_with_mode(&mut inner, stable, None, Some(DesktopSessionMode::ThreeTier)).await.unwrap();
+    assert_eq!(inner.session_mode, DesktopSessionMode::Stable, "automatic recovery must not consume next-mode preferences");
+    assert!(begin_attempt_with_mode(&mut inner, retry, Some(owner), Some(DesktopSessionMode::AiHome)).await.is_none());
+    assert_eq!(inner.session_mode, DesktopSessionMode::Stable, "busy explicit Connect must not recapture");
+
+    // End the session: a new explicit Connect now consumes the saved AI Home mode and retains it across recovery.
+    inner.invalidate_connection(true);
+    inner.fsm.begin_disconnect();
+    inner.fsm.finish_disconnect();
+    let ended_ai_home = inner.connect_generation;
+    let (_ai_home, _, _) = begin_attempt_with_mode(&mut inner, ended_ai_home, Some(owner), Some(DesktopSessionMode::AiHome)).await.unwrap();
+    assert_eq!(inner.session_mode, DesktopSessionMode::AiHome);
+    inner.fsm.connect_failed();
+    let retry_ai_home = inner.connect_generation;
+    begin_attempt_with_mode(&mut inner, retry_ai_home, None, Some(DesktopSessionMode::Stable)).await.unwrap();
+    assert_eq!(inner.session_mode, DesktopSessionMode::AiHome, "recovery must retain AI Home session mode");
 
     // End the session: a new explicit Connect now consumes the saved three-tier mode.
     inner.invalidate_connection(true);
     inner.fsm.begin_disconnect();
     inner.fsm.finish_disconnect();
     let ended = inner.connect_generation;
-    let (strict, _, _) = begin_attempt_with_mode(&mut inner, ended, Some(owner), Some(true)).await.unwrap();
-    assert!(inner.three_tier_routing, "capture must precede readiness/compile failures");
+    let (strict, _, _) = begin_attempt_with_mode(&mut inner, ended, Some(owner), Some(DesktopSessionMode::ThreeTier)).await.unwrap();
+    assert_eq!(inner.session_mode, DesktopSessionMode::ThreeTier, "capture must precede readiness/compile failures");
     inner.fsm.mark_kill_switch_armed();
     inner.fsm.mark_session_verified();
     inner.fsm.connect_succeeded().unwrap();
     inner.invalidate_connection(false);
     inner.fsm.connect_failed();
     let recovery = inner.connect_generation;
-    let (recovered, _, _) = begin_attempt_with_mode(&mut inner, recovery, None, Some(false)).await.unwrap();
-    assert!(inner.three_tier_routing, "protected/monitor/transport recovery must retain strict mode");
+    let (recovered, _, _) = begin_attempt_with_mode(&mut inner, recovery, None, Some(DesktopSessionMode::Stable)).await.unwrap();
+    assert_eq!(inner.session_mode, DesktopSessionMode::ThreeTier, "protected/monitor/transport recovery must retain strict mode");
 
     inner.fsm.connect_failed();
-    assert!(begin_attempt_with_mode(&mut inner, strict, Some(owner), Some(false)).await.is_none());
-    assert!(inner.three_tier_routing, "stale generation must not consume Stable");
+    assert!(begin_attempt_with_mode(&mut inner, strict, Some(owner), Some(DesktopSessionMode::Stable)).await.is_none());
+    assert_eq!(inner.session_mode, DesktopSessionMode::ThreeTier, "stale generation must not consume Stable");
     let newer_owner = service::claim_user_connect(service::user_connect_stamp()).unwrap();
-    assert!(begin_attempt_with_mode(&mut inner, recovered, Some(owner), Some(false)).await.is_none());
-    assert!(inner.three_tier_routing, "stale user ticket must not consume Stable");
+    assert!(begin_attempt_with_mode(&mut inner, recovered, Some(owner), Some(DesktopSessionMode::Stable)).await.is_none());
+    assert_eq!(inner.session_mode, DesktopSessionMode::ThreeTier, "stale user ticket must not consume Stable");
 
     inner.invalidate_connection(true);
     inner.fsm.begin_disconnect();
     inner.fsm.finish_disconnect();
     let ended = inner.connect_generation;
-    begin_attempt_with_mode(&mut inner, ended, Some(newer_owner), Some(false)).await.unwrap();
-    assert!(!inner.three_tier_routing, "explicit ended-session Connect must capture Stable too");
+    begin_attempt_with_mode(&mut inner, ended, Some(newer_owner), Some(DesktopSessionMode::Stable)).await.unwrap();
+    assert_eq!(inner.session_mode, DesktopSessionMode::Stable, "explicit ended-session Connect must capture Stable too");
 }
 
 #[tokio::test]
@@ -567,6 +591,7 @@ fn unverified_wfp_lock_carries_the_service_error_instead_of_a_tun_verdict() {
             "Windows kill-switch reconciliation failed: FwpmTransactionCommit0 returned 0x80320017".into(),
         ),
         reconnect_after_release: false,
+        ai_home_scoped: false,
     };
     let data_plane = lock_unverified_error(&kill_switch_not_locked(&status));
     let last = classify_exhausted_data_plane(Ok(()), data_plane, Ok(()));
@@ -1013,6 +1038,7 @@ fn resumable_startup_runtime() -> (ServiceStatusSnapshot, DnsProtectionStatus) {
                 direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             }),
             network_events: Default::default(),
             update_attempt_pending: None,
@@ -1619,6 +1645,7 @@ fn kill_switch_health_requires_wanted_live_locked() {
         direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
         last_error: None,
         reconnect_after_release: false,
+        ai_home_scoped: false,
     };
     assert!(!kill_switch_unhealthy(Some(&healthy)));
     assert!(kill_switch_unhealthy(None));
@@ -1638,6 +1665,7 @@ fn kill_switch_health_requires_wanted_live_locked() {
             direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
             reconnect_after_release: false,
+            ai_home_scoped: false,
         };
         assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
     }
@@ -1990,6 +2018,7 @@ fn service_direct_proof_rejects_malformed_or_different_endpoint_digests() {
         direct_endpoint_digest: digest.clone(),
         last_error: None,
         reconnect_after_release: false,
+        ai_home_scoped: false,
     };
     prove_service_endpoint_digest(&status, &digest).unwrap();
 

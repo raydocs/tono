@@ -310,8 +310,10 @@ impl TonoPreferences {
     /// Validate persisted intent; connect captures it once, before any runtime writer.
     pub fn require_available_desktop_routing_mode(&self) -> Result<()> {
         match self.desktop_routing_mode.as_deref() {
-            None | Some("stable" | "three-tier") => Ok(()),
-            Some(_) => anyhow::bail!("invalid desktop_routing_mode; expected stable or three-tier"),
+            None | Some("ai-home" | "stable" | "three-tier") => Ok(()),
+            Some(_) => anyhow::bail!(
+                "invalid desktop_routing_mode; expected ai-home, stable, or three-tier"
+            ),
         }
     }
 
@@ -684,6 +686,8 @@ mod auto_launch_seed {
         prefs.desktop_routing_mode = Some("typo".into());
         assert!(prefs.require_available_desktop_routing_mode().unwrap_err().to_string().contains("invalid"));
         prefs.desktop_routing_mode = Some("stable".into());
+        assert!(prefs.require_available_desktop_routing_mode().is_ok());
+        prefs.desktop_routing_mode = Some("ai-home".into());
         assert!(prefs.require_available_desktop_routing_mode().is_ok());
         assert!(TonoPreferences::default().require_available_desktop_routing_mode().is_ok());
     }

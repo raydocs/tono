@@ -15,6 +15,7 @@ pub(super) fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>)
         && armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some();
     RuleConfig {
         mode: armed.intent.mode,
+        ai_home_scoped: armed.intent.ai_home_scoped && !armed.intent.strict_kill_switch,
         endpoints: if armed.intent.strict_kill_switch && armed.intent.mode == KillSwitchStatusMode::Blocked {
             Vec::new()
         } else { armed.intent.endpoints.clone() },

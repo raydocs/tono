@@ -38,7 +38,7 @@ use super::{
 use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect_for_generation;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
-use super::probes::{verify_locked, verify_session_data_plane, verify_session_health};
+use super::probes::{verify_session_data_plane, verify_session_health};
 use super::platform::{uplinks_may_have_changed, usable_physical_uplinks};
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
@@ -808,6 +808,7 @@ mod protection_resync_tests {
             direct_endpoint_digest: String::new(),
             last_error: None,
             reconnect_after_release: false,
+            ai_home_scoped: false,
         };
         let mut inner = state.lock().await;
         crate::tono::commands::quit::apply_service_kill_switch(&mut inner, Some(service_disarmed));
@@ -1731,8 +1732,8 @@ pub(super) async fn handle_network_change_inner(
     // first reconnect on "DNS 53 busy" because the just-killed listener was
     // the one we needed.
     let in_place_proven = if allow_in_place {
-        let strict = state.lock().await.three_tier_routing;
-        if strict {
+        let session_mode = state.lock().await.session_mode;
+        if session_mode.uses_owned_graph() {
             !periodic_data_plane_probe_failed(state, app).await
         } else {
             verify_session_data_plane(state).await.is_ok()
@@ -1758,7 +1759,7 @@ pub(super) async fn handle_network_change_inner(
     // release the barrier and probe without a tunnel. A policy rebuild and an
     // explicit strict kill switch keep the protected reconnect below.
     let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
-    let strict = state.lock().await.three_tier_routing;
+    let strict = state.lock().await.session_mode.is_three_tier();
     let health_guard = if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
         match admit_health_release(state, generation, selected_node.as_deref(), switch_task, allow_in_place).await {
             Ok(guards) => Some(guards),

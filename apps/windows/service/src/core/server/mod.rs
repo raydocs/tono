@@ -1496,6 +1496,7 @@ async fn release_kill_switch_for_platform(_apply_narrow: bool) -> Result<HttpRes
                 direct_endpoint_digest: String::new(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             })
         }
         Err(error) => service_unavailable(format!("Kill switch release failed: {error:#}")),
@@ -1791,6 +1792,7 @@ mod service_stop_release_tests {
                 }],
                 bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
                 direct_endpoints: Vec::new(),
+                ai_home_scoped: false,
             },
             "/opt/tono/mihomo",
             "scm-stop-owner",

@@ -216,6 +216,57 @@ impl TaskRegistry {
     }
 }
 
+/// Captured connect-time routing contract, never a live preference read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DesktopSessionMode {
+    #[default]
+    Stable,
+    ThreeTier,
+    AiHome,
+}
+
+impl DesktopSessionMode {
+    /// Resolve the explicit user Connect preference against the installed catalog's Home line.
+    /// Decision 131: `None` and `"ai-home"` default to `AiHome` when `home_socks5` is present on
+    /// the account and fall back to `Stable` when the account has no `home_socks5`.
+    pub fn resolve_explicit(preference: Option<&str>, has_home_socks5: bool) -> Self {
+        match preference {
+            Some("three-tier") => Self::ThreeTier,
+            Some("stable") => Self::Stable,
+            Some("ai-home") | None => {
+                if has_home_socks5 {
+                    Self::AiHome
+                } else {
+                    Self::Stable
+                }
+            }
+            Some(_) => Self::Stable,
+        }
+    }
+
+    pub const fn is_three_tier(self) -> bool {
+        matches!(self, Self::ThreeTier)
+    }
+
+    pub const fn is_ai_home(self) -> bool {
+        matches!(self, Self::AiHome)
+    }
+
+    /// True when the session runs a compiled sing-box graph (`ThreeTier` or `AiHome`) bound to a
+    /// proven physical interface with no Mihomo fallback and no in-place DIRECT overlay.
+    pub const fn uses_owned_graph(self) -> bool {
+        matches!(self, Self::ThreeTier | Self::AiHome)
+    }
+
+    pub const fn graph_variant(self) -> Option<tono_core::three_tier::Variant> {
+        match self {
+            Self::Stable => None,
+            Self::ThreeTier => Some(tono_core::three_tier::Variant::ThreeTier),
+            Self::AiHome => Some(tono_core::three_tier::Variant::AiHome),
+        }
+    }
+}
+
 pub struct TonoInner {
     pub client: Arc<TonoApiClient>,
     /// Memory-first session credentials (never touches the vault on the
@@ -249,7 +300,7 @@ pub struct TonoInner {
     /// The core this connect armed. DIRECT in-place reload is mihomo-only.
     pub sing_box_core: bool,
     /// Captured connect-time routing contract, never a live preference read.
-    pub three_tier_routing: bool,
+    pub session_mode: DesktopSessionMode,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
     /// The cache itself is built on demand: `CatalogCache` boxes its safety
@@ -838,7 +889,7 @@ impl TonoState {
                 session_marker: Default::default(),
                 installation_id,
                 sing_box_core: false,
-                three_tier_routing: false,
+                session_mode: DesktopSessionMode::Stable,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,
                 nodes: Vec::new(),

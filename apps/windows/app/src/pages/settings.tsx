@@ -266,21 +266,37 @@ export const GeneralCard = () => {
       <Row
         label={t('tono.settings.general.routingMode')}
         subtitle={
-          <>
-            {t('tono.settings.general.routingScope')}
-            <br />
-            {t('tono.settings.general.routingLimits')}
-            <br />
-            {t('tono.settings.general.routingEffect')}
-          </>
+          (preferences?.desktop_routing_mode ?? 'ai-home') === 'three-tier' ? (
+            <>
+              {t('tono.settings.general.routingScope')}
+              <br />
+              {t('tono.settings.general.routingLimits')}
+              <br />
+              {t('tono.settings.general.routingEffect')}
+            </>
+          ) : (preferences?.desktop_routing_mode ?? 'ai-home') === 'ai-home' ? (
+            <>
+              {t('tono.settings.general.routingAiHomeScope')}
+              <br />
+              {t('tono.settings.general.routingAiHomeLimits')}
+              <br />
+              {t('tono.settings.general.routingEffect')}
+            </>
+          ) : (
+            t('tono.settings.general.routingEffect')
+          )
         }
       >
         {newAppearance ? (
           <SeaSegmented
             label={t('tono.settings.general.routingMode')}
-            value={preferences?.desktop_routing_mode ?? 'stable'}
+            value={preferences?.desktop_routing_mode ?? 'ai-home'}
             disabled={disabled}
             options={[
+              {
+                value: 'ai-home',
+                label: t('tono.settings.general.routingAiHome'),
+              },
               {
                 value: 'stable',
                 label: t('tono.settings.general.routingStable'),
@@ -293,6 +309,7 @@ export const GeneralCard = () => {
             onChange={(desktop_routing_mode) =>
               void savePreferences({
                 desktop_routing_mode: desktop_routing_mode as
+                  | 'ai-home'
                   | 'stable'
                   | 'three-tier',
               })
@@ -301,17 +318,21 @@ export const GeneralCard = () => {
         ) : (
           <select
             aria-label={t('tono.settings.general.routingMode')}
-            value={preferences?.desktop_routing_mode ?? 'stable'}
+            value={preferences?.desktop_routing_mode ?? 'ai-home'}
             disabled={disabled}
             style={{ flexShrink: 0 }}
             onChange={(event) =>
               void savePreferences({
                 desktop_routing_mode: event.target.value as
+                  | 'ai-home'
                   | 'stable'
                   | 'three-tier',
               })
             }
           >
+            <option value="ai-home">
+              {t('tono.settings.general.routingAiHome')}
+            </option>
             <option value="stable">
               {t('tono.settings.general.routingStable')}
             </option>

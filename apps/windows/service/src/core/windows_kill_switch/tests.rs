@@ -85,6 +85,7 @@ fn test_config() -> KillSwitchConfig {
         }],
         bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
         direct_endpoints: Vec::new(),
+        ai_home_scoped: false,
     }
 }
 
@@ -135,6 +136,7 @@ fn valid_intent(mode: KillSwitchStatusMode, wanted: bool) -> IntentRecord {
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: None,
+        ai_home_scoped: false,
     }
 }
 
@@ -2205,6 +2207,7 @@ fn apply_learned_bootstrap_pins_reads_the_programdata_file() {
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: None,
+        ai_home_scoped: false,
     };
     apply_learned_bootstrap_pins(&mut intent);
     let _ = std::fs::remove_file(&path);
@@ -6047,6 +6050,93 @@ async fn direct_endpoints_live_only_in_the_armed_session_memory() -> Result<()> 
             .direct_endpoints
             .is_empty()
     );
+    cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn ai_home_start_requires_matching_contract_and_guards_session_mutations() -> Result<()> {
+    cleanup().await;
+    let mut base: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../tooling/scripts/sing-box/runtime-template.json"
+    ))?;
+    base["inbounds"][0]["interface_name"] = serde_json::json!("Tono");
+    base["inbounds"][0]["route_exclude_address"] = serde_json::json!(["93.184.216.34/32"]);
+    base["experimental"]["clash_api"]["external_controller"] = serde_json::json!("127.0.0.1:9097");
+    base["experimental"]["clash_api"]["secret"] = serde_json::json!("11".repeat(32));
+    base["outbounds"] = serde_json::json!([
+        {"type":"vless","tag":"Fixture Alpha","server":"93.184.216.34","server_port":443,
+         "uuid":"00000000-0000-4000-8000-000000000000",
+         "tls":{"enabled":true,"server_name":"example.com","utls":{"enabled":true,"fingerprint":"chrome"},
+                "reality":{"enabled":true,"public_key":"key","short_id":"ab"}}},
+        {"type":"selector","tag":"Tono-Exit","outbounds":["Fixture Alpha"],"default":"Fixture Alpha"}
+    ]);
+    let stable_bundle = crate::RuntimeBundle {
+        yaml: base.to_string(),
+        assets: Vec::new(),
+        core_path: "/opt/tono/sing-box".to_owned(),
+        remote_providers: Vec::new(),
+    };
+
+    let graph = crate::three_tier::ai_home_graph(
+        "Tono-Home-Residential",
+        "Ethernet 7",
+        "198.18.176.0/20",
+    )
+    .map_err(anyhow::Error::msg)?;
+    let mut ai_home_json = base.clone();
+    ai_home_json["route"] = graph["route"].clone();
+    ai_home_json["dns"] = graph["dns"].clone();
+    ai_home_json["outbounds"]
+        .as_array_mut()
+        .unwrap()
+        .extend([
+            serde_json::json!({
+                "type":"socks","tag":"Tono-Home-Residential","server":"isp.decodo.com","server_port":10001,
+                "version":"5","username":"fixture-user","password":"fixture-password","network":"tcp","detour":"Tono-Exit"
+            }),
+            graph["direct_outbound"].clone(),
+        ]);
+    let ai_home_bundle = crate::RuntimeBundle {
+        yaml: ai_home_json.to_string(),
+        assets: Vec::new(),
+        core_path: "/opt/tono/sing-box".to_owned(),
+        remote_providers: Vec::new(),
+    };
+
+    let whole_host_ks = test_config();
+    let mut ai_home_ks = test_config();
+    ai_home_ks.ai_home_scoped = true;
+
+    assert!(!admit_ai_home_start(&stable_bundle, Some(&whole_host_ks)).await?);
+    assert!(admit_ai_home_start(&ai_home_bundle, Some(&whole_host_ks)).await.is_err());
+    assert!(admit_ai_home_start(&stable_bundle, Some(&ai_home_ks)).await.is_err());
+    assert!(admit_ai_home_start(&ai_home_bundle, None).await.is_err());
+    assert!(admit_ai_home_start(&ai_home_bundle, Some(&ai_home_ks)).await?);
+
+    // Tightening commit ordering: if a whole-host barrier is live and installing AI Home fails,
+    // the persisted intent on disk must stay whole-host (`ai_home_scoped == false`).
+    arm_bootstrap(&whole_host_ks, "/opt/tono/sing-box", "owner-alice").await?;
+    let fail_install = SimulatedStateFailures::arm(false, true);
+    assert!(arm_bootstrap(&ai_home_ks, "/opt/tono/sing-box", "owner-alice").await.is_err());
+    let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert!(!on_disk.ai_home_scoped);
+    drop(fail_install);
+
+    // Committed AI Home arm persists `ai_home_scoped: true`, reports it on status, refuses
+    // in-place runtime/endpoint mutations, and still releases normally without strict lockout.
+    arm_bootstrap(&ai_home_ks, "/opt/tono/sing-box", "owner-alice").await?;
+    let committed: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert!(committed.ai_home_scoped);
+    assert!(status().await.ai_home_scoped);
+    assert!(sing_box_full_tunnel_is_locked().is_err());
+    assert!(replace_proxy_endpoints(&whole_host_ks.proxy_endpoints).await.is_err());
+
+    release().await?;
+    let disarmed = status().await;
+    assert!(!disarmed.wanted);
+    assert!(!disarmed.ai_home_scoped);
     cleanup().await;
     Ok(())
 }

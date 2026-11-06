@@ -202,7 +202,12 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// `ReplaceSingBoxRuntime` may carry `traffic_policy`, the Service verifies it with the policy key
 /// compiled into it and admits only the DIRECT entries it lists. An older App sends none and its
 /// DIRECT document is refused, which only skips the optional overlay. MIN_REQUIRED stays 14.
-pub const PROTOCOL_REVISION: u16 = 22;
+/// Revision 23 adds the AI Home routing contract (decision 130): `StartClash` accepts an
+/// `ai-home` sing-box graph paired with `windows_kill_switch.ai_home_scoped`, installs the
+/// AI-prefix-only WFP rule set without a whole-host block, and reports `KillSwitchStatus.ai_home_scoped`.
+/// MIN_REQUIRED stays 14; an App refuses AI Home against an older Service rather than running the
+/// AI Home graph under whole-host WFP.
+pub const PROTOCOL_REVISION: u16 = 23;
 /// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
@@ -216,6 +221,8 @@ pub const MIN_SERVICE_REVISION_FOR_SING_BOX: u16 = 18;
 pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT: u16 = 19;
 /// First revision that verifies the signed traffic policy a sing-box DIRECT document comes from.
 pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_POLICY: u16 = 22;
+/// First revision that admits the AI Home graph and installs the AI-prefix-only WFP scope.
+pub const MIN_SERVICE_REVISION_FOR_AI_HOME: u16 = 23;
 /// First revision that reports the relay permit in rule C (decision 090) to the App.
 pub const MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT: u16 = 20;
 /// First revision that admits StartClash under the release authority and installs the

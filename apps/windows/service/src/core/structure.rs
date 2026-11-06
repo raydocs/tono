@@ -157,6 +157,12 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT
     }
+
+    /// Whether `StartClash` admits the AI Home graph and installs the AI-prefix-only WFP scope.
+    pub const fn supports_ai_home(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_AI_HOME
+    }
 }
 
 /// The image file name selects the engine. Omitted and unknown names stay mihomo,
@@ -573,6 +579,11 @@ pub struct KillSwitchConfig {
     /// by the next arm.
     #[serde(default)]
     pub direct_endpoints: Vec<ProxyEndpoint>,
+    /// AI Home mode (decision 130): install only the AI-prefix WFP blocks and locked tunnel
+    /// permits, without a whole-host `WEIGHT_BLOCK_ALL` filter. Admitted only alongside the
+    /// `ai-home` sing-box graph.
+    #[serde(default)]
+    pub ai_home_scoped: bool,
 }
 
 /// Reported via `GET /kill-switch/status`: which phase of the two-phase arm is live.
@@ -620,6 +631,10 @@ pub struct KillSwitchStatus {
     /// Over IPC it is true only for the owner whose session was released (#1291).
     #[serde(default)]
     pub reconnect_after_release: bool,
+    /// Whether the armed WFP barrier uses the AI-prefix-only `AI Home` scope rather than a
+    /// whole-host block.
+    #[serde(default)]
+    pub ai_home_scoped: bool,
 }
 
 /// `POST /kill-switch/lock` payload. `None` locks the interface named at arm time.
@@ -1022,6 +1037,7 @@ impl ServiceStatusSnapshot {
                 direct_endpoint_digest: direct_endpoint_digest(&[]).unwrap_or_default(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             };
             // Another user's machine-wide barrier is armed, which a full release of ours could not
             // remove: do not promise this caller a hold to release.
@@ -1376,6 +1392,7 @@ mod tests {
             }],
             bootstrap_api_hosts: vec!["api.example.com".to_owned()],
             direct_endpoints: Vec::new(),
+            ai_home_scoped: false,
         };
         let encoded = serde_json::to_vec(&config).expect("config should serialize");
         assert_eq!(
@@ -1394,6 +1411,7 @@ mod tests {
             direct_endpoint_digest: super::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
             reconnect_after_release: false,
+            ai_home_scoped: false,
         };
         let encoded = serde_json::to_vec(&status).expect("status should serialize");
         assert_eq!(
@@ -1414,6 +1432,7 @@ mod tests {
             .expect("an older payload without the field must still parse");
         assert!(!parsed.tunnel_permit_rendered);
         assert!(!parsed.reconnect_after_release);
+        assert!(!parsed.ai_home_scoped);
         assert_eq!(parsed.mode, KillSwitchStatusMode::Locked);
         assert_eq!(
             serde_json::from_value::<KillSwitchStatusMode>(serde_json::json!("locked")).unwrap(),

@@ -162,7 +162,9 @@ export const classifyActivityRoute = (
   if (
     terminal === 'DIRECT' ||
     terminal === 'Tono-China-Direct' ||
-    terminal === 'Tono-China-Web-Direct'
+    terminal === 'Tono-China-Web-Direct' ||
+    terminal === 'Tono-ThreeTier-Direct' ||
+    terminal === 'Tono-AIHome-Direct'
   ) {
     return 'direct'
   }
@@ -196,7 +198,9 @@ const observedActivityRoute = (
   if (
     terminal === 'DIRECT' ||
     terminal === 'Tono-China-Direct' ||
-    terminal === 'Tono-China-Web-Direct'
+    terminal === 'Tono-China-Web-Direct' ||
+    terminal === 'Tono-ThreeTier-Direct' ||
+    terminal === 'Tono-AIHome-Direct'
   ) {
     return 'direct'
   }

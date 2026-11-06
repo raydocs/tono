@@ -1065,6 +1065,7 @@ export interface TranslationResources {
           coreUnpinned: string
           dnsPortBusy: string
           encryptedDns: string
+          exitUnreachable: string
           hy2Idle: string
           nodeUnreachable: string
           otherVpnPresent: string
@@ -1084,6 +1085,7 @@ export interface TranslationResources {
           staleGeneration: string
           tunDataPlaneBroken: string
           tunIngressBroken: string
+          unclassified: string
           wfpEngineWedged: string
           wfpLockUnverified: string
         }
@@ -1701,6 +1703,9 @@ export interface TranslationResources {
           launchAtStartupHint: string
           readFailed: string
           reload: string
+          routingAiHome: string
+          routingAiHomeLimits: string
+          routingAiHomeScope: string
           routingEffect: string
           routingLimits: string
           routingMode: string

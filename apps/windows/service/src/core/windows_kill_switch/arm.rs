@@ -148,7 +148,11 @@ pub(crate) async fn arm_bootstrap_waiting(
         config.proxy_endpoints = contract.exit_endpoints.clone();
         config.bootstrap_api_hosts.clear();
         config.direct_endpoints.clear();
+        config.ai_home_scoped = false;
         if config.tunnel_interface != "Tono" { bail!("strict session requires the owned Tono TUN"); }
+    }
+    if config.ai_home_scoped && config.tunnel_interface != "Tono" {
+        bail!("AI Home session requires the owned Tono TUN");
     }
     ensure_supported()?;
     validate_config(&config)?;
@@ -173,9 +177,15 @@ pub(crate) async fn arm_bootstrap_waiting(
     if strict_kill_switch_enabled() {
         bail!("strict session must be explicitly disconnected before another StartClash");
     }
-    let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {
+    let previous = armed_guard().clone();
+    let inherited_verified = previous.as_ref().is_some_and(|armed| {
         armed.intent.owner_key.as_deref() == Some(owner_key) && armed.intent.is_verified()
     });
+    let ai_home_scoped = strict_contract.is_none() && config.ai_home_scoped;
+    let widening_whole_host_to_ai_home = ai_home_scoped
+        && previous
+            .as_ref()
+            .is_some_and(|armed| armed.intent.wanted && !armed.intent.ai_home_scoped);
     let armed = Armed {
         intent: IntentRecord {
             wanted: true,
@@ -192,6 +202,7 @@ pub(crate) async fn arm_bootstrap_waiting(
             reconnect_after_release: false,
             reconnect_owner_key: None,
             apply_narrow_after_release: None,
+            ai_home_scoped,
         },
         tun_luid: None,
         core_instance: None,
@@ -201,11 +212,16 @@ pub(crate) async fn arm_bootstrap_waiting(
         direct_reload: None,
     };
     // Persist fail-closed intent before touching WFP: a daemon restart installs at least the
-    // floor if this process dies during the following transaction.
+    // floor if this process dies during the following transaction. When widening a live whole-host
+    // barrier to AI Home, save whole-host scope until the kernel transaction succeeds (decision 130).
     if armed.intent.strict_kill_switch {
         persist_strict_recovery().await?;
     }
-    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
+    let mut pre_commit_intent = armed.intent.clone();
+    if widening_whole_host_to_ai_home {
+        pre_commit_intent.ai_home_scoped = false;
+    }
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&pre_commit_intent)?).await?;
     CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
     publish_reconnect(false, None);
     *armed_guard() = Some(armed.clone());
@@ -214,7 +230,11 @@ pub(crate) async fn arm_bootstrap_waiting(
     // debt, so the core-window retry still registers the fallback.
     STARTUP_RETIREMENT_OWES_DNS_FALLBACK.store(false, Ordering::Release);
     note_fresh_arm_core_window(&armed.intent);
-    record_outcome(install_unlocked(&armed).await)
+    let installed = record_outcome(install_unlocked(&armed).await);
+    if installed.is_ok() && widening_whole_host_to_ai_home {
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
+    }
+    installed
 }
 
 /// Commit the full app verification barrier for the active logical session.
@@ -262,7 +282,7 @@ pub(crate) async fn replace_proxy_endpoints(endpoints: &[ProxyEndpoint]) -> Resu
         }
     }
     let _operation = WFP_OPERATION.lock().await;
-    refuse_strict_mutation()?;
+    refuse_owned_graph_mutation()?;
     let mut armed = armed_guard().clone().context("kill switch is not armed")?;
     if armed.intent.mode != KillSwitchStatusMode::Locked {
         bail!("kill switch must be locked before replacing proxy endpoints");

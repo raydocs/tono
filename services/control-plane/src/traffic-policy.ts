@@ -165,6 +165,7 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'xylink.com', 'zhumu.me', 'quanshi.com',
     'zhihu.com', 'zhimg.com', 'goofish.com', '1688.com',
     '10086.cn', 'cmecloud.cn', 'miit.gov.cn',
+    'todesk.com', 'todesk.cn',
   ];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
   // NARROWING THESE LISTS IS A BREAKING OPERATION. `publicTrafficPolicy` runs the
@@ -216,6 +217,7 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'xylink.com', 'zhumu.me', 'quanshi.com',
     'zhihu.com', 'zhimg.com', 'goofish.com', '1688.com',
     '10086.cn', 'cmecloud.cn', 'miit.gov.cn',
+    'todesk.com', 'todesk.cn',
   ];
   const protectedSuffixes = [
     'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claude.site',

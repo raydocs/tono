@@ -177,6 +177,16 @@ describe('Activity connection presentation', () => {
       classifyActivityRoute(connection('direct', { chains: ['DIRECT'] })),
     ).toBe('direct')
     expect(
+      toActivityRow(
+        connection('ai-home-direct', { chains: ['Tono-AIHome-Direct'] }),
+      ),
+    ).toMatchObject({ route: 'direct', observedRoute: 'direct' })
+    expect(
+      toActivityRow(
+        connection('three-tier-direct', { chains: ['Tono-ThreeTier-Direct'] }),
+      ),
+    ).toMatchObject({ route: 'direct', observedRoute: 'direct' })
+    expect(
       classifyActivityRoute(connection('blocked', { chains: ['REJECT-DROP'] })),
     ).toBe('rejected')
     expect(

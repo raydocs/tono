@@ -88,6 +88,11 @@ pub(super) struct IntentRecord {
     /// record whose existing hold is left alone; this never authorizes a broad WFP block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) apply_narrow_after_release: Option<bool>,
+    /// AI Home mode (decision 130): install only the AI-prefix WFP blocks and locked tunnel
+    /// permits rather than the whole-host default-deny floor. Never true when `strict_kill_switch`
+    /// is true.
+    #[serde(default)]
+    pub(super) ai_home_scoped: bool,
 }
 
 /// Persisted before arming; generation is filled only by the committed owner transition.

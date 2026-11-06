@@ -484,6 +484,7 @@ mod quit_tests {
             wanted: false, verified: false, live: false, mode: KillSwitchStatusMode::Blocked,
             tunnel_permit_rendered: false, endpoints: Vec::new(),
             direct_endpoint_digest: String::new(), last_error: None, reconnect_after_release: false,
+            ai_home_scoped: false,
         };
         let (entered, sampled) = tokio::sync::oneshot::channel();
         let (release, deliver) = tokio::sync::oneshot::channel();
@@ -509,6 +510,7 @@ mod quit_tests {
                 wanted: true, verified: true, live: true, mode: KillSwitchStatusMode::Locked,
                 tunnel_permit_rendered: true, endpoints: Vec::new(),
                 direct_endpoint_digest: String::new(), last_error: None, reconnect_after_release: false,
+                ai_home_scoped: false,
             });
         }
         release.send(()).unwrap();
@@ -549,6 +551,7 @@ mod quit_tests {
                 direct_endpoint_digest: String::new(),
                 last_error: None,
                 reconnect_after_release: false,
+                ai_home_scoped: false,
             }),
             network_events: Default::default(),
             update_attempt_pending: None,

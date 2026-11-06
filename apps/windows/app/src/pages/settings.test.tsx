@@ -226,27 +226,29 @@ it('general settings confirm saved choices across navigation and apply language 
     screen.getByRole('switch', {
       name: i18n.language === 'zh' ? '登录电脑时打开' : 'Open at sign-in',
     }) as HTMLButtonElement
-  const routing = (value: 'stable' | 'three-tier') =>
+  const routing = (value: 'ai-home' | 'stable' | 'three-tier') =>
     screen.getByRole('button', {
-      name: value === 'stable' ? 'Stable (default)' : 'Three-tier',
+      name:
+        value === 'ai-home'
+          ? 'AI Home (default)'
+          : value === 'stable'
+            ? 'Stable'
+            : 'Three-tier',
     }) as HTMLButtonElement
   expect(toggle().disabled).toBe(true)
   expect(routing('three-tier').disabled).toBe(true)
   await act(async () => finishRead())
   await waitFor(() => expect(toggle().disabled).toBe(false))
   expect(toggle().getAttribute('aria-checked')).toBe('false')
-  expect(routing('stable').getAttribute('aria-pressed')).toBe('true')
+  expect(routing('ai-home').getAttribute('aria-pressed')).toBe('true')
   expect(
-    screen.getByText(/Priority: 21 cloud-video exceptions/).textContent,
+    screen.getByText(/AI Home: AI and named Home services/).textContent,
   ).toContain(
-    '194 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations',
+    'Everything else goes DIRECT, including UDP and LAN',
   )
   expect(
-    screen.getByText(/ECH, cached\/raw IP or app DoH/).textContent,
-  ).toContain('unidentified AI is not guaranteed Home routing')
-  expect(
-    screen.getByText(/Ordinary DIRECT supports public IPv4/).textContent,
-  ).toContain('TCP ports 80/443 only')
+    screen.getByText(/Only listed AI domains and Anthropic/).textContent,
+  ).toContain('ordinary traffic stays online and listed AI services stay blocked')
   let refuse!: () => void
   mocks.preferenceRead.mockImplementation(async () => actual)
   mocks.preferenceWrite.mockImplementationOnce(async (value) => {
@@ -300,14 +302,17 @@ it('general settings confirm saved choices across navigation and apply language 
   expect(toggle().disabled).toBe(false)
   expect(
     screen
-      .getByRole('button', { name: '稳定（默认）' })
+      .getByRole('button', { name: 'AI 家宽（默认）' })
       .getAttribute('aria-pressed'),
   ).toBe('true')
   expect(
+    screen.getByRole('button', { name: '稳定' }).hasAttribute('disabled'),
+  ).toBe(false)
+  expect(
     screen.getByRole('button', { name: '三层路由' }).hasAttribute('disabled'),
   ).toBe(false)
-  expect(screen.getByText(/优先级：21 项云端视频例外/).textContent).toContain(
-    '无法保证未识别的 AI 走 Home',
+  expect(screen.getByText(/AI 家宽：AI 与指定的家宽服务/).textContent).toContain(
+    '其余全部直连，包括 UDP 和局域网',
   )
 
   // A successful write with a failed readback is still unconfirmed, not Saved.
@@ -337,6 +342,14 @@ it('general settings confirm saved choices across navigation and apply language 
     desktop_routing_mode: 'three-tier',
   })
   expect(actual).toMatchObject({ desktop_routing_mode: 'three-tier' })
+  expect(
+    screen.getByText(/Priority: 21 cloud-video exceptions/).textContent,
+  ).toContain(
+    '194 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations',
+  )
+  expect(
+    screen.getByText(/Ordinary DIRECT supports public IPv4/).textContent,
+  ).toContain('TCP ports 80/443 only')
   expect(screen.getByRole('status').textContent).toBe('Saved')
   rerender(page(false))
   rerender(page(true))
@@ -366,10 +379,10 @@ it('general settings confirm saved choices across navigation and apply language 
   const legacyRouting = () =>
     screen.getByRole('combobox', { name: 'Routing mode' }) as HTMLSelectElement
   await waitFor(() => expect(legacyRouting().value).toBe('stable'))
-  fireEvent.change(legacyRouting(), { target: { value: 'three-tier' } })
-  await waitFor(() => expect(legacyRouting().value).toBe('three-tier'))
+  fireEvent.change(legacyRouting(), { target: { value: 'ai-home' } })
+  await waitFor(() => expect(legacyRouting().value).toBe('ai-home'))
   expect(mocks.preferenceWrite).toHaveBeenLastCalledWith({
-    desktop_routing_mode: 'three-tier',
+    desktop_routing_mode: 'ai-home',
   })
-  expect(actual).toMatchObject({ desktop_routing_mode: 'three-tier' })
+  expect(actual).toMatchObject({ desktop_routing_mode: 'ai-home' })
 })

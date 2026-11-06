@@ -805,6 +805,18 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 Ok(contract) => contract,
                 Err(error) => return bad_request(format!("Strict runtime refused: {error:#}")),
             };
+            let ai_home_admitted = match windows_kill_switch::admit_ai_home_start(
+                &start_request.runtime,
+                start_request.windows_kill_switch.as_ref(),
+            )
+            .await
+            {
+                Ok(admitted) => admitted,
+                Err(error) => return bad_request(format!("AI Home runtime refused: {error:#}")),
+            };
+            if strict_contract.is_some() && ai_home_admitted {
+                return bad_request("Strict three-tier and AI Home contracts are mutually exclusive");
+            }
             #[cfg(all(windows, not(feature = "test")))]
             {
                 let admitted = if crate::core::structure::is_sing_box_core_path(
@@ -812,6 +824,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ) {
                     if strict_contract.is_some() {
                         crate::core::sing_box_runtime::admit_strict_runtime(&start_request.runtime.yaml)
+                    } else if ai_home_admitted {
+                        crate::core::sing_box_runtime::admit_ai_home_start_runtime(&start_request.runtime.yaml)
                     } else {
                         crate::core::sing_box_runtime::admit_new_runtime(&start_request.runtime.yaml)
                     }
@@ -1157,7 +1171,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StageRuntime, IPC_HANDLER_TIMEOUT);
-            if let Err(error) = windows_kill_switch::refuse_strict_mutation() {
+            if let Err(error) = windows_kill_switch::refuse_owned_graph_mutation() {
                 return service_unavailable(error.to_string());
             }
             match stage_runtime(&owner, &request.payload).await {

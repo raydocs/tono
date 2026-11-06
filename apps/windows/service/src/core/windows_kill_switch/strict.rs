@@ -110,9 +110,92 @@ pub(super) async fn prove_strict_session(armed: &Armed) -> Result<()> {
     prove_strict_interface(&contract.physical_interface).await
 }
 
+pub(crate) async fn admit_ai_home_start(
+    runtime: &crate::RuntimeBundle,
+    kill_switch: Option<&KillSwitchConfig>,
+) -> Result<bool> {
+    let requested = kill_switch.is_some_and(|ks| ks.ai_home_scoped);
+    let value: Option<serde_json::Value> = serde_json::from_str(&runtime.yaml).ok();
+    if let Some(value) = value.as_ref()
+        && crate::three_tier::routing_mode(value).is_none()
+    {
+        bail!("runtime mixes three-tier and ai-home graph tags");
+    }
+    let is_ai_home = value
+        .as_ref()
+        .is_some_and(crate::three_tier::is_ai_home_runtime);
+    if !requested && !is_ai_home {
+        return Ok(false);
+    }
+    if !requested || !is_ai_home {
+        bail!("AI Home runtime and ai_home_scoped kill-switch contract must match");
+    }
+    let kill_switch = kill_switch.context("AI Home requires Windows protection")?;
+    if !crate::core::structure::is_sing_box_core_path(&runtime.core_path) {
+        bail!("AI Home requires sing-box");
+    }
+    if kill_switch.tunnel_interface.trim() != "Tono" {
+        bail!("AI Home session requires the owned Tono TUN");
+    }
+    if !kill_switch.direct_endpoints.is_empty() {
+        bail!("AI Home session does not accept physical DIRECT endpoint grants");
+    }
+    crate::core::sing_box_runtime::admit_ai_home_start_runtime(&runtime.yaml)
+        .map_err(anyhow::Error::msg)?;
+    let value = value.context("AI Home runtime must be JSON")?;
+    let interface = value["outbounds"]
+        .as_array()
+        .context("missing outbounds")?
+        .iter()
+        .find(|outbound| {
+            outbound["type"] == "direct"
+                && outbound["tag"].as_str() == Some(crate::three_tier::AI_HOME_DIRECT)
+        })
+        .and_then(|outbound| outbound["bind_interface"].as_str())
+        .context("AI Home physical interface missing")?
+        .to_owned();
+    prove_strict_interface(&interface).await?;
+    let exits = value["outbounds"]
+        .as_array()
+        .context("missing outbounds")?
+        .iter()
+        .filter(|outbound| matches!(outbound["type"].as_str(), Some("vless" | "hysteria2")))
+        .map(|outbound| {
+            let ip = outbound["server"]
+                .as_str()
+                .context("AI Home exit needs literal IPv4")?;
+            let address: Ipv4Addr = ip.parse().context("AI Home exit needs literal IPv4")?;
+            let port = outbound["server_port"]
+                .as_u64()
+                .and_then(|port| u16::try_from(port).ok())
+                .filter(|port| *port > 0)
+                .context("invalid AI Home exit port")?;
+            if !is_public_direct_ipv4(address) {
+                bail!("AI Home exit must be public IPv4");
+            }
+            Ok((address, port))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if exits.is_empty() {
+        bail!("AI Home graph has no cloud exit");
+    }
+    Ok(true)
+}
+
 pub(crate) fn refuse_strict_mutation() -> Result<()> {
     if strict_kill_switch_enabled() {
         bail!("three-tier session is immutable; explicitly disconnect before changing runtime or mode");
+    }
+    Ok(())
+}
+
+pub(crate) fn refuse_owned_graph_mutation() -> Result<()> {
+    refuse_strict_mutation()?;
+    if armed_guard()
+        .as_ref()
+        .is_some_and(|armed| armed.intent.wanted && armed.intent.ai_home_scoped)
+    {
+        bail!("AI Home session is immutable; reconnect before changing runtime or mode");
     }
     Ok(())
 }

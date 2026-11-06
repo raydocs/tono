@@ -494,6 +494,7 @@ mod tests {
                         "WFP permit for {NODE_IP}:443 rejected; Authorization: Bearer {ACCESS_TOKEN}"
                     )),
                     reconnect_after_release: false,
+                    ai_home_scoped: false,
                 },
                 dns: DnsProtectionStatus {
                     enabled: false,

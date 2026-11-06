@@ -41,7 +41,7 @@ use crate::{
 pub(super) struct Prefetched {
     bootstrap_api_hosts: Vec<String>,
     sing_box: Option<SingBoxImage>,
-    three_tier: bool,
+    session_mode: crate::tono::state::DesktopSessionMode,
 }
 
 /// WIN-TCP-PROOF-SERIAL: the unarmed TCP proof of the exit ran beside the Service readiness
@@ -53,7 +53,10 @@ pub(super) struct Prefetched {
 ///    must not depend on the system resolver once blocking starts, and the app's own API
 ///    client is pinned to the same addresses (see `tono::bootstrap` / `tono::transport`).
 ///  - The sing-box image proof, which only chooses the core for this start.
-pub(super) async fn ready_service_and_prefetch(state: &TonoState, three_tier: bool) -> Result<Prefetched, String> {
+pub(super) async fn ready_service_and_prefetch(
+    state: &TonoState,
+    session_mode: crate::tono::state::DesktopSessionMode,
+) -> Result<Prefetched, String> {
     // Immutable admission snapshot, never the mutable next-session preference.
     // A protected re-entry resolves through the protected resolver, which is down until this
     // attempt's Core answers; its bootstrap lookup gets a short budget.
@@ -71,7 +74,11 @@ pub(super) async fn ready_service_and_prefetch(state: &TonoState, three_tier: bo
     )
     .await?;
     // After the learned pins were read from the Service: the merge puts them in the permit set.
-    Ok(Prefetched { bootstrap_api_hosts: bootstrap::merge_bootstrap_hosts(&addresses), sing_box, three_tier })
+    Ok(Prefetched {
+        bootstrap_api_hosts: bootstrap::merge_bootstrap_hosts(&addresses),
+        sing_box,
+        session_mode,
+    })
 }
 
 /// The learned pins come from the Service, so they are read once it is ready; the two local
@@ -110,7 +117,11 @@ pub(super) async fn run_stages(
     route_owner: Option<&crate::tono::route_preferences::PreferenceContext>,
     prefetched: Prefetched,
 ) -> Result<(), StageFailure> {
-    let Prefetched { bootstrap_api_hosts, sing_box, three_tier } = prefetched;
+    let Prefetched {
+        bootstrap_api_hosts,
+        sing_box,
+        session_mode,
+    } = prefetched;
     // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
     // the bootstrap API hosts are the only control-plane recovery channel.
     // When the catalog binds a home-broadband exit, its endpoint joins the
@@ -162,8 +173,9 @@ pub(super) async fn run_stages(
             document,
         })
     };
-    let needs_physical_interface = three_tier || (WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content()));
+    let needs_physical_interface = session_mode.uses_owned_graph()
+        || (WINDOWS_OPTIONAL_DIRECT_ENABLED
+            && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content()));
 
     // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
@@ -236,10 +248,8 @@ pub(super) async fn run_stages(
                     Some(interface)
                 }
                 Err(error) => {
-                    // The cloud DIRECT overlay is optional. A machine with a virtual-only
-                    // default route (or an adapter transition) must keep the proven full-tunnel
-                    // runtime rather than turning an unrelated VMware/Hyper-V condition into a
-                    // connection failure. WFP still has no physical DIRECT permits in this case.
+                    // The cloud DIRECT overlay is optional in Stable. Owned sing-box graphs
+                    // (`ThreeTier` and `AiHome`) fail closed below when no physical uplink exists.
                     logging!(
                         warn,
                         Type::Service,
@@ -255,9 +265,19 @@ pub(super) async fn run_stages(
     // account's exit credentials. The App never writes it to the user profile;
     // it reaches the Service over IPC.
     let secret = generate_controller_secret();
-    let strict_interface = if three_tier {
-        Some(physical_interface.as_deref().ok_or_else(|| StageFailure::error("three-tier requires a proven physical interface"))?)
-    } else { None };
+    let owned_graph = match session_mode.graph_variant() {
+        Some(variant) => {
+            let label = match variant {
+                tono_core::three_tier::Variant::ThreeTier => "three-tier",
+                tono_core::three_tier::Variant::AiHome => "AI Home",
+            };
+            let interface = physical_interface
+                .as_deref()
+                .ok_or_else(|| StageFailure::error(format!("{label} requires a proven physical interface")))?;
+            Some((variant, interface))
+        }
+        None => None,
+    };
     let prepared = prepare_owned_core(
         state,
         active_runtime_resume.is_some(),
@@ -268,7 +288,7 @@ pub(super) async fn run_stages(
         runtime_ports,
         &core_path,
         sing_box,
-        strict_interface,
+        owned_graph,
     )
     .await?;
     {
@@ -288,6 +308,7 @@ pub(super) async fn run_stages(
         // Omission = clear (service-side): the first start never carries
         // direct permits; the cloud-policy stage adds them later if needed.
         direct_endpoints: Vec::new(),
+        ai_home_scoped: session_mode.is_ai_home(),
     };
 
     // §6.3: startingKillSwitch — the Service persists intent, installs the
@@ -356,7 +377,7 @@ pub(super) async fn run_stages(
         )
         .await??;
     ensure_fresh(state, generation).await?;
-    if !three_tier {
+    if !session_mode.uses_owned_graph() {
         transaction
             .wait("fake-IP verification", verify_fake_ip())
             .await?
@@ -364,24 +385,35 @@ pub(super) async fn run_stages(
     }
 
     // §6.8 + §6.9: checkingExit → verifyingTraffic, as one retryable verification group (C3).
-    let mut kill_status = if three_tier {
+    let mut kill_status = if session_mode.uses_owned_graph() {
         set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
         set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
-        let status = super::probes::verify_locked().await.map_err(StageFailure::error)?;
-        transaction.wait("three-tier protected fake-IP/TLS verification", super::probes::verify_three_tier_data_plane())
-            .await?.map_err(StageFailure::error)?;
+        let status = super::probes::verify_locked_for_mode(session_mode)
+            .await
+            .map_err(StageFailure::error)?;
+        let label = if session_mode.is_ai_home() {
+            "AI Home protected fake-IP/TLS verification"
+        } else {
+            "three-tier protected fake-IP/TLS verification"
+        };
+        transaction
+            .wait(label, super::probes::verify_three_tier_data_plane())
+            .await?
+            .map_err(StageFailure::error)?;
         status
-    } else { verify_post_lock(
-        state,
-        app,
-        &secret,
-        controller_port,
-        mixed_port,
-        generation,
-        started,
-        transaction,
-    )
-    .await? };
+    } else {
+        verify_post_lock(
+            state,
+            app,
+            &secret,
+            controller_port,
+            mixed_port,
+            generation,
+            started,
+            transaction,
+        )
+        .await?
+    };
 
     // The durable logical-session latch is committed only after every existing check and a
     // final generation guard. A failure remains an ordinary connect failure.
@@ -412,6 +444,9 @@ pub(super) async fn run_stages(
         }).await?;
         deferred_catalog_rebuild = catalog_changed;
         inner.kill_switch = Some(kill_status);
+        if session_mode.uses_owned_graph() {
+            inner.applied_direct_interface = physical_interface.clone();
+        }
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
@@ -480,14 +515,14 @@ pub(super) async fn run_stages(
         transport: node.catalog_transport(),
     });
     spawn_network_monitor(state, app).await;
-    if deferred_catalog_rebuild && !three_tier {
+    if deferred_catalog_rebuild && !session_mode.is_three_tier() {
         super::switch::spawn_deferred_catalog_rebuild(state, app, generation);
         return Ok(());
     }
     spawn_exit_identity_lookup(state, app, generation);
-    // Strict graphs are immutable. Stable's optional overlay, selected-exit writers and
-    // policy refresh must never replace them with a full-tunnel/stable document.
-    if three_tier {
+    // Owned sing-box graphs (Three-tier and AI Home) carry their own compiled DIRECT rules.
+    // Stable's optional overlay, selected-exit writers and policy refresh must never replace them.
+    if session_mode.uses_owned_graph() {
         return Ok(());
     }
     let residential_target = if home_socks5.is_some() {

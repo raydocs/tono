@@ -307,6 +307,7 @@ fn emergency_armed() -> Armed {
             reconnect_after_release: false,
             reconnect_owner_key: None,
             apply_narrow_after_release: None,
+            ai_home_scoped: false,
         },
         tun_luid: None,
         core_instance: None,
