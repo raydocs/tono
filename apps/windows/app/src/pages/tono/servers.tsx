@@ -36,6 +36,7 @@ import {
 import { useTonoToast } from '@/tono-ui/tono-toast-context'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
+import { whileVisible } from '@/tono-ui/while-visible'
 
 import {
   latencyColor,
@@ -89,7 +90,7 @@ const ServersPage = () => {
   } | null>(null)
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
-  const { status, mutateTonoStatus } = useTonoStatus()
+  const { status, mutateTonoStatus, visible } = useTonoStatus()
   const showToast = useTonoToast()
   const [selectError, setSelectError] = useState<string | null>(null)
   const [switchingName, setSwitchingName] = useState<string | null>(null)
@@ -132,7 +133,8 @@ const ServersPage = () => {
   const { data: catalog, refetch: mutateCatalog } = useQuery({
     queryKey: catalogStatusQueryKey,
     queryFn: tonoCatalogStatus,
-    refetchInterval: 30_000,
+    refetchInterval: visible ? 30_000 : false,
+    refetchOnWindowFocus: true,
   })
   const scope = status?.routePreferenceScope
   const {
@@ -143,7 +145,8 @@ const ServersPage = () => {
     queryKey: ['tono', 'route-preferences', scope, status?.catalogRevision],
     queryFn: tonoRoutePreferences,
     enabled: !!scope,
-    refetchInterval: 30_000,
+    refetchInterval: visible ? 30_000 : false,
+    refetchOnWindowFocus: true,
   })
   const preferences = preferencesMatch(
     storedPreferences,
@@ -163,9 +166,9 @@ const ServersPage = () => {
   )
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 5_000)
-    return () => window.clearInterval(timer)
-  }, [])
+    if (!visible) return
+    return whileVisible(() => setNow(Date.now()), 5_000)
+  }, [visible])
 
   useEffect(
     () => () => {

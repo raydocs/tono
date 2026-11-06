@@ -60,5 +60,8 @@ export function useTonoStatus() {
     status,
     mutateTonoStatus,
     isLoading,
+    /** The window is shown. A window closed to the tray is only hidden, and WebView2 still
+     * reports its page "visible", so other polls and clocks gate on this. */
+    visible: pageVisible,
   }
 }

@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
     | undefined,
   refreshGetClashTraffic: vi.fn(),
   encryptedDnsOverrides: false,
+  visible: true,
+  trafficEnabled: [] as (boolean | undefined)[],
 }))
 
 vi.mock('@/hooks/use-tono', () => ({
@@ -40,15 +42,21 @@ vi.mock('@/hooks/use-tono', () => ({
   useTonoStatus: () => ({
     status: mocks.status,
     mutateTonoStatus: mocks.mutateTonoStatus,
+    visible: mocks.visible,
   }),
 }))
 
+vi.mock('@/hooks/use-visibility', () => ({ useVisibility: () => true }))
+
 vi.mock('@/hooks/use-traffic-data', () => ({
-  useTrafficData: () => ({
-    response: { data: mocks.traffic },
-    live: mocks.trafficLive,
-    refreshGetClashTraffic: mocks.refreshGetClashTraffic,
-  }),
+  useTrafficData: (options?: { enabled?: boolean }) => {
+    mocks.trafficEnabled.push(options?.enabled)
+    return {
+      response: { data: mocks.traffic },
+      live: mocks.trafficLive,
+      refreshGetClashTraffic: mocks.refreshGetClashTraffic,
+    }
+  },
 }))
 
 vi.mock('@/services/cmds', () => ({
@@ -125,6 +133,8 @@ beforeEach(() => {
   mocks.traffic = undefined
   mocks.refreshGetClashTraffic.mockReset()
   mocks.encryptedDnsOverrides = false
+  mocks.visible = true
+  mocks.trafficEnabled = []
 })
 
 afterEach(async () => {
@@ -132,6 +142,25 @@ afterEach(async () => {
   vi.unstubAllGlobals()
   await removeCacheData(['tono', 'encrypted-dns'])
   await removeCacheData(['tono', 'catalog-status'])
+})
+
+describe('dashboard in a window hidden to the tray', () => {
+  it('keeps no traffic socket while hidden and opens it when shown again', () => {
+    mocks.status = makeStatus({ uiState: 'connected' })
+    mocks.visible = false
+    const view = renderDashboard()
+    expect(mocks.trafficEnabled.at(-1)).toBe(false)
+
+    mocks.visible = true
+    view.rerender(
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </SWRConfig>,
+    )
+    expect(mocks.trafficEnabled.at(-1)).toBe(true)
+  })
 })
 
 describe('dashboard action-error ownership', () => {

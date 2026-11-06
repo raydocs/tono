@@ -3,9 +3,6 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 const handlers = vi.hoisted(() => ({ message: (_data: string) => {} }))
-vi.mock('./use-traffic-monitor', () => ({
-  useTrafficMonitorEnhanced: () => ({ graphData: { appendData: vi.fn() } }),
-}))
 vi.mock('./use-mihomo-ws-subscription', () => ({
   useMihomoWsSubscription: ({
     setupHandlers,

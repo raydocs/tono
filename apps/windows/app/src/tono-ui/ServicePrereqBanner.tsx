@@ -2,6 +2,7 @@ import { useLockFn } from 'ahooks'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useVisibility } from '@/hooks/use-visibility'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
@@ -35,6 +36,7 @@ export const ServicePrereqBanner = () => {
   const [error, setError] = useState<string | null>(null)
   const [repairing, setRepairing] = useState(false)
   const refreshingRef = useRef(false)
+  const visible = useVisibility()
 
   const refresh = useCallback(async () => {
     if (refreshingRef.current) return
@@ -54,11 +56,13 @@ export const ServicePrereqBanner = () => {
   }, [])
 
   useEffect(() => {
+    // A window hidden to the tray asks nothing; showing it again reads at once.
+    if (!visible) return
     void refresh()
     // Read-only, but SCM can stall. refresh coalesces ticks until it answers.
     const timer = window.setInterval(() => void refresh(), 30_000)
     return () => window.clearInterval(timer)
-  }, [refresh])
+  }, [refresh, visible])
 
   const repair = useLockFn(async () => {
     setRepairing(true)

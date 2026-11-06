@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   repair: vi.fn(),
 }))
 
+vi.mock('@/hooks/use-visibility', () => ({ useVisibility: () => true }))
 vi.mock('@/services/tono', () => ({
   tonoServicePrerequisites: mocks.prerequisites,
   tonoRepairService: mocks.repair,

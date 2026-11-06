@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { MihomoWebSocket, Traffic } from 'tono-plugin-core-api'
 
 import { useMihomoWsSubscription } from './use-mihomo-ws-subscription'
-import { useTrafficMonitorEnhanced } from './use-traffic-monitor'
 
 const FALLBACK_TRAFFIC: Traffic = { up: 0, down: 0, upTotal: 0, downTotal: 0 }
 const DUPLICATE_TRAFFIC_WINDOW_MS = 50
@@ -45,9 +44,6 @@ export const useTrafficData = (options?: {
     setLive(false)
   }
 
-  const {
-    graphData: { appendData },
-  } = useTrafficMonitorEnhanced({ subscribe: false, enabled })
   const { response, refresh } = useMihomoWsSubscription<ITrafficItem>({
     storageKey: 'mihomo_traffic_date',
     // The traffic socket captures host/port/secret at open time. Tono mints a
@@ -76,7 +72,6 @@ export const useTrafficData = (options?: {
           if (shouldSkipDuplicateTraffic(parsed)) {
             return
           }
-          appendData(parsed)
           next(null, parsed)
         } catch (error) {
           next(error, FALLBACK_TRAFFIC)
