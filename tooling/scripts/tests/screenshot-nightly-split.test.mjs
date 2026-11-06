@@ -26,6 +26,16 @@ test('every screenshot test the PR gate skips runs in the nightly, and only ther
   assert.equal([...nightly.matchAll(/^ {8}run:.*--ignore-snapshots/gm)].length, 0, 'the nightly must compare pixels')
   assert.ok(nightly.includes('shard: [1, 2, 3, 4]'), 'the nightly uses the PR gate shard count')
 
+  const browserKey = "key: playwright-${{ runner.os }}-${{ hashFiles('services/ops-console/package-lock.json') }}"
+  assert.ok(services.includes('id: playwright-cache'), 'PR e2e must cache Playwright browsers')
+  assert.ok(nightly.includes('id: playwright-cache'), 'nightly must cache Playwright browsers')
+  assert.ok(services.includes(browserKey))
+  assert.ok(nightly.includes(browserKey))
+  assert.ok(services.includes('npx playwright install-deps chromium'), 'cache hit still installs OS deps')
+  assert.doesNotMatch(services, /playwright-[\s\S]{0,80}restore-keys:/)
+  assert.doesNotMatch(nightly, /playwright-[\s\S]{0,80}restore-keys:/)
+  assert.match(services, /cache: npm\n {10}cache-dependency-path: services\/ops-console\/package-lock\.json/)
+
   assert.ok(/^on:\n {2}schedule:\n {4}- cron: /m.test(nightly), 'the nightly needs a schedule')
   assert.ok(/^ {2}workflow_dispatch:/m.test(nightly), 'the nightly needs workflow_dispatch')
   assert.ok(!/^ {2}(pull_request|merge_group|workflow_call):/m.test(nightly), 'the nightly must stay out of the PR gate')

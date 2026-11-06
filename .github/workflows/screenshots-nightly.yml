@@ -45,8 +45,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sing-box-input:
+  skip-duplicate:
     if: ${{ !inputs.update_baselines }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Skip when this SHA already had a successful nightly
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_BASELINES: ${{ inputs.update_baselines }}
+        run: |
+          set -euo pipefail
+          skip=$(node tooling/scripts/screenshots-nightly-skip.mjs --decide)
+          case "$skip" in true|false) ;; *) echo "bad skip token" >&2; exit 1 ;; esac
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          printf 'screenshots-nightly skip=%s event=%s sha=%s\n' "$skip" "$GITHUB_EVENT_NAME" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  sing-box-input:
+    needs: skip-duplicate
+    if: ${{ !inputs.update_baselines && needs.skip-duplicate.result == 'success' && needs.skip-duplicate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -61,8 +85,8 @@ jobs:
           retention-days: 3
 
   macos-window-captures:
-    needs: sing-box-input
-    if: ${{ !inputs.update_baselines }}
+    needs: [skip-duplicate, sing-box-input]
+    if: ${{ !inputs.update_baselines && needs.skip-duplicate.result == 'success' && needs.skip-duplicate.outputs.skip != 'true' }}
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -124,9 +148,12 @@ jobs:
           retention-days: 7
 
   ops-console-screenshots:
-    if: ${{ !inputs.update_baselines }}
+    needs: skip-duplicate
+    if: ${{ !inputs.update_baselines && needs.skip-duplicate.result == 'success' && needs.skip-duplicate.outputs.skip != 'true' }}
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +171,15 @@ jobs:
       - name: Install exactly what the lockfile pins
         run: npm ci
 
+      - name: Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ github.workspace }}/.ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('services/ops-console/package-lock.json') }}
+
       - name: Install Playwright's Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
 
       - name: Screenshot baselines compared
@@ -166,6 +201,8 @@ jobs:
     if: ${{ inputs.update_baselines }}
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
     defaults:
       run:
         working-directory: services/ops-console
@@ -179,7 +216,15 @@ jobs:
       - name: Install exactly what the lockfile pins
         run: npm ci
 
+      - name: Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ github.workspace }}/.ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('services/ops-console/package-lock.json') }}
+
       - name: Install Playwright's Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
 
       - name: Screenshot baselines re-recorded
@@ -200,7 +245,7 @@ jobs:
           retention-days: 7
 
   report-failure:
-    needs: [sing-box-input, macos-window-captures, ops-console-screenshots, ops-console-rerecord]
+    needs: [skip-duplicate, sing-box-input, macos-window-captures, ops-console-screenshots, ops-console-rerecord]
     if: failure() && github.ref == 'refs/heads/main' && !inputs.update_baselines
     runs-on: ubuntu-24.04
     timeout-minutes: 10

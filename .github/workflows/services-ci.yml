@@ -95,8 +95,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: services-ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
+  group: services-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   release-duplicate:
@@ -155,6 +155,7 @@ jobs:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: services/control-plane
@@ -167,6 +168,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: services/control-plane/package-lock.json
 
       - name: Install exactly what the lockfile pins
         run: npm ci
@@ -223,6 +226,7 @@ jobs:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -298,6 +302,7 @@ jobs:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     # Job-level permissions replace the workflow-level block entirely, so
     # contents: read has to be restated or checkout loses the tree.
     permissions:
@@ -309,6 +314,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            services/control-plane/package-lock.json
+            services/ops-console/package-lock.json
 
       - name: Install control-plane
         working-directory: services/control-plane
@@ -411,6 +420,7 @@ jobs:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: services/control-plane
@@ -420,6 +430,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: services/control-plane/package-lock.json
 
       - name: Install exactly what the lockfile pins
         run: npm ci
@@ -497,7 +509,12 @@ jobs:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
     strategy:
+      # Same specs, split for wall-clock. Keep fail-fast off so a red
+      # shard still reports which siblings would fail.
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
@@ -510,12 +527,26 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: services/ops-console/package-lock.json
 
       - name: Install exactly what the lockfile pins
         run: npm ci
 
+      - name: Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ github.workspace }}/.ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('services/ops-console/package-lock.json') }}
+
       - name: Install Playwright's Chromium and its OS deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Functional assertions only
         # Screenshot baselines were captured on macOS at DPR 2; Linux fonts

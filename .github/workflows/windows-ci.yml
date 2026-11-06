@@ -54,8 +54,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
+  group: windows-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   release-duplicate:
@@ -117,6 +117,7 @@ jobs:
     # config, catalog, connection, auth, node, policy, and credentials. Running it
     # on Linux keeps the cheap half of the coverage fast and unconditional.
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     env:
       CARGO_INCREMENTAL: "0"
     steps:
@@ -195,14 +196,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Install the pinned toolchain and cargo-llvm-cov
+      - name: Install the pinned toolchain
         working-directory: apps/windows
         run: |
           toolchain=$(sed -n 's/^channel = "\(.*\)"$/\1/p' app/rust-toolchain.toml)
           test -n "$toolchain"
           rustup toolchain install "$toolchain" --profile minimal --component llvm-tools-preview
           echo "RUSTUP_TOOLCHAIN=$toolchain" >> "$GITHUB_ENV"
-          cargo "+$toolchain" install cargo-llvm-cov --locked --version 0.9.1
+
+      # Prebuilt binary. `cargo install cargo-llvm-cov` compiled from source on
+      # every run (setup ~64–73s vs ~24s of coverage work).
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-llvm-cov@0.9.1
 
       - name: Measure tono-core coverage
         working-directory: apps/windows
@@ -226,15 +232,22 @@ jobs:
     # On Linux because the frontend does not need Windows to be type-checked or
     # unit-tested, and the Windows runner is the slow one.
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/windows/app
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.26.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/windows/app/pnpm-lock.yaml
 
       - name: Cargo caches are rust-cache, saved only on main
         shell: bash
@@ -272,9 +285,6 @@ jobs:
           console.log('rust-cache: 3 jobs cache workspace crates, save on main push only; nextest is tono-core only')
           NODE
 
-      - name: Install pnpm as the project pins it
-        run: npm install --global pnpm@11.3.0
-
       - name: Install exactly what the lockfile pins
         run: pnpm install --frozen-lockfile
 
@@ -306,6 +316,7 @@ jobs:
     # what ships, and because `build.rs` gives every test harness its own Common
     # Controls activation context there; the tests die at load time without it.
     runs-on: windows-2025
+    timeout-minutes: 25
     env:
       CARGO_INCREMENTAL: "0"
     steps:
@@ -327,12 +338,15 @@ jobs:
         run: |
           echo "Cargo cache (windows-app-rust): cache-hit=${{ steps.rust-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.26.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
-
-      - name: Install pnpm as the project pins it
-        run: npm install --global pnpm@11.3.0
+          cache: pnpm
+          cache-dependency-path: apps/windows/app/pnpm-lock.yaml
 
       - name: Install exactly what the lockfile pins
         working-directory: apps/windows/app
@@ -421,6 +435,7 @@ jobs:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: windows-2025
+    timeout-minutes: 20
     env:
       CARGO_INCREMENTAL: "0"
     steps:

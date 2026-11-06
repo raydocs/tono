@@ -16,8 +16,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-gate-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+  # Cancel only consecutive pushes on the same PR. Each workflow file uses its
+  # own prefix: a called reusable workflow inherits the caller's
+  # github.workflow, so ${{ github.workflow }} here would make macos/windows/
+  # services share this group and fail to start (ci-gate run 42183279487).
+  # Never cancel main, tags, release branches, or the merge queue.
+  group: ci-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
@@ -31,9 +36,12 @@ jobs:
       connect_bench: ${{ steps.filter.outputs.connect_bench }}
       ios: ${{ steps.filter.outputs.ios }}
     steps:
+      # Path detection diffs this checkout (PR merge commit or merge-group
+      # head) against the event base SHA. A full clone is unnecessary:
+      # ci-gate-changes.mjs fetches a missing SHA with --depth=1.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24

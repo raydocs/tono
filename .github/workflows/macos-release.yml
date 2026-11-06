@@ -82,6 +82,7 @@ jobs:
     # Plain shell: it needs no Mac, and a macos-26 runner can take an hour to arrive
     # (run 39699940479 queued this job for 52 minutes) before the build may start.
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Refuse a ref that is not the release line
         env:
@@ -124,6 +125,7 @@ jobs:
     # Consume those same bytes rather than conflicting with its artifact name.
     needs: branch
     runs-on: macos-26
+    timeout-minutes: 90
     outputs:
       short_version: ${{ steps.release-version.outputs.short_version }}
       build: ${{ steps.release-version.outputs.build }}
@@ -439,6 +441,7 @@ jobs:
   attest:
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
@@ -457,6 +460,7 @@ jobs:
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.candidate_only) }}
     needs: [build, attest]
     runs-on: macos-26
+    timeout-minutes: 30
     environment: macos-appcast
     env:
       RELEASE_SHORT_VERSION: ${{ needs.build.outputs.short_version }}
