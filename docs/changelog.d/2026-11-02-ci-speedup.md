@@ -67,3 +67,18 @@
   | 挂死作业 | 现在会在 timeout 杀掉 | 上限封顶 |
 
 - 续记（2026-11-06，ci-gate run 42183279487）：`changes` 判定六个成员都该跑，但 macos/windows/services/sing-box/connect-bench/ios 作业没有出现在 run 里，`needs.*.result` 全是 `failure`，聚合 22s 红。可复用工作流继承调用方的 `github.workflow`（都变成 `ci-gate`），子作业和父作业抢同一个 concurrency 组。组名改回每个文件自己的前缀（`macos-ci-` 等）+ PR 号；`cancel-in-progress` 仍只对 `pull_request`。测试禁止被调用工作流用 `github.workflow` 做组名。
+- 续记（2026-11-06，绿）：[ci-gate run 42186529899](https://github.com/raydocs/tono/actions/runs/42186529899) 在 `2bbb231fe` 成功（14m35s 墙钟）。清理pass：不再改工作流。e2e 分片 3 的 Playwright 安装 559s 是四路同时冷 miss 抢下载，不是暖缓存数字；按任务要求不拿这次冷跑当优化依据。npm/pnpm/Playwright 都是 miss（新 key 第一次）；rust-cache 3/3 hit（core / app-rust / service）。
+
+  | 作业 | 基线 p50 墙钟 | 本 run | 缓存 |
+  |---|---|---|---|
+  | windows / app-rust | 8m20s | **8m02s** | rust hit，pnpm miss |
+  | macos / unit-tests | 6m54s | **5m09s** | 第一轮 XCTest 并行（main 上还没有） |
+  | windows / coverage | 1m30s（准备 64s） | **49s**（install-action 0s，测量 23s） | 预编译，不走 rust-cache |
+  | windows / service | 5m01s | 5m24s | rust hit |
+  | services / control-plane | 5m08s | 4m28s | npm miss；`npm ci` 6s |
+  | services / e2e 1/2/4 | ~5m | 5m33s / 4m37s / 5m09s | npm miss，playwright miss（安装 21–28s） |
+  | services / e2e 3 | ~5m | 13m38s | playwright 安装 **559s**（冷跑，不当基线） |
+  | 门墙钟 | ~8m20s（app-rust） | 14m35s（被 e2e3 冷安装拖住） | 暖路径仍应是 app-rust ~8m |
+  | 计费（ceil×OS 倍率合计） | 约 280 Linux-eq min | **278** | e2e3 多算了约 8 Linux min |
+
+  暖缓存预期：Playwright key 已由本 run 写入；下次 e2e 准备应回到 ~1 min 以内，门墙钟回到 app-rust。coverage 的 49s 不依赖缓存，可与基线 1m30s 直接比。
