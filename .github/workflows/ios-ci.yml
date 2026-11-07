@@ -104,6 +104,19 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPointIdentifier" "$APP/PlugIns/TonoWidgets.appex/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :NSSupportsLiveActivities" "$APP/Info.plist"
           du -sh "$APP" "$APP/PlugIns/PacketTunnel.appex" "$APP/PlugIns/TonoWidgets.appex"
+          # Exact sizes (bytes): each executable, each bundle, and the bundle zipped as a download stand-in.
+          for f in "$APP/Tono" "$APP/PlugIns/PacketTunnel.appex/PacketTunnel" "$APP/PlugIns/TonoWidgets.appex/TonoWidgets"; do
+            echo "SIZE exe $(stat -f %z "$f") $(basename "$f")"
+          done
+          for d in "$APP" "$APP/PlugIns/PacketTunnel.appex" "$APP/PlugIns/TonoWidgets.appex"; do
+            echo "SIZE bundle_kb $(du -sk "$d" | cut -f1) $(basename "$d")"
+          done
+          (cd "$(dirname "$APP")" && ditto -c -k --keepParent Tono.app "$RUNNER_TEMP/Tono-app.zip")
+          echo "SIZE zip $(stat -f %z "$RUNNER_TEMP/Tono-app.zip") Tono.app.zip"
+          # Only the tunnel extension links the core (libbox); the app asks it over TunnelMessage.traffic.
+          # grep reads all of strings' output (no -q): an early exit breaks the pipe under pipefail.
+          if strings "$APP/Tono" | grep "github.com/sagernet/sing-box" > /dev/null; then echo "the app links libbox" >&2; exit 1; fi
+          strings "$APP/PlugIns/PacketTunnel.appex/PacketTunnel" | grep "github.com/sagernet/sing-box" > /dev/null
       - name: Build for the simulator (Debug)
         working-directory: apps/ios
         run: |

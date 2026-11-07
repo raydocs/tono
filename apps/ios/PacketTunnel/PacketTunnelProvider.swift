@@ -15,6 +15,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     static let log = Logger(subsystem: "com.raydocs.tono.ios", category: "tunnel")
 
     private var commandServer: LibboxCommandServer?
+    /// The app's speed readout, read from `commandServer` while the app asks (`TunnelMessage.traffic`).
+    private let traffic = TrafficSampler()
     private lazy var platform = TunnelPlatform(provider: self)
     private let underlying = UnderlyingNetwork()
     /// The inputs sing-box was last started from and whether a graph runs. A refused rebuild can
@@ -127,6 +129,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         screenObserver = nil
         #endif
         underlying.onIPv6Change = nil
+        traffic.stop()
         stopService()
         if let server = commandServer {
             try? await Task.sleep(nanoseconds: 100_000_000)
@@ -173,6 +176,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 ("running", answer.routing?.json ?? .null),
                 ("tunnel", answer.json)
             ).serialized().utf8)
+        case .traffic:
+            return await traffic.sample()
         case nil:
             return Data("unknown message".utf8)
         }

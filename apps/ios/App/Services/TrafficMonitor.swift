@@ -1,5 +1,4 @@
 import Foundation
-import Libbox
 import TonoKit
 
 protocol TrafficClient: AnyObject {
@@ -15,6 +14,8 @@ enum TrafficEvent: Sendable {
 typealias TrafficClientFactory = (@escaping @Sendable (TrafficEvent) -> Void) -> any TrafficClient
 typealias TrafficScheduler = (TimeInterval, @escaping @Sendable () -> Void) -> () -> Void
 typealias TrafficDelivery = (@escaping @MainActor @Sendable () -> Void) -> Void
+/// Sends `TunnelMessage.traffic` to the running tunnel; the handler gets its reply, or nil for none.
+typealias TrafficAsk = @Sendable (@escaping @Sendable (Data?) -> Void) -> Void
 
 /// Reads statistics only; neither a socket connection nor a rate certifies tunnel protection.
 @MainActor
@@ -27,7 +28,7 @@ final class TrafficMonitor {
     var onRate: ((Int64, Int64) -> Void)?
 
     init(queue: DispatchQueue = DispatchQueue(label: "tono.app.traffic"),
-         makeClient: @escaping TrafficClientFactory = { LibboxTrafficClient(receive: $0) },
+         makeClient: @escaping TrafficClientFactory,
          schedule: @escaping TrafficScheduler = trafficSchedule,
          deliver: @escaping TrafficDelivery = { work in Task { @MainActor in work() } }) {
         worker = TrafficWorker(queue: queue, makeClient: makeClient, schedule: schedule)
@@ -210,41 +211,65 @@ func trafficSchedule(_ delay: TimeInterval, _ work: @escaping @Sendable () -> Vo
     return { item.cancel() }
 }
 
-/// One handler per native client: its callbacks never acquire another client's identity.
-private final class LibboxTrafficClient: NSObject, TrafficClient, LibboxCommandClientHandlerProtocol {
+/// Asks the tunnel for a sample once a second (`TunnelMessage.traffic`), never with an ask still
+/// out. The tunnel reads its own core, so the app links no libbox. No reply (the message's timeout),
+/// an "unavailable" or anything else that is not a sample ends the stream as a lost socket did: the
+/// monitor clears the rate, backs off and asks again.
+final class ProviderTrafficClient: TrafficClient, @unchecked Sendable {
     private let receive: @Sendable (TrafficEvent) -> Void
-    private var client: LibboxCommandClient?
+    private let ask: TrafficAsk
+    private let schedule: TrafficScheduler
+    private let interval: TimeInterval
+    private let lock = NSLock()
+    /// Bumped by connect and disconnect: a reply or tick of an earlier stream does nothing.
+    private var generation = 0
+    private var cancelTick: (() -> Void)?
 
-    init(receive: @escaping @Sendable (TrafficEvent) -> Void) {
+    init(receive: @escaping @Sendable (TrafficEvent) -> Void, ask: @escaping TrafficAsk,
+         interval: TimeInterval = 1, schedule: @escaping TrafficScheduler = trafficSchedule) {
         self.receive = receive
-        super.init()
-        let options = LibboxCommandClientOptions()
-        options.addCommand(LibboxCommandStatus)
-        options.statusInterval = Int64(NSEC_PER_SEC)
-        client = LibboxNewCommandClient(self, options)
+        self.ask = ask
+        self.interval = interval
+        self.schedule = schedule
     }
 
     func connect() throws {
-        guard let client else { throw CocoaError(.coderInvalidValue) }
-        try client.connect()
+        poll(advance())
     }
+
     func disconnect() throws {
-        let client = self.client
-        self.client = nil
-        try client?.disconnect()
+        _ = advance()
     }
-    func writeStatus(_ message: LibboxStatusMessage?) {
-        guard let message, message.trafficAvailable else { return }
-        receive(.rate(message.downlink, message.uplink))
+
+    private func advance() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        generation += 1
+        cancelTick?()
+        cancelTick = nil
+        return generation
     }
-    func connected() {}
-    func disconnected(_ message: String?) { receive(.disconnected) }
-    func clearLogs() {}
-    func initializeClashMode(_ modeList: (any LibboxStringIteratorProtocol)?, currentMode: String?) {}
-    func setDefaultLogLevel(_ level: Int32) {}
-    func updateClashMode(_ newMode: String?) {}
-    func write(_ events: LibboxConnectionEvents?) {}
-    func writeGroups(_ message: (any LibboxOutboundGroupIteratorProtocol)?) {}
-    func writeLogs(_ messageList: (any LibboxLogIteratorProtocol)?) {}
-    func writeOutbounds(_ message: (any LibboxOutboundGroupItemIteratorProtocol)?) {}
+
+    private func current(_ g: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation == g
+    }
+
+    private func poll(_ g: Int) {
+        guard current(g) else { return }
+        ask { [weak self] data in
+            guard let self, self.current(g) else { return }
+            guard let sample = TrafficSample.decode(data) else {
+                _ = self.advance()
+                self.receive(.disconnected)
+                return
+            }
+            self.receive(.rate(sample.down, sample.up))
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            guard self.generation == g else { return }
+            self.cancelTick = self.schedule(self.interval) { [weak self] in self?.poll(g) }
+        }
+    }
 }
