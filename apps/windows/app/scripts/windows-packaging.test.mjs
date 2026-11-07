@@ -559,6 +559,12 @@ test('NSIS names every gate refusal with its own dialog, code, first error line 
   )
   const explain =
     installerSource.match(/!macro TONO_GATE_EXPLAIN\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  // Missing helper output is not evidence that the default log was written.
+  assert.match(
+    explain,
+    /\$\{If\} \$R3 == ""\s+StrCpy \$R3 "\$\(gateLogUnavailable\)"/,
+  )
+  assert.doesNotMatch(explain, /ReadEnvStr|install-gate\.log/)
   assert.match(
     explain,
     new RegExp(
@@ -675,11 +681,11 @@ test('every uninstaller abort hands the manual lease back first', () => {
   const removeService =
     installerSource.match(/!macro RemoveVergeService\b([\s\S]*?)!macroend/)?.[1] ?? ''
   const aborts = [...removeService.matchAll(/^[ \t]*Abort\b/gm)]
-  assert.equal(aborts.length, 2, 'RemoveVergeService has two Aborts')
+  assert.equal(aborts.length, 3, 'missing helper, incomplete cleanup and unproven barrier all stop uninstall')
   for (const abort of aborts) {
     assert.match(
       removeService.slice(0, abort.index),
-      /!ifdef __UNINSTALL__\s+Call un\.HandBackManualLease\s+!endif\s*$/,
+      /Call un\.HandBackManualLease\s+(?:!endif\s+)?$/,
       'an uninstaller Abort in RemoveVergeService hands the lease back first',
     )
   }
@@ -776,6 +782,76 @@ test('Windows installers refuse to downgrade and hand back the manual lease on t
   assert.match(
     release,
     /nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\\resources\\tono-service-install\.exe" --manual-update-finish'/,
+  )
+})
+
+test('existing-install refusals distinguish partial records, invalid versions and orphan files', () => {
+  // Remnants do not prove that a working old installation can be uninstalled.
+  const detector =
+    installerSource.match(/Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    detector,
+    /\$ExistingVersion == ""\s+StrCpy \$ExistingInstallIssue "TONO_INSTALL_RECORD_INCOMPLETE"\s+Goto invalid_existing_version/,
+  )
+  assert.match(
+    detector,
+    /\$\{If\} \$R0 = -1\s+StrCpy \$ExistingInstallIssue "TONO_INSTALL_VERSION_INVALID"\s+Goto invalid_existing_version/,
+  )
+  assert.match(
+    detector,
+    /\$\{Else\}\s+StrCpy \$ExistingInstallIssue "TONO_INSTALL_VERSION_COMPARE_FAILED"\s+Goto invalid_existing_version/,
+  )
+  assert.match(
+    detector,
+    /FileExists\} "\$INSTDIR\\verge-mihomo.exe"\s+\$\{OrIf\} \$\{FileExists\} "\$INSTDIR\\sing-box.exe"\s+\$\{OrIf\} \$\{FileExists\} "\$INSTDIR\\resources\\tono-service.exe"\s+StrCpy \$ExistingInstallIssue "TONO_INSTALL_FILES_WITHOUT_RECORD"\s+Goto invalid_existing_version/,
+  )
+  const chinese =
+    installerSource.match(/LangString invalidExistingVersion \$\{LANG_SIMPCHINESE\} "(.*)"/)?.[1] ?? ''
+  assert.match(chinese, /\$ExistingInstallIssue/)
+  assert.match(chinese, /\$INSTDIR/)
+  assert.match(chinese, /\$\{UNINSTKEY\}/)
+  assert.doesNotMatch(chinese, /检测到现有.*安装|请先修复或卸载/)
+  // A complete 32 record is parseable, but its verge-mihomo layout cannot enter replacement.
+  const layoutAt = detector.indexOf('"TONO_INSTALL_LEGACY_LAYOUT"')
+  assert.ok(layoutAt > 0 && layoutAt < detector.indexOf('automatic_update:'))
+  assert.match(
+    detector,
+    /SemverCompare \$ExistingVersion "0.0.35"\s+Pop \$R0\s+\$\{If\} \$R0 = -1\s+StrCpy \$ExistingInstallIssue "TONO_INSTALL_LEGACY_LAYOUT"\s+Goto invalid_existing_version/,
+  )
+  assert.match(
+    detector,
+    /\$\{IfNot\} \$\{FileExists\} "\$INSTDIR\\tono-core.exe"[\s\S]*?"TONO_INSTALL_LEGACY_LAYOUT"[\s\S]*?"TONO_INSTALL_INCOMPLETE_PAYLOAD"[\s\S]*?Goto invalid_existing_version/,
+  )
+  assert.doesNotMatch(detector, /ReadRegStr[^\n]*InstallLocation|ExecWait|\bDelete\b/)
+})
+
+test('partial uninstall keeps a self-contained retry path and its install record', () => {
+  const init =
+    installerSource.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(init, /\{\{#each resources\}\}\s+File \/a/)
+  const verifyAt = init.indexOf('--verify-uninstall-root')
+  assert.ok(verifyAt > 0 && verifyAt < init.indexOf('--manual-update-gate'))
+  assert.doesNotMatch(init, /nsExec::[^\n]*\$INSTDIR\\resources/)
+  assert.match(
+    windowsServiceUpdateExecutorSource,
+    /mode == "--verify-uninstall-root"[\s\S]*?native::program_files\(\)\?\.join\("Tono"\)[\s\S]*?root.canonicalize\(\)\? == expected.canonicalize\(\)\?[\s\S]*?native::verify_tree\(root, 0\)\?/,
+  )
+  const remove =
+    installerSource.match(/!macro TonoDeleteUninstallFile\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  assert.match(remove, /ClearErrors\s+Delete "\$\{PATH\}"\s+\$\{If\} \$\{Errors\}/)
+  assert.match(remove, /Call un\.HandBackManualLease[\s\S]*?SetErrorLevel 1603\s+Abort /)
+  assert.doesNotMatch(remove, /DeleteRegKey|Delete .*uninstall.exe|\/REBOOTOK/)
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const payloadEnd = uninstall.lastIndexOf('!insertmacro TonoDeleteUninstallFile')
+  assert.ok(payloadEnd > 0 && payloadEnd < uninstall.indexOf('Delete "$INSTDIR\\uninstall.exe"'))
+  assert.ok(payloadEnd < uninstall.indexOf('DeleteRegKey'))
+  assert.match(uninstall, /TonoDeleteUninstallFile "\$INSTDIR\\verge-mihomo.exe"/)
+  const serviceCleanup =
+    installerSource.match(/!macro RemoveVergeService\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  assert.match(
+    serviceCleanup,
+    /\$\{If\} \$0 == "2"\s+!ifdef __UNINSTALL__[\s\S]*?SetErrorLevel 1603[\s\S]*?Abort "TONO_UNINSTALL_CLEANUP_INCOMPLETE/,
   )
 })
 

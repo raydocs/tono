@@ -113,7 +113,9 @@ fn cleanup_exit_code(outcome: &CleanupOutcome) -> i32 {
     }
 }
 
-/// Whether an exit code lets the NSIS macro proceed with deleting the application.
+/// Whether an exit code proves the network barrier is gone, permitting payload removal.
+/// NSIS separately keeps the uninstall record and files on exit 2 until cosmetic cleanup can
+/// finish; a safe network is necessary, but not sufficient, for reporting a complete uninstall.
 ///
 /// The invariant, stated once and asserted in the tests: an uninstall may only continue on an
 /// outcome whose *precondition is that the WFP filters are gone*. `Clean` and
