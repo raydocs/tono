@@ -1,0 +1,15 @@
+## 2026-10-31 · macOS 海景能耗与状态修复（MAC-UI-01/02/03/08、MAC-MISS-01）
+- 归属：ops 计划 [plan-2026-09-11](../ops/plan-2026-09-11.md) 的 UI 工作，不是发布门；仅 macOS（`apps/macos`）。
+- 来源：origin/main `372a4cc6c` → 分支 `fix/macos-scene-energy-20261031`，PR [#1811](https://github.com/raydocs/tono/pull/1811)（草稿，未合 main）。
+- 缺陷修复：
+  - MAC-UI-08：连接降级时首页与菜单栏海景标题写 “Connected”，场景却是失败黄昏 → 标题改为已有键 “Degraded”（已降级），不含保护范围措辞，所有路由模式相同；未连接时仍写 “Not connected”。
+  - MAC-MISS-01：Auto 探测在启动卡顿时降档后整个会话锁死 → 降档后 20 s 再测一次，只在可见时采样，干净结果恢复 Full（或 Static→Lite），重测只升不降。
+- 新增/优化（能耗；窗口可见、聚焦、正常温度时观感不变，Full 水面仍 60 fps）：
+  - MAC-UI-01：只有场景被完全遮住（降低透明度时内页底色不透明）才暂停；普通内页的暗化地平线可见，按设计继续运动。
+  - MAC-UI-02：窗口失焦（非 key/main 或应用非 active）时 Metal 水面降到 30 fps，仍在动，不换档。
+  - MAC-UI-03：serious 热状态水面降到 15 fps（不冻结）；critical 才进入 Static，即降低动态效果的同一设计静帧。低电量模式沿用原有 Lite，不新增冻结。
+  - 暂停只发生在无人可见时（遮挡、最小化、隐藏、完全遮住），暂停期间的状态变化直接画到目标静态终点（原有 `animated: false` 路径）。
+- 工程与测试：新增 XCTest：`SeaStatusWordsTests.testADegradedConnectionHeadlineMatchesTheDuskInsteadOfReadingConnected`、`SeaBackdropDimTests.testOnlyABackdropThatHidesTheSceneEntirelyPausesIt`、`SeaSceneParametersTests.testALaunchJankDowngradeIsRestoredByOneCleanRetry`、`testAnUnfocusedWindowThrottlesTheWaterWithoutStoppingIt`、`testHeatThrottlesTheWaterAndOnlyCriticalHoldsTheStillFrame`。
+- 验证：本机（MacBook）按规定不跑 xcodebuild/swift test；仅静态检查（grep）。实际检查交 hosted ci-gate（macos-26）。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：未做聚焦可见时的 30 fps 环境帧率、1x drawable、首帧后 isOpaque、GPU 计时（无法证明观感不变）；失焦/热状态降帧的观感与能耗、启动选档待实机。

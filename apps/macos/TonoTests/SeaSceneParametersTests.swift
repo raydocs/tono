@@ -65,6 +65,32 @@ final class SeaSceneParametersTests: XCTestCase {
         XCTAssertEqual(probe.elapsed, elapsed, "there is no lasting per-frame sample after the bounded probe")
     }
 
+    func testALaunchJankDowngradeIsRestoredByOneCleanRetry() {
+        var probe = SeaSceneQualityProbe()
+        probe.frame(at: 0)
+        for index in 1...70 { probe.frame(at: Double(index) * 0.045) }
+        XCTAssertEqual(probe.quality, .lite)
+        XCTAssertTrue(probe.complete)
+        XCTAssertTrue(probe.retry())
+        for index in 1...200 { probe.frame(at: 100 + Double(index) / 60) }
+        XCTAssertEqual(probe.quality, .full, "a clean later sample restores Full")
+        XCTAssertTrue(probe.complete)
+        XCTAssertFalse(probe.retry(), "one retry per scene")
+    }
+
+    func testAnUnfocusedWindowThrottlesTheWaterWithoutStoppingIt() {
+        XCTAssertEqual(SeaWaterPace.preferredFPS(focused: true, thermal: .nominal), 60)
+        XCTAssertEqual(SeaWaterPace.preferredFPS(focused: false, thermal: .nominal), 30)
+    }
+
+    func testHeatThrottlesTheWaterAndOnlyCriticalHoldsTheStillFrame() {
+        XCTAssertEqual(SeaWaterPace.preferredFPS(focused: true, thermal: .serious), 15)
+        XCTAssertEqual(SeaSceneQuality.requested("Full", reduceMotion: false, lowPower: false,
+                                                 automatic: .full, thermal: .serious), .full)
+        XCTAssertEqual(SeaSceneQuality.requested("Full", reduceMotion: false, lowPower: false,
+                                                 automatic: .full, thermal: .critical), .static)
+    }
+
     @MainActor
     func testWaterTrafficRisesWithLiveRatesThenDecaysOnceTheReadingFreezes() {
         var traffic = SeaWaterTraffic()
