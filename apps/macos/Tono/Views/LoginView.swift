@@ -1,6 +1,4 @@
-#if DEBUG
 import AuthenticationServices
-#endif
 import SwiftUI
 import AppKit
 
@@ -111,11 +109,33 @@ struct LoginView: View {
         }
     }
     private var nativeAppleSignInEnabled: Bool {
-        #if DEBUG
-        methods?.apple.enabled == true
-        #else
-        false
-        #endif
+        methods?.apple.enabled == true && AppleSignInAvailability.entitled
+    }
+    /// Decision 141: nothing links without this explicit answer, and the
+    /// ticket only rides along with a code for the address shown here.
+    @ViewBuilder
+    private func identityLinkPrompt(_ link: PendingIdentityLink) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if link.consented {
+                Text("After you sign in with a code sent to \(link.maskedEmail), this Apple ID will be linked to that Tono account.")
+            } else {
+                Text("Link the Apple ID for \(link.maskedEmail) to the Tono account you sign in to with an email code? Only do this on your own Mac.")
+                HStack {
+                    Button("Link Apple ID") {
+                        session.pendingIdentityLink?.consented = true
+                        if TonoAccountRules.normalizedEmail(email) != link.email {
+                            email = link.email
+                        }
+                    }
+                    .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .gateSecondary))
+                    Button("Not now") { session.discardIdentityLink() }
+                        .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .link))
+                }
+            }
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
     private var nativeGoogleSignInEnabled: Bool {
         #if DEBUG
@@ -408,6 +428,9 @@ struct LoginView: View {
                                 .font(.caption)
                                 .modifier(SeaDisclosureTreatment())
                             }
+                            if let link = session.pendingIdentityLink, session.user == nil {
+                                identityLinkPrompt(link)
+                            }
                             if showsCodeStep {
                                 gateField("Six-digit email code", text: $emailCode, focused: focusedField == .code)
                                     .focused($focusedField, equals: .code)
@@ -455,7 +478,6 @@ struct LoginView: View {
                                 .disabled(locked)
                             }
 
-                            #if DEBUG
                             if nativeAppleSignInEnabled {
                                 TonoAppleSignInButton {
                                     Task {
@@ -468,13 +490,11 @@ struct LoginView: View {
                                 .frame(maxWidth: .infinity)
                                 .disabled(locked)
                             }
-                            #endif
                         }
                         .transition(stepTransition)
                     } else {
                         VStack(spacing: 10) {
                             HStack(spacing: 10) {
-                                #if DEBUG
                                 if nativeAppleSignInEnabled {
                                     TonoAppleSignInButton {
                                         Task {
@@ -487,7 +507,6 @@ struct LoginView: View {
                                     .frame(maxWidth: .infinity)
                                     .disabled(locked)
                                 }
-                                #endif
                             }
 
                             #if DEBUG
@@ -736,7 +755,6 @@ struct LoginView: View {
     }
 }
 
-#if DEBUG
 @MainActor
 struct TonoAppleSignInButton: NSViewRepresentable {
     typealias Action = @MainActor @Sendable () -> Void
@@ -774,6 +792,7 @@ struct TonoAppleSignInButton: NSViewRepresentable {
     }
 }
 
+#if DEBUG
 let previewHelperFailureMessage = """
 Core failed to start: The installed network helper no longer accepts this copy of Tono. Click Retry and approve the administrator prompt to repair it, or run the documented sudo emergency-disarm command and reopen Tono. Helper installation failed: The authenticated helper did not start.
 """
