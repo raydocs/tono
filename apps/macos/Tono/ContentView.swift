@@ -24,8 +24,9 @@ struct ContentView: View {
                     failed: appState.lastConnectionFailure != nil),
                     motionEnabled: true,
                     progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil,
-                    // Keeps moving behind inner pages too, where it shows dimmed.
-                    active: true,
+                    // Keeps moving behind inner pages too, where it shows dimmed;
+                    // pauses only while the opaque ground hides it entirely.
+                    active: backdrop.showsScene,
                     traffic: { [appState] in appState.seaTrafficSample })
                     .ignoresSafeArea()
                     .opacity(backdrop.sceneOpacity)
