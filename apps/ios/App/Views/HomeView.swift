@@ -28,7 +28,9 @@ struct HomeView: View {
     var body: some View {
         ZStack(alignment: .top) {
             TonoColor.night.ignoresSafeArea()
-            SeaScene(sky: sky, horizon: 0.42)
+            // Settings and the VPN primer open full height and hide the sea; Lines and Details open at half
+            // height with the sky still in view, so the scene keeps moving under them.
+            SeaScene(sky: sky, horizon: 0.42, covered: showSettings || model.showVPNPrimer)
             // Legibility scrim behind the lower controls; the sea stays visible above it.
             // Large text pushes the controls up over the sky, so the scrim starts higher there.
             // At accessibility sizes the text sits on the sky itself, so the scrim is near-opaque there.
@@ -768,8 +770,11 @@ enum PhaseText {
         case .connected, .degraded:
             if m.offline { return L.t("status_offline") }
             let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map { L.isChinese ? region($0) : $0.uppercased() } : nil)
-            if let home { return L.t("status_protected_home", home) }
-            return L.t("status_protected")
+            // The mode the tunnel runs, not the saved choice; nothing confirmed takes the narrower claim.
+            var running: RoutingMode?
+            if case .graph(let s)? = m.routing { running = s.mode }
+            let key = ConnectedStatusKey.key(runningMode: running, home: home != nil)
+            return home.map { L.t(key, $0) } ?? L.t(key)
         default: return nil
         }
     }
