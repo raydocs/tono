@@ -154,7 +154,7 @@ jobs:
         # cannot detect drift in the vendored crate's independent lockfile.
         run: cargo fetch --locked --manifest-path apps/windows/vendor/kode-bridge/Cargo.toml
 
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: nextest
 
@@ -207,7 +207,7 @@ jobs:
 
       # Prebuilt binary. `cargo install cargo-llvm-cov` compiled from source on
       # every run (setup ~64–73s vs ~24s of coverage work).
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-llvm-cov@0.9.1
 
