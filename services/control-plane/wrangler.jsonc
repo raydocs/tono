@@ -12,6 +12,13 @@
     {
       "pattern": "releases.afk.ccwu.cc",
       "custom_domain": true
+    },
+    {
+      // Relay entry name (2026-11-18): the API served under a second hostname so a
+      // network that resets TLS by the afk.ccwu.cc SNI can still reach it through the
+      // relays. Same Worker, same API; only the relay path of the clients uses it.
+      "pattern": "static.reveslc.com",
+      "custom_domain": true
     }
   ],
   "triggers": { "crons": ["*/5 * * * *"] },

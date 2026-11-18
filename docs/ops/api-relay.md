@@ -20,6 +20,16 @@ node side may be shut down. The address is compiled into the clients, so install
 change keep the old Westwood address until they update. The exit-node address of Westwood (Reality
 443, the catalog) is a separate record and is not changed by this edit.
 
+**2026-11-18 (owner): relay entry host.** A customer's carrier reset every TLS handshake whose SNI was
+`api.afk.ccwu.cc` (TCP to both relays connected; `curl` got `Connection reset` before the server hello),
+while the same relays completed TLS for `static.reveslc.com` (zone `reveslc.com`, same Cloudflare account).
+The relays now also admit `static.reveslc.com`, and the Worker serves it as a second custom domain with
+the same API. Only the clients' relay path dials with it (macOS `ControlPlanePath.relayEntryHosts`, Windows
+`bootstrap::API_RELAY_HOST`); pinned, system-DNS and tunnel paths keep `api.afk.ccwu.cc`. The release host
+`releases.afk.ccwu.cc` is unchanged. Both relays were edited in place (additive map lines; backups
+`/etc/nginx/tono-relay.stream.conf.bak-20261118-entry-sni`); the live files lack the `limit_conn` lines of
+the canonical copy and were not overwritten.
+
 Westwood and Mesa are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 `api.afk.ccwu.cc` (control plane), `releases.afk.ccwu.cc` (installers). Anything else is
 sent to a closed port.

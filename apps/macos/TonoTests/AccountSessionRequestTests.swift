@@ -716,6 +716,22 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(message?.contains("relay") == true, "the error names the relays: \(message ?? "nil")")
     }
 
+    /// 2026-11-18: a carrier reset every TLS handshake naming `api.afk.ccwu.cc`.
+    /// Only the relay path dials with the entry host; the release host and
+    /// every non-production host keep their own name.
+    func testTheRelayPathDialsWithTheEntryHostNotTheBlockedAPIHost() throws {
+        let api = try XCTUnwrap(URL(string: "https://api.afk.ccwu.cc/api/v1/auth/methods"))
+        XCTAssertEqual(ControlPlanePath.relayEndpoints(for: api)?.host, "static.reveslc.com")
+        let releases = try XCTUnwrap(URL(string: "https://releases.afk.ccwu.cc/x.zip"))
+        XCTAssertEqual(ControlPlanePath.relayEndpoints(for: releases)?.host, "releases.afk.ccwu.cc")
+        let debug = try XCTUnwrap(URL(string: "https://example.test/"))
+        XCTAssertNil(ControlPlanePath.relayEndpoints(for: debug))
+        let message = try XCTUnwrap(PinnedControlPlaneExchange.requestBytes(
+            URLRequest(url: api), host: "static.reveslc.com", userAgent: "Tono/0"
+        ))
+        XCTAssertTrue(String(decoding: message, as: UTF8.self).contains("Host: static.reveslc.com"))
+    }
+
     /// Decision 089: the third relay (Los Angeles, another provider) comes after
     /// the two DMIT relays, and a walk whose first two relays fail still
     /// dials it inside the walk's bounded connect budget. The two closed
