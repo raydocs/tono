@@ -2377,11 +2377,10 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         assert_eq!(
             crate::tono::bootstrap::api_relays(),
             vec![
-                std::net::SocketAddr::from(([179, 253, 233, 220], 2053)),
+                std::net::SocketAddr::from(([179, 253, 244, 3], 2053)),
                 std::net::SocketAddr::from(([179, 255, 154, 17], 2053)),
-                std::net::SocketAddr::from(([154, 84, 56, 196], 2053)),
             ],
-            "the third relay is appended after the two DMIT relays"
+            "the compiled list is Westwood then Mesa (2026-11-17); the walk below uses injected relays"
         );
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
