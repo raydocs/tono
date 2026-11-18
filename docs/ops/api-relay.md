@@ -22,8 +22,8 @@ change keep the old Westwood address until they update. The exit-node address of
 
 **2026-11-18 (owner): relay entry host.** A customer's carrier reset every TLS handshake whose SNI was
 `api.afk.ccwu.cc` (TCP to both relays connected; `curl` got `Connection reset` before the server hello),
-while the same relays completed TLS for `static.reveslc.com` (zone `reveslc.com`, same Cloudflare account).
-The relays now also admit `static.reveslc.com`, and the Worker serves it as a second custom domain with
+while the same relays completed TLS for an unrelated name (`static.reveslc.com`, tested from that network; that zone sits in another Cloudflare account than the Worker, so the entry name is `static.bicon.dev`, zone `bicon.dev`, registered 2026-11-18 in the production account).
+The relays now also admit `static.bicon.dev`, and the Worker serves it as a second custom domain with
 the same API. Only the clients' relay path dials with it (macOS `ControlPlanePath.relayEntryHosts`, Windows
 `bootstrap::API_RELAY_HOST`); pinned, system-DNS and tunnel paths keep `api.afk.ccwu.cc`. The release host
 `releases.afk.ccwu.cc` is unchanged. Both relays were edited in place (additive map lines; backups

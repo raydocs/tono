@@ -2454,7 +2454,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         assert_eq!(super::relay_entry_host("API.AFK.CCWU.CC"), bootstrap::API_RELAY_HOST);
         assert_eq!(super::relay_entry_host("localhost"), "localhost");
         assert_eq!(super::relay_entry_host("tono-relay.test"), "tono-relay.test");
-        assert_eq!(bootstrap::API_RELAY_HOST, "static.reveslc.com");
+        assert_eq!(bootstrap::API_RELAY_HOST, "static.bicon.dev");
         assert_ne!(bootstrap::API_RELAY_HOST, bootstrap::API_HOST);
     }
 
