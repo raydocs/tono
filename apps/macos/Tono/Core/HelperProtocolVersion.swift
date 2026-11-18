@@ -529,7 +529,12 @@ nonisolated enum HelperProtocolVersion {
     ///   tags. An older daemon keeps the previous AI Home graph.
     /// - 4.52.69 → 4.52.70: Three-tier always passes the shared LAN set,
     ///   including 100.64/10, even while fail-closed; LAN DNS stays blocked.
-    static let current = "4.52.70"
+    /// - 4.52.70 → 4.52.71: the compiled Tono API relays are Westwood
+    ///   `179.253.244.3:2053` (moved from the blocked `179.253.233.220`) and
+    ///   Mesa `179.255.154.17:2053`; the Arosscloud relay is dropped. Armed
+    ///   without a tunnel, PF admits exactly these two (TCP 2053, interactive
+    ///   user only). An older daemon keeps the old three-address permit.
+    static let current = "4.52.71"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

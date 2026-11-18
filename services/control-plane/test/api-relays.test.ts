@@ -105,7 +105,7 @@ it('takes a relay e2e report only from that relay node\'s exit token and stores 
     return response;
   };
   const row = () => db().prepare('SELECT * FROM api_relay_reports WHERE relay = ?')
-    .bind('179.253.233.220:2053').first<Record<string, unknown>>();
+    .bind('179.253.244.3:2053').first<Record<string, unknown>>();
 
   expect((await report('not-a-node-token-but-long-enough-to-look-real', { observedAt: t, httpStatus: 200 })).status).toBe(401);
   const foreign = await report(tokens['tokyo-other'], { observedAt: t, httpStatus: 200 });

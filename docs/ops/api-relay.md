@@ -10,9 +10,15 @@ the node; the client validates the normal Cloudflare certificate.
 
 | Node | Address | Port | Since |
 |---|---|---|---|
-| Los Angeles · Westwood (DMIT) | 179.253.233.220 | 2053 | 2026-10-10 03:04 UTC |
+| Los Angeles · Westwood (DMIT) | 179.253.244.3 | 2053 | 2026-11-17 (replaces 179.253.233.220, blocked; clients after the helper 4.52.71 line) |
 | Los Angeles · Mesa (DMIT) | 179.255.154.17 | 2053 | 2026-10-10 03:59 UTC |
-| Los Angeles · Arosscloud (AS400619) | 154.84.56.196 | 2053 | 2026-10-10 20:16 UTC (node side; clients after #1538) |
+
+**2026-11-17 (owner):** the relay list is exactly these two. Westwood moved from 179.253.233.220
+(blocked) to 179.253.244.3, verified TLS + API 200 on :2053 from the maintainer's Mac. The third relay
+(Arosscloud 154.84.56.196, decision 089) is dropped from every client and from `api-relays.ts`; the
+node side may be shut down. The address is compiled into the clients, so installs older than this
+change keep the old Westwood address until they update. The exit-node address of Westwood (Reality
+443, the catalog) is a separate record and is not changed by this edit.
 
 Westwood and Mesa are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 `api.afk.ccwu.cc` (control plane), `releases.afk.ccwu.cc` (installers). Anything else is

@@ -690,7 +690,7 @@ final class AccountSessionRequestTests: XCTestCase {
                 relayAttempts.record()
                 // What the relay client reports when neither relay connects.
                 throw URLError(.cannotConnectToHost, userInfo: [
-                    NSLocalizedDescriptionKey: "relay: 179.253.233.220:2053 refused; 179.255.154.17:2053 refused",
+                    NSLocalizedDescriptionKey: "relay: 179.253.244.3:2053 refused; 179.255.154.17:2053 refused",
                 ])
             },
             relayOnly: { true }
@@ -725,7 +725,7 @@ final class AccountSessionRequestTests: XCTestCase {
         let production = try XCTUnwrap(URL(string: "https://api.afk.ccwu.cc"))
         XCTAssertEqual(
             ControlPlanePath.relayEndpoints(for: production)?.endpoints.map(\.description),
-            ["179.253.233.220:2053", "179.255.154.17:2053", "154.84.56.196:2053"]
+            ["179.253.244.3:2053", "179.255.154.17:2053"]
         )
         XCTAssertEqual(PinnedControlPlaneExchange.relayWalkBudget(3), 15, "5 s per relay, 15 s for the walk")
 
