@@ -31,7 +31,7 @@ pub const API_HOST: &str = "api.afk.ccwu.cc";
 /// (verified 2026-11-18) but completes one for this name; the relays admit it and the Worker
 /// serves it as an alias of the API host, so the API is identical. Relay path only: the pins,
 /// the system resolver, DoH and the alternate ports keep [`API_HOST`].
-pub const API_RELAY_HOST: &str = "static.reveslc.com";
+pub const API_RELAY_HOST: &str = "static.bicon.dev";
 
 /// Tono-owned API relays outside Cloudflare, tried in this order after every
 /// Cloudflare path has failed provably undelivered (decision 077).

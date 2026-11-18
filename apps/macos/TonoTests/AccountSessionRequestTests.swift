@@ -721,15 +721,15 @@ final class AccountSessionRequestTests: XCTestCase {
     /// every non-production host keep their own name.
     func testTheRelayPathDialsWithTheEntryHostNotTheBlockedAPIHost() throws {
         let api = try XCTUnwrap(URL(string: "https://api.afk.ccwu.cc/api/v1/auth/methods"))
-        XCTAssertEqual(ControlPlanePath.relayEndpoints(for: api)?.host, "static.reveslc.com")
+        XCTAssertEqual(ControlPlanePath.relayEndpoints(for: api)?.host, "static.bicon.dev")
         let releases = try XCTUnwrap(URL(string: "https://releases.afk.ccwu.cc/x.zip"))
         XCTAssertEqual(ControlPlanePath.relayEndpoints(for: releases)?.host, "releases.afk.ccwu.cc")
         let debug = try XCTUnwrap(URL(string: "https://example.test/"))
         XCTAssertNil(ControlPlanePath.relayEndpoints(for: debug))
         let message = try XCTUnwrap(PinnedControlPlaneExchange.requestBytes(
-            URLRequest(url: api), host: "static.reveslc.com", userAgent: "Tono/0"
+            URLRequest(url: api), host: "static.bicon.dev", userAgent: "Tono/0"
         ))
-        XCTAssertTrue(String(decoding: message, as: UTF8.self).contains("Host: static.reveslc.com"))
+        XCTAssertTrue(String(decoding: message, as: UTF8.self).contains("Host: static.bicon.dev"))
     }
 
     /// Decision 089: the third relay (Los Angeles, another provider) comes after

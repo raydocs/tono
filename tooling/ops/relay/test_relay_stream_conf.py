@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 CONF = Path(__file__).resolve().parent / "tono-relay.stream.conf"
-ADMITTED = {"api.afk.ccwu.cc", "releases.afk.ccwu.cc", "static.reveslc.com"}
+ADMITTED = {"api.afk.ccwu.cc", "releases.afk.ccwu.cc", "static.bicon.dev"}
 
 
 def strip_comments(text: str) -> str:

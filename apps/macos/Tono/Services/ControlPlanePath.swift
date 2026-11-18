@@ -215,11 +215,11 @@ nonisolated struct ControlPlanePath: Sendable {
     /// The server name a relay is dialed with, per API host. A network may
     /// reset TLS by SNI: 2026-11-18 a customer's carrier reset every handshake
     /// naming `api.afk.ccwu.cc` yet passed the same relays' session for
-    /// `static.reveslc.com`. The relays pass both through unterminated and the
+    /// `static.bicon.dev`. The relays pass both through unterminated and the
     /// Worker serves both names, so only the relay path swaps the name; every
     /// other path keeps the real API host. The release host keeps its own name.
     static let relayEntryHosts: [String: String] = [
-        "api.afk.ccwu.cc": "static.reveslc.com",
+        "api.afk.ccwu.cc": "static.bicon.dev",
     ]
 
     private static let relayEndpoints = ControlPlaneRelays.endpoints.map {
