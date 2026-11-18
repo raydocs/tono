@@ -148,7 +148,7 @@ class ControlPlane internal constructor(
 
     companion object {
         /** Keep in step with raydocs/tono services/control-plane/src/api-relays.ts. */
-        val API_RELAYS = listOf("179.253.233.220" to 2053, "179.255.154.17" to 2053, "154.84.56.196" to 2053)
+        val API_RELAYS = listOf("179.253.244.3" to 2053, "179.255.154.17" to 2053)
         private const val CONNECT_TIMEOUT_MS = 6_000
         private const val READ_TIMEOUT_MS = 15_000
         private const val MAX_BODY = 2 * 1024 * 1024

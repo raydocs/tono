@@ -12,13 +12,11 @@
 /// `api-relays.ts`.
 nonisolated enum ControlPlaneRelays {
     /// Literal IPv4 address and TCP port of each relay, in the order clients
-    /// try them. The third is on another provider and network than the two
-    /// DMIT nodes (decision 089), so one provider's outage does not take every
-    /// relay with it; it is last so a walk that reaches a DMIT relay is
-    /// unchanged.
+    /// try them. Two DMIT nodes: Westwood (moved to 179.253.244.3 on
+    /// 2026-11-17 because 179.253.233.220 was blocked) and Mesa. The Arosscloud
+    /// relay of decision 089 was dropped by the owner the same day.
     static let endpoints: [(address: String, port: UInt16)] = [
-        ("179.253.233.220", 2053), // Los Angeles · Westwood
+        ("179.253.244.3", 2053), // Los Angeles · Westwood
         ("179.255.154.17", 2053), // Los Angeles · Mesa
-        ("154.84.56.196", 2053), // Los Angeles · Arosscloud
     ]
 }

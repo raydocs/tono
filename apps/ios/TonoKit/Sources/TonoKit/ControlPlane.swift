@@ -78,9 +78,8 @@ public protocol APITransport: Sendable {
 public struct ControlPlaneClient: Sendable {
     /// Keep in step with services/control-plane/src/api-relays.ts.
     public static let apiRelays: [APIPath] = [
-        .relay(host: "179.253.233.220", port: 2053),
+        .relay(host: "179.253.244.3", port: 2053),
         .relay(host: "179.255.154.17", port: 2053),
-        .relay(host: "154.84.56.196", port: 2053),
     ]
     public static let productionBase = URL(string: "https://api.afk.ccwu.cc/api/v1/")!
 

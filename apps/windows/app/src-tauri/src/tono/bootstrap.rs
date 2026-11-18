@@ -34,11 +34,10 @@ pub const API_HOST: &str = "api.afk.ccwu.cc";
 /// Cloudflare edge: TLS is not terminated there, so the client still validates
 /// Cloudflare's certificate for the hostname, and the relay sees what any router
 /// on the path sees. Two DMIT nodes on different hosts (Westwood, Mesa), so one
-/// node going down does not take the fallback with it, then a third on another
-/// provider and network (Arosscloud, AS400619; decision 089), so one provider going
-/// down does not either. The API transport and the updater both walk them in this
-/// order, `transport::RELAY_CONNECT_TIMEOUT` each. Appended last: a remembered relay
-/// is an index into this list, so the first two keep theirs. They are
+/// node going down does not take the fallback with it. The API transport and the
+/// updater both walk them in this order, `transport::RELAY_CONNECT_TIMEOUT` each. The
+/// owner dropped the third relay (Arosscloud, decision 089) on 2026-11-17 and moved
+/// Westwood to 179.253.244.3; a remembered relay is an index into this list. They are
 /// for the customer whose ISP cannot carry a TLS session to Cloudflare at all
 /// (China Mobile → anycast, 2026-10-10): for that customer the pins, the system
 /// resolver, DoH and the alternate ports all land on the same broken path.

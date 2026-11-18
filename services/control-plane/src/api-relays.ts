@@ -15,11 +15,8 @@ import { connect as socketConnect } from 'cloudflare:sockets';
 // on a host that is not an exit node has none: nothing may report for it, so
 // it is judged on the TCP probe alone (decision 089, docs/ops/api-relay.md).
 export const API_RELAYS: readonly ApiRelay[] = [
-  { name: 'Los Angeles · Westwood', host: '179.253.233.220', port: 2053, exitNodeId: 'los-angeles-westwood' },
+  { name: 'Los Angeles · Westwood', host: '179.253.244.3', port: 2053, exitNodeId: 'los-angeles-westwood' },
   { name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, exitNodeId: 'los-angeles-mesa' },
-  // Arosscloud (AS400619), Los Angeles: another provider and network than the DMIT pair
-  // (same metro); not an exit node.
-  { name: 'Los Angeles · Arosscloud', host: '154.84.56.196', port: 2053 },
 ];
 
 export type ApiRelay = { name: string; host: string; port: number; exitNodeId?: string };
