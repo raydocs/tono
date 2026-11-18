@@ -382,9 +382,10 @@ pub struct TonoTransport {
     /// A19: where path failures go (the audit log, then the periodic timeline). None in tests
     /// that do not ask for it.
     path_failure_sink: Option<PathFailureSink>,
-    /// The host the relay clients are pinned for: `bootstrap::API_HOST` in production. A
-    /// request for any other host (the integration profile, loopback tests) never goes
-    /// relay-only, because a relay client resolves only this name to its relay.
+    /// The host the relay clients serve: `bootstrap::API_HOST` in production, which they enter
+    /// as `bootstrap::API_RELAY_HOST` (`relay_entry_host`). A request for any other host (the
+    /// integration profile, loopback tests) never goes relay-only, because a relay client
+    /// resolves only its entry name to its relay.
     relay_host: String,
     /// Decision 091: what carries the control plane now, a [`ControlPlaneReach`] code. Published
     /// by the app's state (`commands::status_of`) and read before every non-relay step of a
@@ -535,6 +536,23 @@ async fn service_permits_relays() -> Option<bool> {
 struct Relay {
     address: std::net::SocketAddr,
     client: reqwest::Client,
+    /// The hostname this relay is entered by: URL host, `Host` and TLS SNI of every request it
+    /// carries, and the name its client resolves to `address`. `bootstrap::API_RELAY_HOST` for
+    /// the production API host, the transport's own host otherwise (`relay_entry_host`).
+    entry_host: String,
+}
+
+/// The name a relay is entered by for requests to `host`. A network that resets any TLS
+/// handshake whose SNI is `bootstrap::API_HOST` (2026-11-18) still completes one for
+/// `bootstrap::API_RELAY_HOST`, which the relays admit and the Worker serves as an alias of the
+/// API host; only the relay path uses it. A transport for any other host (the integration
+/// profile, loopback tests) enters its relays by that host unchanged.
+fn relay_entry_host(host: &str) -> &str {
+    if host.eq_ignore_ascii_case(bootstrap::API_HOST) {
+        bootstrap::API_RELAY_HOST
+    } else {
+        host
+    }
 }
 
 /// A relay attempt that provably delivered nothing: its class, its text for the combined error
@@ -718,8 +736,9 @@ impl TonoTransport {
         self
     }
 
-    /// One client per relay, pinned to that relay's socket for `host`. Everything else is the
-    /// shared builder: no proxy, no redirects, full certificate validation against `host`.
+    /// One client per relay, pinned to that relay's socket for the relay's entry name for `host`
+    /// (`relay_entry_host`). Everything else is the shared builder: no proxy, no redirects, full
+    /// certificate validation against that name.
     fn build_relays(
         host: &str,
         addresses: &[std::net::SocketAddr],
@@ -728,12 +747,14 @@ impl TonoTransport {
         addresses
             .iter()
             .map(|address| {
+                let entry_host = relay_entry_host(host);
                 Ok(Relay {
                     address: *address,
                     client: builder()
-                        .resolve_to_addrs(host, std::slice::from_ref(address))
+                        .resolve_to_addrs(entry_host, std::slice::from_ref(address))
                         .build()
                         .context("failed to build a Tono HTTP relay client")?,
+                    entry_host: entry_host.to_owned(),
                 })
             })
             .collect()
@@ -1148,6 +1169,7 @@ impl TonoTransport {
     /// The URL carries the relay's port and the pin carries the same one, as the alternate
     /// ports do; the SNI is the hostname alone, and the Cloudflare edge the relay forwards to
     /// ignores the port in `Host` (measured 2026-09-29 and again through the relay 2026-10-10).
+    /// The hostname is the relay's entry name (`relay_url`), not the API host.
     async fn attempt_one_relay(
         &self,
         request: &ApiRequest,
@@ -1160,7 +1182,7 @@ impl TonoTransport {
                 how: "no such relay".to_owned(),
             });
         };
-        let Some(url) = Self::with_port(&request.url, relay.address.port()) else {
+        let Some(url) = self.relay_url(&request.url, relay) else {
             return Err(RelayFailure {
                 kind: TransportKind::Other,
                 text: format!("relay {}: unusable url", relay.address),
@@ -1232,6 +1254,18 @@ impl TonoTransport {
         // Read again after the await: the walk's concurrent DoH queries share the gate, and
         // another one may have latched it while this one waited on the Service probe.
         !gate.lost()
+    }
+
+    /// `url` as sent through `relay`: the relay's port, and for the API host the relay's entry
+    /// name as the URL host, so the SNI and `Host` are `bootstrap::API_RELAY_HOST`. Scheme,
+    /// path, query and everything outside the URL are untouched; a URL for another host keeps it.
+    fn relay_url(&self, url: &str, relay: &Relay) -> Option<String> {
+        let mut parsed = reqwest::Url::parse(url).ok()?;
+        parsed.set_port(Some(relay.address.port())).ok()?;
+        if parsed.host_str().is_some_and(|host| host.eq_ignore_ascii_case(&self.relay_host)) {
+            parsed.set_host(Some(&relay.entry_host)).ok()?;
+        }
+        Some(parsed.to_string())
     }
 
     fn is_relay_host(&self, url: &str) -> bool {
@@ -1765,6 +1799,7 @@ mod tests {
         CONNECT_TIMEOUT, Duration, MAX_RESPONSE_BYTES, TOTAL_TIMEOUT, TonoTransport, describe,
         kind_label, method_of,
     };
+    use crate::tono::bootstrap;
     use tono_core::auth::{
         ApiError, ApiRequest, ApiResponse, HttpMethod, HttpTransport, TransportKind,
         should_retry_transport,
@@ -2367,6 +2402,131 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             "second request took {:?}, so it paid a dead path first",
             started.elapsed()
         );
+    }
+
+    /// A local HTTP server that answers every request `200 ok` and sends the request head it
+    /// read (request line, then headers, CRLF-joined) down the returned channel.
+    fn record_requests(
+    ) -> (std::net::SocketAddr, std::sync::mpsc::Receiver<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("addr");
+        let (head_tx, head_rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut head = String::new();
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    head.push_str(line.trim_end());
+                    head.push_str("\r\n");
+                    line.clear();
+                }
+                let _ = head_tx.send(head);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+        (address, head_rx)
+    }
+
+    /// The value of header `name` in a head read by `record_requests`.
+    fn head_header(head: &str, name: &str) -> Option<String> {
+        head.lines().skip(1).find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name).then(|| value.trim().to_owned())
+        })
+    }
+
+    #[test]
+    fn only_the_production_api_host_is_entered_by_the_relay_host() {
+        assert_eq!(super::relay_entry_host(bootstrap::API_HOST), bootstrap::API_RELAY_HOST);
+        assert_eq!(super::relay_entry_host("API.AFK.CCWU.CC"), bootstrap::API_RELAY_HOST);
+        assert_eq!(super::relay_entry_host("localhost"), "localhost");
+        assert_eq!(super::relay_entry_host("tono-relay.test"), "tono-relay.test");
+        assert_eq!(bootstrap::API_RELAY_HOST, "static.reveslc.com");
+        assert_ne!(bootstrap::API_RELAY_HOST, bootstrap::API_HOST);
+    }
+
+    /// The relay path enters the API as `bootstrap::API_RELAY_HOST` (the SNI the customer's
+    /// network lets through): URL host, so `Host` and SNI, and the name the relay client
+    /// resolves. The pinned path keeps `bootstrap::API_HOST`. Path, query, method, body and
+    /// headers are the same on both.
+    #[tokio::test]
+    async fn a_relayed_request_names_the_relay_host_and_a_pinned_one_keeps_the_api_host() {
+        fn request(port: u16) -> ApiRequest {
+            ApiRequest {
+                method: HttpMethod::Post,
+                url: format!(
+                    "http://{}:{port}/api/v1/auth/email/start?probe=1",
+                    bootstrap::API_HOST
+                ),
+                bearer: Some("secret-bearer".to_string()),
+                json_body: Some("{}".to_string()),
+                binary_body: None,
+                headers: vec![("X-Custom".to_string(), "kept".to_string())],
+            }
+        }
+        let dead = vec![std::net::SocketAddr::from(([10, 255, 255, 1], 443))];
+
+        // The pinned path answers: the API host, no relay involved.
+        let (pinned, pinned_heads) = record_requests();
+        let transport = TonoTransport::with_clients_and_relays(
+            bootstrap::API_HOST,
+            &[pinned],
+            &dead,
+            &[],
+        )
+        .expect("transport");
+        let response = transport.send(request(pinned.port())).await.expect("pinned answers");
+        assert_eq!(response.status, 200);
+        let head = pinned_heads.recv_timeout(Duration::from_secs(1)).expect("pinned saw it");
+        assert_eq!(
+            head_header(&head, "host"),
+            Some(format!("{}:{}", bootstrap::API_HOST, pinned.port())),
+            "a pinned request keeps the API host: {head}"
+        );
+        assert_eq!(head_header(&head, "x-tono-path"), Some("pinned".to_owned()));
+
+        // Both Cloudflare paths are dead: the relay answers, entered by the relay host.
+        let (relay, relay_heads) = record_requests();
+        let transport = TonoTransport::with_clients_and_relays(
+            bootstrap::API_HOST,
+            &dead,
+            &dead,
+            &[relay],
+        )
+        .expect("transport");
+        let response = transport.send(request(443)).await.expect("the relay carries it");
+        assert_eq!(response.status, 200);
+        let head = relay_heads.recv_timeout(Duration::from_secs(1)).expect("relay saw it");
+        assert_eq!(
+            head.lines().next(),
+            Some("POST /api/v1/auth/email/start?probe=1 HTTP/1.1"),
+            "a relayed request keeps method, path and query: {head}"
+        );
+        assert_eq!(
+            head_header(&head, "host"),
+            Some(format!("{}:{}", bootstrap::API_RELAY_HOST, relay.port())),
+            "a relayed request is addressed to the relay host, not the API host: {head}"
+        );
+        assert!(
+            !head.contains(bootstrap::API_HOST),
+            "the API host must not appear on the relay path: {head}"
+        );
+        assert_eq!(head_header(&head, "authorization"), Some("Bearer secret-bearer".to_owned()));
+        assert_eq!(head_header(&head, "x-custom"), Some("kept".to_owned()));
+        assert_eq!(head_header(&head, "x-tono-path"), Some("relay".to_owned()));
     }
 
     /// Decision 089: the third compiled relay (Los Angeles, another provider) comes after the two

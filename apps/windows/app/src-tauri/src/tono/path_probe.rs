@@ -4,7 +4,7 @@
 //! probed in parallel: the pinned Cloudflare addresses, the system resolver, and the Tono relays
 //! (decision 077). A probe is a TCP connection and a TLS handshake and nothing more. No HTTP
 //! request is sent, so there is no cookie, token, device or installation id and no `X-Tono-*`
-//! header. TLS carries `bootstrap::API_HOST` as SNI and the certificate is checked by the
+//! header. TLS carries `bootstrap::API_HOST` as SNI (`bootstrap::API_RELAY_HOST` to a relay) and the certificate is checked by the
 //! platform verifier, the one reqwest uses for every API request; a certificate that is not
 //! valid for the host fails the probe. Each path has `PROBE_BUDGET`, and the paths run at once.
 //!
@@ -170,14 +170,14 @@ fn tls_config() -> Result<Arc<rustls::ClientConfig>, rustls::Error> {
     Ok(Arc::new(config))
 }
 
-/// TCP, then TLS for `bootstrap::API_HOST`, to `address`; closed without sending a byte of
-/// application data.
+/// TCP, then TLS for `host` (`bootstrap::API_HOST`, or `bootstrap::API_RELAY_HOST` to a relay),
+/// to `address`; closed without sending a byte of application data.
 ///
 /// The platform verifier checks the chain synchronously inside the handshake (on Windows
 /// `CertGetCertificateChain`, which may fetch over the network for longer than the budget), so
 /// each handshake runs on its own thread with its own runtime and is abandoned after
 /// `PROBE_BUDGET`: a slow check cannot stall the other probes or an app worker.
-async fn handshake(config: &Arc<rustls::ClientConfig>, address: SocketAddr) -> bool {
+async fn handshake(config: &Arc<rustls::ClientConfig>, address: SocketAddr, host: &'static str) -> bool {
     let (done, outcome) = tokio::sync::oneshot::channel();
     let config = Arc::clone(config);
     let spawned = std::thread::Builder::new()
@@ -186,7 +186,7 @@ async fn handshake(config: &Arc<rustls::ClientConfig>, address: SocketAddr) -> b
             let reached = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .is_ok_and(|runtime| runtime.block_on(handshake_here(config, address)));
+                .is_ok_and(|runtime| runtime.block_on(handshake_here(config, address, host)));
             let _ = done.send(reached);
         });
     if spawned.is_err() {
@@ -196,9 +196,9 @@ async fn handshake(config: &Arc<rustls::ClientConfig>, address: SocketAddr) -> b
 }
 
 /// `handshake` on the calling thread's runtime.
-async fn handshake_here(config: Arc<rustls::ClientConfig>, address: SocketAddr) -> bool {
+async fn handshake_here(config: Arc<rustls::ClientConfig>, address: SocketAddr, host: &'static str) -> bool {
     let attempt = async {
-        let name = rustls::pki_types::ServerName::try_from(bootstrap::API_HOST).ok()?;
+        let name = rustls::pki_types::ServerName::try_from(host).ok()?;
         let tcp = tokio::net::TcpStream::connect(address).await.ok()?;
         tokio_rustls::TlsConnector::from(config).connect(name, tcp).await.ok()
     };
@@ -206,7 +206,7 @@ async fn handshake_here(config: Arc<rustls::ClientConfig>, address: SocketAddr) 
 }
 
 async fn reaches_any(config: &Arc<rustls::ClientConfig>, addresses: &[SocketAddr]) -> bool {
-    futures::future::join_all(addresses.iter().map(|address| handshake(config, *address)))
+    futures::future::join_all(addresses.iter().map(|address| handshake(config, *address, bootstrap::API_HOST)))
         .await
         .into_iter()
         .any(|reached| reached)
@@ -231,7 +231,7 @@ async fn first_relay_reached(
     config: &Arc<rustls::ClientConfig>,
     relays: &[SocketAddr],
 ) -> Option<usize> {
-    futures::future::join_all(relays.iter().map(|relay| handshake(config, *relay)))
+    futures::future::join_all(relays.iter().map(|relay| handshake(config, *relay, bootstrap::API_RELAY_HOST)))
         .await
         .into_iter()
         .position(|reached| reached)

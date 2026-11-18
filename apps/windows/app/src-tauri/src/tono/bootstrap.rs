@@ -26,11 +26,18 @@ pub const API_BOOTSTRAP_IPS: [&str; 2] = ["104.20.26.170", "172.66.162.98"];
 /// The API hostname these pins stand in for.
 pub const API_HOST: &str = "api.afk.ccwu.cc";
 
+/// The name the relay path enters the API by: TLS SNI, `Host` and URL host of every request a
+/// relay carries. One customer's network resets any TLS handshake whose SNI is [`API_HOST`]
+/// (verified 2026-11-18) but completes one for this name; the relays admit it and the Worker
+/// serves it as an alias of the API host, so the API is identical. Relay path only: the pins,
+/// the system resolver, DoH and the alternate ports keep [`API_HOST`].
+pub const API_RELAY_HOST: &str = "static.reveslc.com";
+
 /// Tono-owned API relays outside Cloudflare, tried in this order after every
 /// Cloudflare path has failed provably undelivered (decision 077).
 ///
 /// Each is an nginx `stream` listener that admits exactly the SNIs
-/// `api.afk.ccwu.cc` and `releases.afk.ccwu.cc` and passes the bytes to the
+/// `api.afk.ccwu.cc`, [`API_RELAY_HOST`] and `releases.afk.ccwu.cc` and passes the bytes to the
 /// Cloudflare edge: TLS is not terminated there, so the client still validates
 /// Cloudflare's certificate for the hostname, and the relay sees what any router
 /// on the path sees. Two DMIT nodes on different hosts (Westwood, Mesa), so one
