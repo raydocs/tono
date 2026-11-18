@@ -328,7 +328,7 @@ extension KillSwitchManager {
             check("kernel-holds-relay-permit",
                   relayShown.contains("179.253.244.3 port = 2053")
                     && relayShown.contains("179.255.154.17 port = 2053")
-                    && !relayShown.contains("179.253.244.3 port = 2053")
+                    && !relayShown.contains("179.253.233.220 port = 2053")
                     && !relayShown.contains("154.84.56.196 port = 2053"))
             check("kernel-relay-permit-is-user-only", relayShown.split(separator: "\n")
                 .filter { $0.contains("2053") }
