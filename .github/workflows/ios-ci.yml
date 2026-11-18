@@ -146,4 +146,7 @@ jobs:
           name: ios-preview-screenshots
           path: ${{ runner.temp }}/ios-preview
           if-no-files-found: warn
-          retention-days: 14
+          # ~700MB per run (preview videos + UI-test recording). A green run's previews are looked at
+          # the same day; keep a failed run's longer for debugging. Long retention filled the account's
+          # shared artifact quota and blocked uploads in other repositories.
+          retention-days: ${{ job.status == 'success' && 2 || 14 }}
