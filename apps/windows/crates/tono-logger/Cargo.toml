@@ -10,7 +10,7 @@ color = ["nu-ansi-term"]
 [dependencies]
 arraydeque = "0.5"
 compact_str = { version = "0.10", features = ["rkyv", "smallvec"] }
-flexi_logger = "0.31"
+flexi_logger = "0.32"
 log = "0.4"
 nu-ansi-term = { version = "0.50", optional = true }
 tokio = { version = "1.48", features = ["sync"] }

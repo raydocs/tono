@@ -139,7 +139,7 @@ tokio = { version = "1.52", features = [
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
 tono-logger = { path = "../crates/tono-logger", optional = true }
-flexi_logger = { version = "0.31", optional = true }
+flexi_logger = { version = "0.32", optional = true }
 log = { version = "0.4.28", optional = true }
 tracing-log = { version = "0.2", optional = true }
 compact_str = { version = "0.10", features = ["serde"], optional = true }
@@ -150,7 +150,7 @@ sysproxy = { path = "../vendor/sysproxy" }
 
 [target.'cfg(unix)'.dependencies]
 platform_lib = { package = "libc", version = "0.2", optional = true }
-nix = { version = "0.31", features = ["user"], optional = true }
+nix = { version = "0.32", features = ["user"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 tono-authenticode = { path = "../crates/tono-authenticode" }
