@@ -103,6 +103,16 @@ actor TonoAPIClient {
         case exitIdentityPropagating
         case credentialPersistence
         case credentialRecoveryRecord
+        /// 401 `EMAIL_OWNERSHIP_UNVERIFIED`: Apple or Google proved its own
+        /// account but cannot vouch for the mailbox (decision 141). The ticket
+        /// lets an email-code sign-in for that address link it, with consent.
+        case providerMailboxUnverified(linkTicket: String?)
+        /// 401 `OIDC_AUTHENTICATION_FAILED`: the provider's token was refused.
+        /// No Tono session is involved, so not "your session has expired".
+        case identityVerificationFailed
+        /// 503 `IDENTITY_PROVIDER_UNAVAILABLE`: Apple's or Google's keys could
+        /// not be read; the same attempt may be retried.
+        case identityProviderUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -124,6 +134,9 @@ actor TonoAPIClient {
             case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. Try again in a minute.")
             case .credentialPersistence: String(localized: "Tono could not save your sign-in in Keychain. You are signed out. Check that your login keychain is unlocked, then try again.")
             case .credentialRecoveryRecord: String(localized: "Tono could not update its sign-in recovery record. You are signed out. Check available disk space and Tono's Application Support folder permissions, then try again.")
+            case .providerMailboxUnverified: String(localized: "This Apple ID uses an email address Apple cannot vouch for. Sign in with an email code for that address; you can link this Apple ID there.")
+            case .identityVerificationFailed: String(localized: "Sign-in could not be verified. Please try again.")
+            case .identityProviderUnavailable: String(localized: "The sign-in provider is temporarily unavailable. Try again in a moment.")
             }
         }
 
@@ -165,7 +178,7 @@ actor TonoAPIClient {
     ]
 
     private struct APIErrorBody: Decodable { let message: String?; let code: String? }
-    private struct ErrorEnvelope: Decodable { let error: APIErrorBody }
+    private struct ErrorEnvelope: Decodable { let error: APIErrorBody; let linkTicket: String? }
     private let baseURL: URL
     /// The control-plane `URLSession`, which resolves the host through the
     /// system resolver.
@@ -1247,6 +1260,11 @@ actor TonoAPIClient {
                 // #595: the Worker's refusal of a sign-in code, not an expired session. Keyed on
                 // the code: the verify endpoint also answers a plain 401 (AUTHENTICATION_FAILED).
                 if status == 401, envelope?.error.code == "INVALID_OR_EXPIRED_CODE" { throw APIError.invalidOrExpiredCode }
+                if status == 401, envelope?.error.code == "EMAIL_OWNERSHIP_UNVERIFIED" {
+                    throw APIError.providerMailboxUnverified(linkTicket: envelope?.linkTicket)
+                }
+                if status == 401, envelope?.error.code == "OIDC_AUTHENTICATION_FAILED" { throw APIError.identityVerificationFailed }
+                if status == 503, envelope?.error.code == "IDENTITY_PROVIDER_UNAVAILABLE" { throw APIError.identityProviderUnavailable }
                 if status == 401 { throw APIError.unauthorized }; if status == 403 { throw APIError.forbidden }
                 if status == 429 {
                     let seconds = answer.retryAfter.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }

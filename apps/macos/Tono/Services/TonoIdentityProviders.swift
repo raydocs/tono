@@ -1,4 +1,3 @@
-#if DEBUG
 import AppKit
 import AuthenticationServices
 import CryptoKit
@@ -18,15 +17,71 @@ enum TonoIdentityProviderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .alreadyRunning: "A sign-in request is already in progress."
-        case .cancelled: "Sign-in was cancelled."
-        case .invalidCallback: "The identity provider returned an invalid callback."
-        case .invalidCredential: "The identity provider returned an invalid credential."
-        case .browserUnavailable: "Tono could not open your browser for sign-in."
-        case .listenerFailed: "Tono could not create the local sign-in callback."
-        case .timedOut: "Sign-in timed out. Please try again."
-        case .tokenExchangeFailed: "Google could not complete sign-in."
+        case .alreadyRunning: String(localized: "A sign-in request is already in progress.")
+        case .cancelled: String(localized: "Sign-in was cancelled.")
+        case .invalidCallback: String(localized: "The identity provider returned an invalid callback.")
+        case .invalidCredential: String(localized: "The identity provider returned an invalid credential.")
+        case .browserUnavailable: String(localized: "Tono could not open your browser for sign-in.")
+        case .listenerFailed: String(localized: "Tono could not create the local sign-in callback.")
+        case .timedOut: String(localized: "Sign-in timed out. Please try again.")
+        case .tokenExchangeFailed: String(localized: "Google could not complete sign-in.")
         }
+    }
+}
+
+/// Sign in with Apple is a restricted entitlement: a build is offered the
+/// button only when its signature actually carries it (the Developer ID
+/// release needs a provisioning profile with the capability first).
+enum AppleSignInAvailability {
+    static let entitled: Bool = {
+        guard let task = SecTaskCreateFromSelf(nil) else { return false }
+        let value = SecTaskCopyValueForEntitlement(task, "com.apple.developer.applesignin" as CFString, nil)
+        return (value as? [String])?.isEmpty == false
+    }()
+}
+
+/// An Apple/Google link ticket from a refused provider sign-in (decision 141).
+/// The ticket's payload names the address the provider gave; the client reads
+/// it only to show it masked and to send the ticket with a code for that same
+/// address. The server verifies the signature and every binding again.
+nonisolated struct PendingIdentityLink: Equatable, Sendable {
+    static let lifetime: TimeInterval = 600
+    let provider: String
+    let ticket: String
+    let email: String
+    let receivedAt: Date
+    /// The user's explicit "Link" answer; nothing is sent without it.
+    var consented = false
+
+    init?(provider: String, ticket: String, now: Date = Date()) {
+        let parts = ticket.split(separator: ".")
+        guard parts.count == 3, ticket.count <= 2_048 else { return nil }
+        var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while payload.count % 4 != 0 { payload += "=" }
+        guard let data = Data(base64Encoded: payload),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let email = claims["email"] as? String, email.contains("@")
+        else { return nil }
+        self.provider = provider
+        self.ticket = ticket
+        self.email = email.lowercased()
+        self.receivedAt = now
+    }
+
+    /// "j•••@outlook.com": enough to recognise, not to read out.
+    var maskedEmail: String {
+        guard let at = email.firstIndex(of: "@") else { return email }
+        return "\(email.prefix(1))•••\(email[at...])"
+    }
+
+    /// The ticket to send with a code for `address`, or nil when the user did
+    /// not agree, the address differs, or ten minutes have passed.
+    func ticket(for address: String?, now: Date = Date()) -> String? {
+        guard consented, address?.lowercased() == email,
+              now.timeIntervalSince(receivedAt) < Self.lifetime
+        else { return nil }
+        return ticket
     }
 }
 
@@ -124,6 +179,7 @@ final class AppleSignInCoordinator: NSObject,
     }
 }
 
+#if DEBUG
 nonisolated private final class GoogleLoopbackReceiver: @unchecked Sendable {
     private let expectedState: String
     private let listener: NWListener
