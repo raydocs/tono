@@ -459,8 +459,15 @@ struct DashboardView: View {
         if appState.isProtectionBlockUnreadable { return "Protection unknown" }
         if appState.isProtectionBlocked { return "Protected offline" }
         if appState.isProtectionUnconfirmed { return "Protection unknown" }
-        if isDegradedWhileConnected { return "Protected — exit degraded" }
-        return appState.isConnected ? "Protected" : "Standby"
+        if isDegradedWhileConnected { return isListedAIScope ? "Degraded" : "Protected — exit degraded" }
+        guard appState.isConnected else { return "Standby" }
+        return isListedAIScope ? "AI protected" : "Protected"
+    }
+
+    /// The verified session protects listed AI only (decision 130). Read
+    /// from the captured session, not the saved Settings choice.
+    private var isListedAIScope: Bool {
+        appState.sessionProtectionScope == .listedAI
     }
 
     private var statusBadgeColor: Color {
@@ -489,12 +496,21 @@ struct DashboardView: View {
         if appState.isProtectionBlocked { return String(localized: "Offline") }
         if appState.isProtectionUnconfirmed { return String(localized: "Unknown") }
         if isDegradedWhileConnected { return String(localized: "Degraded") }
-        return appState.isConnected
-            ? String(localized: "Protected")
-            : String(localized: "Standby")
+        guard appState.isConnected else { return String(localized: "Standby") }
+        return isListedAIScope
+            ? String(localized: "AI protected")
+            : String(localized: "Protected")
     }
 
     private var protectionDetail: String {
+        Self.protectionDetail(for: appState)
+    }
+
+    @MainActor
+    static func protectionDetail(for appState: AppState) -> String {
+        if appState.isDisconnecting { return String(localized: "Finishing") }
+        if appState.isConnecting { return String(localized: "Connecting") }
+        if appState.isProtectedReconnectScheduled { return String(localized: "Waiting to retry…") }
         if appState.isProtectionBlockUnreadable {
             return String(localized: "Direct traffic may be blocked")
         }
@@ -504,10 +520,14 @@ struct DashboardView: View {
         if appState.isProtectionUnconfirmed {
             return String(localized: "Direct traffic may be blocked")
         }
-        if isDegradedWhileConnected {
+        if appState.isConnected && appState.isProxyDegraded && !appState.isConnecting && !appState.isDisconnecting {
             return String(localized: "Exit not responding — checking")
         }
-        if appState.isConnected { return String(localized: "Traffic is routed") }
+        if appState.isConnected {
+            return appState.sessionProtectionScope == .listedAI
+                ? String(localized: "Listed AI protected · unmatched traffic direct")
+                : String(localized: "Traffic is routed")
+        }
         return String(localized: "Ready to connect")
     }
 

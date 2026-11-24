@@ -203,7 +203,7 @@ struct SettingsView: View {
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Only listed AI domains and Anthropic's IPv4 range are recognized. ECH, cached or raw IP, or app DoH can hide other AI services, which then go DIRECT. If Tono quits or Core stops, ordinary traffic stays online and listed AI services stay blocked until you reconnect or choose Restore internet.")
+                Text("Only listed AI domains and Anthropic's IPv4 range are recognized. ECH, cached or raw IP, or app DoH can hide other AI services, which then go DIRECT. After Tono quits or Core stops, only limited AI blocking is attempted; it cannot guarantee that every listed AI service stays blocked. Reconnect before using AI services.")
                     .font(.system(size: seaEnabled ? 12 : 11))
                     .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -249,7 +249,7 @@ struct SettingsView: View {
 
             settingDivider
 
-            SettingRow(label: "Interface Language", subtitle: "Reopens Tono to apply. Quitting drops the connection and restores normal internet. If protection was on, AI services stay blocked until you connect again.") {
+            SettingRow(label: "Interface Language", subtitle: "Reopens Tono to apply. Quitting disconnects Tono. Any remaining AI blocking is limited and best effort. Reconnect before using AI services.") {
                 settingsPicker(
                     label: "Interface Language",
                     selection: Binding(
@@ -609,7 +609,7 @@ struct SettingsView: View {
         alert.alertStyle = .warning
         alert.messageText = String(localized: "Change the language and reopen Tono?")
         alert.informativeText = String(
-            localized: "Tono has to quit and reopen to change languages. This Mac is protected right now, so the connection is dropped and normal internet is restored. AI services stay blocked until you connect again."
+            localized: "Tono has to quit and reopen to change languages. This ends the current connection and can restore normal internet routing. Any remaining AI blocking is limited and best effort, not full protection. Reconnect before using AI services."
         )
         alert.addButton(withTitle: String(localized: "Reopen Tono"))
         alert.addButton(withTitle: String(localized: "Cancel"))
