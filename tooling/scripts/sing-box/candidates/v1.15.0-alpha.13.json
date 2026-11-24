@@ -1,0 +1,48 @@
+{
+  "contract_version": 1,
+  "profile": "reality-tcp-no-special-routing-v1",
+  "manifest_scope": "v1.15.0-alpha.13-offline-not-installable",
+  "contract_commit": "824dbcfb4dd0a95921840b1737b950cde590241e",
+  "engine": "sing-box",
+  "source": {
+    "repository": "https://github.com/SagerNet/sing-box",
+    "tag": "v1.15.0-alpha.13",
+    "commit": "824dbcfb4dd0a95921840b1737b950cde590241e",
+    "go_mod_sha256": "b3892361f55268d4c0d30d76738b5bd8acbf0c862b3f699d6e7ea4ff92969e66",
+    "go_sum_sha256": "cab7f4e7ff8322592cf3c69809f5afaa8869beead54b98a944855dbfc64e384e",
+    "sing_tun": "v0.9.7-0.20261023115453-611d83b7a57b",
+    "patches": []
+  },
+  "build": {
+    "go_version": "go1.27.1",
+    "gotoolchain": "local",
+    "cgo_enabled": "0",
+    "tags": ["with_gvisor", "with_quic", "with_utls", "with_clash_api"],
+    "args": ["-mod=readonly", "-trimpath"],
+    "ldflags": "-X github.com/sagernet/sing-box/constant.Version=1.15.0-alpha.13-tono-a13.1 -w -s -buildid=",
+    "entrypoint": "./cmd/sing-box",
+    "targets": [
+      {"goos": "linux", "goarch": "amd64", "goamd64": "v2", "purpose": "offline validation only"},
+      {"goos": "darwin", "goarch": "arm64", "purpose": "unsigned candidate input; native qualification required"},
+      {"goos": "windows", "goarch": "amd64", "goamd64": "v2", "purpose": "unsigned candidate input; native qualification required"}
+    ]
+  },
+  "runtime": {
+    "stack": "go",
+    "emit_stack_field": false,
+    "tun_address": "198.18.0.1/30",
+    "virtual_dns_address": "198.18.0.2",
+    "fake_ipv4_range": "198.19.0.0/16",
+    "fake_ipv4_note": "Frozen M0 reference shape that check parses. The Windows sing-box product template is a separate file and is not this field.",
+    "dns_listen": "127.0.0.1:53",
+    "dns_mode": "disabled",
+    "auto_route": true,
+    "strict_route": false,
+    "mtu": 1500,
+    "multi_queue": false,
+    "proxy_mux": false,
+    "persistent_cache": false,
+    "ipv6": false
+  },
+  "toolchain_note": "Tag v1.15.0-alpha.13 is commit 824dbcfb4dd0a95921840b1737b950cde590241e. Go 1.27.1 matches the macOS prepare script. with_gvisor remains in the tag list so the build identity stays explicit; alpha.13 documents that tag as the deprecated gVisor/mixed stack and the product template does not emit stack."
+}

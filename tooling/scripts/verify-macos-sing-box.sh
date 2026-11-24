@@ -3,4 +3,4 @@
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 binary="$repo/apps/macos/Tono/Resources/sing-box"
-echo "a4e886fde02f76f2c7ed12d1d00bb6fe50346475e73a1d1a815952279319f3f5  $binary" | shasum -a 256 -c -
+echo "647fb45b72a32b1cd324665010baf5141dedb347b4dedc66e61fce73e5076dce  $binary" | shasum -a 256 -c -
