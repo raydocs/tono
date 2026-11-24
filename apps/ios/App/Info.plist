@@ -46,6 +46,8 @@
 	<true/>
 	<key>TonoAppGroup</key>
 	<string>$(TONO_APP_GROUP)</string>
+	<key>TonoCoreVersion</key>
+	<string>$(TONO_SING_BOX_VERSION)</string>
 	<key>TonoTunnelBundleID</key>
 	<string>$(TONO_BUNDLE_ID).tunnel</string>
 	<key>UIApplicationSceneManifest</key>

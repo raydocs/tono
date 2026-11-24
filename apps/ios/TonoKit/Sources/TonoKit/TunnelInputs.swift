@@ -63,6 +63,9 @@ public enum TunnelMessage: Equatable, Sendable {
     case measure
     /// Core version, start time and the underlying network the extension sees.
     case status
+    /// The tunnel's latest throughput sample ([TrafficSample]). Read-only; the app asks once a second
+    /// while it is on screen, and the extension keeps its statistics client only while asked.
+    case traffic
 
     public var encoded: Data {
         let op: String
@@ -70,6 +73,7 @@ public enum TunnelMessage: Equatable, Sendable {
         case .reload: op = "reload"
         case .measure: op = "measure"
         case .status: op = "status"
+        case .traffic: op = "traffic"
         }
         return Data(JSON.obj(("op", .string(op))).serialized().utf8)
     }
@@ -79,6 +83,7 @@ public enum TunnelMessage: Equatable, Sendable {
     public var replyTimeout: TimeInterval {
         switch self {
         case .status: return 5
+        case .traffic: return 2
         case .measure: return 10
         case .reload: return 20
         }
@@ -89,6 +94,7 @@ public enum TunnelMessage: Equatable, Sendable {
         case "reload": return .reload
         case "measure": return .measure
         case "status": return .status
+        case "traffic": return .traffic
         default: return nil
         }
     }

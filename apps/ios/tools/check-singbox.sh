@@ -8,6 +8,8 @@
 set -euo pipefail
 IOS="$(cd "$(dirname "$0")/.." && pwd)"
 source "$IOS/supply-chain/sing-box.pin"
+grep -qx "TONO_SING_BOX_VERSION = $SING_BOX_VERSION" "$IOS/Configuration/Base.xcconfig" \
+  || { echo "Configuration/Base.xcconfig TONO_SING_BOX_VERSION does not match sing-box.pin ($SING_BOX_VERSION)" >&2; exit 1; }
 WORK="${1:-${TONO_SB_WORK:-$HOME/.tono-tools/sing-box-cli}}"
 mkdir -p "$WORK"
 ARCHIVE="$WORK/$SING_BOX_LINUX_AMD64_ASSET"
