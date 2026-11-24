@@ -72,6 +72,10 @@ struct SeaBackdropDim: Equatable {
     var sceneBlur: CGFloat
     var groundOpacity: Double
 
+    /// The dimmed horizon is still seen, so it keeps moving. Only a backdrop
+    /// that fully hides the scene (the opaque Reduce Transparency ground) pauses it.
+    var showsScene: Bool { sceneOpacity > 0 && groundOpacity < 1 }
+
     static func resolve(home: Bool, reduceTransparency: Bool) -> SeaBackdropDim {
         if home { return SeaBackdropDim(sceneOpacity: 1, sceneBlur: 0, groundOpacity: 0) }
         if reduceTransparency { return SeaBackdropDim(sceneOpacity: 0, sceneBlur: 0, groundOpacity: 1) }

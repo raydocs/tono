@@ -55,19 +55,37 @@ struct SeaSceneParameters: Equatable {
 enum SeaSceneQuality: String {
     case full, lite, `static`
 
+    /// Critical heat holds the designed still frame (the Reduce Motion one);
+    /// serious heat only slows the water (`SeaWaterPace`), it never freezes it.
     static func requested(_ preference: String, reduceMotion: Bool, lowPower: Bool,
-                          automatic: Self) -> Self {
-        if reduceMotion || preference == "Static" { return .static }
+                          automatic: Self, thermal: ProcessInfo.ThermalState = .nominal) -> Self {
+        if reduceMotion || preference == "Static" || thermal == .critical { return .static }
         if preference == "Lite" || preference == "Simple" { return .lite }
         if lowPower { return preference == "Auto" && automatic == .static ? .static : .lite }
         return preference == "Full" ? .full : automatic
     }
 }
 
+/// How fast the Full-tier Metal water draws. A focused window at normal heat
+/// keeps 60 fps. An unfocused window, or serious heat, slows it; the water
+/// keeps moving at the same speed, with fewer frames. Pausing an unseen scene
+/// is `SeaSceneNativeView.sceneIsVisible`'s job, not this one.
+enum SeaWaterPace {
+    static func preferredFPS(focused: Bool, thermal: ProcessInfo.ThermalState) -> Float {
+        if thermal == .serious || thermal == .critical { return 15 }
+        return focused ? 60 : 30
+    }
+}
+
 /// A single visible 3 s sample budget, like scene-quality-probe.ts. No lasting frame callback.
+/// A downgrade gets one later re-measure (`retry`): the first sample runs at
+/// launch, when session restore and first layout keep the main thread busy.
 struct SeaSceneQualityProbe {
+    /// Seconds after a downgrade before the one re-measure.
+    static let retryDelay = 20.0
     private(set) var quality = SeaSceneQuality.full
     private(set) var complete = false
+    private(set) var retried = false
     private(set) var elapsed = 0.0
     private var last: Double?
     private var checkpoint = false
@@ -81,6 +99,20 @@ struct SeaSceneQualityProbe {
 
     mutating func pause() { last = nil }
 
+    /// Re-measure once after a downgrade. The retry can only restore quality:
+    /// it keeps the current tier while it samples, then upgrades on a clean result.
+    mutating func retry() -> Bool {
+        guard complete, !retried, quality != .full else { return false }
+        retried = true
+        complete = false
+        elapsed = 0
+        last = nil
+        checkpoint = false
+        intervals.removeAll(keepingCapacity: true)
+        liteIntervals.removeAll(keepingCapacity: true)
+        return true
+    }
+
     func canSample(preference: String, reduceMotion: Bool, lowPower: Bool) -> Bool {
         preference == "Auto" && !reduceMotion && !lowPower && !complete
     }
@@ -92,6 +124,13 @@ struct SeaSceneQualityProbe {
         let interval = (time - last) * 1000
         elapsed += interval
         intervals.append(interval)
+        if retried {
+            guard elapsed >= 3000 || intervals.count >= 1000 else { return }
+            let p95 = Self.p95(intervals)
+            if p95 <= 34 { quality = .full } else if p95 <= 50 && quality == .static { quality = .lite }
+            complete = true
+            return
+        }
         if quality == .lite { liteIntervals.append(interval) }
         if elapsed >= 1500 && !checkpoint {
             checkpoint = true
