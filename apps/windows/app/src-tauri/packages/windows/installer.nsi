@@ -93,6 +93,7 @@ Var TonoLeaseReleased
 Var NoShortcutMode
 Var ExistingVersion
 Var ExistingUninstallCommand
+Var ExistingInstallIssue
 ; Unlike `/UPDATE`, this is set only after a complete installed-product record passes version
 ; validation. It prevents failure cleanup from disarming a Service owned by the previous install.
 Var ConfirmedExistingInstall
@@ -234,6 +235,7 @@ Function DetectExistingInstall
     ${If} $R0 != "${PRODUCTNAME}"
     ${OrIf} $ExistingUninstallCommand == ""
     ${OrIf} $ExistingVersion == ""
+      StrCpy $ExistingInstallIssue "TONO_INSTALL_RECORD_INCOMPLETE"
       Goto invalid_existing_version
     ${EndIf}
 
@@ -243,7 +245,32 @@ Function DetectExistingInstall
     nsis_tauri_utils::SemverCompare $ExistingVersion "0.0.0-0"
     Pop $R0
     ${If} $R0 = -1
+      StrCpy $ExistingInstallIssue "TONO_INSTALL_VERSION_INVALID"
       Goto invalid_existing_version
+    ${EndIf}
+
+    ; 0.0.35 renamed verge-mihomo to tono-core. A leftover tono-core from a later failed install
+    ; does not make a registered 32-34 installation compatible. A confirmed orphan clear uses the
+    ; separately gated fresh-install recovery path instead (it can restore missing targets).
+    ${If} $ClearingOrphanedBlock != 1
+      nsis_tauri_utils::SemverCompare $ExistingVersion "0.0.35"
+      Pop $R0
+      ${If} $R0 = -1
+        StrCpy $ExistingInstallIssue "TONO_INSTALL_LEGACY_LAYOUT"
+        Goto invalid_existing_version
+      ${EndIf}
+      ${IfNot} ${FileExists} "$INSTDIR\tono-core.exe"
+        ${If} ${FileExists} "$INSTDIR\verge-mihomo.exe"
+          StrCpy $ExistingInstallIssue "TONO_INSTALL_LEGACY_LAYOUT"
+        ${Else}
+          StrCpy $ExistingInstallIssue "TONO_INSTALL_INCOMPLETE_PAYLOAD"
+        ${EndIf}
+        Goto invalid_existing_version
+      ${EndIf}
+      ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+        StrCpy $ExistingInstallIssue "TONO_INSTALL_INCOMPLETE_PAYLOAD"
+        Goto invalid_existing_version
+      ${EndIf}
     ${EndIf}
 
     nsis_tauri_utils::SemverCompare "${VERSION}" $ExistingVersion
@@ -259,6 +286,7 @@ Function DetectExistingInstall
         Goto downgrade_blocked
       !endif
     ${Else}
+      StrCpy $ExistingInstallIssue "TONO_INSTALL_VERSION_COMPARE_FAILED"
       Goto invalid_existing_version
     ${EndIf}
   ${EndIf}
@@ -304,6 +332,7 @@ Function DetectExistingInstall
     Quit
 
   invalid_existing_version:
+    DetailPrint "$ExistingInstallIssue; setup=${VERSION}; recorded=$ExistingVersion; directory=$INSTDIR"
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "$(invalidExistingVersion)"
     ${EndIf}
@@ -325,6 +354,9 @@ Function DetectExistingInstall
     ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
     ${OrIf} ${FileExists} "$INSTDIR\tono-core.exe"
     ${OrIf} ${FileExists} "$INSTDIR\verge-mihomo.exe"
+    ${OrIf} ${FileExists} "$INSTDIR\sing-box.exe"
+    ${OrIf} ${FileExists} "$INSTDIR\resources\tono-service.exe"
+      StrCpy $ExistingInstallIssue "TONO_INSTALL_FILES_WITHOUT_RECORD"
       Goto invalid_existing_version
     ${EndIf}
     Return
@@ -434,9 +466,21 @@ LangString downgradeBlocked ${LANG_SIMPCHINESE} "检测到较新的 ${PRODUCTNAM
 LangString downgradeBlocked ${LANG_ENGLISH} "A newer ${PRODUCTNAME} version ($ExistingVersion) is installed. Setup stopped to protect application data and the system Service. Use an installer for that version or newer.$\r$\n$\r$\nTo go back to an older version, first uninstall this one from Windows Installed apps (do not delete application data), then run the older installer. Do not install an older version over a newer one: it cannot undo the DNS settings the newer version changed."
 LangString downgradeBlocked ${LANG_RUSSIAN} "Установлена более новая версия ${PRODUCTNAME} ($ExistingVersion). Установка остановлена для защиты данных приложения и системной службы. Используйте установщик этой или более новой версии.$\r$\n$\r$\nЧтобы вернуться к старой версии, сначала удалите текущую через список установленных приложений Windows (не удаляя данные приложения), затем запустите старый установщик. Не устанавливайте старую версию поверх новой: она не может отменить изменения DNS, сделанные новой версией."
 
-LangString invalidExistingVersion ${LANG_SIMPCHINESE} "检测到现有 ${PRODUCTNAME} 安装，但无法安全确认其版本。安装已停止，未删除应用数据。请先修复或卸载现有版本（不要选择删除应用数据），再重试。"
-LangString invalidExistingVersion ${LANG_ENGLISH} "An existing ${PRODUCTNAME} installation was found, but its version could not be verified safely. Setup stopped without deleting application data. Repair or uninstall the existing version (do not select Delete application data), then retry."
-LangString invalidExistingVersion ${LANG_RUSSIAN} "Обнаружена существующая установка ${PRODUCTNAME}, но её версию не удалось безопасно проверить. Установка остановлена без удаления данных приложения. Восстановите или удалите текущую версию (не выбирая удаление данных приложения), затем повторите попытку."
+LangString invalidExistingVersion ${LANG_SIMPCHINESE} "发现 ${PRODUCTNAME} 安装记录或程序文件，但无法安全确认安装状态，可能只有残留文件或记录。安装已停止，未删除应用数据。$\r$\n$\r$\n错误代码：$ExistingInstallIssue$\r$\n安装包版本：${VERSION}$\r$\n记录版本：$ExistingVersion$\r$\n程序目录：$INSTDIR$\r$\n注册表项：${UNINSTKEY}$\r$\n$\r$\n请把此窗口截图和安装包文件名发给 ${PRODUCTNAME} 支持。如果原卸载程序仍可用，可正常卸载且不要勾选“删除应用数据”；无法卸载时请停止，不要自行删除程序目录或注册表。"
+LangString invalidExistingVersion ${LANG_ENGLISH} "${PRODUCTNAME} installation records or program files were found, but setup cannot safely confirm the installation state. These may be remnants only. Setup stopped without deleting application data.$\r$\n$\r$\nCode: $ExistingInstallIssue$\r$\nSetup version: ${VERSION}$\r$\nRecorded version: $ExistingVersion$\r$\nProgram directory: $INSTDIR$\r$\nRegistry key: ${UNINSTKEY}$\r$\n$\r$\nSend a screenshot and the installer filename to ${PRODUCTNAME} support. If the original uninstaller still works, uninstall normally without selecting Delete application data. If it fails, stop; do not delete program files or registry entries yourself."
+LangString invalidExistingVersion ${LANG_RUSSIAN} "${PRODUCTNAME} installation records or program files were found, but setup cannot safely confirm the installation state. These may be remnants only. Setup stopped without deleting application data.$\r$\n$\r$\nCode: $ExistingInstallIssue$\r$\nSetup version: ${VERSION}$\r$\nRecorded version: $ExistingVersion$\r$\nProgram directory: $INSTDIR$\r$\nRegistry key: ${UNINSTKEY}$\r$\n$\r$\nSend a screenshot and the installer filename to ${PRODUCTNAME} support. If the original uninstaller still works, uninstall normally without selecting Delete application data. If it fails, stop; do not delete program files or registry entries yourself."
+
+LangString uninstallFileRetained ${LANG_SIMPCHINESE} "${PRODUCTNAME} 未能删除程序文件：$R6$\r$\n卸载尚未完成；卸载记录和卸载程序已保留。请关闭占用该文件的程序后重试此卸载程序，仍失败时将此窗口和安装包文件名发给支持。保留数据时不要勾选“删除应用数据”。不要手动删除网卡、驱动或注册表。"
+LangString uninstallFileRetained ${LANG_ENGLISH} "${PRODUCTNAME} could not remove this program file: $R6$\r$\nUninstall is incomplete; the uninstall record and uninstaller were retained. Close programs using this file and retry this uninstaller. If it still fails, send this window and the installer filename to support. Leave Delete application data unchecked to keep your data. Do not manually delete adapters, drivers or registry entries."
+LangString uninstallFileRetained ${LANG_RUSSIAN} "${PRODUCTNAME} could not remove this program file: $R6$\r$\nUninstall is incomplete; the uninstall record and uninstaller were retained. Close programs using this file and retry this uninstaller. If it still fails, send this window and the installer filename to support. Leave Delete application data unchecked to keep your data. Do not manually delete adapters, drivers or registry entries."
+
+LangString uninstallRootUnverifiable ${LANG_SIMPCHINESE} "无法安全确认 ${PRODUCTNAME} 程序目录，卸载未开始。错误代码：TONO_UNINSTALL_ROOT_UNVERIFIABLE$\r$\n请将此窗口和安装包文件名发给支持；不要移动卸载程序、删除程序目录或修改注册表。"
+LangString uninstallRootUnverifiable ${LANG_ENGLISH} "The ${PRODUCTNAME} program directory could not be verified safely. Uninstall did not start. Code: TONO_UNINSTALL_ROOT_UNVERIFIABLE$\r$\nSend this window and the installer filename to support; do not move the uninstaller, delete program files or edit the registry."
+LangString uninstallRootUnverifiable ${LANG_RUSSIAN} "The ${PRODUCTNAME} program directory could not be verified safely. Uninstall did not start. Code: TONO_UNINSTALL_ROOT_UNVERIFIABLE$\r$\nSend this window and the installer filename to support; do not move the uninstaller, delete program files or edit the registry."
+
+LangString uninstallCleanupRetained ${LANG_SIMPCHINESE} "${PRODUCTNAME} 已解除网络拦截，但服务或恢复任务清理尚未完成（result 2）。错误代码：TONO_UNINSTALL_CLEANUP_INCOMPLETE$\r$\n程序文件和卸载记录已保留，请关闭此窗口后重试卸载，保留数据时不要勾选“删除应用数据”。仍失败时请发送此窗口截图，不要手动删除服务或注册表。"
+LangString uninstallCleanupRetained ${LANG_ENGLISH} "${PRODUCTNAME} network blocking was released, but Service or recovery-task cleanup is incomplete (result 2). Code: TONO_UNINSTALL_CLEANUP_INCOMPLETE$\r$\nProgram files and the uninstall record were retained. Close this window and retry uninstall, leaving Delete application data unchecked to keep data. If it still fails, send this screenshot; do not manually delete services or registry entries."
+LangString uninstallCleanupRetained ${LANG_RUSSIAN} "${PRODUCTNAME} network blocking was released, but Service or recovery-task cleanup is incomplete (result 2). Code: TONO_UNINSTALL_CLEANUP_INCOMPLETE$\r$\nProgram files and the uninstall record were retained. Close this window and retry uninstall, leaving Delete application data unchecked to keep data. If it still fails, send this screenshot; do not manually delete services or registry entries."
 
 LangString legacyWixManualMigration ${LANG_SIMPCHINESE} "检测到旧版 MSI/WiX ${PRODUCTNAME}。为了避免误删应用数据，此安装程序不会自动卸载它。请从 Windows“已安装的应用”中卸载旧版（不要删除应用数据），然后重新运行此安装程序。"
 LangString legacyWixManualMigration ${LANG_ENGLISH} "A legacy MSI/WiX ${PRODUCTNAME} installation was found. To avoid deleting application data accidentally, this installer will not remove it automatically. Uninstall the legacy version from Windows Installed apps without deleting application data, then run this installer again."
@@ -481,6 +525,10 @@ LangString gateNoDetail ${LANG_SIMPCHINESE} "（无）"
 LangString gateNoDetail ${LANG_ENGLISH} "(none)"
 LangString gateNoDetail ${LANG_RUSSIAN} "(none)"
 
+LangString gateLogUnavailable ${LANG_SIMPCHINESE} "（未取得日志位置；无需创建日志目录，请发送此窗口截图和安装包文件名）"
+LangString gateLogUnavailable ${LANG_ENGLISH} "(log location unavailable; do not create a log folder; send this screenshot and the installer filename)"
+LangString gateLogUnavailable ${LANG_RUSSIAN} "(log location unavailable; do not create a log folder; send this screenshot and the installer filename)"
+
 LangString gateReasonUpdatePending ${LANG_SIMPCHINESE} "原因：上一次 ${PRODUCTNAME} 更新没有完成，受保护的恢复记录仍在。$\r$\n下一步：如果 ${PRODUCTNAME} 仍已安装，请打开它，在“检查更新”中完成更新（或断开后重试）；如果已经卸载，请重启电脑一次，让恢复任务完成，然后重试。"
 LangString gateReasonUpdatePending ${LANG_ENGLISH} "Cause: an earlier ${PRODUCTNAME} update did not finish, and its protected recovery record is still here.$\r$\nNext: if ${PRODUCTNAME} is still installed, open it and finish the update from Check for Updates (or Disconnect and Retry). If it is already uninstalled, restart Windows once so the recovery task can finish, then try again."
 LangString gateReasonUpdatePending ${LANG_RUSSIAN} "Cause: an earlier ${PRODUCTNAME} update did not finish, and its protected recovery record is still here.$\r$\nNext: if ${PRODUCTNAME} is still installed, open it and finish the update from Check for Updates (or Disconnect and Retry). If it is already uninstalled, restart Windows once so the recovery task can finish, then try again."
@@ -509,9 +557,9 @@ LangString gateReasonCoreRunning ${LANG_SIMPCHINESE} "原因：之前安装的 $
 LangString gateReasonCoreRunning ${LANG_ENGLISH} "Cause: the ${PRODUCTNAME} core process from an earlier installation is still running, or could not be shown stopped.$\r$\nNext: restart Windows, then try again."
 LangString gateReasonCoreRunning ${LANG_RUSSIAN} "Cause: the ${PRODUCTNAME} core process from an earlier installation is still running, or could not be shown stopped.$\r$\nNext: restart Windows, then try again."
 
-LangString gateReasonTonoAdapterPresent ${LANG_SIMPCHINESE} "原因：Windows 报告这台电脑上名为 Tono 的网络适配器仍然存在。$\r$\n下一步：请重启电脑，然后重新运行此安装程序。仍然出现时，请把下面的日志文件发给 ${PRODUCTNAME} 支持。"
-LangString gateReasonTonoAdapterPresent ${LANG_ENGLISH} "Cause: Windows reports a network adapter named Tono as present on this PC.$\r$\nNext: restart Windows, then run this installer again. If it still happens, send the log file below to ${PRODUCTNAME} support."
-LangString gateReasonTonoAdapterPresent ${LANG_RUSSIAN} "Cause: Windows reports a network adapter named Tono as present on this PC.$\r$\nNext: restart Windows, then run this installer again. If it still happens, send the log file below to ${PRODUCTNAME} support."
+LangString gateReasonTonoAdapterPresent ${LANG_SIMPCHINESE} "原因：Windows 仍报告名为 Tono 的网络适配器存在；“已断开”不等于设备不存在。$\r$\n下一步：若 ${PRODUCTNAME} 可打开，请正常断开后退出。重启后仍失败时，不必反复重启；请发送此窗口截图和安装包文件名，日志存在时一并提供。不要仅凭名称删除网卡或驱动。"
+LangString gateReasonTonoAdapterPresent ${LANG_ENGLISH} "Cause: Windows still reports a network adapter named Tono as present; disconnected does not mean absent.$\r$\nNext: if ${PRODUCTNAME} opens, Disconnect normally and exit. If a restart did not help, do not keep restarting. Send this screenshot and the installer filename, plus the log if available. Do not delete an adapter or driver based only on its name."
+LangString gateReasonTonoAdapterPresent ${LANG_RUSSIAN} "Cause: Windows still reports a network adapter named Tono as present; disconnected does not mean absent.$\r$\nNext: if ${PRODUCTNAME} opens, Disconnect normally and exit. If a restart did not help, do not keep restarting. Send this screenshot and the installer filename, plus the log if available. Do not delete an adapter or driver based only on its name."
 
 LangString gateReasonStateDirUnusable ${LANG_SIMPCHINESE} "原因：${PRODUCTNAME} 的系统数据文件夹 %ProgramData%\Tono 不能安全使用：它可能被“C 盘搬家”类工具改成了链接，或所有者不是管理员或 SYSTEM。$\r$\n下一步：如果用工具搬移过 ProgramData，请先移回原位；否则请把下面的日志文件发给 ${PRODUCTNAME} 支持。"
 LangString gateReasonStateDirUnusable ${LANG_ENGLISH} "Cause: the ${PRODUCTNAME} system data folder %ProgramData%\Tono cannot be used safely: a disk-moving tool may have turned it into a link, or it is not owned by Administrators or SYSTEM.$\r$\nNext: if you moved ProgramData with such a tool, move it back first. Otherwise send the log file below to ${PRODUCTNAME} support."
@@ -573,8 +621,7 @@ Function ${UN}TonoGateExplain
     StrCpy $R2 "$(gateNoDetail)"
   ${EndIf}
   ${If} $R3 == ""
-    ReadEnvStr $R3 PROGRAMDATA
-    StrCpy $R3 "$R3\Tono\logs\install-gate.log"
+    StrCpy $R3 "$(gateLogUnavailable)"
   ${EndIf}
   ${If} $0 == "77"
     StrCpy $R0 "TONO_INSTALL_PROTECTION_ACTIVE"
@@ -890,6 +937,13 @@ FunctionEnd
 !macroend
 
 !macro RemoveVergeService
+  ; The uninstaller carries its own helpers, so even a partially removed resources directory
+  ; cannot destroy its retry path. An install uses the freshly extracted installed payload.
+  !ifdef __UNINSTALL__
+    !define TONO_CLEANUP_HELPER "$PLUGINSDIR\tono-gate\resources\tono-service-uninstall.exe"
+  !else
+    !define TONO_CLEANUP_HELPER "$INSTDIR\resources\tono-service-uninstall.exe"
+  !endif
   ; An updater temporarily removes the old application files but must preserve the running
   ; Service until the new install helper replaces it. The helper itself distinguishes a durable
   ; active/wanted session (preserve fail-closed) from a disconnected old build (write a one-start
@@ -909,7 +963,7 @@ FunctionEnd
     ; filters may still be installed" — because removing the app while a persistent WFP barrier
     ; stays armed leaves a blocked machine with no software left to unblock it. An inexact
     ; resolver does not: the user can change DNS from Windows' own network settings.
-    ${IfNot} ${FileExists} "$INSTDIR\resources\tono-service-uninstall.exe"
+    ${IfNot} ${FileExists} "${TONO_CLEANUP_HELPER}"
       !ifdef __UNINSTALL__
         Call un.HandBackManualLease
       !endif
@@ -917,7 +971,7 @@ FunctionEnd
     ${EndIf}
     DetailPrint "Restoring network protection and removing ${PRODUCTNAME} Service..."
     ; Preserve the recovery files but return control instead of hanging forever if cleanup stalls.
-    nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe" $TonoUninstallScope'
+    nsExec::ExecToLog /TIMEOUT=180000 '"${TONO_CLEANUP_HELPER}" $TonoUninstallScope'
     Pop $0
     ; Second chance for machines that fail the first pass (stuck owner lock, ProgramData ACL, or
     ; a wedged first disarm): run the Service binary's emergency disarm, then retry the helper.
@@ -931,13 +985,14 @@ FunctionEnd
         Pop $1
         DetailPrint "Emergency disarm finished (result $1)."
       ${EndIf}
-      nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-uninstall.exe" $TonoUninstallScope'
+      nsExec::ExecToLog /TIMEOUT=180000 '"${TONO_CLEANUP_HELPER}" $TonoUninstallScope'
       Pop $0
       DetailPrint "Second cleanup finished (result $0)."
     ${EndIf}
     ; The helper's exit-code contract (uninstall_service.rs `cleanup_exit_code`):
     ;   0 = the machine is clean (or was already clean)
-    ;   2 = the network was provably restored; only cosmetic cleanup (SCM record/binary) failed
+    ;   2 = the network was provably restored; only cosmetic cleanup (SCM record/binary) failed.
+    ;       Setup may repair it, but uninstall must retain its record/retry path until complete.
     ;   4 = the kill-switch filters were removed; DNS may be inexact (DHCP fallback, still on a
     ;       Tono resolver, or unproven). Continue — an inexact resolver is not a blocked machine.
     ;   3 = cleanup could not show the WFP barrier (or Tono's NRPT rule) was removed; the
@@ -947,7 +1002,16 @@ FunctionEnd
     ; like 3, because nothing showed the machine was made safe. That discipline is unchanged —
     ; unknown results still block, and every blocking path still preserves the recovery files.
     ${If} $0 == "2"
-      DetailPrint "${PRODUCTNAME} network protection was restored; some Service leftovers could not be removed and will be cleaned up by a future install."
+      !ifdef __UNINSTALL__
+        SetErrorLevel 1603
+        ${IfNot} ${Silent}
+          MessageBox MB_ICONSTOP "$(uninstallCleanupRetained)"
+        ${EndIf}
+        Call un.HandBackManualLease
+        Abort "TONO_UNINSTALL_CLEANUP_INCOMPLETE: result 2; files and uninstall record retained."
+      !else
+        DetailPrint "${PRODUCTNAME} network protection was restored; some Service leftovers could not be removed and will be cleaned up by a future install."
+      !endif
     ${ElseIf} $0 == "4"
       DetailPrint "${PRODUCTNAME} network protection (kill switch) was removed. DNS may need a manual check: Settings > Network & Internet > your adapter > DNS server assignment > Automatic (DHCP) for IPv4 and IPv6. Install/uninstall continues because the machine is no longer blocked."
     ${ElseIf} $0 != "0"
@@ -959,6 +1023,7 @@ FunctionEnd
       Abort "Tono could not confirm this machine was made safe (result $0), so it stopped here. Network protection may still be active: the kill switch, or Tono's DNS rule, may still be installed. The Tono Service, Tono's files and the recovery files were kept so protection can still be released. To release it, run the elevated Start-Menu shortcut ${RESTORENETWORKLINK}, or run this uninstaller or installer again. Do not rely on a reboot: the block filters survive a restart while the loopback and DHCP exceptions beside them do not. See the messages above for what failed."
     ${EndIf}
   ${EndIf}
+  !undef TONO_CLEANUP_HELPER
 !macroend
 
 ; Test 5 and older installers copied a second Mihomo plus Unix-named service helpers/scripts into
@@ -1579,11 +1644,29 @@ Function un.onInit
   ; Cancel in the language dialog (no saved choice) Aborts before any lease is taken.
   !insertmacro MUI_UNGETLANGUAGE
 
-  ; Refuse pending v1 before the pre-uninstall hook or any App termination. The plug-ins
-  ; directory only holds the helper's reason file until the gate has answered.
+  ; Refuse pending v1 before the pre-uninstall hook or any App termination. Embed the same
+  ; helpers as setup instead of depending on files a previous partial uninstall already removed.
   InitPluginsDir
+  SetOutPath "$PLUGINSDIR\tono-gate"
+  {{#each resources_dirs}}
+    CreateDirectory "$PLUGINSDIR\tono-gate\\{{this}}"
+  {{/each}}
+  {{#each resources}}
+    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+  {{/each}}
+  ; Embedded helpers must not let a copied uninstaller or _?= redirect deletion to another
+  ; directory. Native code checks the fixed Program Files root, ACLs and every reparse component.
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --verify-uninstall-root "$INSTDIR"'
+  Pop $0
+  ${If} $0 != "0"
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "$(uninstallRootUnverifiable)"
+    ${EndIf}
+    SetErrorLevel 1603
+    Abort "TONO_UNINSTALL_ROOT_UNVERIFIABLE"
+  ${EndIf}
   Delete "$PLUGINSDIR\tono-gate-reason.txt"
-  nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
   Pop $0
   ; 78 (block filters with no Tono Service left to own them) needs the same confirmed release:
   ; this uninstaller's RemoveVergeService ladder is the only thing left that can remove them.
@@ -1601,7 +1684,7 @@ Function un.onInit
     Abort "Uninstall cancelled while protection is active."
     uninstallReleaseConfirmed:
     Delete "$PLUGINSDIR\tono-gate-reason.txt"
-    nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-uninstall-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-uninstall-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
     Pop $0
   ${EndIf}
   ${If} $0 != "0"
@@ -1617,7 +1700,7 @@ Function un.onInit
   ${If} ${FileExists} "$PLUGINSDIR\tono-gate-reason.txt"
     StrCpy $TonoLeaseInherited 1
   ${EndIf}
-  CopyFiles /SILENT "$INSTDIR\resources\tono-service-install.exe" "$PLUGINSDIR\tono-gate.exe"
+  CopyFiles /SILENT "$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" "$PLUGINSDIR\tono-gate.exe"
   !insertmacro SetContext
 
   !if "${INSTALLMODE}" == "both"
@@ -1634,6 +1717,25 @@ Function un.onInit
     StrCpy $UpdateMode 1
   ${EndIf}
 FunctionEnd
+
+; Never remove ARP/uninstall.exe after silently failing to remove a payload. Keep a retry path
+; even when some earlier files are already gone. No /REBOOTOK: queued deletion is not absence.
+!macro TonoDeleteUninstallFile PATH
+  ${If} ${FileExists} "${PATH}"
+    ClearErrors
+    Delete "${PATH}"
+    ${If} ${Errors}
+      StrCpy $R6 "${PATH}"
+      DetailPrint "TONO_UNINSTALL_FILE_RETAINED: $R6"
+      Call un.HandBackManualLease
+      ${IfNot} ${Silent}
+        MessageBox MB_ICONSTOP "$(uninstallFileRetained)"
+      ${EndIf}
+      SetErrorLevel 1603
+      Abort "TONO_UNINSTALL_FILE_RETAINED: $R6"
+    ${EndIf}
+  ${EndIf}
+!macroend
 
 Section Uninstall
   !ifmacrodef NSIS_HOOK_PREUNINSTALL
@@ -1652,7 +1754,7 @@ Section Uninstall
   ; Every delete below that reaches into the approving account's own AppData runs only when the
   ; helper found no link or reparse point on the way there, the same check its all-profile removal
   ; applies to every profile. Any other result, a missing helper included, leaves them in place.
-  nsExec::ExecToLog /TIMEOUT=30000 '"$INSTDIR\resources\tono-service-uninstall.exe" --check-current-app-data'
+  nsExec::ExecToLog /TIMEOUT=30000 '"$PLUGINSDIR\tono-gate\resources\tono-service-uninstall.exe" --check-current-app-data'
   Pop $AppDataPathPlain
 
   ; "Delete app data" means every Windows account's Tono data. This elevated uninstaller runs as
@@ -1662,7 +1764,7 @@ Section Uninstall
   ; helper itself is deleted with the resources.
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
-    nsExec::ExecToLog /TIMEOUT=120000 '"$INSTDIR\resources\tono-service-uninstall.exe" --delete-app-data-all-profiles'
+    nsExec::ExecToLog /TIMEOUT=120000 '"$PLUGINSDIR\tono-gate\resources\tono-service-uninstall.exe" --delete-app-data-all-profiles'
     Pop $0
     ${If} $0 != "0"
       DetailPrint "Some ${PRODUCTNAME} data in other Windows accounts could not be removed (result $0)."
@@ -1679,18 +1781,20 @@ Section Uninstall
 
   !insertmacro SetContext
 
-  ; Delete the app directory and its content from disk
-  ; Copy main executable
-  Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+  ; Remove runtime payloads first. A locked old/new Core must leave ARP and uninstall.exe
+  ; intact, rather than turning a retryable uninstall into FILES_WITHOUT_RECORD on next setup.
+  !insertmacro TonoDeleteUninstallFile "$INSTDIR\${MAINBINARYNAME}.exe"
+
+  ; Delete external binaries (the current bundle does not list the historical Core names).
+  {{#each binaries}}
+    !insertmacro TonoDeleteUninstallFile "$INSTDIR\\{{this}}"
+  {{/each}}
+  !insertmacro TonoDeleteUninstallFile "$INSTDIR\verge-mihomo.exe"
+  !insertmacro TonoDeleteUninstallFile "$INSTDIR\verge-mihomo-alpha.exe"
 
   ; Delete resources
   {{#each resources}}
-    Delete "$INSTDIR\\{{this.[1]}}"
-  {{/each}}
-
-  ; Delete external binaries
-  {{#each binaries}}
-    Delete "$INSTDIR\\{{this}}"
+    !insertmacro TonoDeleteUninstallFile "$INSTDIR\\{{this.[1]}}"
   {{/each}}
   ; Copied beside sing-box.exe by the install section or published by the Service helper; it is
   ; in no generated list, and leaving it keeps the RMDir below from removing the product root.
