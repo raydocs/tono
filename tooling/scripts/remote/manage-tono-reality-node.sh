@@ -208,6 +208,12 @@ apply_deployment() {
         "serverNames": ["$target"],
         "privateKey": "$private_key",
         "shortIds": ["$short_id"]
+      },
+      "sockopt": {
+        "tcpFastOpen": true,
+        "tcpNoDelay": true,
+        "tcpKeepAliveIdle": 300,
+        "tcpKeepAliveInterval": 30
       }
     }
   }],
