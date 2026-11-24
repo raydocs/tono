@@ -11,20 +11,63 @@ struct SeaScene: View {
     var horizon: CGFloat = 0.44
     /// Off where text scrolls over the moon's place in the sky (sign-in at accessibility sizes).
     var moon = true
+    /// A sheet hides the scene (Home's Settings and VPN primer): it holds a still frame.
+    var covered = false
     @Environment(\.tonoReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var energy = SceneEnergy.shared
+
+    /// Seconds between redraws, or nil to hold the still frame Reduce Motion draws
+    /// (`SceneAnimationPolicy`): nothing can see it, or the phone is at critical thermal pressure.
+    private var interval: Double? {
+        reduceMotion ? nil : SceneAnimationPolicy.frameInterval(appActive: scenePhase == .active, sheetCovering: covered,
+                                                                 lowPowerMode: energy.lowPowerMode, thermal: energy.thermalPolicy)
+    }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
+        let still = interval == nil
+        TimelineView(.animation(minimumInterval: interval ?? 1.0 / 30, paused: still)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             SeaCanvas(sunRise: sky.sunRise, warn: sky.warning ? 1 : 0, horizon: horizon,
-                      drift: reduceMotion ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
-                      breath: [.dawn, .rising, .reconnecting].contains(sky) && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
-                      animateStars: !reduceMotion, moon: moon,
-                      scan: sky == .reconnecting && !reduceMotion ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
+                      drift: still ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
+                      breath: [.dawn, .rising, .reconnecting].contains(sky) && !still ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
+                      animateStars: !still, moon: moon,
+                      scan: sky == .reconnecting && !still ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
         }
         .animation(reduceMotion ? nil : (sky == .day ? TonoMotion.arrival : TonoMotion.ambient), value: sky)
         .accessibilityHidden(true)
         .ignoresSafeArea()
+    }
+}
+
+/// Low Power Mode and thermal state as the scene reads them, kept current from the system's notifications.
+@MainActor
+final class SceneEnergy: ObservableObject {
+    static let shared = SceneEnergy()
+    @Published private(set) var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @Published private(set) var thermal = ProcessInfo.processInfo.thermalState
+    private var observers: [NSObjectProtocol] = []
+
+    var thermalPolicy: SceneAnimationPolicy.Thermal {
+        switch thermal {
+        case .nominal: return .nominal
+        case .fair: return .fair
+        case .serious: return .serious
+        case .critical: return .critical
+        @unknown default: return .critical
+        }
+    }
+
+    private init() {
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled }
+            },
+            center.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.thermal = ProcessInfo.processInfo.thermalState }
+            },
+        ]
     }
 }
 

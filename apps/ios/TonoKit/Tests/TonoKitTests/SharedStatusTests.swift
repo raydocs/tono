@@ -164,4 +164,17 @@ final class SharedStatusTests: XCTestCase {
         XCTAssertNil(shared.writingTunnel(report(at: t0.addingTimeInterval(10))))
     }
 
+
+    /// The tunnel beats every 5 min and widgets turn "last known" 15 min after the newest beat they
+    /// read: a beat that only moves `beatAt` reloads every second beat, never later than that.
+    func testBeatOnlyWritesReloadWidgetsEverySecondBeatAndChangesAtOnce() {
+        let first = report(at: t0)
+        XCTAssertTrue(SharedStatus.tunnelWriteNeedsReload(old: first, new: first, lastReloadedBeat: nil))
+        let beat5 = report(at: t0.addingTimeInterval(300))
+        XCTAssertFalse(SharedStatus.tunnelWriteNeedsReload(old: first, new: beat5, lastReloadedBeat: t0))
+        let beat10 = report(at: t0.addingTimeInterval(600))
+        XCTAssertTrue(SharedStatus.tunnelWriteNeedsReload(old: beat5, new: beat10, lastReloadedBeat: t0))
+        let rebuilt = report(generation: 2, at: t0.addingTimeInterval(310))
+        XCTAssertTrue(SharedStatus.tunnelWriteNeedsReload(old: beat5, new: rebuilt, lastReloadedBeat: t0.addingTimeInterval(300)))
+    }
 }

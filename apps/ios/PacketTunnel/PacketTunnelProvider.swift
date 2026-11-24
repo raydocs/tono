@@ -36,6 +36,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// from an old file.
     private var startedAt: Date?
     private var heartbeat: DispatchSourceTimer?
+    /// The `beatAt` of the last widget reload this process asked for. Guarded by `statusLock`.
+    private var lastReloadedBeat: Date?
     /// Set when sing-box stopped its own service (`coreStopped`): from then on every record and
     /// answer says no graph runs. Its own lock, so the core's callback never waits on `serviceLock`.
     private let stopLock = NSLock()
@@ -107,7 +109,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let stopped = coreStop()
         let failure = running ? nil : SharedFiles.loadFailure()?.code
         let report = current.report(process: running, since: since, failure: failure, now: now, coreStopped: stopped)
-        if StatusStore.update({ ($0 ?? SharedStatus()).writingTunnel(report) }) { StatusReload.all() }
+        var before: TunnelReport?
+        let wrote = StatusStore.update { old in
+            before = old?.tunnel
+            return (old ?? SharedStatus()).writingTunnel(report)
+        }
+        // The file takes every beat; WidgetKit is asked only for a change a reader can see, or every
+        // second beat (`tunnelWriteNeedsReload`). Guarded by `statusLock`.
+        if wrote, SharedStatus.tunnelWriteNeedsReload(old: before, new: report, lastReloadedBeat: lastReloadedBeat) {
+            lastReloadedBeat = report.beatAt
+            StatusReload.all()
+        }
         return current.answer(since: since, now: now, coreStopped: stopped)
     }
 
