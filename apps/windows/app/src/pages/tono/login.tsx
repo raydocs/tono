@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
@@ -71,6 +71,49 @@ const planLapseOfRefusal = (code: string | undefined): PlanLapse | null =>
         : null
 /** Re-read the mail state this long after a code request; the server flags provider failures. */
 const DELIVERY_RECHECK_MS = 30_000
+
+const NOTICE_ID = 'tono-login-notice'
+
+/** The lead sentence of a message and the rest, whitespace kept so the text reads the same. */
+const leadSentence = (message: string): [string, string] => {
+  const match = /^(.+?(?:[。！？]|[.!?](?:\s+|$)))(.+)$/su.exec(message)
+  return match ? [match[1], match[2]] : [message, '']
+}
+
+/**
+ * The sea look's sign-in notice, beside the action it is about. Severity is the icon and the
+ * bold lead sentence, not colour alone: `warning` is a failure the user can retry, `info` an
+ * answer about the account (a lapsed plan), not a fault.
+ */
+const SeaInlineNotice = ({
+  tone,
+  message,
+  children,
+}: {
+  tone: 'warning' | 'info'
+  message: string | null
+  children?: ReactNode
+}) => {
+  const [lead, rest] = leadSentence(message ?? '')
+  return (
+    <div id={NOTICE_ID} className="sea-inline-notice" data-tone={tone}>
+      <TonoIcon
+        name={tone === 'warning' ? 'alertCircle' : 'info'}
+        size={18}
+        className="sea-inline-notice__icon"
+      />
+      <div className="sea-inline-notice__body">
+        {message && (
+          <p role="alert">
+            <strong>{lead}</strong>
+            {rest && <span>{rest}</span>}
+          </p>
+        )}
+        {children}
+      </div>
+    </div>
+  )
+}
 const SENT_ACK_MS = 1500
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -663,18 +706,89 @@ const LoginPage = () => {
           >
             {t('tono.account.signOut')}
           </button>
-          {signOutError && (
-            <span
-              role="alert"
-              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
-            >
-              {signOutError}
-            </span>
-          )}
+          {signOutError &&
+            (newAppearance ? (
+              <SeaInlineNotice tone="warning" message={signOutError} />
+            ) : (
+              <span
+                role="alert"
+                style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+              >
+                {signOutError}
+              </span>
+            ))}
         </GlassCard>
       </div>
     )
   }
+
+  // The text without its trailing stable code; the code stays in the details.
+  const failureText = visibleError?.replace(/ \(TONO_[A-Z0-9_]+\)$/, '') ?? null
+  const failureExtras = (
+    <>
+      {hasDiagnosticFailure && (
+        <details style={{ fontSize: 12, color: text.secondary }}>
+          <summary style={{ cursor: 'pointer' }}>
+            {t('tono.login.technicalDetails')}
+          </summary>
+          {authPaths.length > 0 && <LoginPathFailures paths={authPaths} />}
+          {authFailureSummary?.includes('\nRoutes: Tono relays') && (
+            <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
+              {t('tono.login.relayFailureKinds')}
+            </p>
+          )}
+          {!supportAvailable && (
+            <SupportContact
+              key={authFailureSummary}
+              compact
+              extra={authFailureSummary ?? undefined}
+            />
+          )}
+        </details>
+      )}
+      {supportAvailable && (
+        <div style={{ fontSize: 12, color: text.secondary }}>
+          {!visibleError && <p>{t('tono.login.recoveryEnded')}</p>}
+          <SupportContact
+            key={authFailureSummary}
+            compact
+            contact
+            extra={`${authFailureSummary ?? ''}\nRecovery cause: ${recovery.cause ?? ''}`}
+          />
+        </div>
+      )}
+    </>
+  )
+  const failureVisible = Boolean(
+    visibleError || hasDiagnosticFailure || supportAvailable,
+  )
+  // The sea look puts the failure inline, between the field and the action it is about;
+  // the original look keeps its centred text under the form.
+  const failureNotice = !failureVisible ? null : newAppearance ? (
+    <SeaInlineNotice
+      tone={signInPlanLapse ? 'info' : 'warning'}
+      message={failureText}
+    >
+      {failureExtras}
+    </SeaInlineNotice>
+  ) : (
+    <div id={NOTICE_ID}>
+      {visibleError && (
+        <p
+          role="alert"
+          style={{
+            margin: 0,
+            fontSize: 12,
+            textAlign: 'center',
+            color: 'var(--tono-text-error)',
+          }}
+        >
+          {failureText}
+        </p>
+      )}
+      {failureExtras}
+    </div>
+  )
 
   const changeEmailButton = (
     <button
@@ -923,6 +1037,7 @@ const LoginPage = () => {
               type="email"
               required
               aria-invalid={error === t('tono.login.invalidEmail')}
+              aria-describedby={visibleError ? NOTICE_ID : undefined}
               autoComplete="email"
               placeholder={t('tono.login.emailPlaceholder')}
               value={email}
@@ -938,6 +1053,7 @@ const LoginPage = () => {
 
           {!codeSent ? (
             <>
+              {newAppearance && failureNotice}
               <p className="tono-welcome__trust">
                 <TonoIcon name="lock" size={14} />
                 <span>{t('tono.login.privacySummary')}</span>
@@ -1032,7 +1148,11 @@ const LoginPage = () => {
                     maxLength={6}
                     inputMode="numeric"
                     autoComplete="one-time-code"
-                    aria-describedby="tono-code-help"
+                    aria-describedby={
+                      visibleError
+                        ? `tono-code-help ${NOTICE_ID}`
+                        : 'tono-code-help'
+                    }
                     aria-invalid={Boolean(error)}
                     onChange={(event) =>
                       setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
@@ -1052,6 +1172,7 @@ const LoginPage = () => {
                   />
                 </div>
               </label>
+              {newAppearance && failureNotice}
               <button
                 type="submit"
                 className="tono-button tono-action"
@@ -1099,58 +1220,7 @@ const LoginPage = () => {
           )}
         </form>
 
-        {(visibleError || hasDiagnosticFailure || supportAvailable) && (
-          // The sea look keeps the failure and its details in one quiet card,
-          // aligned with the form instead of floating on the horizon.
-          <div className={newAppearance ? 'sea-login-notice' : undefined}>
-            {visibleError && (
-              <p
-                role="alert"
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  textAlign: newAppearance ? 'left' : 'center',
-                  color: 'var(--tono-text-error)',
-                }}
-              >
-                {visibleError.replace(/ \(TONO_[A-Z0-9_]+\)$/, '')}
-              </p>
-            )}
-            {hasDiagnosticFailure && (
-              <details style={{ fontSize: 12, color: text.secondary }}>
-                <summary style={{ cursor: 'pointer' }}>
-                  {t('tono.login.technicalDetails')}
-                </summary>
-                {authPaths.length > 0 && (
-                  <LoginPathFailures paths={authPaths} />
-                )}
-                {authFailureSummary?.includes('\nRoutes: Tono relays') && (
-                  <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
-                    {t('tono.login.relayFailureKinds')}
-                  </p>
-                )}
-                {!supportAvailable && (
-                  <SupportContact
-                    key={authFailureSummary}
-                    compact
-                    extra={authFailureSummary ?? undefined}
-                  />
-                )}
-              </details>
-            )}
-            {supportAvailable && (
-              <div style={{ fontSize: 12, color: text.secondary }}>
-                {!visibleError && <p>{t('tono.login.recoveryEnded')}</p>}
-                <SupportContact
-                  key={authFailureSummary}
-                  compact
-                  contact
-                  extra={`${authFailureSummary ?? ''}\nRecovery cause: ${recovery.cause ?? ''}`}
-                />
-              </div>
-            )}
-          </div>
-        )}
+        {!newAppearance && failureNotice}
         {codeSent && !newAppearance && (
           <div
             id="tono-code-help"
