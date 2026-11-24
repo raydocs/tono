@@ -6,6 +6,7 @@ import {
   type CSSProperties,
 } from 'react'
 
+import { seaSceneMotion } from './sea-scene-motion'
 import { SeaWaterCanvas } from './SeaWater'
 import { useSceneQuality } from './useSceneQuality'
 
@@ -19,6 +20,8 @@ export interface SeaSceneProps {
   phase: SeaPhase
   /** Hidden native surfaces / closed tray may explicitly opt out. */
   paused?: boolean
+  /** An inner page shows the scene only blurred and dimmed: it keeps moving, the water at a lower frame rate. */
+  blurred?: boolean
   /** Caller-owned stage progress (0–1), connecting only; omitted keeps the half-rise. */
   progress?: number
 }
@@ -42,13 +45,17 @@ const subscribe = (notify: () => void) => {
   }
 }
 
-// A window behind another app, minimised or hidden to the tray holds the scene
-// like a hidden page: WebView2 keeps such a page "visible", and the loops and
-// water would otherwise keep the GPU busy with nobody looking.
+// A hidden page (minimised, hidden to the tray) holds the scene. A window that
+// is still visible beside the focused app keeps every loop and phase change
+// running and only throttles the water (sea-scene-motion.ts), so a connect from
+// the tray flyout still plays its sunrise in the main window.
 const snapshot = () => {
   const reduced = MEDIA.some((query) => window.matchMedia(query).matches)
-  const away = document.hidden || !document.hasFocus()
-  return (reduced ? 1 : 0) | (away ? 2 : 0)
+  return (
+    (reduced ? 1 : 0) |
+    (document.hidden ? 2 : 0) |
+    (document.hasFocus() ? 0 : 4)
+  )
 }
 
 const fill: CSSProperties = { position: 'absolute', inset: 0 }
@@ -136,6 +143,7 @@ const SunDisk = () => (
 export const SeaScene = ({
   phase,
   paused = false,
+  blurred = false,
   progress,
 }: SeaSceneProps) => {
   const sceneRef = useRef<HTMLDivElement>(null)
@@ -147,7 +155,12 @@ export const SeaScene = ({
   const isStatic = paused || (environment & 1) !== 0 || quality === 'static'
   const full = quality !== 'lite'
   const isHidden = (environment & 2) !== 0
-  const isPaused = isStatic || isHidden
+  const motion = seaSceneMotion({
+    hidden: isHidden,
+    unfocused: (environment & 4) !== 0,
+    blurred,
+  })
+  const isPaused = isStatic || motion === 'held'
   const progressStyle =
     phase === 'connecting' &&
     progress !== undefined &&
@@ -568,7 +581,11 @@ export const SeaScene = ({
           />
         </div>
         {quality === 'full' && !isStatic && hasSize && (
-          <SeaWaterCanvas sceneRef={sceneRef} running={!isHidden} />
+          <SeaWaterCanvas
+            sceneRef={sceneRef}
+            running={motion !== 'held'}
+            throttled={motion === 'throttled'}
+          />
         )}
       </div>
       <div
