@@ -197,7 +197,8 @@ final class SignInDiagnosticCopy {
     var copied: Bool?
     var manualText = ""
 
-    func copy(cause: SignInRecovery.Cause? = nil, write: (String) -> Bool = { text in
+    func copy(cause: SignInRecovery.Cause? = nil, report: [String] = ConnectionFailureReport.shared.currentLines(),
+              write: (String) -> Bool = { text in
         NSPasteboard.general.clearContents()
         return NSPasteboard.general.setString(text, forType: .string)
     }) {
@@ -210,6 +211,8 @@ final class SignInDiagnosticCopy {
         Auth stage: sign-in
         """
         if let cause { text += "\nRecovery cause: \(cause.rawValue)" }
+        // Closed vocabulary only (`ConnectionFailureReport`): labels and classes.
+        for line in report { text += "\n" + line }
         copied = write(text)
         manualText = copied == true ? "" : text
     }

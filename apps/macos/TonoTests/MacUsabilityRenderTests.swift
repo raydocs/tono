@@ -155,7 +155,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         XCTAssertNil(copy.copied)
         XCTAssertTrue(copy.manualText.isEmpty)
         XCTAssertNil(pasteboard.string(forType: .string))
-        copy.copy { text in
+        copy.copy(report: []) { text in
             pasteboard.clearContents()
             return pasteboard.setString(text, forType: .string)
         }
@@ -166,7 +166,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         XCTAssertTrue(text.hasSuffix("\nAuth stage: sign-in"))
         XCTAssertFalse(text.contains("@"))
         XCTAssertFalse(text.contains("Email:"))
-        copy.copy(cause: .relaysUnreachable) { _ in false }
+        copy.copy(cause: .relaysUnreachable, report: []) { _ in false }
         XCTAssertEqual(copy.copied, false)
         XCTAssertEqual(copy.manualText, text + "\nRecovery cause: relaysUnreachable")
         try await capture("login-copy-failed", width: 420, height: 180, annotate: false,
@@ -174,9 +174,12 @@ final class MacUsabilityRenderTests: XCTestCase {
                           nativeLabels: ["Copy diagnostics", "Could not copy. You can copy the safe text manually."]) {
             SignInDiagnosticCopyButton(copy: copy).padding(24)
         }
-        copy.copy { _ in true }
+        copy.copy(report: []) { _ in true }
         XCTAssertEqual(copy.copied, true)
         XCTAssertTrue(copy.manualText.isEmpty)
+        // The path report joins the copy after the fixed lines, line by line.
+        copy.copy(report: ["macOS: 26.3.1", "Control plane: relay:connect (1 min ago)"]) { _ in false }
+        XCTAssertEqual(copy.manualText, text + "\nmacOS: 26.3.1\nControl plane: relay:connect (1 min ago)")
 
         let app = AppState()
         let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
