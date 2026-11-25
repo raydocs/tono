@@ -122,19 +122,36 @@ final class AppUpdater: ObservableObject {
     /// attempts that are no longer executable forward — blocked, rolled back,
     /// expired, already explicitly disconnected, or an abandoned replacement.
     /// A healthy in-flight or successor-recoverable attempt stays protected.
-    nonisolated static func disconnectRetriable(_ pending: HelperManager.UpdateStatus?) -> Bool {
+    nonisolated static func disconnectRetriable(
+        _ pending: HelperManager.UpdateStatus?, now: UInt64 = UInt64(Date().timeIntervalSince1970)
+    ) -> Bool {
         guard let pending, pending.pending else { return false }
         switch pending.execution ?? "" {
         case "reserved", "staged":
             return true
         case "consumed", "rolledBack", "replaced":
             return pending.receipt?.blockedReason != nil
+                || (pending.execution == "consumed" && executorSilent(pending.receipt, now: now))
                 || pending.disconnectRequested == true
                 || pending.disconnectVerified == true
                 || pending.diagnostic != nil
         default:
             return false
         }
+    }
+
+    /// How long a consumed attempt may go without a receipt update before the
+    /// executor is taken as gone. Replacement takes seconds to minutes; an
+    /// attempt idle this long was abandoned (a crashed executor, a power loss),
+    /// and without this the customer waited out the 48 h expiry with protection
+    /// armed and no way to sign in. Retiring still needs the owner's verified
+    /// Disconnect and the installed components to match the captured original,
+    /// so a half-replaced install keeps its evidence and stays pending.
+    nonisolated static let executorSilence: UInt64 = 1800
+
+    nonisolated static func executorSilent(_ receipt: UpdateContractV1.Receipt?, now: UInt64) -> Bool {
+        guard let receipt else { return false }
+        return now >= receipt.expiresAtUnix || now >= receipt.updatedAtUnix + executorSilence
     }
 
     static func offerAlert(version: String) -> NSAlert {
