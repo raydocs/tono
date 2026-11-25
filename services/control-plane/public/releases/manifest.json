@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-18T12:02:18Z",
+ "generatedAt": "2026-11-25T04:33:51Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
@@ -18,16 +18,16 @@
   "repository": "Published from Tono’s own repository. Everything before 0.0.66 and 0.0.33 was released from a fork of another project, and the Windows updater asked a host blocked from mainland China, so a PC that could not connect was told no update existed."
  },
  "releaseSet": {
-  "id": "2026-08-18-macos-build67-windows-0.0.34",
+  "id": "2026-11-25-macos-build86-windows-0.0.85",
   "status": "both-lines-published-and-reachable",
-  "reason": "macOS Build 67 is the newest item in the Sparkle feed and Windows 0.0.34 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
+  "reason": "macOS Build 86 is the newest item in the Sparkle feed and Windows 0.0.85 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
  },
  "platforms": {
   "macos": {
    "current": {
-    "releaseId": "macos-0.0.67-build67",
-    "version": "0.0.67",
-    "build": 67,
+    "releaseId": "macos-0.0.85-build86",
+    "version": "0.0.85",
+    "build": 86,
     "architecture": "arm64",
     "minimumOS": "26.3",
     "availability": "sparkle-published",
@@ -40,59 +40,100 @@
     },
     "provenance": {
      "releaseLine": "release/macos",
-     "sourceCommit": "952b4b6db1cd007607f64f8812f46a4d10dc4d9c",
-     "immutableTagCommit": "952b4b6db1cd007607f64f8812f46a4d10dc4d9c",
+     "sourceCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
+     "immutableTagCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
      "tagStatus": "exact"
     },
-    "helperContract": "3.12.2",
+    "helperContract": "4.52.72",
     "knownLimitations": [
      "仅 Apple Silicon，需 macOS 26.3 或更高",
      "IPv6 全程关闭：TUN 与 fake-ip 只走 IPv4，AAAA 拨号由 Kill Switch 丢弃后客户端改试 IPv4"
     ],
     "artifact": {
-     "name": "Tono-0.0.67-build67-arm64.zip",
-     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.67-build67-arm64.zip",
-     "size": 20394392,
-     "sha256": "91917b5f56dfd778881d35723383cd4896e9292de188670ffe1ae0c22fc67cf2",
-     "sparkleEdSignature": "L7hXiezkO6lLeLr4HZ2O17x7P2plMAU4Svl4bawitei2KA9LGnktsAenydkplabeijzBezIz/JO023wYxxzGBw=="
+     "name": "Tono-0.0.85-build86-arm64.zip",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.85-build86-arm64.zip",
+     "size": 19107498,
+     "sha256": "a15c1a56bdfc8875d934698fc437113b69aaf63e6268fc15815fb7c8fcb8ea46",
+     "sparkleEdSignature": "QKGmVtYLM0FP0/ZBAcoKGfpF30/cXED+AVWsJXo3KbTvPMAo2nd0C9VU+1PITQJd5ZWBoc4BUdpSnX/tgA/ZAg=="
     },
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.67-build67"
+    "diskImage": {
+     "name": "Tono-0.0.85-build86-arm64.dmg",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.85-build86-arm64.dmg",
+     "size": 21392853,
+     "sha256": "99daa11ba05692b4e4a430218e204f993f82e0c63c38e4f3e42a79da90cddc3e"
+    },
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.85-build86"
    }
   },
   "windows": {
    "current": {
-    "releaseId": "windows-0.0.34",
-    "version": "0.0.34",
+    "releaseId": "windows-0.0.85",
+    "version": "0.0.85",
     "architecture": "x86_64",
     "installer": "nsis",
     "availability": "published-stable",
     "update": {
      "mechanism": "tauri-updater-v2",
      "automaticUpdaterEnabled": true,
-     "channelVersion": "0.0.34"
+     "channelVersion": "0.0.85"
     },
-    "commit": "ded3ecd78e2ce0bdd68c657481a9513e4a9f895b",
+    "commit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
     "releaseLine": "release/windows",
-    "serviceProtocolRevision": 14,
+    "serviceProtocolRevision": 23,
     "minimumServiceRevision": 14,
     "recommended": true,
     "artifact": {
-     "name": "Tono_0.0.34_x64-setup.exe",
-     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.34_x64-setup.exe",
-     "size": 32337730,
-     "sha256": "b746d353a11a86ca3bc61f06ac866a6ab0f32961f26bab0a56212d703263f427",
+     "name": "Tono_0.0.85_x64-setup.exe",
+     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.85_x64-setup.exe",
+     "size": 40707247,
+     "sha256": "a8c411533fb59525db56363fbd71c90bc9a790fd635ef0120bdf780b0c2a7a41",
      "authenticodeSigned": false,
      "authenticodeStatus": "not-signed"
     },
     "knownLimitations": [
      "安装包未附 Authenticode 证书，全新安装时 Windows SmartScreen 会告警",
-     "App 与 Service 必须同版；从 0.0.33 自动更新会在一次提权事务里同时替换两者"
+     "0.0.32–0.0.34 旧版不可直接覆盖升级：需先在网络恢复后正常卸载旧版并重启确认网络正常，再安装本版"
     ],
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.34"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.85"
    }
   }
  },
  "archive": [
+  {
+   "releaseId": "macos-0.0.85-build86",
+   "platform": "macos",
+   "version": "0.0.85",
+   "build": 86,
+   "publishedAt": "2026-11-25T04:27:55Z",
+   "status": "published-sparkle-current",
+   "sourceCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
+   "tagCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
+   "summary": [
+    "扩展国内直连与局域网访问（含 `.cn`、ToDesk、政采云、Gitee、即梦、万网与阿里云百炼），完成 `traffic-policy` 签名密钥平滑轮换兼容，并在连接关闭与断开时采集各站点真实流量与零下行卡顿率用于运维后台优化。",
+    "扩展国内直连与局域网访问（#1850）：新增 `.cn` 域名及 ToDesk、政采云（`assetcloud.zj.gov.cn`）、Gitee、即梦（`jimeng.jianying.com`）、万网（`wanwang.aliyun.com`）直连分流，将国内阿里云百炼（`dashscope.aliyuncs.com`）切回直连，并在 macOS 默认开启本地局域网设备访问",
+    "策略签名密钥平滑轮换（#1851）：升级策略签名主公钥并保留旧密钥只读回退，确保老策略与平滑热更新不断流",
+    "网站流量与卡顿诊断回传（#1851）：在连接关闭与断开时统计每个站点的真实上下行字节、耗时与零下行卡顿率，用于后台全局站点监控与分流优化",
+    "携带中继入口 `static.bicon.dev` 与原生 v1 安全更新能力（`releaseSequence` 8501）"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.85-build86"
+  },
+  {
+   "releaseId": "windows-0.0.85",
+   "platform": "windows",
+   "version": "0.0.85",
+   "publishedAt": "2026-11-25T04:27:58Z",
+   "status": "published-stable-channel-current",
+   "sourceCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
+   "tagCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
+   "summary": [
+    "Windows 端正式支持经签名的云端策略 `directSuffixes` 热更新并内置 `.cn` 及高频远程/办公国内站点直连，完成策略签名密钥平滑轮换与每站点上下行及卡顿统计闭环。服务协议版本不变，可通过原生 v1 或 Tauri 更新器升级。",
+    "支持签名策略直连后缀云端热更新（#1851）：Windows `sing-box` 内核可直接放行经 Ed25519 签名校验的 `directSuffixes`，后续新增国内直连站点无需重新发版安装",
+    "扩展国内直连范围（#1850）：新增 `.cn`、ToDesk、政采云（`assetcloud.zj.gov.cn`）、Gitee、即梦（`jimeng.jianying.com`）、万网（`wanwang.aliyun.com`）直连，并将国内阿里云百炼（`dashscope.aliyuncs.com`）切回直连",
+    "策略签名密钥平滑轮换（#1851）：更新主签名公钥并保留旧密钥只读兼容",
+    "网站流量与卡顿统计（#1851）：在连接关闭与断开时采集各站点真实上下行字节、耗时与零下行卡顿标记，用于后台全局监控面板"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.85"
+  },
   {
    "releaseId": "macos-0.0.67-build67",
    "platform": "macos",

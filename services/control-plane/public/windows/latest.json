@@ -1,15 +1,15 @@
 {
-  "version": "0.0.34",
-  "notes": "# Tono 0.0.34\r\n\r\nThis build updates automatically from 0.0.33. It focuses on polish and Chinese\r\nlanguage quality.\r\n\r\n- Switching servers now confirms with a small toast naming the server you\r\n  landed on, instead of changing silently.\r\n- Chinese text across the app was reviewed and tightened: servers are\r\n  consistently called 节点, punctuation is full-width in Chinese contexts, and\r\n  a handful of awkward translations were rewritten.\r\n- The server badge artwork was rebuilt as a shared brand mark, matching the\r\n  macOS app pixel for pixel.\r\n- Small consistency fixes to the selected-server highlight and card borders.",
-  "pub_date": "2026-08-18T11:55:10.738Z",
+  "version": "0.0.85",
+  "notes": "# Tono 0.0.85\n\nSupports x64 Windows 10 22H2 / Windows 11.\n\n## Changes since 0.0.84\n\n- **Cloud hot-push for signed `directSuffixes`** (#1851): Windows `sing-box` runtimes now admit well-formed, non-protected `directSuffixes` delivered by a signature-verified cloud `traffic-policy` without waiting for a client rebuild.\n- **Expanded China direct routing** (#1850): Added domestic direct coverage including `.cn`, ToDesk, `assetcloud.zj.gov.cn`, Gitee, Jimeng (`jimeng.jianying.com`), and Aliyun Wanwang (`wanwang.aliyun.com`), and moved mainland `dashscope.aliyuncs.com` back to direct.\n- **Zero-downtime policy key rotation** (#1851): Rotated the production `traffic-policy` Ed25519 key with legacy read fallback.\n- **Per-site bandwidth & stall telemetry** (#1851): Tracks active flows and emits closed TCP/UDP byte totals, duration, and zero-download TCP stall diagnostics on close and disconnect.",
+  "pub_date": "2026-11-25T03:39:19.000Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlI4V1Q1N3doU3c4QTFyZE5jNllyRGN4enhZWHVudHk2amc5NkZsUnRKWi93QzFWRXZjMlJQQ00vUVlsU1p4VEdzU0NXK0wySWF0S2pwL3JjQ0FTUEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3MDU0MTA3CWZpbGU6VG9ub18wLjAuMzRfeDY0LXNldHVwLmV4ZQpxczdTWlFhZVdSRll5ZTB0Y1k1ejdrRllYVGc3dHcvSlZPMVdNVCtBQXJnVk1TOUZ0UFF3MS9LbUNOdUNqMHlkdFBvZ0IrSkNXbE03djVzWFVKOG5DZz09Cg==",
-      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.34_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlZPa2lPYytjUVRFWkR6UVVRZ201N3laUVRmai84OStOaHBkWTIreGs2Q0hWOVFUVDlLREZHc1pISHBHT1l1RzlNQll3bW94VVFiK0pjNkpHUWxBR1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTc3OTExCWZpbGU6VG9ub18wLjAuODVfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NQpTRG1RWFJOcDhvVTZBMG81aGNZOUFSbmMxNlFWQ1NuZDAxZ0NITEEyRmhZMGRiOXBFbDg3Ri9DV0h1QnJNWnFtaFVxekMxdEJjY2RnTXJsNUJyTUVDUT09Cg==",
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.85_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlI4V1Q1N3doU3c4QTFyZE5jNllyRGN4enhZWHVudHk2amc5NkZsUnRKWi93QzFWRXZjMlJQQ00vUVlsU1p4VEdzU0NXK0wySWF0S2pwL3JjQ0FTUEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3MDU0MTA3CWZpbGU6VG9ub18wLjAuMzRfeDY0LXNldHVwLmV4ZQpxczdTWlFhZVdSRll5ZTB0Y1k1ejdrRllYVGc3dHcvSlZPMVdNVCtBQXJnVk1TOUZ0UFF3MS9LbUNOdUNqMHlkdFBvZ0IrSkNXbE03djVzWFVKOG5DZz09Cg==",
-      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.34_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlZPa2lPYytjUVRFWkR6UVVRZ201N3laUVRmai84OStOaHBkWTIreGs2Q0hWOVFUVDlLREZHc1pISHBHT1l1RzlNQll3bW94VVFiK0pjNkpHUWxBR1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTc3OTExCWZpbGU6VG9ub18wLjAuODVfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NQpTRG1RWFJOcDhvVTZBMG81aGNZOUFSbmMxNlFWQ1NuZDAxZ0NITEEyRmhZMGRiOXBFbDg3Ri9DV0h1QnJNWnFtaFVxekMxdEJjY2RnTXJsNUJyTUVDUT09Cg==",
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.85_x64-setup.exe"
     }
   }
 }
