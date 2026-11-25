@@ -429,7 +429,9 @@ export async function getCustomerDestinations(req: Request, e: Env, rawId: strin
   let rows: Row[] = [];
   try {
     rows = (await e.DB.prepare(
-      `SELECT day_at, etld1, route, node, connections, bytes_up, bytes_down, top_process
+      `SELECT day_at, etld1, route, node, connections,
+              closed_connections, stalled_connections, duration_ms_sum,
+              bytes_up, bytes_down, top_process
        FROM traffic_destination_daily WHERE user_id = ? AND day_at >= ?
        ORDER BY day_at DESC, bytes_down DESC`,
     ).bind(userId, from).all<Row>()).results ?? [];
@@ -445,6 +447,9 @@ export async function getCustomerDestinations(req: Request, e: Env, rawId: strin
       dayAt: Number(row.day_at), etld1: String(row.etld1), route,
       node: nullText(row.node) || null,
       connections: Number(row.connections) || 0,
+      closedConnections: Number(row.closed_connections) || 0,
+      stalledConnections: Number(row.stalled_connections) || 0,
+      durationMsSum: Number(row.duration_ms_sum) || 0,
       bytesUp: Number(row.bytes_up) || 0,
       bytesDown: Number(row.bytes_down) || 0,
       topProcesses: top ? top.split(',').filter(Boolean) : [],

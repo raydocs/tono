@@ -280,6 +280,29 @@ pub(super) async fn sample_connections_once(
         return inner.connect_generation == generation && inner.fsm.status().is_connected;
     }
     state.route_ledger().lock().ingest(&payload);
+    let selected_exit = inner.selected_node.clone().unwrap_or_default();
+    let closed_connections = state.connection_tracker().lock().observe(
+        &payload,
+        &selected_exit,
+        crate::tono::commands::epoch_millis(),
+    );
+    for closed in closed_connections {
+        let network: &'static str = if closed.network == "UDP" { "UDP" } else { "TCP" };
+        state.audit().log(crate::tono::audit::AuditEvent::ConnectionClosed {
+            host: closed.host,
+            destination_ip: closed.destination_ip,
+            destination_port: closed.destination_port,
+            network,
+            process: closed.process,
+            route: closed.route,
+            rule: closed.rule,
+            selected_exit: closed.selected_exit,
+            bytes_up: closed.bytes_up,
+            bytes_down: closed.bytes_down,
+            duration_ms: closed.duration_ms,
+            stalled: closed.stalled,
+        });
+    }
 
     let direct_active = direct_seen.len() < MAX_DIRECT_SAMPLES;
     if direct_active {

@@ -459,9 +459,17 @@ export async function publicTrafficPolicy(e: Env) {
     // trades a real outage for a check the client already performs. When the key
     // *is* present a bad signature means the stored row was altered underneath
     // us, which is worth refusing to serve.
-    const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
-    if (signature && publicKey) {
-      if (!await verifyTrafficPolicySignature(json, signature, publicKey)) {
+    const publicKeys = [e.TRAFFIC_POLICY_PUBLIC_KEY, e.TRAFFIC_POLICY_LEGACY_PUBLIC_KEY]
+      .filter((k): k is string => Boolean(k));
+    if (signature && publicKeys.length > 0) {
+      let verified = false;
+      for (const publicKey of publicKeys) {
+        if (await verifyTrafficPolicySignature(json, signature, publicKey)) {
+          verified = true;
+          break;
+        }
+      }
+      if (!verified) {
         throw new Error('policy signature does not verify');
       }
     }

@@ -17,6 +17,8 @@ type Merged = {
   route: RouteKind;
   node: string | null;
   connections: number;
+  closedConnections: number;
+  stalledConnections: number;
   bytes: number;
   topProcesses: string[];
 };
@@ -35,6 +37,8 @@ function merge(rows: readonly DestinationRowDto[]): Merged[] {
     const found = byKey.get(id);
     if (found) {
       found.connections += row.connections;
+      found.closedConnections += row.closedConnections ?? 0;
+      found.stalledConnections += row.stalledConnections ?? 0;
       found.bytes += row.bytesUp + row.bytesDown;
       for (const process of row.topProcesses) {
         if (!found.topProcesses.includes(process)) found.topProcesses.push(process);
@@ -47,6 +51,8 @@ function merge(rows: readonly DestinationRowDto[]): Merged[] {
       route: row.route,
       node: row.node,
       connections: row.connections,
+      closedConnections: row.closedConnections ?? 0,
+      stalledConnections: row.stalledConnections ?? 0,
       bytes: row.bytesUp + row.bytesDown,
       topProcesses: [...row.topProcesses],
     });
@@ -150,6 +156,22 @@ function destinationColumns(top: number): DataColumn<Merged>[] {
           <BytesCell bytes={row.bytes} />
         </span>
       ),
+    },
+    {
+      id: 'stalls',
+      header: copy.destinationColumns.stalls,
+      width: '96px',
+      align: 'right',
+      mono: true,
+      sortValue: (row) => row.stalledConnections,
+      cell: (row) =>
+        row.closedConnections > 0 ? (
+          <span className={row.stalledConnections > 0 ? 'text-[var(--bad)]' : undefined}>
+            {`${row.stalledConnections}/${row.closedConnections}`}
+          </span>
+        ) : (
+          copy.missing
+        ),
     },
     {
       id: 'mark',

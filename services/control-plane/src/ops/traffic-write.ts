@@ -104,10 +104,14 @@ export async function writeParsedSegment(
     statements.push(db.prepare(
       `INSERT INTO traffic_destination_daily(
          user_id, device_id, day_at, etld1, route, node,
-         connections, bytes_up, bytes_down, top_process, updated_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         connections, closed_connections, stalled_connections, duration_ms_sum,
+         bytes_up, bytes_down, top_process, updated_at
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_id, device_id, day_at, etld1, route, node) DO UPDATE SET
          connections = connections + excluded.connections,
+         closed_connections = closed_connections + excluded.closed_connections,
+         stalled_connections = stalled_connections + excluded.stalled_connections,
+         duration_ms_sum = duration_ms_sum + excluded.duration_ms_sum,
          bytes_up = bytes_up + excluded.bytes_up,
          bytes_down = bytes_down + excluded.bytes_down,
          top_process = CASE
@@ -124,6 +128,9 @@ export async function writeParsedSegment(
       route,
       node,
       agg.connections,
+      agg.closedConnections,
+      agg.stalledConnections,
+      agg.durationMsSum,
       agg.bytesUp,
       agg.bytesDown,
       topProcess(agg.processes),

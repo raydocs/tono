@@ -24,3 +24,14 @@ it('folds days for the same exit without attributing another exit’s traffic to
     { node: 'exit-b', connections: '7', bytes: '4.0KB' },
   ]);
 });
+
+it('shows closed and stalled connection counts when present', () => {
+  const html = renderToString(<Destinations state="ready" rows={[
+    {
+      dayAt: 3, etld1: 'todesk.com', route: 'direct', node: 'HK-01',
+      connections: 6, closedConnections: 5, stalledConnections: 2, durationMsSum: 9000,
+      bytesUp: 200, bytesDown: 1024, topProcesses: ['ToDesk'],
+    },
+  ]} />);
+  expect(html).toContain('2/5');
+});

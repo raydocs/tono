@@ -17,8 +17,9 @@ use serde_json::{Map, Value};
 
 use crate::core::direct_policy::DirectPolicy;
 use crate::direct_domains::{
-    CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_VIDEO_DOMAINS, direct_suffix_overlaps_protected,
-    is_address_free_web_suffix, is_protected_from_direct,
+    CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_VIDEO_DOMAINS,
+    direct_suffix_overlaps_protected, is_address_free_web_suffix, is_protected_from_direct,
+    is_valid_signed_web_suffix,
 };
 
 const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
@@ -83,11 +84,12 @@ pub(crate) fn admit_sing_box_direct_rules(
             break;
         }
     }
+    let allow_signed_suffix = !matches!(binding, DirectBinding::NoPolicy);
     for (index, rule) in rules.iter().enumerate() {
         if !json_names(rule, &direct) {
             continue;
         }
-        if !sing_box_direct_shape(rule, &rules[..index], &direct) {
+        if !sing_box_direct_shape(rule, &rules[..index], &direct, allow_signed_suffix) {
             return Err(format!(
                 "a rule to `{DIRECT_GROUP_NAME}` is not a compiler shape: {}",
                 shape_refusal(rule)
@@ -191,7 +193,12 @@ pub fn admit_mihomo_direct_rules(
     Ok(())
 }
 
-fn sing_box_direct_shape(rule: &Value, earlier: &[Value], direct: &[&str]) -> bool {
+fn sing_box_direct_shape(
+    rule: &Value,
+    earlier: &[Value],
+    direct: &[&str],
+    allow_signed_suffix: bool,
+) -> bool {
     let Some(rule) = rule.as_object() else {
         return false;
     };
@@ -258,7 +265,7 @@ fn sing_box_direct_shape(rule: &Value, earlier: &[Value], direct: &[&str]) -> bo
                 &["network", "port", "domain_suffix", "action", "outbound"],
             ) && port_of(rule).is_some_and(|port| WEB_SUFFIX_PORTS.contains(&port))
                 && one_str(rule, "domain_suffix").is_some_and(|suffix| {
-                    suffix_ok(suffix, |child| {
+                    suffix_ok(suffix, allow_signed_suffix, |child| {
                         sing_box_pins(earlier, direct, "domain_suffix", child)
                     })
                 })
@@ -413,9 +420,15 @@ fn protected_destinations_pinned(domain: impl Fn(&str) -> bool, cidr: impl Fn(&s
         && CLAUDE_HOME_IPV4_CIDRS.iter().all(|range| cidr(*range))
 }
 
-/// A reviewed China suffix that is not protected; a protected child must be pinned first.
-fn suffix_ok(suffix: &str, child_pinned: impl Fn(&str) -> bool) -> bool {
-    is_address_free_web_suffix(suffix)
+/// A reviewed China suffix (or a well-formed non-protected suffix authorized by
+/// a verified cloud policy) that is not protected; a protected child must be pinned first.
+fn suffix_ok(
+    suffix: &str,
+    allow_signed_suffix: bool,
+    child_pinned: impl Fn(&str) -> bool,
+) -> bool {
+    (is_address_free_web_suffix(suffix)
+        || (allow_signed_suffix && is_valid_signed_web_suffix(suffix)))
         && !direct_suffix_overlaps_protected(suffix)
         && CLAUDE_HOME_DOMAINS
             .iter()
@@ -765,6 +778,18 @@ mod tests {
         assert_eq!(admitted_by(suffix_rule("taobao.com", 80), by), Ok(()));
         let no_native = DirectPolicy::from_json(r#"{"version":3,"domains":[]}"#, 1).unwrap();
         assert!(admitted_by(suffix_rule("taobao.com", 80), DirectBinding::Policy(&no_native)).is_err());
+
+        // An arbitrary non-protected suffix can be hot-pushed by a signed policy without a
+        // compiled allowlist rebuild, while protected or unlisted suffixes stay refused.
+        let hotpush_json = r#"{"version":4,"domains":[{"host":"res.wx.qq.com","ports":[443]}],"directSuffixes":[{"host":"todesk.com","ports":[443]}]}"#;
+        let (signing, public) = key(2);
+        let hotpush = DirectPolicy::verify_with_key(&sign(&signing, hotpush_json, 8), &public).unwrap();
+        assert_eq!(
+            admitted_by(suffix_rule("todesk.com", 443), DirectBinding::Policy(&hotpush)),
+            Ok(())
+        );
+        assert!(admitted_by(suffix_rule("todesk.com", 443), by).is_err());
+        assert!(admitted_by(suffix_rule("claude.ai", 443), DirectBinding::ShapeOnly).is_err());
     }
 
     #[test]

@@ -443,6 +443,54 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(fetched.status).toBe(200);
   });
 
+  it('verifies reads with TRAFFIC_POLICY_LEGACY_PUBLIC_KEY while requiring the primary key on writes', async () => {
+    const legacyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']) as CryptoKeyPair;
+    const legacyPubRaw = await crypto.subtle.exportKey('raw', legacyPair.publicKey);
+    const legacyPubB64 = btoa(String.fromCharCode(...new Uint8Array(legacyPubRaw)));
+    const rotatedEnv = {
+      ...env,
+      TRAFFIC_POLICY_LEGACY_PUBLIC_KEY: legacyPubB64,
+    } as unknown as Env;
+
+    const preview = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const previewJson = (await preview.json() as any).json as string;
+    const legacySigBuf = await crypto.subtle.sign(
+      'Ed25519',
+      legacyPair.privateKey,
+      new TextEncoder().encode(`tono-traffic-policy-v1\n${previewJson}`),
+    );
+    const legacySig = btoa(String.fromCharCode(...new Uint8Array(legacySigBuf)));
+
+    // Writing with the legacy key must be rejected under the rotated primary key.
+    const writeCtx = createExecutionContext();
+    const writeRes = await worker.fetch(new Request('https://test/api/v1/admin/traffic-policy', {
+      ...json({ policy: unlistedPolicy, expectedRevision: 0, signature: legacySig }),
+      method: 'PUT',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+    }), rotatedEnv, writeCtx);
+    await waitOnExecutionContext(writeCtx);
+    expect(writeRes.status).toBe(400);
+    expect((await writeRes.json() as any).error.code).toBe('TRAFFIC_POLICY_SIGNATURE_INVALID');
+
+    // Store a row signed by the primary key, then simulate an existing DB row signed by the legacy key.
+    const published = await admin('traffic-policy', {
+      policy: unlistedPolicy, expectedRevision: 0, signature: await signPolicy(previewJson),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET signature = ? WHERE singleton_id = 1',
+    ).bind(legacySig).run();
+
+    const account = await createAccount('legacy-rotated-key-read');
+    const readCtx = createExecutionContext();
+    const readRes = await worker.fetch(new Request('https://test/api/v1/traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    }), rotatedEnv, readCtx);
+    await waitOnExecutionContext(readCtx);
+    expect(readRes.status).toBe(200);
+    expect((await readRes.json() as any).signature).toBe(legacySig);
+  });
+
   it('binds the assigned revision inside the signed policy json once enabled', async () => {
     // #317: the envelope revision is outside the signature, so a replayed
     // signed document could claim any revision. With the switch on, the

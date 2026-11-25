@@ -1060,6 +1060,7 @@ extension AppState {
         self.loadedRuntimeConfigDigest = nil
         self.residentialRouteAuditGeneration &+= 1
         self.residentialRouteAuditContext = nil
+        LocalTrafficAudit.shared.flushActiveConnections()
         LocalTrafficAudit.shared.setResidentialRouteContext(nil)
         LocalTrafficAudit.setAssistantDirectFirstMember(nil)
 

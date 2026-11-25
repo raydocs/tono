@@ -316,6 +316,22 @@ pub enum AuditEvent {
     NetworkLogSegmentUploadFail {
         error: String,
     },
+    /// A connection closed (or flushed on disconnect) with transferred bytes
+    /// and stall diagnostic state.
+    ConnectionClosed {
+        host: String,
+        destination_ip: String,
+        destination_port: u16,
+        network: &'static str,
+        process: String,
+        route: String,
+        rule: String,
+        selected_exit: String,
+        bytes_up: u64,
+        bytes_down: u64,
+        duration_ms: u64,
+        stalled: bool,
+    },
     // lifecycle
     AuditEnabled,
     AuditDisabled,
@@ -387,6 +403,33 @@ impl AuditEvent {
             PeriodicTelemetryUploadFail { error } => {
                 PeriodicTelemetryUploadFail { error: redact(&error) }
             }
+            ConnectionClosed {
+                host,
+                destination_ip,
+                destination_port,
+                network,
+                process,
+                route,
+                rule,
+                selected_exit,
+                bytes_up,
+                bytes_down,
+                duration_ms,
+                stalled,
+            } => ConnectionClosed {
+                host: redact(&host),
+                destination_ip: redact(&destination_ip),
+                destination_port,
+                network,
+                process: redact(&process),
+                route: redact(&route),
+                rule: redact(&rule),
+                selected_exit: redact(&selected_exit),
+                bytes_up,
+                bytes_down,
+                duration_ms,
+                stalled,
+            },
             other => other,
         }
     }

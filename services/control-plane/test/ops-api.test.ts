@@ -389,6 +389,25 @@ describe('ops v1 api', () => {
     assertList(await (await ops('customers/u-1/activity?range=24h')).json(), assertActivityHour);
     assertList(await (await ops('customers/u-1/destinations?range=7d')).json(), assertDestinationRow);
     assertList(await (await ops('customers/u-1/services?range=7d')).json(), assertServiceUsage);
+
+    await db().prepare(
+      `INSERT INTO traffic_destination_daily(
+         user_id, device_id, day_at, etld1, route, node,
+         connections, closed_connections, stalled_connections, duration_ms_sum,
+         bytes_up, bytes_down, top_process, updated_at
+       ) VALUES
+         ('u-1', 'd-1', ?, 'todesk.com', 'direct', 'HK-01', 10, 8, 3, 24000, 1000, 2000, 'ToDesk', ?),
+         ('u-1', 'd-1', ?, 'gitee.com', 'cloud', 'JP-01', 5, 5, 0, 4000, 500, 50000, 'Chrome', ?)`,
+    ).bind(NOW, NOW, NOW, NOW).run();
+    const custDest = await (await ops('customers/u-1/destinations?range=7d')).json() as { items: Array<Record<string, unknown>> };
+    expect(custDest.items[0]).toMatchObject({ etld1: 'gitee.com', closedConnections: 5, stalledConnections: 0, durationMsSum: 4000 });
+    const fleetStalls = await (await ops('traffic/destinations?range=7d&sort=stalls')).json() as { items: Array<Record<string, unknown>> };
+    expect(fleetStalls.items[0]).toMatchObject({
+      etld1: 'todesk.com', route: 'direct', users: 1, connections: 10,
+      closedConnections: 8, stalledConnections: 3, stallRate: 0.375, avgDurationMs: 3000,
+    });
+    const fleetFiltered = await (await ops('traffic/destinations?range=7d&route=cloud&q=git')).json() as { items: Array<Record<string, unknown>> };
+    expect(fleetFiltered.items.map((item) => item.etld1)).toEqual(['gitee.com']);
   });
 
   it('keeps a renewed log grant when expiry cleanup already selected it', async () => {
@@ -1489,6 +1508,7 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/customers/{id}/diagnostics',
       'GET /api/v1/ops/failure-clusters',
       'GET /api/v1/ops/customers/{id}/services',
+      'GET /api/v1/ops/traffic/destinations',
       'GET /api/v1/ops/customers/{id}/followups',
       'POST /api/v1/ops/customers/{id}/followups',
       'GET /api/v1/ops/incidents',

@@ -60,6 +60,9 @@ export interface DestinationRowDto {
   route: RouteKind;
   node: string | null;
   connections: number;
+  closedConnections?: number;
+  stalledConnections?: number;
+  durationMsSum?: number;
   bytesUp: number;
   bytesDown: number;
   topProcesses: string[];
@@ -215,7 +218,8 @@ export function assertActivityHour(value: unknown, path = 'activityHour'): Activ
 }
 
 const DESTINATION_KEYS = [
-  'dayAt', 'etld1', 'route', 'node', 'connections', 'bytesUp', 'bytesDown', 'topProcesses',
+  'dayAt', 'etld1', 'route', 'node', 'connections', 'closedConnections', 'stalledConnections', 'durationMsSum',
+  'bytesUp', 'bytesDown', 'topProcesses',
 ];
 
 export function assertDestinationRow(value: unknown, path = 'destination'): DestinationRowDto {
@@ -226,6 +230,9 @@ export function assertDestinationRow(value: unknown, path = 'destination'): Dest
     route: oneOf<RouteKind>(row, path, 'route', ROUTE_KINDS),
     node: optText(row, path, 'node'),
     connections: int(row, path, 'connections'),
+    ...(row.closedConnections === undefined ? {} : { closedConnections: int(row, path, 'closedConnections') }),
+    ...(row.stalledConnections === undefined ? {} : { stalledConnections: int(row, path, 'stalledConnections') }),
+    ...(row.durationMsSum === undefined ? {} : { durationMsSum: int(row, path, 'durationMsSum') }),
     bytesUp: int(row, path, 'bytesUp'),
     bytesDown: int(row, path, 'bytesDown'),
     topProcesses: textList(row, path, 'topProcesses'),

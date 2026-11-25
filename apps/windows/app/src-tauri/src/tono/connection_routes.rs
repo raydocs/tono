@@ -23,6 +23,8 @@ pub(crate) struct SampledConnection {
     #[serde(default, rename = "rulePayload")]
     pub(crate) rule_payload: String,
     #[serde(default)]
+    pub(crate) start: String,
+    #[serde(default)]
     pub(crate) upload: u64,
     #[serde(default)]
     pub(crate) download: u64,
@@ -470,5 +472,231 @@ mod observation_regressions {
         assert_eq!(new_direct_samples(&payload, &mut seen).len(), MAX_DIRECT_SAMPLES);
         assert_eq!(seen.len(), MAX_DIRECT_SAMPLES);
         assert!(new_direct_samples(&payload, &mut seen).is_empty());
+    }
+}
+
+pub(crate) const MAX_TRACKED_CONNECTIONS: usize = 2048;
+const STALLED_TCP_THRESHOLD_MS: u64 = 3_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClosedConnectionSample {
+    pub(crate) host: String,
+    pub(crate) destination_ip: String,
+    pub(crate) destination_port: u16,
+    pub(crate) network: String,
+    pub(crate) process: String,
+    pub(crate) route: String,
+    pub(crate) rule: String,
+    pub(crate) selected_exit: String,
+    pub(crate) bytes_up: u64,
+    pub(crate) bytes_down: u64,
+    pub(crate) duration_ms: u64,
+    pub(crate) stalled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TrackedConnection {
+    id: String,
+    host: String,
+    destination_ip: String,
+    destination_port: u16,
+    network: String,
+    process: String,
+    route: String,
+    rule: String,
+    selected_exit: String,
+    start: String,
+    first_seen_ms: i64,
+    upload: u64,
+    download: u64,
+}
+
+impl TrackedConnection {
+    fn into_closed(self, closed_ms: i64) -> ClosedConnectionSample {
+        let started_ms = chrono::DateTime::parse_from_rfc3339(&self.start)
+            .ok()
+            .map(|dt| dt.timestamp_millis())
+            .unwrap_or(self.first_seen_ms);
+        let duration_ms = u64::try_from((closed_ms - started_ms).max(0)).unwrap_or(0);
+        let stalled = self.network.eq_ignore_ascii_case("TCP")
+            && duration_ms >= STALLED_TCP_THRESHOLD_MS
+            && self.download == 0;
+        ClosedConnectionSample {
+            host: self.host,
+            destination_ip: self.destination_ip,
+            destination_port: self.destination_port,
+            network: self.network,
+            process: self.process,
+            route: self.route,
+            rule: self.rule,
+            selected_exit: self.selected_exit,
+            bytes_up: self.upload,
+            bytes_down: self.download,
+            duration_ms,
+            stalled,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ConnectionCloseTracker {
+    active: std::collections::HashMap<String, TrackedConnection>,
+    order: std::collections::VecDeque<String>,
+}
+
+impl ConnectionCloseTracker {
+    pub(crate) fn observe(
+        &mut self,
+        payload: &SampledConnections,
+        selected_exit: &str,
+        now_ms: i64,
+    ) -> Vec<ClosedConnectionSample> {
+        let mut live_ids = std::collections::HashSet::with_capacity(payload.connections.len());
+        let mut closed = Vec::new();
+        for conn in &payload.connections {
+            let id = conn.id.trim();
+            if id.is_empty() {
+                continue;
+            }
+            let port = conn.metadata.destination_port.trim().parse::<u16>().unwrap_or(0);
+            if port == 53 {
+                continue;
+            }
+            let host = conn.metadata.host.trim();
+            let dest_ip = conn.metadata.destination_ip.trim();
+            if host.is_empty() && dest_ip.is_empty() {
+                continue;
+            }
+            live_ids.insert(id.to_owned());
+            if let Some(existing) = self.active.get_mut(id) {
+                existing.upload = existing.upload.max(conn.upload);
+                existing.download = existing.download.max(conn.download);
+                continue;
+            }
+            let tracked = TrackedConnection {
+                id: id.to_owned(),
+                host: if host.is_empty() { dest_ip.to_owned() } else { host.to_owned() },
+                destination_ip: dest_ip.to_owned(),
+                destination_port: port,
+                network: if conn.metadata.network.trim().is_empty() {
+                    "TCP".to_owned()
+                } else {
+                    conn.metadata.network.trim().to_ascii_uppercase()
+                },
+                process: process_name(conn),
+                route: if conn.chains.is_empty() {
+                    "DIRECT".to_owned()
+                } else {
+                    conn.chains.join(" <- ")
+                },
+                rule: if conn.rule_payload.is_empty() {
+                    conn.rule.clone()
+                } else {
+                    format!("{} {}", conn.rule, conn.rule_payload)
+                },
+                selected_exit: selected_exit.to_owned(),
+                start: conn.start.clone(),
+                first_seen_ms: now_ms,
+                upload: conn.upload,
+                download: conn.download,
+            };
+            self.active.insert(tracked.id.clone(), tracked);
+            self.order.push_back(id.to_owned());
+            while self.order.len() > MAX_TRACKED_CONNECTIONS {
+                if let Some(evicted_id) = self.order.pop_front()
+                    && let Some(evicted) = self.active.remove(&evicted_id)
+                {
+                    closed.push(evicted.into_closed(now_ms));
+                }
+            }
+        }
+        let mut next_order = std::collections::VecDeque::with_capacity(self.order.len());
+        while let Some(id) = self.order.pop_front() {
+            if live_ids.contains(&id) {
+                next_order.push_back(id);
+            } else if let Some(entry) = self.active.remove(&id) {
+                closed.push(entry.into_closed(now_ms));
+            }
+        }
+        self.order = next_order;
+        closed
+    }
+
+    pub(crate) fn drain_all(&mut self, now_ms: i64) -> Vec<ClosedConnectionSample> {
+        let mut closed = Vec::with_capacity(self.order.len());
+        while let Some(id) = self.order.pop_front() {
+            if let Some(entry) = self.active.remove(&id) {
+                closed.push(entry.into_closed(now_ms));
+            }
+        }
+        self.active.clear();
+        closed
+    }
+}
+
+#[cfg(test)]
+mod connection_close_tracker_tests {
+    use super::*;
+
+    #[test]
+    fn emits_closed_connection_with_high_water_bytes_and_stall_flag() {
+        let mut tracker = ConnectionCloseTracker::default();
+        let start = "2026-11-24T00:00:00Z";
+        let first: SampledConnections = serde_json::from_value(serde_json::json!({
+            "connections": [
+                {
+                    "id": "fast",
+                    "start": start,
+                    "upload": 100,
+                    "download": 2048,
+                    "chains": ["Tono-Exit"],
+                    "rule": "MATCH",
+                    "metadata": {"host": "www.example.com", "destinationIP": "1.1.1.1", "destinationPort": "443", "network": "tcp", "process": "chrome.exe"}
+                },
+                {
+                    "id": "stalled",
+                    "start": start,
+                    "upload": 64,
+                    "download": 0,
+                    "chains": ["Tono-China-Web-Direct"],
+                    "rule": "DOMAIN-SUFFIX",
+                    "rulePayload": "todesk.com",
+                    "metadata": {"host": "down.todesk.com", "destinationIP": "2.2.2.2", "destinationPort": "443", "network": "tcp", "process": "ToDesk.exe"}
+                },
+                {
+                    "id": "dns-skip",
+                    "metadata": {"host": "dns.google", "destinationPort": "53", "network": "udp"}
+                }
+            ]
+        })).unwrap();
+        let base_ms = chrono::DateTime::parse_from_rfc3339(start).unwrap().timestamp_millis();
+        assert!(tracker.observe(&first, "HK Edge 01", base_ms + 1_000).is_empty());
+
+        let second: SampledConnections = serde_json::from_value(serde_json::json!({
+            "connections": [
+                {
+                    "id": "stalled",
+                    "start": start,
+                    "upload": 128,
+                    "download": 0,
+                    "chains": ["Tono-China-Web-Direct"],
+                    "metadata": {"host": "down.todesk.com", "destinationIP": "2.2.2.2", "destinationPort": "443", "network": "tcp", "process": "ToDesk.exe"}
+                }
+            ]
+        })).unwrap();
+        let closed = tracker.observe(&second, "HK Edge 01", base_ms + 5_000);
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].host, "www.example.com");
+        assert_eq!(closed[0].bytes_up, 100);
+        assert_eq!(closed[0].bytes_down, 2048);
+        assert!(!closed[0].stalled);
+
+        let drained = tracker.drain_all(base_ms + 5_000);
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].host, "down.todesk.com");
+        assert_eq!(drained[0].bytes_up, 128);
+        assert_eq!(drained[0].bytes_down, 0);
+        assert!(drained[0].stalled);
+        assert!(drained[0].duration_ms >= 3_000);
     }
 }

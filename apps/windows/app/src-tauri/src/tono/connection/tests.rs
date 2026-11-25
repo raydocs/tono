@@ -3109,3 +3109,60 @@ async fn offline_ready_connect_is_refused_as_soon_as_the_server_forbids_the_sess
     let _ = gate.wait_durable(Duration::from_secs(5)).await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn signed_policy_allows_arbitrary_non_protected_direct_suffix() {
+    let node = ValidatedNode {
+        name: "HK Edge 01".to_string(),
+        server: std::net::Ipv4Addr::new(203, 0, 113, 9),
+        port: 443,
+        protocol: "vless",
+        raw: serde_json::Value::Null,
+    };
+    let wechat_pins = vec![(
+        "res.wx.qq.com".to_string(),
+        vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
+        vec![443],
+    )];
+    let suffixes = vec![
+        tono_core::policy::PolicyDomain {
+            host: "todesk.com".to_string(),
+            ports: vec![443],
+        },
+        tono_core::policy::PolicyDomain {
+            host: "zj.gov.cn".to_string(),
+            ports: vec![80, 443],
+        },
+        tono_core::policy::PolicyDomain {
+            host: "claude.ai".to_string(),
+            ports: vec![443],
+        },
+    ];
+    let (untrusted, _) = super::direct::build_direct_plan_with_trust(
+        "Ethernet 2".to_string(),
+        &wechat_pins,
+        &[],
+        &[],
+        &suffixes,
+        &node,
+        vec![r"^C:\\WeChat\\.*$".to_string()],
+        false,
+    )
+    .unwrap();
+    assert!(!untrusted.web_suffix_rules.iter().any(|(h, _)| h == "todesk.com"));
+
+    let (trusted, _) = super::direct::build_direct_plan_with_trust(
+        "Ethernet 2".to_string(),
+        &wechat_pins,
+        &[],
+        &[],
+        &suffixes,
+        &node,
+        vec![r"^C:\\WeChat\\.*$".to_string()],
+        true,
+    )
+    .unwrap();
+    assert!(trusted.web_suffix_rules.contains(&("todesk.com".to_string(), 443)));
+    assert!(trusted.web_suffix_rules.contains(&("zj.gov.cn".to_string(), 443)));
+    assert!(!trusted.web_suffix_rules.iter().any(|(h, _)| h == "claude.ai"));
+}
