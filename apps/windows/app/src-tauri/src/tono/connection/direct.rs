@@ -1738,7 +1738,7 @@ async fn sing_box_direct_service_ready() -> bool {
 
 fn sing_box_rules_keep_ai_blocked(rules: &[tono_core::sing_box::ClashRuleProof]) -> bool {
     rules.iter().any(|rule| {
-        rule.payload.contains("dashscope.aliyuncs.com")
+        rule.payload.contains("dashscope-intl.aliyuncs.com")
             && rule.proxy.starts_with("route(")
             && !rule.proxy.contains(config::DIRECT_GROUP_NAME)
     }) && rules.iter().any(|rule| rule.payload.contains("process_path_regex="))

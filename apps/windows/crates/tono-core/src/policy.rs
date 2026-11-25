@@ -171,6 +171,43 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "miit.gov.cn",
     "todesk.com",
     "todesk.cn",
+    "gov.cn",
+    "gitee.com",
+    "gitee.io",
+    "jianying.com",
+    "aliyun.com",
+    "todesk.net",
+    "todgo.com",
+    "oray.net",
+    "sunlogin.net",
+    "doubao.com",
+    "bytedance.com",
+    "bytedance.net",
+    "byteimg.com",
+    "douyinpic.com",
+    "zijieapi.com",
+    "bdurl.net",
+    "volces.com",
+    "volccdn.com",
+    "volcvideo.com",
+    "bytetos.com",
+    "bytegoofy.com",
+    "byted-static.com",
+    "icloud.com.cn",
+    "icloud-content.com.cn",
+    "apple.cn",
+    "myqcloud.com",
+    "tencentcos.cn",
+    "fangcloud.com",
+    "alibaba.com",
+    "minimaxi.com",
+    "bigmodel.cn",
+    "moonshot.cn",
+    "minimax.cn",
+    "deepseek.com",
+    "kimi.com",
+    "mi.com",
+    "qq.com.cn",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -978,9 +1015,17 @@ mod tests {
         assert!(is_allowed_direct_suffix("miit.gov.cn"));
         assert!(is_allowed_direct_suffix("todesk.com"));
         assert!(is_allowed_direct_suffix("todesk.cn"));
-        assert!(!is_allowed_direct_suffix("oray.net"));
-        assert!(!is_allowed_direct_suffix("gov.cn"));
-        assert!(!is_allowed_direct_suffix("alibaba.com"));
+        assert!(is_allowed_direct_suffix("gov.cn"));
+        assert!(is_allowed_direct_suffix("gitee.com"));
+        assert!(is_allowed_direct_suffix("jianying.com"));
+        assert!(is_allowed_direct_suffix("aliyun.com"));
+        assert!(is_allowed_direct_suffix("todesk.net"));
+        assert!(is_allowed_direct_suffix("oray.net"));
+        assert!(is_allowed_direct_suffix("doubao.com"));
+        assert!(is_allowed_direct_suffix("bytedance.com"));
+        assert!(is_allowed_direct_suffix("icloud.com.cn"));
+        assert!(!is_allowed_direct_suffix("example.org"));
+        assert!(!is_allowed_direct_suffix("cn"));
         assert!(!is_allowed_direct_suffix("snssdk.com"));
         assert!(!is_allowed_direct_suffix("googleapis.com"));
         assert!(!is_allowed_direct_suffix("evil-dingtalk.com"));
@@ -1117,9 +1162,17 @@ mod tests {
                 &response(1, &document.to_string()), &no_protected(), trusted,
             ).unwrap();
             assert_eq!(policy.direct_suffixes[0].host, "aliyuncs.com");
+            let mainland = serde_json::json!({
+                "version": 3, "domains": [], "mediaEndpoints": [],
+                "webDomains": [{"host": "dashscope.aliyuncs.com", "ports": [443]}],
+                "directSuffixes": [],
+            });
+            let mainland_policy = validate_policy_with_trust(
+                &response(1, &mainland.to_string()), &no_protected(), trusted,
+            ).unwrap();
+            assert_eq!(mainland_policy.web_domains[0].host, "dashscope.aliyuncs.com");
             for host in [
-                "dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com",
-                "coding-intl.dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                "dashscope-intl.aliyuncs.com",
                 "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
                 "workspace.cn-beijing.maas.aliyuncs.com", "trial.ap-southeast-1.maas.aliyuncs.com",
                 "token-plan.ap-southeast-1.maas.aliyuncs.com",

@@ -437,7 +437,6 @@
         {
           "action": "route",
           "domain_suffix": [
-            "dashscope.aliyuncs.com",
             "dashscope-intl.aliyuncs.com",
             "dashscope-us.aliyuncs.com",
             "maas.aliyuncs.com",
@@ -693,7 +692,6 @@
         {
           "action": "reject",
           "domain_suffix": [
-            "dashscope.aliyuncs.com",
             "dashscope-intl.aliyuncs.com",
             "dashscope-us.aliyuncs.com",
             "maas.aliyuncs.com",
@@ -1406,7 +1404,7 @@
     },
     {
       "type": "default",
-      "payload": "network=tcp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...]",
+      "payload": "network=tcp domain_suffix=[dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com maas.aliyuncs.com...]",
       "proxy": "route(Tono-Home-Residential)"
     },
     {
@@ -1426,7 +1424,7 @@
     },
     {
       "type": "default",
-      "payload": "network=udp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...]",
+      "payload": "network=udp domain_suffix=[dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com maas.aliyuncs.com...]",
       "proxy": "reject"
     },
     {

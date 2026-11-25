@@ -523,7 +523,7 @@ final class SingBoxConfigTests: XCTestCase {
             let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
             let directDNS = try XCTUnwrap(dnsRules.firstIndex { $0["server"] as? String == "Tono-China-DNS" })
             let target = home == nil ? ConfigPipeline.exitGroupName : ConfigPipeline.claudeHomeGroupName
-            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+            for suffix in ["dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
                 let tcp = try XCTUnwrap(rules.firstIndex {
                     $0["network"] as? String == "tcp" && ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["outbound"] as? String == target
                 }, suffix)

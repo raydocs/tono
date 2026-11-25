@@ -110,7 +110,7 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.allowLocalNetworkDevices,
         store: AppProfile.defaults
-    ) private var allowLocalNetworkDevices = false
+    ) private var allowLocalNetworkDevices = SettingsKey.allowLocalNetworkDevicesDefault
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
@@ -265,7 +265,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Allow local network devices",
-                subtitle: "Off by default. While connected, let this Mac reach printers, file shares, casting and other devices on your local network. When off, they are blocked while connected.",
+                subtitle: "On by default. While connected, let this Mac reach printers, file shares, casting and other devices on your local network. When off, they are blocked while connected.",
                 seaSummary: "Reach printers and other local devices while connected.",
                 isOn: Binding(
                     get: { allowLocalNetworkDevices },

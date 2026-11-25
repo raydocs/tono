@@ -151,7 +151,7 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     '100ppi.com', 'awtmt.com', 'cls.cn', 'cninfo.com.cn', 'ccxe.com.cn',
     'pushplus.plus', 'baostock.com', 'sse.com.cn', 'szse.cn', 'zoom.us',
     'zoom.com',
-    'zoomgov.com', 'oray.com', 'sunlogin.com', 'edu.cn',
+    'zoomgov.com', 'oray.com', 'sunlogin.com', 'edu.cn', '163.com', 'netease.com', '126.net',
     'taobao.com', 'tmall.com', 'alipay.com', 'alicdn.com',
     'jd.com', 'douyin.com', 'weibo.com', 'meituan.com',
     'dianping.com', 'pinduoduo.com', 'amap.com',
@@ -166,6 +166,15 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'zhihu.com', 'zhimg.com', 'goofish.com', '1688.com',
     '10086.cn', 'cmecloud.cn', 'miit.gov.cn',
     'todesk.com', 'todesk.cn',
+    'gov.cn', 'gitee.com', 'gitee.io', 'jianying.com', 'aliyun.com',
+    'todesk.net', 'todgo.com', 'oray.net', 'sunlogin.net',
+    'doubao.com', 'bytedance.com', 'bytedance.net', 'byteimg.com',
+    'douyinpic.com', 'zijieapi.com', 'bdurl.net', 'volces.com',
+    'volccdn.com', 'volcvideo.com', 'bytetos.com', 'bytegoofy.com',
+    'byted-static.com', 'icloud.com.cn', 'icloud-content.com.cn',
+    'apple.cn', 'myqcloud.com', 'tencentcos.cn', 'fangcloud.com',
+    'alibaba.com', 'minimaxi.com', 'bigmodel.cn', 'moonshot.cn',
+    'minimax.cn', 'deepseek.com', 'kimi.com', 'mi.com', 'qq.com.cn',
   ];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
   // NARROWING THESE LISTS IS A BREAKING OPERATION. `publicTrafficPolicy` runs the
@@ -218,6 +227,15 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'zhihu.com', 'zhimg.com', 'goofish.com', '1688.com',
     '10086.cn', 'cmecloud.cn', 'miit.gov.cn',
     'todesk.com', 'todesk.cn',
+    'gov.cn', 'gitee.com', 'gitee.io', 'jianying.com', 'aliyun.com',
+    'todesk.net', 'todgo.com', 'oray.net', 'sunlogin.net',
+    'doubao.com', 'bytedance.com', 'bytedance.net', 'byteimg.com',
+    'douyinpic.com', 'zijieapi.com', 'bdurl.net', 'volces.com',
+    'volccdn.com', 'volcvideo.com', 'bytetos.com', 'bytegoofy.com',
+    'byted-static.com', 'icloud.com.cn', 'icloud-content.com.cn',
+    'apple.cn', 'myqcloud.com', 'tencentcos.cn', 'fangcloud.com',
+    'alibaba.com', 'minimaxi.com', 'bigmodel.cn', 'moonshot.cn',
+    'minimax.cn', 'deepseek.com', 'kimi.com', 'mi.com', 'qq.com.cn',
   ];
   const protectedSuffixes = [
     'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claude.site',
@@ -241,7 +259,7 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
   // Dedicated Model Studio API namespaces, not Alibaba's general cloud tree.
   // Clients evaluate these assistant children before the reviewed DIRECT parent.
   const dedicatedModelAPISuffixes = [
-    'dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com',
+    'dashscope-intl.aliyuncs.com',
     'dashscope-us.aliyuncs.com', 'maas.aliyuncs.com',
   ];
   const assistantHomeSuffixes = [

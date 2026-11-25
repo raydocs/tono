@@ -620,9 +620,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(fetched.status).toBe(200);
     expect((await fetched.json() as any).json).toBe(canonical);
 
+    const mainlandAccepted = await admin('traffic-policy', {
+      policy: { ...policy, webDomains: [{ host: 'dashscope.aliyuncs.com', ports: [443] }] },
+      dryRun: true,
+    }, 'PUT');
+    expect(mainlandAccepted.status).toBe(200);
+
     for (const host of [
-      'dashscope.aliyuncs.com', 'cn-hongkong.dashscope.aliyuncs.com',
-      'coding-intl.dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com',
+      'dashscope-intl.aliyuncs.com',
       'dashscope-us.aliyuncs.com', 'maas.aliyuncs.com',
       'workspace.cn-beijing.maas.aliyuncs.com', 'trial.ap-southeast-1.maas.aliyuncs.com',
       'token-plan.ap-southeast-1.maas.aliyuncs.com',
@@ -690,21 +695,31 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         { host: 'miit.gov.cn', ports: [80, 443] },
         { host: 'todesk.com', ports: [80, 443] },
         { host: 'todesk.cn', ports: [80, 443] },
+        { host: 'gov.cn', ports: [80, 443] },
+        { host: 'gitee.com', ports: [80, 443] },
+        { host: 'jianying.com', ports: [80, 443] },
+        { host: 'aliyun.com', ports: [80, 443] },
+        { host: 'todesk.net', ports: [80, 443] },
+        { host: 'oray.net', ports: [80, 443] },
+        { host: 'doubao.com', ports: [80, 443] },
+        { host: 'bytedance.com', ports: [80, 443] },
       ],
     }, false);
     expect(policy.directSuffixes?.map((entry) => entry.host)).toEqual([
-      '10086.cn', 'cmecloud.cn', 'miit.gov.cn', 'todesk.cn', 'todesk.com',
+      '10086.cn', 'aliyun.com', 'bytedance.com', 'cmecloud.cn', 'doubao.com',
+      'gitee.com', 'gov.cn', 'jianying.com', 'miit.gov.cn', 'oray.net',
+      'todesk.cn', 'todesk.com', 'todesk.net',
     ]);
     expect(policy.webDomains?.map((entry) => entry.host)).toEqual([
       'api.todesk.cn', 'beian.miit.gov.cn', 'console.cmecloud.cn', 'ecloud.10086.cn', 'www.todesk.com',
     ]);
     expect(() => canonicalTrafficPolicy({
       version: 3, domains: [], mediaEndpoints: [], webDomains: [],
-      directSuffixes: [{ host: 'gov.cn', ports: [443] }],
+      directSuffixes: [{ host: 'example.org', ports: [443] }],
     }, false)).toThrow();
     expect(() => canonicalTrafficPolicy({
       version: 3, domains: [], mediaEndpoints: [], webDomains: [],
-      directSuffixes: [{ host: 'oray.net', ports: [443] }],
+      directSuffixes: [{ host: 'cn', ports: [443] }],
     }, false)).toThrow();
   });
 

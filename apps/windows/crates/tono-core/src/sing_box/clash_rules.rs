@@ -271,7 +271,7 @@ mod tests {
             .iter()
             .position(|rule| {
                 rule.payload
-                    == "network=tcp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...]"
+                    == "network=tcp domain_suffix=[dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com maas.aliyuncs.com...]"
                     && rule.proxy == "route(Tono-Exit)"
             })
             .expect("ai suffix");

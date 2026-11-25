@@ -72,9 +72,8 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
     }
 
     /// The arm request carries `allowLocalNetworkDevices` only when the
-    /// setting is on. A helper older than the field rejects any arm that
-    /// carries it, so the default (off, or never set) must send nothing; the
-    /// helper reads absence as off and renders no LAN pass.
+    /// setting is on. Defaults to on when never set; explicit off sends nothing,
+    /// and the helper reads absence as off and renders no LAN pass.
     func testArmRequestCarriesLocalNetworkDevicesOnlyWhenTheSettingIsOn() throws {
         let suite = "LocalNetworkDevicesArmFieldTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -85,7 +84,7 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
                 SettingsKey.allowsLocalNetworkDevices(defaults: defaults)
             )
         }
-        XCTAssertTrue(fields().isEmpty, "never set must send no field")
+        XCTAssertEqual(fields()["allowLocalNetworkDevices"] as? Bool, true, "never set defaults to on")
         defaults.set(false, forKey: SettingsKey.allowLocalNetworkDevices)
         XCTAssertTrue(fields().isEmpty, "off must send no field")
         defaults.set(true, forKey: SettingsKey.allowLocalNetworkDevices)

@@ -8,7 +8,7 @@ final class RoutingTests: XCTestCase {
 
     func testContractCountsMatchTheDesktopLists() {
         XCTAssertEqual(DesktopRoutingContract.cloudVideoSuffixes.count, 21)
-        XCTAssertEqual(DesktopRoutingContract.homeSuffixes.count, 194)
+        XCTAssertEqual(DesktopRoutingContract.homeSuffixes.count, 193)
         XCTAssertEqual(DesktopRoutingContract.mobileHomeAuxSuffixes.count, 60)
         XCTAssertEqual(DesktopRoutingContract.xCloudSuffixes, ["x.com", "twitter.com", "twimg.com", "t.co", "pscp.tv", "periscope.tv", "twtrdns.net", "cms-twdigitalassets.com", "vine.co", "twitpic.com"])
         XCTAssertEqual(DesktopRoutingContract.overseasCloudSuffixes.count, 52)

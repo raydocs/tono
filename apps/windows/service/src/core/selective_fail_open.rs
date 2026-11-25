@@ -51,7 +51,6 @@ pub static NRPT_RULES: &[NrptRule] = &[
     NrptRule { suffix: "perplexity.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000024}" },
     NrptRule { suffix: "pplx.ai", guid: "{a17e4c10-5b21-4e08-9c1a-198018000025}" },
     // Model API namespaces only; general Alibaba Cloud stays available.
-    NrptRule { suffix: "dashscope.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000026}" },
     NrptRule { suffix: "dashscope-intl.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000027}" },
     NrptRule { suffix: "dashscope-us.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000028}" },
     NrptRule { suffix: "maas.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000029}" },
@@ -236,10 +235,11 @@ mod tests {
 
     #[test]
     fn model_api_hold_covers_dedicated_families_without_blocking_alibaba_cloud() {
-        for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+        for suffix in ["dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
             let rule = NRPT_RULES.iter().find(|rule| rule.suffix == suffix).expect(suffix);
             assert_eq!(names_for_rule(rule).unwrap(), vec![suffix.to_string(), format!(".{suffix}")]);
         }
+        assert!(NRPT_RULES.iter().all(|rule| rule.suffix != "dashscope.aliyuncs.com"));
         assert!(!nrpt_name_is_safe("aliyuncs.com"));
         assert!(!nrpt_name_is_safe("oss-cn-hangzhou.aliyuncs.com"));
     }

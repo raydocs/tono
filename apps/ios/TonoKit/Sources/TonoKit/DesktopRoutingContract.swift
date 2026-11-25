@@ -5,7 +5,7 @@
 
 public enum DesktopRoutingContract {
     /// SHA-256 of direct_domains.rs + NUL + three-tier-template.json at generation time.
-    public static let sourceDigest = "c7dde1dbd66e1c97370311e7815d213f8d400ff19d22f376bd71d80dfbc557b1"
+    public static let sourceDigest = "28d869bf1dcfb44890cfa6def6ae90be487303fea4e10ada34f1fdc45513d54f"
 
     /// Cloud-only video sites; they precede the broad Home parents (e.g. googleapis.com).
     public static let cloudVideoSuffixes: [String] = [
@@ -34,7 +34,6 @@ public enum DesktopRoutingContract {
 
     /// Owner-approved AI / named Home suffixes, routed to the assigned residential exit.
     public static let homeSuffixes: [String] = [
-        "dashscope.aliyuncs.com",
         "dashscope-intl.aliyuncs.com",
         "dashscope-us.aliyuncs.com",
         "maas.aliyuncs.com",

@@ -45,7 +45,6 @@ enum SelectiveFailOpen {
         "perplexity.com",
         "pplx.ai",
         // Model API namespaces only; general Alibaba Cloud stays available.
-        "dashscope.aliyuncs.com",
         "dashscope-intl.aliyuncs.com",
         "dashscope-us.aliyuncs.com",
         "maas.aliyuncs.com",
@@ -275,13 +274,14 @@ enum SelectiveFailOpen {
             fputs("selective fail-open: resolver path admitted a shared or empty name\n", stderr)
             return false
         }
-        for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+        for suffix in ["dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
             if resolverPath(for: suffix) != "/etc/resolver/\(suffix)" {
                 fputs("selective fail-open: dedicated model API is missing\n", stderr)
                 return false
             }
         }
-        if resolverPath(for: "aliyuncs.com") != nil
+        if resolverPath(for: "dashscope.aliyuncs.com") != nil
+            || resolverPath(for: "aliyuncs.com") != nil
             || resolverPath(for: "oss-cn-hangzhou.aliyuncs.com") != nil {
             fputs("selective fail-open: general Alibaba Cloud must remain open\n", stderr)
             return false
