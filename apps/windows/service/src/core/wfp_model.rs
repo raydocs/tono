@@ -1629,7 +1629,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e11_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e12_0000_4a6c);
     }
 
     #[test]

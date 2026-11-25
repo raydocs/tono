@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import Tono
 
@@ -221,10 +222,14 @@ final class ManagedDirectAddressTrustTests: XCTestCase {
         XCTAssertEqual(decoded.tcpDirectAddresses, ["103.253.207.41", "81.69.152.51"])
         XCTAssertFalse(decoded.trusted)
 
+        let digest = Data(SHA256.hash(data: Data(json.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
         let cache = ManagedTrafficPolicyCache(
             revision: 11,
             json: json,
-            sha256: ConfigStorage.sha256Base64URL(Data(json.utf8)),
+            sha256: digest,
             updatedAt: nil,
             signature: nil
         )
