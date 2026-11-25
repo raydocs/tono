@@ -1,6 +1,6 @@
 {
   "name": "tono-windows",
-  "version": "0.0.85",
+  "version": "0.0.86",
   "license": "GPL-3.0-only",
   "scripts": {
     "prepare": "husky || true",
