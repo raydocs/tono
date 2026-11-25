@@ -393,7 +393,7 @@ fn mihomo_direct_shape(rule: &str, earlier: &[&str], direct: &[&str]) -> bool {
         ] => {
             target == WEB_DIRECT_GROUP_NAME
                 && port(*p).is_some_and(|port| WEB_SUFFIX_PORTS.contains(&port))
-                && suffix_ok(*suffix, |child| {
+                && suffix_ok(*suffix, false, |child| {
                     mihomo_pins(earlier, direct, &format!("DOMAIN-SUFFIX,{child}"))
                 })
         }
