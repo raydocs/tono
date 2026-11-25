@@ -167,6 +167,7 @@ nonisolated enum NativeUpdateDownload {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         var failures = ["system_dns[\(directError.localizedDescription)]"]
+        var attempts = [ConnectionFailureReport.attempt(path: "system_dns", error: directError)]
         for path in paths {
             try Task.checkCancellation()
             let answer: ControlPlaneAnswer
@@ -178,6 +179,7 @@ nonisolated enum NativeUpdateDownload {
             } catch {
                 if isCancellation(error) { throw error }
                 failures.append("\(path.label)[\(error.localizedDescription)]")
+                attempts.append(ConnectionFailureReport.attempt(path: path.label, error: error))
                 continue
             }
             if answer.status == 404 { throw NotPublished() }
@@ -186,14 +188,16 @@ nonisolated enum NativeUpdateDownload {
             }
             return answer.body
         }
-        throw userFacing(Copy.metadataUnreadable, diagnostic: failures.joined(separator: "; "))
+        throw userFacing(Copy.metadataUnreadable, diagnostic: failures.joined(separator: "; "),
+                         report: (.updateMetadata, attempts))
     }
 
     /// Stands in for the direct attempt that is not made while protection is
     /// armed without a tunnel, so the reported failures still name it.
     private static let skippedWhileArmedWithoutTunnel = NSError(
         domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet,
-        userInfo: [NSLocalizedDescriptionKey: "not tried: protection is armed without a tunnel (decision 086)"]
+        userInfo: [NSLocalizedDescriptionKey: "not tried: protection is armed without a tunnel (decision 086)",
+                   ConnectionFailureReport.skippedKey: true]
     )
 
     private static func isCancellation(_ error: any Error) -> Bool {
@@ -268,6 +272,7 @@ nonisolated enum NativeUpdateDownload {
             let file = try FileHandle(forWritingTo: destination)
             defer { try? file.close() }
             var failures = ["direct[\(directError.localizedDescription)]"]
+            var attempts = [ConnectionFailureReport.attempt(path: "direct", error: directError)]
             for path in paths {
                 try Task.checkCancellation()
                 try file.truncate(atOffset: 0)
@@ -277,13 +282,15 @@ nonisolated enum NativeUpdateDownload {
                 } catch {
                     if sink.answered || isCancellation(error) { throw error }
                     failures.append("\(path.label)[\(error.localizedDescription)]")
+                    attempts.append(ConnectionFailureReport.attempt(path: path.label, error: error))
                     continue
                 }
                 guard sink.isComplete else { throw failure(Copy.packageMismatch) }
                 try file.synchronize()
                 return destination
             }
-            throw userFacing(Copy.packageNotDownloaded, diagnostic: failures.joined(separator: "; "))
+            throw userFacing(Copy.packageNotDownloaded, diagnostic: failures.joined(separator: "; "),
+                             report: (.updatePackage, attempts))
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
@@ -294,10 +301,22 @@ nonisolated enum NativeUpdateDownload {
         NSError(domain: "Tono.NativeUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
-    /// The alert shows `sentence`. `diagnostic` is the path list, for the log only.
-    static func userFacing(_ sentence: String, diagnostic: String) -> NSError {
+    /// The alert shows `sentence`, then, when `report` is given, the path
+    /// list as labels and failure classes. `diagnostic` is the raw path list,
+    /// for the log only.
+    static func userFacing(
+        _ sentence: String, diagnostic: String,
+        report: (area: ConnectionFailureReport.Area, attempts: [ControlPlaneUnreachable.Attempt])? = nil
+    ) -> NSError {
         updateLog.error("native update: \(diagnostic, privacy: .public)")
-        return failure(sentence)
+        guard let report else { return failure(sentence) }
+        ConnectionFailureReport.shared.record(report.area, attempts: report.attempts)
+        return failure(sentence + "\n" + pathLine(report.attempts))
+    }
+
+    /// `Paths: system_dns:dns, relay:connect`, the part of the alert support reads.
+    static func pathLine(_ attempts: [ControlPlaneUnreachable.Attempt]) -> String {
+        "Paths: " + ConnectionFailureReport.summary(attempts)
     }
 }
 

@@ -1616,7 +1616,11 @@ actor TonoAPIClient {
                 throw APIError.tlsIntercepted
             }
             // Where it failed, when the walk said so.
-            if let unreachable = ControlPlaneUnreachable(error) { throw APIError.unreachable(unreachable) }
+            if let unreachable = ControlPlaneUnreachable(error) {
+                ConnectionFailureReport.shared.record(
+                    .controlPlane, attempts: unreachable.attempts, stoppedEarly: unreachable.stoppedEarly)
+                throw APIError.unreachable(unreachable)
+            }
             throw APIError.transport(error.localizedDescription)
         }
         try await Task.sleep(for: .seconds(1))
