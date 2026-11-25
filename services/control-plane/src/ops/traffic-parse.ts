@@ -44,6 +44,9 @@ export type ParseContext = {
 
 export type DestinationAgg = {
   connections: number;
+  closedConnections: number;
+  stalledConnections: number;
+  durationMsSum: number;
   bytesUp: number;
   bytesDown: number;
   processes: Map<string, number>;
@@ -85,9 +88,19 @@ export type NormalizedConnection = {
   node: string;
   bytesUp: number;
   bytesDown: number;
+  closed: boolean;
+  stalled: boolean;
+  durationMs: number;
 };
 
-const CONNECTION_KINDS = new Set(['connection', 'connection_opened', 'directDial']);
+const CONNECTION_KINDS = new Set([
+  'connection',
+  'connection_opened',
+  'connection_closed',
+  'connectionClosed',
+  'directDial',
+]);
+const CLOSED_CONNECTION_KINDS = new Set(['connection_closed', 'connectionClosed']);
 const ROUTES = new Set<Route>(['cloud', 'residential', 'direct', 'reject', 'unknown']);
 const SKIP_HOSTS = new Set(['', 'unknown', '*', '-']);
 
@@ -108,6 +121,18 @@ function intField(row: Record<string, unknown>, ...keys: string[]): number {
     if (Number.isFinite(n) && n >= 0) return Math.floor(n);
   }
   return 0;
+}
+
+function boolField(row: Record<string, unknown>, ...keys: string[]): boolean {
+  for (const key of keys) {
+    const value = row[key];
+    if (value === true || value === 1) return true;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1') return true;
+    }
+  }
+  return false;
 }
 
 function dayAt(tsMs: number): number {
@@ -228,6 +253,7 @@ export function normalizeConnection(
   if (!host || SKIP_HOSTS.has(host)) return null;
   const e = etld1(host);
   if (!e) return null;
+  const closed = CLOSED_CONNECTION_KINDS.has(kind);
   return {
     tsMs: tsMsOf(row, receivedAt),
     host,
@@ -238,6 +264,9 @@ export function normalizeConnection(
     node: nodeName(row),
     bytesUp: intField(row, 'bytes_up', 'bytesUp', 'upload', 'upBytes', 'up_bytes'),
     bytesDown: intField(row, 'bytes_down', 'bytesDown', 'download', 'downBytes', 'down_bytes'),
+    closed,
+    stalled: closed && boolField(row, 'stalled'),
+    durationMs: closed ? intField(row, 'duration_ms', 'durationMs') : 0,
   };
 }
 
@@ -288,14 +317,26 @@ export async function parseAuditSegment(
         seenEtld.add(e);
       }
     }
+    const countOpen = kind !== 'connection_closed';
     const day = dayAt(conn.tsMs);
     const seenSec = Math.floor(conn.tsMs / 1000);
     const dKey = destKey(day, e, conn.route, conn.node);
     const dest = takeBucket(parsed.destinations, dKey, () => ({
-      connections: 0, bytesUp: 0, bytesDown: 0, processes: new Map(),
+      connections: 0,
+      closedConnections: 0,
+      stalledConnections: 0,
+      durationMsSum: 0,
+      bytesUp: 0,
+      bytesDown: 0,
+      processes: new Map(),
     }));
     if (dest) {
-      dest.connections += 1;
+      if (countOpen) dest.connections += 1;
+      if (conn.closed) {
+        dest.closedConnections += 1;
+        if (conn.stalled) dest.stalledConnections += 1;
+        dest.durationMsSum += conn.durationMs;
+      }
       dest.bytesUp += conn.bytesUp;
       dest.bytesDown += conn.bytesDown;
       bumpProcess(dest, conn.process);
@@ -309,7 +350,7 @@ export async function parseAuditSegment(
       }));
       if (svc) {
         svc.bytes += conn.bytesUp + conn.bytesDown;
-        svc.sessions += 1;
+        if (countOpen) svc.sessions += 1;
         if (seenSec > svc.lastSeenAt) svc.lastSeenAt = seenSec;
       }
     }
@@ -320,7 +361,7 @@ export async function parseAuditSegment(
         firstSeen: seenSec, lastSeen: seenSec, bytes: 0, connections: 0,
       }));
       if (cand) {
-        cand.connections += 1;
+        if (countOpen) cand.connections += 1;
         cand.bytes += conn.bytesUp + conn.bytesDown;
         if (seenSec < cand.firstSeen) cand.firstSeen = seenSec;
         if (seenSec > cand.lastSeen) cand.lastSeen = seenSec;

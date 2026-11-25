@@ -260,6 +260,38 @@ where
                     if let Some(payload) = sample.as_ref() {
                         worker_state.route_ledger().lock().ingest(payload);
                     }
+                    let now_ms = crate::tono::commands::epoch_millis();
+                    let closed_connections = {
+                        let mut tracker = worker_state.connection_tracker().lock();
+                        let mut out = if let Some(payload) = sample.as_ref() {
+                            tracker.observe(
+                                payload,
+                                inner.selected_node.as_deref().unwrap_or(""),
+                                now_ms,
+                            )
+                        } else {
+                            Vec::new()
+                        };
+                        out.extend(tracker.drain_all(now_ms));
+                        out
+                    };
+                    for closed in closed_connections {
+                        let network: &'static str = if closed.network == "UDP" { "UDP" } else { "TCP" };
+                        worker_state.audit().log(AuditEvent::ConnectionClosed {
+                            host: closed.host,
+                            destination_ip: closed.destination_ip,
+                            destination_port: closed.destination_port,
+                            network,
+                            process: closed.process,
+                            route: closed.route,
+                            rule: closed.rule,
+                            selected_exit: closed.selected_exit,
+                            bytes_up: closed.bytes_up,
+                            bytes_down: closed.bytes_down,
+                            duration_ms: closed.duration_ms,
+                            stalled: closed.stalled,
+                        });
+                    }
                     if disconnecting {
                         worker_state.audit().log(AuditEvent::DisconnectOk {
                             elapsed_ms: super::session_elapsed_ms(connected_at),
@@ -282,6 +314,10 @@ where
                 inner.retry_attempt = 0;
                 inner.next_retry_at_ms = None;
                 worker_state.route_ledger().lock().clear_connection_counters();
+                worker_state
+                    .connection_tracker()
+                    .lock()
+                    .drain_all(crate::tono::commands::epoch_millis());
                 break;
             }
             result

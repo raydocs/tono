@@ -3109,3 +3109,54 @@ async fn offline_ready_connect_is_refused_as_soon_as_the_server_forbids_the_sess
     let _ = gate.wait_durable(Duration::from_secs(5)).await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn signed_policy_allows_arbitrary_non_protected_direct_suffix() {
+    let node = node();
+    let wechat_pins = vec![(
+        "res.wx.qq.com".to_string(),
+        vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
+        vec![443],
+    )];
+    let suffixes = vec![
+        tono_core::policy::PolicyDomain {
+            host: "hotpush-fixture.example.net".to_string(),
+            ports: vec![443],
+        },
+        tono_core::policy::PolicyDomain {
+            host: "gov-fixture.example.org".to_string(),
+            ports: vec![80, 443],
+        },
+        tono_core::policy::PolicyDomain {
+            host: "claude.ai".to_string(),
+            ports: vec![443],
+        },
+    ];
+    let (untrusted, _) = super::direct::build_direct_plan_with_trust(
+        "Ethernet 2".to_string(),
+        &wechat_pins,
+        &[],
+        &[],
+        &suffixes,
+        &node,
+        vec![r"^C:\\WeChat\\.*$".to_string()],
+        false,
+    )
+    .unwrap();
+    assert!(!untrusted.web_suffix_rules.iter().any(|(h, _)| h == "hotpush-fixture.example.net"));
+
+    let (trusted, _) = super::direct::build_direct_plan_with_trust(
+        "Ethernet 2".to_string(),
+        &wechat_pins,
+        &[],
+        &[],
+        &suffixes,
+        &node,
+        vec![r"^C:\\WeChat\\.*$".to_string()],
+        true,
+    )
+    .unwrap();
+    assert!(trusted.web_suffix_rules.contains(&("hotpush-fixture.example.net".to_string(), 443)));
+    assert!(trusted.web_suffix_rules.contains(&("gov-fixture.example.org".to_string(), 443)));
+    assert!(!trusted.web_suffix_rules.iter().any(|(h, _)| h == "claude.ai"));
+}

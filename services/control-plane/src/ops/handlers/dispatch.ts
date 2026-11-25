@@ -9,6 +9,7 @@ import {
   getCustomers, getCustomer, getCustomerConnections, getCustomerActivity,
   getCustomerDestinations, getCustomerServices, getCustomerDiagnostics, getFailureClusters,
 } from './customers';
+import { getFleetDestinations } from './destinations';
 import { getFunnel } from './funnel';
 import {
   getIncidents, getIncident, postIncidentAck, postIncidentSnooze,
@@ -67,6 +68,7 @@ export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/customers/{id}/activity',
   'GET /api/v1/ops/customers/{id}/destinations',
   'GET /api/v1/ops/customers/{id}/services',
+  'GET /api/v1/ops/traffic/destinations',
   'GET /api/v1/ops/customers/{id}/followups',
   'POST /api/v1/ops/customers/{id}/followups',
   'GET /api/v1/ops/incidents',
@@ -167,6 +169,7 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/activity$/, handle: (req, e, _a, p) => getCustomerActivity(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/destinations$/, handle: (req, e, _a, p) => getCustomerDestinations(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/services$/, handle: (req, e, _a, p) => getCustomerServices(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/traffic\/destinations$/, handle: (req, e) => getFleetDestinations(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/followups$/, handle: (req, e, _a, p) => getCustomerFollowups(req, e, p[0]) },
   { method: 'POST', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/followups$/, handle: (req, e, a, p) => postCustomerFollowup(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)$/, handle: (req, e, _a, p) => getCustomer(req, e, p[0]) },

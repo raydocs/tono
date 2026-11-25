@@ -38,6 +38,7 @@ pub use crate::direct_domains::{
     DEDICATED_MODEL_API_SUFFIXES, ENCRYPTED_DNS_PORTS, MOBILE_HOME_AUX_SUFFIXES,
     OVERSEAS_CLOUD_SUFFIXES, OVERSEAS_UDP_REJECT_IPV4_CIDRS, OVERSEAS_UDP_REJECT_IPV6_CIDRS,
     PUBLIC_STUN_SUFFIXES, STUN_UDP_PORTS, X_CLOUD_SUFFIXES, is_address_free_web_suffix,
+    is_valid_signed_web_suffix,
 };
 
 /// Main and known helper executables for the three reviewed China-office

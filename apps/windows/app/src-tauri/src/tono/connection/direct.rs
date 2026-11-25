@@ -666,7 +666,14 @@ pub(super) async fn apply_cloud_policy(
         }
     };
     let wechat_path_regexes = wechat_path_regexes.await.unwrap_or_default();
-    let (plan, direct_endpoints) = match build_direct_plan(
+    let policy_trusted = {
+        let inner = state.lock().await;
+        signed_policy_for(inner.traffic_policy_response.as_ref(), &policy).is_some_and(|signed| {
+            tono_core::policy_signature::verdict(&signed.json, Some(&signed.signature))
+                == tono_core::policy_signature::SignatureVerdict::Trusted
+        })
+    };
+    let (plan, direct_endpoints) = match build_direct_plan_with_trust(
         interface,
         &wechat_pins,
         &web_pins,
@@ -674,6 +681,7 @@ pub(super) async fn apply_cloud_policy(
         &policy.document.direct_suffixes,
         node,
         wechat_path_regexes,
+        sing_box && policy_trusted,
     ) {
         Ok(plan) => plan,
         Err(reason) => {
@@ -2210,6 +2218,28 @@ pub fn build_direct_plan(
     node: &ValidatedNode,
     wechat_process_path_regexes: Vec<String>,
 ) -> Result<(tono_core::config::DirectPlan, Vec<ProxyEndpoint>), String> {
+    build_direct_plan_with_trust(
+        interface,
+        wechat_pins,
+        web_pins,
+        media,
+        suffixes,
+        node,
+        wechat_process_path_regexes,
+        false,
+    )
+}
+
+pub fn build_direct_plan_with_trust(
+    interface: String,
+    wechat_pins: &[(String, Vec<std::net::Ipv4Addr>, Vec<u16>)],
+    web_pins: &[(String, Vec<std::net::Ipv4Addr>, Vec<u16>)],
+    media: &[tono_core::policy::PolicyMedia],
+    suffixes: &[tono_core::policy::PolicyDomain],
+    node: &ValidatedNode,
+    wechat_process_path_regexes: Vec<String>,
+    policy_trusted: bool,
+) -> Result<(tono_core::config::DirectPlan, Vec<ProxyEndpoint>), String> {
     let mut hosts: Vec<(String, String)> = Vec::new();
     let mut wechat_tcp = Vec::new();
     let mut web_tcp = Vec::new();
@@ -2254,8 +2284,11 @@ pub fn build_direct_plan(
     // [80, 443] subset, so this only normalizes order and duplicates.
     let mut web_suffix_rules: Vec<(String, u16)> = Vec::new();
     for entry in suffixes {
-        // Address-free WFP path: Bilibili family plus product China suffixes.
-        if !tono_core::config::is_address_free_web_suffix(&entry.host) {
+        // Address-free WFP path: Bilibili family plus product China suffixes, or
+        // any non-protected suffix authorized by a signature-verified policy.
+        if !(tono_core::config::is_address_free_web_suffix(&entry.host)
+            || (policy_trusted && tono_core::config::is_valid_signed_web_suffix(&entry.host)))
+        {
             continue;
         }
         for port in &entry.ports {

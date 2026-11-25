@@ -444,4 +444,71 @@ describe('writeParsedSegment and retainTrafficDaily', () => {
     ).all<{ segment_id: string }>();
     expect(segments.results.map((row) => row.segment_id)).toEqual(['seg-keep']);
   });
+
+  it('tracks closed connections, bytes, duration and stall rate without double-counting macOS opens', async () => {
+    const jsonl = [
+      JSON.stringify({
+        kind: 'connection_opened',
+        timestamp: TS,
+        host: 'down.todesk.com',
+        process: 'ToDesk',
+        route: 'Tono-China-Web-Direct',
+        selected_exit: 'HK Edge 01',
+      }),
+      JSON.stringify({
+        kind: 'connection_closed',
+        timestamp: TS,
+        host: 'down.todesk.com',
+        process: 'ToDesk',
+        route: 'Tono-China-Web-Direct',
+        selected_exit: 'HK Edge 01',
+        bytes_up: '256',
+        bytes_down: '0',
+        duration_ms: '4500',
+        stalled: 'true',
+      }),
+      JSON.stringify({
+        ts: Date.parse(TS),
+        kind: 'connectionClosed',
+        host: 'gitee.com',
+        process: 'chrome.exe',
+        route: 'Tono-Exit',
+        selectedExit: 'JP-Tokyo-01',
+        bytesUp: 400,
+        bytesDown: 8192,
+        durationMs: 1200,
+        stalled: false,
+      }),
+    ].join('\n');
+    const parsed = await parseAuditSegment(jsonl, ctx);
+    await writeParsedSegment(db(), parsed, RECEIVED, 'seg-closed-quality');
+
+    const rows = await db().prepare(
+      `SELECT etld1, connections, closed_connections, stalled_connections, duration_ms_sum, bytes_up, bytes_down
+       FROM traffic_destination_daily WHERE user_id = ? ORDER BY etld1`,
+    ).bind(ctx.userId).all<{
+      etld1: string; connections: number; closed_connections: number;
+      stalled_connections: number; duration_ms_sum: number; bytes_up: number; bytes_down: number;
+    }>();
+    expect(rows.results).toEqual([
+      {
+        etld1: 'gitee.com',
+        connections: 1,
+        closed_connections: 1,
+        stalled_connections: 0,
+        duration_ms_sum: 1200,
+        bytes_up: 400,
+        bytes_down: 8192,
+      },
+      {
+        etld1: 'todesk.com',
+        connections: 1,
+        closed_connections: 1,
+        stalled_connections: 1,
+        duration_ms_sum: 4500,
+        bytes_up: 256,
+        bytes_down: 0,
+      },
+    ]);
+  });
 });

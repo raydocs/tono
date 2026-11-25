@@ -493,6 +493,42 @@ function fixturesPlugin(): Plugin {
           sendJson(res, materializeOps(body, file!.clock));
           return;
         }
+        if (parts[0] === 'traffic' && parts[1] === 'destinations' && parts.length === 2) {
+          const items = set === 'empty'
+            ? []
+            : [
+                {
+                  etld1: 'todesk.com',
+                  route: 'direct',
+                  users: 4,
+                  connections: 18,
+                  closedConnections: 16,
+                  stalledConnections: 4,
+                  stallRate: 0.25,
+                  avgDurationMs: 3200,
+                  bytesUp: 12_000,
+                  bytesDown: 48_000,
+                  topProcesses: ['ToDesk'],
+                  nodes: ['HK-01'],
+                },
+                {
+                  etld1: 'gitee.com',
+                  route: 'cloud',
+                  users: 6,
+                  connections: 42,
+                  closedConnections: 40,
+                  stalledConnections: 0,
+                  stallRate: 0,
+                  avgDurationMs: 850,
+                  bytesUp: 180_000,
+                  bytesDown: 4_200_000,
+                  topProcesses: ['Chrome', 'git'],
+                  nodes: ['JP-01'],
+                },
+              ];
+          sendJson(res, { items, nextCursor: null, total: items.length, updatedAt: Math.floor(Date.now() / 1000) });
+          return;
+        }
         if (parts[0] === 'customers' || parts[0] === 'incidents') {
           const file = opsFile(
             parts[0] === 'customers' ? names.customers : names.incidents,

@@ -444,7 +444,8 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
                 "action":"route","outbound":config::DIRECT_GROUP_NAME}));
         }
         for (suffix, port) in &plan.web_suffix_rules {
-            if !config::is_address_free_web_suffix(suffix)
+            if !(config::is_address_free_web_suffix(suffix)
+                || config::is_valid_signed_web_suffix(suffix))
                 || ![80, 443].contains(port)
                 || plan.wechat_process_path_regexes.is_empty()
                 || !plan.reviewed_direct_ports.contains(port)

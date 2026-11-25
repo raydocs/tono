@@ -826,6 +826,9 @@ pub struct TonoState {
     /// and the telemetry uploader never need the product mutex to ingest or
     /// read a delta.
     route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
+    /// Tracks active Mihomo connections so completed/closed flows emit
+    /// byte totals and stall flags once per flow.
+    connection_tracker: parking_lot::Mutex<crate::tono::connection_routes::ConnectionCloseTracker>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
     release_operation: tokio::sync::Mutex<Option<ReleaseOperation>>,
@@ -994,6 +997,9 @@ impl TonoState {
             audit,
             support_reports: parking_lot::Mutex::new(Default::default()),
             route_ledger: parking_lot::Mutex::new(crate::tono::route_ledger::RouteLedger::default()),
+            connection_tracker: parking_lot::Mutex::new(
+                crate::tono::connection_routes::ConnectionCloseTracker::default(),
+            ),
             catalog_sync_operation: tokio::sync::Mutex::new(()),
             release_operation: tokio::sync::Mutex::new(None),
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
@@ -1012,6 +1018,12 @@ impl TonoState {
 
     pub fn route_ledger(&self) -> &parking_lot::Mutex<crate::tono::route_ledger::RouteLedger> {
         &self.route_ledger
+    }
+
+    pub(crate) fn connection_tracker(
+        &self,
+    ) -> &parking_lot::Mutex<crate::tono::connection_routes::ConnectionCloseTracker> {
+        &self.connection_tracker
     }
 
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, TonoInner> {

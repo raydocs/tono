@@ -807,6 +807,29 @@ pub fn direct_suffix_overlaps_protected(host: &str) -> bool {
             })
 }
 
+/// Well-formed multi-label suffix that does not match or enclose any permanently
+/// protected host, safe to admit from a signature-verified cloud policy without
+/// rebuilding the compiled Windows allowlist.
+pub fn is_valid_signed_web_suffix(suffix: &str) -> bool {
+    !suffix.is_empty()
+        && suffix.len() <= 253
+        && suffix.contains('.')
+        && suffix
+            .rsplit('.')
+            .next()
+            .is_some_and(|tld| !tld.bytes().all(|b| b.is_ascii_digit()))
+        && suffix.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+        && !direct_suffix_overlaps_protected(suffix)
+}
+
 pub fn cidr_contains_ipv4(cidr: &str, ip: std::net::Ipv4Addr) -> bool {
     let Some((base, bits)) = cidr.split_once('/') else {
         return false;

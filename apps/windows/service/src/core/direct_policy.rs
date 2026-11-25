@@ -14,7 +14,9 @@ use serde_json::Value;
 
 use crate::SignedTrafficPolicy;
 use crate::direct_domains::ALWAYS_ADDRESS_FREE_WEB_SUFFIXES;
-use crate::policy_signature::{SignatureVerdict, TRAFFIC_POLICY_PUBLIC_KEY, verdict_with_key};
+use crate::policy_signature::{
+    SignatureVerdict, TRAFFIC_POLICY_LEGACY_PUBLIC_KEY, TRAFFIC_POLICY_PUBLIC_KEY, verdict_with_key,
+};
 
 // The limits `tono-core` `policy::validate_policy` applies, so a document the App accepted is
 // never larger than what the Service reads.
@@ -44,7 +46,13 @@ impl DirectPolicy {
     /// privileged Service calls it; the client build keeps the module for the compiler-compat tests.
     #[cfg_attr(not(feature = "standalone"), allow(dead_code))]
     pub(crate) fn verify(signed: &SignedTrafficPolicy) -> Result<Self, String> {
-        Self::verify_with_key(signed, TRAFFIC_POLICY_PUBLIC_KEY)
+        match Self::verify_with_key(signed, TRAFFIC_POLICY_PUBLIC_KEY) {
+            Ok(policy) => Ok(policy),
+            Err(_) if !TRAFFIC_POLICY_LEGACY_PUBLIC_KEY.is_empty() => {
+                Self::verify_with_key(signed, TRAFFIC_POLICY_LEGACY_PUBLIC_KEY)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// `verify` against an explicit key, so tests can sign with a throwaway pair.

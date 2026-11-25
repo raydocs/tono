@@ -244,6 +244,7 @@ export const customerCopy = {
     node: '节点',
     connections: '连接数',
     bytes: '流量',
+    stalls: '卡顿',
     action: '',
   } as const,
   route: {

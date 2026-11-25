@@ -13,6 +13,7 @@ import { openCustomer, openNodePage, setTrafficRange } from '@/lib/hash-route';
 import { useBeat } from '@/lib/use-poll';
 import { usePrivacy } from '@/lib/privacy';
 import { useResource, type Resource } from '@/lib/use-resource';
+import { FleetDestinationsPanel } from './traffic/FleetDestinations';
 
 const words = copy.traffic;
 function stateOf(resource: Resource<unknown>, empty: boolean): PanelState {
@@ -94,6 +95,7 @@ export default function TrafficPage({ range: selected, customers }: {
         {hourly ? <LineChart label={words.hours} format={formatBytesMeasured} when={formatWhen} tick={tick} scale="bytes"
           series={[{ key: 'bytes', name: words.hours, points: hourly.fleet.map((point) => ({ t: point.t, v: point.bytes })) }]} /> : null}
       </Panel>
+      <FleetDestinationsPanel range={range} beat={beat} />
     </div>
   );
 }

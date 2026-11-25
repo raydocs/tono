@@ -16,7 +16,9 @@ import Foundation
 nonisolated enum ManagedTrafficPolicySignature {
     /// Public half of the production signing key, standard base64, 32 bytes.
     /// Mirrors TRAFFIC_POLICY_PUBLIC_KEY in services/control-plane/wrangler.jsonc.
-    static let publicKeyBase64 = "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM="
+    static let publicKeyBase64 = "FnHlqLD41/jJR9uXGMpdkTmmArm5eVE93SCO+fnUxmg="
+    /// Read-only fallback for policies signed before the 0.0.85 key rotation.
+    static let legacyFallbackKeyBase64 = "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM="
 
     /// Prefixed to the signed bytes. Mirrors TRAFFIC_POLICY_SIGNATURE_CONTEXT in
     /// services/control-plane/src/crypto.ts. Domain separation: a signature this
@@ -77,6 +79,20 @@ nonisolated enum ManagedTrafficPolicySignature {
         json: String,
         signature: String?,
         publicKeyBase64: String = Self.publicKeyBase64
+    ) -> Verdict {
+        let primary = singleKeyVerdict(json: json, signature: signature, publicKeyBase64: publicKeyBase64)
+        if primary == .untrustworthy,
+           publicKeyBase64 == Self.publicKeyBase64,
+           !Self.legacyFallbackKeyBase64.isEmpty {
+            return singleKeyVerdict(json: json, signature: signature, publicKeyBase64: Self.legacyFallbackKeyBase64)
+        }
+        return primary
+    }
+
+    private static func singleKeyVerdict(
+        json: String,
+        signature: String?,
+        publicKeyBase64: String
     ) -> Verdict {
         guard let signature, !signature.isEmpty else { return .unsigned }
         guard let keyData = Data(base64Encoded: publicKeyBase64),

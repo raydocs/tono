@@ -85,12 +85,35 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     )
     let sessionID = UUID().uuidString
     let timestampFormatter: ISO8601DateFormatter
+    let standardTimestampFormatter: ISO8601DateFormatter
     var pending: [Data] = []
     var pendingBytes = 0
     var droppedPendingEntries = 0
     var flushWorkItem: DispatchWorkItem?
     var seenConnectionIDs = Set<String>()
     var seenConnectionOrder: [String] = []
+    static let maximumActiveAuditConnections = 2_048
+    struct TrackedAuditConnection {
+        let id: String
+        let host: String
+        let destinationIP: String
+        let destinationPort: String
+        let network: String
+        let process: String
+        let route: String
+        let routeClassification: String
+        let rule: String
+        let rulePayload: String
+        let selectedExit: String
+        let startedAt: String
+        let firstSeenAt: Date
+        var lastSeenAt: Date
+        var upload: Int64
+        var download: Int64
+        let uploadScope: String?
+    }
+    var activeAuditConnections: [String: TrackedAuditConnection] = [:]
+    var activeAuditConnectionOrder: [String] = []
     var researchObservedSince = Int(Date().timeIntervalSince1970)
     var researchTotals: [
         ClaudeTrafficResearchKey: ClaudeTrafficResearchTotal
@@ -178,6 +201,9 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         timestampFormatter = formatter
+        let plainFormatter = ISO8601DateFormatter()
+        plainFormatter.formatOptions = [.withInternetDateTime]
+        standardTimestampFormatter = plainFormatter
     }
 
     func setEnabled(_ enabled: Bool) {
@@ -537,6 +563,60 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         }
     }
 
+    static func isStalledConnection(
+        network: String,
+        durationMs: Int64,
+        bytesDown: Int64
+    ) -> Bool {
+        network.uppercased() == "TCP" && durationMs >= 3_000 && bytesDown == 0
+    }
+
+    private func emitConnectionClosed(_ tracked: TrackedAuditConnection, closedAt: Date) {
+        let startedAtDate = timestampFormatter.date(from: tracked.startedAt)
+            ?? standardTimestampFormatter.date(from: tracked.startedAt)
+            ?? tracked.firstSeenAt
+        let durationMs = max(0, Int64(closedAt.timeIntervalSince(startedAtDate) * 1000))
+        let stalled = Self.isStalledConnection(
+            network: tracked.network,
+            durationMs: durationMs,
+            bytesDown: tracked.download
+        )
+        enqueue(
+            kind: "connection_closed",
+            fields: [
+                "connection_id": tracked.id,
+                "host": tracked.host,
+                "destination_ip": tracked.destinationIP,
+                "destination_port": tracked.destinationPort,
+                "network": tracked.network,
+                "process": tracked.process,
+                "route": tracked.route,
+                "route_classification": tracked.routeClassification,
+                "rule": tracked.rule,
+                "rule_payload": tracked.rulePayload,
+                "selected_exit": tracked.selectedExit,
+                "started_at": tracked.startedAt,
+                "bytes_up": String(tracked.upload),
+                "bytes_down": String(tracked.download),
+                "duration_ms": String(durationMs),
+                "stalled": stalled ? "true" : "false",
+            ],
+            uploadScope: tracked.uploadScope
+        )
+    }
+
+    func flushActiveConnections() {
+        queue.async { [self] in
+            let closedAt = Date()
+            for id in activeAuditConnectionOrder {
+                if let tracked = activeAuditConnections.removeValue(forKey: id) {
+                    emitConnectionClosed(tracked, closedAt: closedAt)
+                }
+            }
+            activeAuditConnectionOrder.removeAll()
+        }
+    }
+
     func recordConnections(
         _ connections: [APIConnection],
         protection: TrafficAuditProtectionSnapshot,
@@ -555,6 +635,8 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             if researchEnabled && Self.isClaudeTrafficResearchEnabled {
                 recordResearchProtection(protection)
             }
+            let now = Date()
+            var liveIDs = Set<String>()
             for connection in connections {
                 if researchEnabled && Self.isClaudeTrafficResearchEnabled {
                     recordResearchConnectionObservation(
@@ -567,6 +649,13 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                     )
                 }
                 guard localAuditEnabled, Self.isEnabled else { continue }
+                liveIDs.insert(connection.id)
+                if var existing = activeAuditConnections[connection.id] {
+                    existing.upload = max(existing.upload, connection.upload)
+                    existing.download = max(existing.download, connection.download)
+                    existing.lastSeenAt = now
+                    activeAuditConnections[connection.id] = existing
+                }
                 guard seenConnectionIDs.insert(connection.id).inserted else {
                     continue
                 }
@@ -619,6 +708,33 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                     residentialContext: residentialContext
                 )
 
+                activeAuditConnections[connection.id] = TrackedAuditConnection(
+                    id: connection.id,
+                    host: host,
+                    destinationIP: metadata.destinationIP ?? "unknown",
+                    destinationPort: metadata.destinationPort ?? "unknown",
+                    network: metadata.network.uppercased(),
+                    process: process,
+                    route: chain,
+                    routeClassification: routeClassification,
+                    rule: connection.rule,
+                    rulePayload: connection.rulePayload ?? "",
+                    selectedExit: protection.selectedExit,
+                    startedAt: connection.start,
+                    firstSeenAt: now,
+                    lastSeenAt: now,
+                    upload: max(0, connection.upload),
+                    download: max(0, connection.download),
+                    uploadScope: uploadScope
+                )
+                activeAuditConnectionOrder.append(connection.id)
+                if activeAuditConnectionOrder.count > Self.maximumActiveAuditConnections {
+                    let evictedId = activeAuditConnectionOrder.removeFirst()
+                    if let evicted = activeAuditConnections.removeValue(forKey: evictedId) {
+                        emitConnectionClosed(evicted, closedAt: now)
+                    }
+                }
+
                 enqueue(
                     kind: "connection_opened",
                     fields: [
@@ -660,6 +776,18 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                     ],
                     uploadScope: uploadScope
                 )
+            }
+            if localAuditEnabled && Self.isEnabled && !activeAuditConnectionOrder.isEmpty {
+                var remainingOrder: [String] = []
+                remainingOrder.reserveCapacity(activeAuditConnectionOrder.count)
+                for id in activeAuditConnectionOrder {
+                    if liveIDs.contains(id) {
+                        remainingOrder.append(id)
+                    } else if let closed = activeAuditConnections.removeValue(forKey: id) {
+                        emitConnectionClosed(closed, closedAt: now)
+                    }
+                }
+                activeAuditConnectionOrder = remainingOrder
             }
         }
     }

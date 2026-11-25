@@ -80,4 +80,12 @@ final class ManagedTrafficPolicyRevisionTests: XCTestCase {
             XCTFail("a json naming revision 4 was accepted as revision 5")
         } catch {}
     }
+
+    func testProductionKeyAndLegacyFallbackAreValid32ByteKeys() {
+        let primary = Data(base64Encoded: ManagedTrafficPolicySignature.publicKeyBase64)
+        let legacy = Data(base64Encoded: ManagedTrafficPolicySignature.legacyFallbackKeyBase64)
+        XCTAssertEqual(primary?.count, 32)
+        XCTAssertEqual(legacy?.count, 32)
+        XCTAssertNotEqual(primary, legacy)
+    }
 }

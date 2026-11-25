@@ -49,6 +49,7 @@ export * from './contract/receipts';
 export * from './contract/slo';
 export * from './contract/api-relays';
 export * from './contract/api-paths';
+export * from './contract/destinations';
 
 // dept:b
 // append your entries inside your block

@@ -1,5 +1,15 @@
+import type { FleetDestinationDto, ListDto, RouteKind } from '@contract';
 import { copy } from '@/copy/copy';
 import { getJson } from './api';
+
+export type FleetDestinationSort = 'bytes' | 'stalls' | 'connections';
+export type FleetDestinationsQuery = {
+  range: TrafficRange;
+  route?: RouteKind | 'all';
+  sort?: FleetDestinationSort;
+  q?: string;
+  limit?: number;
+};
 
 export const TRAFFIC_RANGES = ['24h', '7d', '90d'] as const;
 export type TrafficRange = (typeof TRAFFIC_RANGES)[number];
@@ -48,4 +58,18 @@ export const trafficApi = {
     const row = object(body.usageHours);
     return { range, ...windowOf(row), fleet: points(row.fleet, (point) => ({ t: number(point.t), bytes: nullable(point.bytes) })) };
   },
+  destinations: (
+    { range, route, sort, q, limit }: FleetDestinationsQuery,
+    signal?: AbortSignal,
+  ): Promise<ListDto<FleetDestinationDto>> => getJson<ListDto<FleetDestinationDto>>(
+    'traffic/destinations',
+    signal,
+    {
+      range,
+      ...(route && route !== 'all' ? { route } : {}),
+      ...(sort ? { sort } : {}),
+      ...(q && q.trim() ? { q: q.trim() } : {}),
+      ...(limit ? { limit: String(limit) } : {}),
+    },
+  ),
 };

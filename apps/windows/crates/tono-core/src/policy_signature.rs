@@ -5,7 +5,9 @@ use base64::Engine as _;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 /// Public half of the production signing key, standard base64, 32 bytes.
-pub const TRAFFIC_POLICY_PUBLIC_KEY: &str = "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM=";
+pub const TRAFFIC_POLICY_PUBLIC_KEY: &str = "FnHlqLD41/jJR9uXGMpdkTmmArm5eVE93SCO+fnUxmg=";
+/// Read-only fallback for policies signed before the 0.0.85 key rotation.
+pub const TRAFFIC_POLICY_LEGACY_PUBLIC_KEY: &str = "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM=";
 /// Prefixed to the signed bytes. Mirrors TRAFFIC_POLICY_SIGNATURE_CONTEXT.
 pub const TRAFFIC_POLICY_SIGNATURE_CONTEXT: &str = "tono-traffic-policy-v1\n";
 
@@ -42,7 +44,12 @@ pub fn same_revision_transition(
 }
 
 pub fn verdict(json: &str, signature: Option<&str>) -> SignatureVerdict {
-    verdict_with_key(json, signature, TRAFFIC_POLICY_PUBLIC_KEY)
+    match verdict_with_key(json, signature, TRAFFIC_POLICY_PUBLIC_KEY) {
+        SignatureVerdict::Untrustworthy if !TRAFFIC_POLICY_LEGACY_PUBLIC_KEY.is_empty() => {
+            verdict_with_key(json, signature, TRAFFIC_POLICY_LEGACY_PUBLIC_KEY)
+        }
+        other => other,
+    }
 }
 
 pub fn verdict_with_key(json: &str, signature: Option<&str>, public_key_base64: &str) -> SignatureVerdict {
@@ -121,6 +128,10 @@ mod tests {
         );
         assert_eq!(
             verdict(json, Some(&signature_b64)),
+            SignatureVerdict::Untrustworthy
+        );
+        assert_eq!(
+            verdict_with_key(json, Some(&signature_b64), super::TRAFFIC_POLICY_LEGACY_PUBLIC_KEY),
             SignatureVerdict::Untrustworthy
         );
     }

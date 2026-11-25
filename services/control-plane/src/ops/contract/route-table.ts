@@ -53,6 +53,7 @@ import { assertChangeReceipt } from './receipts';
 import { assertSloResponse } from './slo';
 import { assertApiRelays } from './api-relays';
 import { assertApiPaths } from './api-paths';
+import { assertFleetDestination } from './destinations';
 import { assertNodeAgents } from './node-agents';
 
 export const assertNodeSummaryList = (value: unknown) => assertList(value, assertNodeSummary);
@@ -64,6 +65,7 @@ export const assertCustomerConnectionsList = (value: unknown) => assertList(valu
 export const assertCustomerActivityList = (value: unknown) => assertList(value, assertActivityHour);
 export const assertCustomerDestinationsList = (value: unknown) => assertList(value, assertDestinationRow);
 export const assertCustomerServicesList = (value: unknown) => assertList(value, assertServiceUsage);
+export const assertFleetDestinationsList = (value: unknown) => assertList(value, assertFleetDestination);
 export { assertFunnel };
 export const assertIncidentList = (value: unknown) => assertList(value, assertIncident);
 export const assertJobList = (value: unknown) => assertList(value, assertJob);
@@ -136,6 +138,7 @@ export const NAMED_CHECKERS = {
   assertSloResponse,
   assertApiRelays,
   assertApiPaths,
+  assertFleetDestinationsList,
   assertNodeAgents,
 } as const;
 
@@ -218,6 +221,7 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
 
   // dept:e
   // append your entries inside your block
+  { route: 'GET /api/v1/ops/traffic/destinations', checker: 'assertFleetDestinationsList' },
 ];
 
 /** `<out>/<route-with-slashes-as-dashes>.json`, braces stripped so `{name}` is `name`. */
