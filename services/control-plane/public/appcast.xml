@@ -3,6 +3,24 @@
     <channel>
         <title>Tono</title>
         <item>
+            <title>0.0.86</title>
+            <pubDate>Wed, 25 Nov 2026 12:50:12 +0000</pubDate>
+            <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.86-build87</link>
+            <sparkle:version>87</sparkle:version>
+            <sparkle:shortVersionString>0.0.86</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.3</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Tono 0.0.86 (build 87)
+
+Requires Apple Silicon and macOS 26.3+.
+
+## Changes since build 86
+
+- **Signed TCP direct IPs** (#1856): The signed `traffic-policy` can now carry `tcpDirectAddresses` (non-DNS IPv4 TCP destinations) and v5 `tcpEndpoints`. These addresses are sent direct and admitted by the helper's fail-closed filter, so a policy update can add or change them without a client rebuild. The helper protocol version moves with this build.
+]]></description>
+            <enclosure url="https://releases.afk.ccwu.cc/download/Tono-0.0.86-build87-arm64.zip" length="19111333" type="application/zip" sparkle:edSignature="CdaM8cfh/1S7DBsDLYtRD6BOBswQD3EAsHA5Ifzh9w2GYGQYwDWNVDaCaa7i2q8jGlt6IywLrceFx+l95CIVDw=="/>
+        </item>
+        <item>
             <title>0.0.85</title>
             <pubDate>Wed, 25 Nov 2026 04:29:30 +0000</pubDate>
             <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.85-build86</link>
