@@ -3351,21 +3351,21 @@ mod tests {
         let filters = expected_filters(&locked);
 
         let mut core_custom = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", 55300);
-        core_custom.app_path = Some(&locked.app_path);
+        core_custom.app_id_matches = true;
         assert_eq!(arbitrate_sublayer(&filters, &core_custom), Some(FilterAction::Permit));
 
         let mut core_443 = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", 443);
-        core_443.app_path = Some(&locked.app_path);
+        core_443.app_id_matches = true;
         assert_eq!(arbitrate_sublayer(&filters, &core_443), Some(FilterAction::Permit));
 
         for denied_port in [53_u16, 853_u16] {
             let mut dns_pkt = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", denied_port);
-            dns_pkt.app_path = Some(&locked.app_path);
+            dns_pkt.app_id_matches = true;
             assert_eq!(arbitrate_sublayer(&filters, &dns_pkt), Some(FilterAction::Block));
         }
 
         let mut core_udp = packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "103.253.207.41", 55300);
-        core_udp.app_path = Some(&locked.app_path);
+        core_udp.app_id_matches = true;
         assert_eq!(arbitrate_sublayer(&filters, &core_udp), Some(FilterAction::Block));
 
         let other_app = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", 55300);

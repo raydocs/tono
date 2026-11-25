@@ -1936,7 +1936,7 @@ async fn replace_sing_box_for_direct(
     // does not read it as a crash; the spawned owner clears the marker on every exit.
     mark_direct_reload_in_flight(state, generation).await;
     if let Err(error) =
-        service::tono_replace_sing_box_runtime(session, direct_document.clone(), true, Some(signed_policy)).await
+        service::tono_replace_sing_box_runtime(session, direct_document.clone(), true, Some(signed_policy.clone())).await
     {
         skip_optional_direct_policy(
             state,
