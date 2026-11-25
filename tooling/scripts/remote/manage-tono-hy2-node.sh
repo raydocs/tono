@@ -532,6 +532,28 @@ auth:
   type: http
   http:
     url: $AUTH_HTTP_URL
+bandwidth:
+  up: 500 mbps
+  down: 500 mbps
+ignoreClientBandwidth: false
+disableUDP: false
+quic:
+  initStreamReceiveWindow: 8388608
+  maxStreamReceiveWindow: 8388608
+  initConnReceiveWindow: 20971520
+  maxConnReceiveWindow: 20971520
+  maxIdleTimeout: 30s
+  maxIncomingStreams: 1024
+acl:
+  inline:
+    - reject(10.0.0.0/8)
+    - reject(172.16.0.0/12)
+    - reject(192.168.0.0/16)
+    - reject(127.0.0.0/8)
+    - reject(169.254.0.0/16)
+    - reject(fc00::/7)
+    - reject(fe80::/10)
+    - reject(::1/128)
 masquerade:
   type: proxy
   proxy:
@@ -557,7 +579,7 @@ Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=15s
 LimitNOFILE=1048576
-MemoryMax=80M
+MemoryMax=256M
 UMask=0077
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

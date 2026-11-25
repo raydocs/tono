@@ -69,7 +69,7 @@ class Contracts(unittest.TestCase):
   r=subprocess.run([bash],input=P.framed_helper(req,src.encode()),stdout=subprocess.PIPE,stderr=subprocess.PIPE)
   self.assertEqual(0,r.returncode,r.stderr.decode()); self.assertEqual(req,json.loads(r.stdout))
  def test_pins_and_checksum_rejection(self):
-  self.assertEqual("v26.3.27",P.XRAY_VERSION)
+  self.assertEqual("v26.11.9",P.XRAY_VERSION)
   class C(io.BytesIO):
    def __enter__(self): return self
    def __exit__(self,*a): pass

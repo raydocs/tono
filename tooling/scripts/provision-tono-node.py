@@ -10,10 +10,10 @@ import argparse, base64, hashlib, json, os, re, secrets, shutil, stat, subproces
 from pathlib import Path
 from typing import Any, Callable
 
-XRAY_VERSION = "v26.3.27"
+XRAY_VERSION = "v26.11.9"
 XRAY_ASSETS = {
-    "x86_64": ("Xray-linux-64.zip", "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"),
-    "aarch64": ("Xray-linux-arm64-v8a.zip", "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"),
+    "x86_64": ("Xray-linux-64.zip", "b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82"),
+    "aarch64": ("Xray-linux-arm64-v8a.zip", "64ed6858982a7f5eb85d88b811089063bd4f17561f4c8f44e0f1dc8e6f6430be"),
 }
 # Git root. parents[1] is tooling/, which let a private inventory under
 # services/ or apps/ through the "outside the repository" check.
