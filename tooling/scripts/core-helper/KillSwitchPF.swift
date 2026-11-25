@@ -576,6 +576,13 @@ extension KillSwitchManager {
                 "label \"tono-direct\""
             )
         }
+        for address in state.sessionDirectTCPAddresses {
+            lines.append(
+                "pass out quick inet proto tcp " +
+                "to \(address) port { 1:52, 54:852, 854:65535 } user root keep state (if-bound) " +
+                "label \"tono-direct\""
+            )
+        }
         // Only while a TUN is up, like continuity above. With no tunnel this
         // address-free permit is not a scoped exception but root web-port
         // egress on the physical interface, and the connect's first arm runs

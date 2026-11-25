@@ -980,4 +980,95 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(strayCatalogKey.status).toBe(400);
     expect((await strayCatalogKey.json() as any).error.code).toBe('VALIDATION_ERROR');
   });
+
+  it('requires a signature for v5 tcpDirectAddresses and custom TCP ports, sorts/dedups, and rejects protected IPs or DNS ports', async () => {
+    const v5Policy = {
+      version: 5,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: [
+        { address: '139.224.114.71', ports: [55310, 55300, 7709] },
+      ],
+      tcpDirectAddresses: [
+        '114.28.170.219',
+        '103.253.207.41',
+        '81.69.152.51',
+      ],
+    };
+
+    const unsigned = await admin('traffic-policy', { policy: v5Policy, expectedRevision: 0 }, 'PUT');
+    expect(unsigned.status).toBe(400);
+    expect((await unsigned.json() as any).error.code).toBe('VALIDATION_ERROR');
+
+    const preview = await admin('traffic-policy', { policy: v5Policy, dryRun: true }, 'PUT');
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as any;
+    expect(previewBody.signatureRequired).toBe(true);
+    const canonical = JSON.parse(previewBody.json);
+    expect(canonical.version).toBe(5);
+    expect(canonical.tcpEndpoints).toEqual([
+      { address: '139.224.114.71', ports: [7709, 55300, 55310] },
+    ]);
+    expect(canonical.tcpDirectAddresses).toEqual([
+      '103.253.207.41',
+      '114.28.170.219',
+      '81.69.152.51',
+    ]);
+
+    const published = await admin('traffic-policy', {
+      policy: v5Policy,
+      expectedRevision: 0,
+      signature: await signPolicy(previewBody.json),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    expect((await published.json() as any).signature).toBeTruthy();
+
+    const account = await createAccount('v5-signed-tcp');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+    const served = JSON.parse((await fetched.json() as any).json);
+    expect(served.tcpDirectAddresses).toEqual(['103.253.207.41', '114.28.170.219', '81.69.152.51']);
+
+    // Validation rejections even when trusted/dry-run.
+    const invalidV5Cases = [
+      // Protected DNS resolvers / Home / Cloud / Relay IPs
+      { ...v5Policy, tcpDirectAddresses: ['1.1.1.1'] },
+      { ...v5Policy, tcpDirectAddresses: ['8.8.8.8'] },
+      { ...v5Policy, tcpDirectAddresses: ['160.79.104.10'] },
+      { ...v5Policy, tcpDirectAddresses: ['91.108.4.1'] },
+      { ...v5Policy, tcpDirectAddresses: ['149.154.160.1'] },
+      { ...v5Policy, tcpDirectAddresses: ['179.253.244.3'] },
+      { ...v5Policy, tcpEndpoints: [{ address: '179.255.154.17', ports: [443] }] },
+      // Private / duplicate / overlap between tcpEndpoints and tcpDirectAddresses
+      { ...v5Policy, tcpDirectAddresses: ['10.0.0.1'] },
+      { ...v5Policy, tcpDirectAddresses: ['81.69.152.51', '81.69.152.51'] },
+      { ...v5Policy, tcpDirectAddresses: ['139.224.114.71'] },
+      // Invalid or DNS/DoT ports
+      { ...v5Policy, tcpEndpoints: [{ address: '81.69.152.51', ports: [] }], tcpDirectAddresses: [] },
+      { ...v5Policy, tcpEndpoints: [{ address: '81.69.152.51', ports: [53] }], tcpDirectAddresses: [] },
+      { ...v5Policy, tcpEndpoints: [{ address: '81.69.152.51', ports: [853] }], tcpDirectAddresses: [] },
+      { ...v5Policy, tcpEndpoints: [{ address: '81.69.152.51', ports: [0] }], tcpDirectAddresses: [] },
+      { ...v5Policy, tcpEndpoints: [{ address: '81.69.152.51', ports: [65536] }], tcpDirectAddresses: [] },
+      {
+        ...v5Policy,
+        tcpEndpoints: [{ address: '81.69.152.51', ports: Array.from({ length: 17 }, (_, i) => 55000 + i) }],
+        tcpDirectAddresses: [],
+      },
+      // Over 64 tcpDirectAddresses bound
+      {
+        ...v5Policy,
+        tcpEndpoints: [],
+        tcpDirectAddresses: Array.from({ length: 65 }, (_, i) => `103.253.207.${i + 1}`),
+      },
+    ];
+    for (const invalid of invalidV5Cases) {
+      const res = await admin('traffic-policy', { policy: invalid, dryRun: true }, 'PUT');
+      expect(res.status, JSON.stringify(invalid)).toBe(400);
+      expect((await res.json() as any).error.code).toBe('VALIDATION_ERROR');
+    }
+  });
 });

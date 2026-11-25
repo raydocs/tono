@@ -43,8 +43,15 @@ fn status_from(armed: Option<Armed>) -> KillSwitchStatus {
         // on the status path.
         tunnel_permit_rendered: TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed),
         endpoints: armed.intent.endpoints.clone(),
-        direct_endpoint_digest: crate::direct_endpoint_digest(&armed.direct_endpoints)
-            .unwrap_or_default(),
+        direct_endpoint_digest: crate::direct_endpoint_digest_with_tcp_addresses(
+            &armed.direct_endpoints,
+            &armed
+                .direct_tcp_addresses
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default(),
         last_error: last_error_guard().clone(),
         reconnect_after_release: !armed.intent.wanted
             && (armed.intent.reconnect_after_release

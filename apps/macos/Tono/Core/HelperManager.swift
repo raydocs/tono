@@ -1014,6 +1014,7 @@ nonisolated struct HelperManager {
         tunnelInterfaces: [String]? = nil,
         proxyEndpoints: [ConfigPipeline.DialEndpoint]? = nil,
         sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]? = nil,
+        sessionDirectTCPAddresses: [String]? = nil,
         tailscaleBootstrapEnabled: Bool? = nil,
         allowSystemResolution: Bool = false,
         bootstrapPins: [String: [String]] = [:],
@@ -1049,6 +1050,9 @@ nonisolated struct HelperManager {
                     "transport": $0.transport,
                 ]
             }
+        }
+        if let sessionDirectTCPAddresses {
+            object["sessionDirectTCPAddresses"] = sessionDirectTCPAddresses
         }
         if let tailscaleBootstrapEnabled {
             object["tailscaleBootstrapEnabled"] = tailscaleBootstrapEnabled

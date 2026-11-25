@@ -282,6 +282,7 @@ extension AppState {
                     && trafficPolicy.directSuffixes.isEmpty
                     && trafficPolicy.mediaEndpoints.isEmpty
                     && trafficPolicy.tcpEndpoints.isEmpty
+                    && trafficPolicy.tcpDirectAddresses.isEmpty
                 var committedDirectPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?
                 if let physicalInterface {
                     do {
@@ -374,6 +375,8 @@ extension AppState {
                     // and harmless before Mihomo exists (root-only pass).
                     sessionDirectEndpoints:
                         activeDirectPolicy?.sessionEndpoints ?? [],
+                    sessionDirectTCPAddresses:
+                        activeDirectPolicy?.tcpDirectAddresses ?? [],
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
                     allowSystemResolution: allowSystemResolution,
                     helperPrepared: true,
@@ -441,6 +444,8 @@ extension AppState {
                     proxyEndpoints: proxyEndpoints,
                     sessionDirectEndpoints:
                         committedDirectPolicy?.sessionEndpoints ?? [],
+                    sessionDirectTCPAddresses:
+                        committedDirectPolicy?.tcpDirectAddresses ?? [],
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
                     helperPrepared: true,
                     reviewedBundleDirect:
@@ -2071,6 +2076,8 @@ extension AppState {
                     proxyEndpoints: self.currentProxyEndpoints(),
                     sessionDirectEndpoints:
                         self.activeDirectPolicy?.sessionEndpoints ?? [],
+                    sessionDirectTCPAddresses:
+                        self.activeDirectPolicy?.tcpDirectAddresses ?? [],
                     tailscaleBootstrapEnabled:
                         AppProfile.homeExitEnabled && self.tonoTransport != nil,
                     helperPrepared: true,
@@ -2339,6 +2346,8 @@ extension AppState {
                             proxyEndpoints: self.currentProxyEndpoints(),
                             sessionDirectEndpoints:
                                 self.activeDirectPolicy?.sessionEndpoints ?? [],
+                            sessionDirectTCPAddresses:
+                                self.activeDirectPolicy?.tcpDirectAddresses ?? [],
                             tailscaleBootstrapEnabled:
                                 AppProfile.homeExitEnabled && self.tonoTransport != nil,
                             helperPrepared: true,

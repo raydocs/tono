@@ -58,7 +58,8 @@ pub use core::{
     ServiceErrorCode, ServiceLifecycleState,
     ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
     StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
-    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest,
+    WriterConfig, canonical_direct_endpoints, canonical_direct_tcp_addresses,
+    direct_endpoint_digest, direct_endpoint_digest_with_tcp_addresses,
     is_protected_startup_replacement_candidate, mihomo_ipc_path, owner_key,
 };
 pub use core::{OwnerPaths, ServicePaths, service_paths};
@@ -207,7 +208,10 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// AI-prefix-only WFP rule set without a whole-host block, and reports `KillSwitchStatus.ai_home_scoped`.
 /// MIN_REQUIRED stays 14; an App refuses AI Home against an older Service rather than running the
 /// AI Home graph under whole-host WFP.
-pub const PROTOCOL_REVISION: u16 = 23;
+/// Revision 24 extends sing-box DIRECT policy admission and CommitSingBoxDirect to support signed
+/// custom-port TCP endpoints (`tcpEndpoints`) and signed non-DNS-port all-TCP `/32` IPv4 addresses
+/// (`tcpDirectAddresses`, `traffic_policy` v4/v5). MIN_REQUIRED stays 14.
+pub const PROTOCOL_REVISION: u16 = 24;
 /// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
@@ -223,6 +227,8 @@ pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT: u16 = 19;
 pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_POLICY: u16 = 22;
 /// First revision that admits the AI Home graph and installs the AI-prefix-only WFP scope.
 pub const MIN_SERVICE_REVISION_FOR_AI_HOME: u16 = 23;
+/// First revision that admits signed custom-port TCP endpoints and all-non-DNS-TCP IPv4 addresses.
+pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_TCP_ENDPOINTS: u16 = 24;
 /// First revision that reports the relay permit in rule C (decision 090) to the App.
 pub const MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT: u16 = 20;
 /// First revision that admits StartClash under the release authority and installs the

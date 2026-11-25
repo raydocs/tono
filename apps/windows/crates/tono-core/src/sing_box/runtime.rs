@@ -482,6 +482,24 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
                 rules.push(rule);
             }
         }
+        for (ip, port) in &plan.tcp_direct_endpoints {
+            validate_direct(*ip, *port, &dial_endpoints)?;
+            direct_endpoints.insert(DialEndpoint {
+                host: *ip,
+                port: *port,
+                transport: Transport::Tcp,
+            });
+            rules.push(json!({"network":"tcp","ip_cidr":[format!("{ip}/32")],"port":port,"action":"route","outbound":config::DIRECT_GROUP_NAME}));
+        }
+        for ip in &plan.tcp_direct_addresses {
+            if !node::is_public_ipv4(*ip)
+                || crate::policy::is_protected_direct_ipv4(*ip)
+                || dial_endpoints.iter().any(|e| e.host == *ip)
+            {
+                return Err(UnsupportedPolicy);
+            }
+            rules.push(json!({"network":"tcp","ip_cidr":[format!("{ip}/32")],"action":"route","outbound":config::DIRECT_GROUP_NAME}));
+        }
     }
     rules.push(if selected.is_hysteria2() {
         json!({"network":"icmp","action":"reject"})
@@ -615,9 +633,10 @@ fn valid_domain(host: &str) -> bool {
 
 fn validate_direct(ip: Ipv4Addr, port: u16, dial: &[DialEndpoint]) -> Result<(), SingBoxError> {
     if !node::is_public_ipv4(ip)
-        || crate::policy::is_permanently_protected(ip)
+        || crate::policy::is_protected_direct_ipv4(ip)
         || port == 0
         || port == 53
+        || port == 853
         || dial.iter().any(|e| e.host == ip)
     {
         return Err(SingBoxError::UnsupportedPolicy);
@@ -881,6 +900,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![],
             udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![],
             reviewed_direct_ports: vec![],
         };
@@ -928,6 +949,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![],
             udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![],
             reviewed_direct_ports: vec![],
         };
@@ -949,7 +972,8 @@ mod tests {
             hosts: vec![("qq.com".into(), "101.1.2.3".into())],
             tcp_wechat_rules: vec![("qq.com".into(), "101.1.2.3".parse().unwrap(), 443)],
             tcp_web_rules: vec![], web_suffix_rules: vec![("aliyuncs.com".into(), 443)],
-            udp_wechat_rules: vec![], wechat_process_path_regexes: vec![r"^C:\\WeChat\\.*$".into()],
+            udp_wechat_rules: vec![], tcp_direct_endpoints: vec![], tcp_direct_addresses: vec![],
+            wechat_process_path_regexes: vec![r"^C:\\WeChat\\.*$".into()],
             reviewed_direct_ports: vec![443],
         };
         let check = |routing: CatalogRouting, target: &str| {
@@ -1375,5 +1399,72 @@ reality-opts:
         ai_home_doc["dns"]["servers"][2]["tag"] = json!(crate::three_tier::HOME_DNS);
         assert!(crate::three_tier::admit_ai_home_runtime(&ai_home_doc).is_err());
         assert!(crate::three_tier::admit_runtime(&ai_home_doc).is_err());
+    }
+
+    #[test]
+    fn tcp_direct_endpoints_and_addresses_emit_after_protected_rules_and_reject_unsafe_targets() {
+        let nodes = nodes();
+        let routing = CatalogRouting::default();
+        let plan = DirectPlan {
+            physical_interface: "Ethernet".into(),
+            hosts: vec![],
+            tcp_wechat_rules: vec![],
+            tcp_web_rules: vec![],
+            web_suffix_rules: vec![],
+            udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![("139.224.114.71".parse().unwrap(), 55300)],
+            tcp_direct_addresses: vec!["103.253.207.41".parse().unwrap()],
+            wechat_process_path_regexes: vec![],
+            reviewed_direct_ports: vec![],
+        };
+        let mut request = input(&nodes, &routing);
+        request.direct_plan = Some(&plan);
+        let runtime = build_runtime(request).unwrap();
+        let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+        let rules = value["route"]["rules"].as_array().unwrap();
+        let ai_pos = rules
+            .iter()
+            .position(|rule| rule["ip_cidr"] == json!(config::CLAUDE_HOME_IPV4_CIDRS.to_vec()))
+            .unwrap();
+        let ep_pos = rules
+            .iter()
+            .position(|rule| {
+                rule["network"] == "tcp"
+                    && rule["ip_cidr"] == json!(["139.224.114.71/32"])
+                    && rule["port"] == 55300
+                    && rule["outbound"] == config::DIRECT_GROUP_NAME
+            })
+            .unwrap();
+        let addr_pos = rules
+            .iter()
+            .position(|rule| {
+                rule["network"] == "tcp"
+                    && rule["ip_cidr"] == json!(["103.253.207.41/32"])
+                    && rule.get("port").is_none()
+                    && rule["outbound"] == config::DIRECT_GROUP_NAME
+            })
+            .unwrap();
+        let final_reject = rules.len() - 1;
+        assert!(ai_pos < ep_pos && ep_pos < addr_pos && addr_pos < final_reject);
+        assert!(runtime.direct_endpoints().contains(&DialEndpoint {
+            host: "139.224.114.71".parse().unwrap(),
+            port: 55300,
+            transport: Transport::Tcp,
+        }));
+
+        for unsafe_port in [53_u16, 853_u16] {
+            let mut bad = plan.clone();
+            bad.tcp_direct_endpoints = vec![("139.224.114.71".parse().unwrap(), unsafe_port)];
+            let mut req = input(&nodes, &routing);
+            req.direct_plan = Some(&bad);
+            assert_eq!(build_runtime(req).unwrap_err(), SingBoxError::UnsupportedPolicy);
+        }
+        for unsafe_ip in ["1.1.1.1", "160.79.104.10", "179.253.244.3", "10.0.0.1"] {
+            let mut bad = plan.clone();
+            bad.tcp_direct_addresses = vec![unsafe_ip.parse().unwrap()];
+            let mut req = input(&nodes, &routing);
+            req.direct_plan = Some(&bad);
+            assert_eq!(build_runtime(req).unwrap_err(), SingBoxError::UnsupportedPolicy);
+        }
     }
 }

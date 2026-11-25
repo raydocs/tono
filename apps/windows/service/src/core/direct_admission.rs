@@ -138,6 +138,17 @@ fn listed_by_policy(rule: &Value, policy: &DirectPolicy) -> bool {
         // A signed-app process rule has no destination of its own; the policy authorises
         // native-app DIRECT by listing native hosts.
         Some("tcp") if rule.contains_key("process_path_regex") => policy.lists_native_apps(),
+        Some("tcp") if rule.contains_key("ip_cidr") && rule.contains_key("port") => {
+            one_str(rule, "ip_cidr")
+                .and_then(|cidr| cidr.strip_suffix("/32"))
+                .and_then(|address| address.parse::<Ipv4Addr>().ok())
+                .zip(port_of(rule))
+                .is_some_and(|(address, port)| policy.lists_tcp_endpoint(address, port))
+        }
+        Some("tcp") if rule.contains_key("ip_cidr") => one_str(rule, "ip_cidr")
+            .and_then(|cidr| cidr.strip_suffix("/32"))
+            .and_then(|address| address.parse::<Ipv4Addr>().ok())
+            .is_some_and(|address| policy.lists_tcp_direct_address(address)),
         Some("tcp") => one_str(rule, "domain_suffix")
             .zip(port_of(rule))
             .is_some_and(|(suffix, port)| policy.lists_suffix(suffix, port)),
@@ -254,6 +265,25 @@ fn sing_box_direct_shape(
                 })
                 && strs(rule, "process_path_regex")
                     .is_some_and(|all| all.iter().all(|r| regex_ok(r)))
+                && protected_destinations_pinned(
+                    |domain| sing_box_pins(earlier, direct, "domain_suffix", domain),
+                    |cidr| sing_box_pins(earlier, direct, "ip_cidr", cidr),
+                )
+        }
+        Some("tcp") if rule.contains_key("ip_cidr") && rule.contains_key("port") => {
+            keys_are(
+                rule,
+                &["network", "ip_cidr", "port", "action", "outbound"],
+            ) && one_str(rule, "ip_cidr").is_some_and(pin_ok)
+                && port_of(rule).is_some_and(|port| port != 0 && port != 53 && port != 853)
+                && protected_destinations_pinned(
+                    |domain| sing_box_pins(earlier, direct, "domain_suffix", domain),
+                    |cidr| sing_box_pins(earlier, direct, "ip_cidr", cidr),
+                )
+        }
+        Some("tcp") if rule.contains_key("ip_cidr") => {
+            keys_are(rule, &["network", "ip_cidr", "action", "outbound"])
+                && one_str(rule, "ip_cidr").is_some_and(pin_ok)
                 && protected_destinations_pinned(
                     |domain| sing_box_pins(earlier, direct, "domain_suffix", domain),
                     |cidr| sing_box_pins(earlier, direct, "ip_cidr", cidr),
@@ -479,6 +509,8 @@ fn pin_ok(cidr: &str) -> bool {
         && !CLAUDE_HOME_IPV4_CIDRS
             .iter()
             .any(|range| in_range(address, range))
+        && !crate::direct_domains::is_cloud_exit_ipv4(address)
+        && !crate::API_RELAYS.iter().any(|(relay, _)| *relay == address)
 }
 
 fn in_range(address: Ipv4Addr, range: &str) -> bool {
@@ -972,5 +1004,39 @@ mod tests {
         for some in ["^a", r"^\.", r"^\\", "^[Dd]:", "^.*x", r"^C:\\Lark\\"] {
             assert!(has_literal_text(some), "{some}");
         }
+    }
+
+    #[test]
+    fn signed_tcp_direct_addresses_and_custom_ports_follow_policy_and_reject_dns_or_protected() {
+        let json = r#"{
+            "version": 5,
+            "revision": 11,
+            "domains": [],
+            "mediaEndpoints": [],
+            "webDomains": [],
+            "directSuffixes": [],
+            "tcpEndpoints": [{"address": "139.224.114.71", "ports": [55300]}],
+            "tcpDirectAddresses": ["103.253.207.41"]
+        }"#;
+        let (signing, public) = key(4);
+        let policy = DirectPolicy::verify_with_key(&sign(&signing, json, 11), &public).unwrap();
+        let by = DirectBinding::Policy(&policy);
+
+        let tcp_ep = |ip: &str, port: u16| {
+            json!({"network":"tcp","ip_cidr":[format!("{ip}/32")],"port":port,"action":"route","outbound":"Tono-China-Direct"})
+        };
+        let tcp_addr = |ip: &str| {
+            json!({"network":"tcp","ip_cidr":[format!("{ip}/32")],"action":"route","outbound":"Tono-China-Direct"})
+        };
+
+        assert_eq!(admitted_by(tcp_ep("139.224.114.71", 55300), by), Ok(()));
+        assert!(admitted_by(tcp_ep("139.224.114.71", 55301), by).is_err());
+        assert!(admitted_by(tcp_ep("139.224.114.71", 53), DirectBinding::ShapeOnly).is_err());
+        assert!(admitted_by(tcp_ep("139.224.114.71", 853), DirectBinding::ShapeOnly).is_err());
+        assert_eq!(admitted_by(tcp_addr("103.253.207.41"), by), Ok(()));
+        assert!(admitted_by(tcp_addr("103.253.207.42"), by).is_err());
+        assert!(admitted_by(tcp_addr("103.253.207.41"), DirectBinding::NoPolicy).is_err());
+        assert!(admitted_by(tcp_addr("91.108.4.1"), DirectBinding::ShapeOnly).is_err());
+        assert!(admitted_by(tcp_addr("179.253.244.3"), DirectBinding::ShapeOnly).is_err());
     }
 }

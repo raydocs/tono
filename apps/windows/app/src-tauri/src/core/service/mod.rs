@@ -1386,6 +1386,8 @@ pub(crate) async fn tono_commit_sing_box_direct(
     session: &OwnerSessionProof,
     direct_endpoints: Vec<tono_service_protocol::ProxyEndpoint>,
     reviewed_direct_ports: Vec<u16>,
+    direct_tcp_addresses: Vec<String>,
+    traffic_policy: Option<tono_service_protocol::SignedTrafficPolicy>,
 ) -> Result<DirectRuntimeReloadResult> {
     let credentials = current_owner_credentials()?;
     let response = tono_service_protocol::commit_sing_box_direct(
@@ -1394,6 +1396,8 @@ pub(crate) async fn tono_commit_sing_box_direct(
         CommitSingBoxDirectRequest {
             direct_endpoints,
             reviewed_direct_ports,
+            direct_tcp_addresses,
+            traffic_policy,
         },
     )
     .await

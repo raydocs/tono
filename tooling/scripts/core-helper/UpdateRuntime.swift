@@ -72,7 +72,8 @@ final class UpdateRuntime {
         [
             "apiHosts": previous.apiHosts,
             "exitHints": [], "tunnelInterfaces": [], "proxyEndpoints": [],
-            "sessionDirectEndpoints": [], "tailscaleBootstrapEnabled": false,
+            "sessionDirectEndpoints": [], "sessionDirectTCPAddresses": [],
+            "tailscaleBootstrapEnabled": false,
             "allowSystemResolution": false, "reviewedBundleDirect": false,
             "bootstrapPins": previous.pinnedHosts.filter { previous.apiHosts.contains($0.key) },
             "aiHomeScoped": previous.aiHomeScoped,

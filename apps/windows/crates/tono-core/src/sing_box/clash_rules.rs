@@ -236,6 +236,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![("aliyuncs.com".into(), 443)],
             udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![r"^C:\\WeChat\\.*$".into()],
             reviewed_direct_ports: vec![443],
         };
@@ -330,6 +332,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![],
             udp_wechat_rules: vec![("101.1.2.6".parse().unwrap(), 8000)],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![
                 crate::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\Weixin\").unwrap(),
                 crate::config::wechat_file_path_regex(r"D:\软件\WeChat\WeChat.exe").unwrap(),

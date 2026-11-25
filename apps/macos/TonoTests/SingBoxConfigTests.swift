@@ -1170,4 +1170,52 @@ final class SingBoxConfigTests: XCTestCase {
         SingBoxDelayGate.suspend()
         XCTAssertFalse(SingBoxDelayGate.isProven)
     }
+
+    func testProductRuntimeEmitsStandaloneSignedTCPDirectRulesWithoutNativeAppDirect() throws {
+        let overlay = ConfigPipeline.OverlayConfig(
+            mixedPort: 29190,
+            externalController: "127.0.0.1:29191",
+            secret: secret,
+            tunEnabled: true,
+            selectedNodeName: "Fixture Beta",
+            claudeHomeNodeName: "Fixture Alpha"
+        )
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en0",
+            domainPins: [],
+            webDomainPins: [],
+            webDomainSuffixes: [],
+            mediaEndpoints: [],
+            tcpEndpoints: [
+                .init(address: "139.224.114.71", port: 55300, transport: "tcp"),
+            ],
+            tcpDirectAddresses: ["81.69.152.51", "103.253.207.41"],
+            directResolverHosts: [],
+            trusted: true,
+            nativeAppDirect: false
+        )
+        let result = try ConfigPipeline.buildSingBoxRuntime(
+            overlay: overlay,
+            nodes: nodes(),
+            directPlan: plan
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        XCTAssertTrue(rules.contains { rule in
+            rule["network"] as? String == "tcp"
+                && rule["ip_cidr"] as? [String] == ["139.224.114.71/32"]
+                && rule["port"] as? [Int] == [55300]
+                && rule["action"] as? String == "route"
+                && rule["outbound"] as? String == ConfigPipeline.directProxyName
+        })
+        for address in ["81.69.152.51", "103.253.207.41"] {
+            XCTAssertTrue(rules.contains { rule in
+                rule["network"] as? String == "tcp"
+                    && rule["ip_cidr"] as? [String] == ["\(address)/32"]
+                    && rule["port"] == nil
+                    && rule["action"] as? String == "route"
+                    && rule["outbound"] as? String == ConfigPipeline.directProxyName
+            })
+        }
+    }
 }

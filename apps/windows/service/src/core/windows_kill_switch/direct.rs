@@ -21,12 +21,25 @@ fn reload_result(
     owner_generation: u64,
     reload_id: u64,
     endpoints: &[ProxyEndpoint],
+    tcp_addresses: &[Ipv4Addr],
 ) -> Result<crate::DirectRuntimeReloadResult> {
+    let tcp_strings: Vec<String> = tcp_addresses.iter().map(ToString::to_string).collect();
     Ok(crate::DirectRuntimeReloadResult {
         owner_generation,
         reload_id,
-        endpoint_digest: crate::direct_endpoint_digest(endpoints).map_err(anyhow::Error::msg)?,
+        endpoint_digest: crate::direct_endpoint_digest_with_tcp_addresses(endpoints, &tcp_strings)
+            .map_err(anyhow::Error::msg)?,
     })
+}
+
+fn direct_digest_for_armed(armed: &Armed) -> Result<String> {
+    let tcp_strings: Vec<String> = armed
+        .direct_tcp_addresses
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    crate::direct_endpoint_digest_with_tcp_addresses(&armed.direct_endpoints, &tcp_strings)
+        .map_err(anyhow::Error::msg)
 }
 
 fn next_direct_reload_id() -> u64 {
@@ -76,6 +89,7 @@ pub(super) async fn transition_direct_to_blocked_unlocked(
     // union WFP would still only permit the connect-time set.
     apply_learned_bootstrap_pins(&mut blocked.intent);
     blocked.direct_endpoints.clear();
+    blocked.direct_tcp_addresses.clear();
     blocked.direct_reload = next_lease;
     blocked.tun_luid = None;
     blocked.core_instance = None;
@@ -132,7 +146,9 @@ pub(super) async fn transition_direct_to_blocked_unlocked(
 }
 
 pub(super) fn direct_state_may_be_live(armed: &Armed) -> bool {
-    !armed.direct_endpoints.is_empty() || armed.direct_reload.is_some()
+    !armed.direct_endpoints.is_empty()
+        || !armed.direct_tcp_addresses.is_empty()
+        || armed.direct_reload.is_some()
         || (armed.intent.strict_contract.is_some() && armed.intent.mode == KillSwitchStatusMode::Locked)
 }
 
@@ -162,13 +178,23 @@ pub(crate) fn sing_box_full_tunnel_is_locked() -> Result<()> {
 pub(crate) async fn commit_sing_box_direct_while_locked(
     endpoints: &[ProxyEndpoint],
     reviewed_ports: &[u16],
+    direct_tcp_addresses: &[String],
+    traffic_policy: Option<&crate::SignedTrafficPolicy>,
     owner_generation: u64,
 ) -> Result<crate::DirectRuntimeReloadResult> {
     ensure_supported()?;
     let failed = {
         let _operation = WFP_OPERATION.lock().await;
         refuse_owned_graph_mutation()?;
-        match commit_sing_box_direct_unlocked(endpoints, reviewed_ports, owner_generation).await {
+        match commit_sing_box_direct_unlocked(
+            endpoints,
+            reviewed_ports,
+            direct_tcp_addresses,
+            traffic_policy,
+            owner_generation,
+        )
+        .await
+        {
             Ok(result) => return Ok(result),
             Err(error) => error,
         }
@@ -183,11 +209,14 @@ pub(crate) async fn commit_sing_box_direct_while_locked(
 async fn commit_sing_box_direct_unlocked(
     endpoints: &[ProxyEndpoint],
     reviewed_ports: &[u16],
+    direct_tcp_addresses: &[String],
+    traffic_policy: Option<&crate::SignedTrafficPolicy>,
     owner_generation: u64,
 ) -> Result<crate::DirectRuntimeReloadResult> {
     let previous = armed_guard().clone().context("kill switch is not armed")?;
     if previous.intent.mode != KillSwitchStatusMode::Locked
         || !previous.direct_endpoints.is_empty()
+        || !previous.direct_tcp_addresses.is_empty()
         || previous.direct_reload.is_some()
     {
         bail!("sing-box DIRECT permits require a locked full tunnel");
@@ -201,14 +230,34 @@ async fn commit_sing_box_direct_unlocked(
     prove_current_tunnel_luid(&previous).await.context(
         "sing-box DIRECT permits lost the locked tunnel; the full tunnel was left in place",
     )?;
-    let canonical = canonical_direct_endpoints(&previous, endpoints)?;
-    let endpoint_digest = crate::direct_endpoint_digest(&canonical).map_err(anyhow::Error::msg)?;
+    let verified_policy = traffic_policy
+        .map(crate::core::direct_policy::DirectPolicy::verify)
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
+    let validation = KillSwitchConfig {
+        tunnel_interface: previous.intent.tunnel_interface.clone(),
+        proxy_endpoints: previous.intent.endpoints.clone(),
+        bootstrap_api_hosts: Vec::new(),
+        direct_endpoints: endpoints.to_vec(),
+        ai_home_scoped: false,
+    };
+    let canonical_tcp_addresses = validate::validate_sing_box_direct_grants(
+        &validation,
+        direct_tcp_addresses,
+        verified_policy.as_ref(),
+    )?;
+    let canonical = crate::canonical_direct_endpoints(endpoints).map_err(anyhow::Error::msg)?;
+    let tcp_strings: Vec<String> = canonical_tcp_addresses.iter().map(ToString::to_string).collect();
+    let endpoint_digest =
+        crate::direct_endpoint_digest_with_tcp_addresses(&canonical, &tcp_strings)
+            .map_err(anyhow::Error::msg)?;
     let reload_id = next_direct_reload_id();
     let tunnel_luid = previous
         .tun_luid
         .context("locked sing-box tunnel has no LUID")?;
     let mut candidate = previous.clone();
     candidate.direct_endpoints = canonical.clone();
+    candidate.direct_tcp_addresses = canonical_tcp_addresses.clone();
     candidate.reviewed_direct_ports = reviewed_ports
         .iter()
         .copied()
@@ -243,7 +292,7 @@ async fn commit_sing_box_direct_unlocked(
     }
     *armed_guard() = Some(candidate);
     *last_error_guard() = None;
-    reload_result(owner_generation, reload_id, &canonical)
+    reload_result(owner_generation, reload_id, &canonical, &canonical_tcp_addresses)
 }
 
 async fn restore_sing_box_full_tunnel(
@@ -315,7 +364,7 @@ pub(crate) async fn begin_direct_runtime_reload(
         expires_at: Some(std::time::Instant::now() + DIRECT_BRACKET_LEASE),
     };
     transition_direct_to_blocked_unlocked(previous, current_core, Some(lease)).await?;
-    reload_result(owner_generation, reload_id, &[])
+    reload_result(owner_generation, reload_id, &[], &[])
 }
 
 /// Install the complete volatile DIRECT set as a short Service-owned pending lease. The caller
@@ -412,9 +461,15 @@ pub(crate) async fn replace_direct_endpoints(
                 .context("tunnel changed during DIRECT replay and Blocked reconciliation failed")?;
             return Err(error.context("tunnel identity changed during DIRECT endpoint replay"));
         }
-        return reload_result(owner_generation, reload_id, &previous.direct_endpoints);
+        return reload_result(
+            owner_generation,
+            reload_id,
+            &previous.direct_endpoints,
+            &previous.direct_tcp_addresses,
+        );
     }
     if !previous.direct_endpoints.is_empty()
+        || !previous.direct_tcp_addresses.is_empty()
         || lease.endpoint_digest
             != crate::direct_endpoint_digest(&[]).map_err(anyhow::Error::msg)?
     {
@@ -473,7 +528,7 @@ pub(crate) async fn replace_direct_endpoints(
     }
     *armed_guard() = Some(candidate);
     *last_error_guard() = None;
-    reload_result(owner_generation, reload_id, &canonical)
+    reload_result(owner_generation, reload_id, &canonical, &[])
 }
 
 /// Commit a pending DIRECT lease only after the App proves the reloaded controller, WFP snapshot,
@@ -544,8 +599,7 @@ pub(crate) async fn finalize_direct_runtime_reload(
             .context("stale finalize tunnel LUID could not be reconciled to Blocked")?;
         return Err(error.context("DIRECT finalize lost its current tunnel identity"));
     }
-    let actual_digest =
-        crate::direct_endpoint_digest(&armed.direct_endpoints).map_err(anyhow::Error::msg)?;
+    let actual_digest = direct_digest_for_armed(&armed)?;
     if actual_digest != expected_digest {
         transition_direct_to_blocked_unlocked(armed, Some(core), None)
             .await
@@ -592,7 +646,12 @@ pub(crate) async fn finalize_direct_runtime_reload(
         *armed_guard() = Some(armed.clone());
     }
     *last_error_guard() = None;
-    reload_result(owner_generation, reload_id, &armed.direct_endpoints)
+    reload_result(
+        owner_generation,
+        reload_id,
+        &armed.direct_endpoints,
+        &armed.direct_tcp_addresses,
+    )
 }
 
 /// Marker the App matches. A non-strict renewal failure must not say the machine is Blocked:
@@ -656,8 +715,7 @@ pub(crate) async fn renew_direct_runtime_reload(
     };
 
     let now = std::time::Instant::now();
-    let actual_digest =
-        crate::direct_endpoint_digest(&armed.direct_endpoints).map_err(anyhow::Error::msg)?;
+    let actual_digest = direct_digest_for_armed(&armed)?;
     let identity_valid = lease.phase == DirectReloadPhase::Committed
         && lease.endpoint_digest == expected_digest
         && actual_digest == expected_digest
@@ -704,7 +762,12 @@ pub(crate) async fn renew_direct_runtime_reload(
     armed.direct_reload = Some(renewed);
     *armed_guard() = Some(armed.clone());
     *last_error_guard() = None;
-    reload_result(owner_generation, reload_id, &armed.direct_endpoints)
+    reload_result(
+        owner_generation,
+        reload_id,
+        &armed.direct_endpoints,
+        &armed.direct_tcp_addresses,
+    )
 }
 
 /// Synchronous security barrier for every Core stop or replacement. An ALE App-ID permit names a

@@ -547,6 +547,7 @@ extension AppState {
                 // in-force pin PF-permitted. The next full arm converges back
                 // to the exact set.
                 let sessionEndpoints: [ConfigPipeline.DirectEndpoint]
+                let sessionTCPAddresses: [String]
                 if pinsOnlyRefresh {
                     sessionEndpoints = Array(Set(
                         (effectiveDirectPolicy?.sessionEndpoints ?? [])
@@ -555,8 +556,13 @@ extension AppState {
                         ($0.transport, $0.port, $0.address)
                             < ($1.transport, $1.port, $1.address)
                     }
+                    sessionTCPAddresses = Array(Set(
+                        (effectiveDirectPolicy?.tcpDirectAddresses ?? [])
+                            + (self.activeDirectPolicy?.tcpDirectAddresses ?? [])
+                    )).sorted()
                 } else {
                     sessionEndpoints = effectiveDirectPolicy?.sessionEndpoints ?? []
+                    sessionTCPAddresses = effectiveDirectPolicy?.tcpDirectAddresses ?? []
                 }
                 let tunnelArmed = KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
                 try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
@@ -566,6 +572,7 @@ extension AppState {
                     proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
                         + self.claudeHomeDialEndpoints(excluding: selectedExit),
                     sessionDirectEndpoints: sessionEndpoints,
+                    sessionDirectTCPAddresses: sessionTCPAddresses,
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil,
                     reviewedBundleDirect:
                         effectiveDirectPolicy?.requiresAddressFreeDirectPermit == true
@@ -638,6 +645,7 @@ extension AppState {
                         proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
                             + self.claudeHomeDialEndpoints(excluding: selectedExit),
                         sessionDirectEndpoints: sessionEndpoints,
+                        sessionDirectTCPAddresses: sessionTCPAddresses,
                         tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil,
                         reviewedBundleDirect: true
                     )
@@ -674,6 +682,8 @@ extension AppState {
                         )) + self.claudeHomeDialEndpoints(excluding: selectedExit),
                         sessionDirectEndpoints:
                             pendingDirectPolicy.sessionEndpoints,
+                        sessionDirectTCPAddresses:
+                            pendingDirectPolicy.tcpDirectAddresses,
                         tailscaleBootstrapEnabled:
                             AppProfile.homeExitEnabled && transport != nil,
                         // The convergence arm rewrites the whole ruleset, so

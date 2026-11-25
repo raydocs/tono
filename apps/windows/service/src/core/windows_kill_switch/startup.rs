@@ -312,6 +312,7 @@ fn emergency_armed() -> Armed {
         tun_luid: None,
         core_instance: None,
         direct_endpoints: Vec::new(),
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     }
@@ -411,6 +412,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                         tun_luid: None,
                         core_instance: None,
                         direct_endpoints: Vec::new(),
+                        direct_tcp_addresses: Vec::new(),
                         reviewed_direct_ports: Vec::new(),
                         direct_reload: None,
                     };
@@ -442,6 +444,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     // recovered session stays fail-closed for them until the app's next
                     // connect transaction re-issues the approved tuples.
                     direct_endpoints: Vec::new(),
+                    direct_tcp_addresses: Vec::new(),
                     reviewed_direct_ports: Vec::new(),
                     direct_reload: None,
                 };

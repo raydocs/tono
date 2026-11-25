@@ -150,6 +150,23 @@ nonisolated extension ConfigPipeline {
         }
     }
 
+    static func isProtectedDirectIPv4(_ address: String) -> Bool {
+        let protectedCIDRs = [
+            "1.1.1.1/32",
+            "8.8.8.8/32",
+            "160.79.104.0/21",
+            "91.108.4.0/22",
+            "91.108.8.0/22",
+            "91.108.12.0/22",
+            "91.108.16.0/22",
+            "91.108.56.0/22",
+            "149.154.160.0/20",
+            "179.253.244.3/32",
+            "179.255.154.17/32",
+        ]
+        return isManagedDirectAllowlistedIPv4(address, allowlist: protectedCIDRs)
+    }
+
     static func ipv4Value(_ raw: String) -> UInt32? {
         var address = in_addr()
         guard inet_pton(AF_INET, raw, &address) == 1 else { return nil }
@@ -179,7 +196,9 @@ nonisolated extension ConfigPipeline {
               policy.webDomainSuffixes.count <= 64,
               policy.mediaEndpoints.count <= 128,
               policy.tcpEndpoints.count <= 128,
-              policy.sessionEndpoints.count <= maximumSessionDirectEndpoints,
+              policy.tcpDirectAddresses.count <= 64,
+              policy.sessionEndpoints.count + policy.tcpDirectAddresses.count
+                <= maximumSessionDirectEndpoints,
               // Resolver hosts are one entry per managed or web direct policy
               // hostname, so this must admit the control plane's own maxima
               // (32 `domains` + 32 `webDomains`). A lower ceiling silently
@@ -291,15 +310,24 @@ nonisolated extension ConfigPipeline {
         let uniqueMedia = Array(Set(media)).sorted {
             ($0.port, $0.address) < ($1.port, $1.address)
         }
+        var tcpPortsByAddress: [String: Set<UInt16>] = [:]
         let tcp = try policy.tcpEndpoints.map { endpoint in
             let address = try validatedManagedDirectAddress(
                 endpoint.address,
                 field: "managed TCP address",
                 trusted: policy.trusted
             )
+            let portAllowed = policy.trusted
+                ? (endpoint.port >= 1 && endpoint.port != 53 && endpoint.port != 853)
+                : (endpoint.port == 80 || endpoint.port == 443)
             guard !permanentlyProtected.contains(address),
+                  !isProtectedDirectIPv4(address),
                   endpoint.transport == "tcp",
-                  endpoint.port == 80 || endpoint.port == 443 else {
+                  portAllowed else {
+                throw TonoInjectionError.unsafeNode("managed TCP endpoint")
+            }
+            tcpPortsByAddress[address, default: []].insert(endpoint.port)
+            guard (tcpPortsByAddress[address]?.count ?? 0) <= 16 else {
                 throw TonoInjectionError.unsafeNode("managed TCP endpoint")
             }
             return DirectEndpoint(
@@ -311,6 +339,25 @@ nonisolated extension ConfigPipeline {
         let uniqueTCP = Array(Set(tcp)).sorted {
             ($0.port, $0.address) < ($1.port, $1.address)
         }
+        let uniqueTCPHosts = Set(uniqueTCP.map(\.address))
+        var seenTCPDirectAddresses = Set<String>()
+        let tcpDirectAddresses = try policy.tcpDirectAddresses.map { raw in
+            guard policy.trusted else {
+                throw TonoInjectionError.unsafeNode("managed direct TCP address")
+            }
+            let address = try validatedManagedDirectAddress(
+                raw,
+                field: "managed direct TCP address",
+                trusted: policy.trusted
+            )
+            guard !permanentlyProtected.contains(address),
+                  !isProtectedDirectIPv4(address),
+                  !uniqueTCPHosts.contains(address),
+                  seenTCPDirectAddresses.insert(address).inserted else {
+                throw TonoInjectionError.unsafeNode("managed direct TCP address")
+            }
+            return address
+        }.sorted()
         return ManagedDirectRuntimePolicy(
             physicalInterface: interface,
             domainPins: pins,
@@ -318,6 +365,7 @@ nonisolated extension ConfigPipeline {
             webDomainSuffixes: webDomainSuffixes,
             mediaEndpoints: uniqueMedia,
             tcpEndpoints: uniqueTCP,
+            tcpDirectAddresses: tcpDirectAddresses,
             directResolverHosts: resolverHosts.sorted(),
             trusted: policy.trusted,
             nativeAppDirect: policy.nativeAppDirect

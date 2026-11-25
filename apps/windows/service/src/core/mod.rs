@@ -18,7 +18,8 @@ pub use structure::{
     ServiceErrorCode, ServiceLifecycleState,
     ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
     StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
-    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest,
+    WriterConfig, canonical_direct_endpoints, canonical_direct_tcp_addresses,
+    direct_endpoint_digest, direct_endpoint_digest_with_tcp_addresses,
     is_protected_startup_replacement_candidate, owner_key,
 };
 

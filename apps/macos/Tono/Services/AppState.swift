@@ -2173,6 +2173,7 @@ final class AppState {
             }
             // Retain the old runtime's grants until its replacement is installed.
             let transitionEndpoints = Array(Set((base?.sessionEndpoints ?? []) + (resolved?.sessionEndpoints ?? [])))
+            let transitionTCPAddresses = Array(Set((base?.tcpDirectAddresses ?? []) + (resolved?.tcpDirectAddresses ?? []))).sorted()
             let transitionReviewedPermit = base?.requiresAddressFreeDirectPermit == true
                 || resolved?.requiresAddressFreeDirectPermit == true
             // One selection for the whole replacement. A catalog installed
@@ -2187,6 +2188,7 @@ final class AppState {
                 tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
                 proxyEndpoints: proxyEndpoints,
                 sessionDirectEndpoints: transitionEndpoints,
+                sessionDirectTCPAddresses: transitionTCPAddresses,
                 tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
                 helperPrepared: true,
                 reviewedBundleDirect: transitionReviewedPermit
@@ -2222,7 +2224,9 @@ final class AppState {
             // /core/sync withheld the reviewed-bundle permit while the Core
             // restarted without its utun (#608). It returns only through an
             // arm with the flag once the new tunnel exists.
-            if transitionReviewedPermit || Set(transitionEndpoints) != Set(resolved?.sessionEndpoints ?? []) {
+            if transitionReviewedPermit
+                || Set(transitionEndpoints) != Set(resolved?.sessionEndpoints ?? [])
+                || Set(transitionTCPAddresses) != Set(resolved?.tcpDirectAddresses ?? []) {
                 guard await Self.waitForOwnedTunnelInterface() else {
                     throw KillSwitchService.Error.commandFailed(
                         "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
@@ -2233,6 +2237,7 @@ final class AppState {
                     tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
                     proxyEndpoints: proxyEndpoints,
                     sessionDirectEndpoints: resolved?.sessionEndpoints ?? [],
+                    sessionDirectTCPAddresses: resolved?.tcpDirectAddresses ?? [],
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
                     helperPrepared: true,
                     reviewedBundleDirect: resolved?.requiresAddressFreeDirectPermit == true
@@ -2270,6 +2275,7 @@ final class AppState {
                             tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
                             proxyEndpoints: armedProxyEndpoints,
                             sessionDirectEndpoints: base?.sessionEndpoints ?? [],
+                            sessionDirectTCPAddresses: base?.tcpDirectAddresses ?? [],
                             tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
                             helperPrepared: true,
                             reviewedBundleDirect: base?.requiresAddressFreeDirectPermit == true

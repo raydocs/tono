@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import Tono
 
@@ -25,6 +26,7 @@ final class ManagedDirectAddressTrustTests: XCTestCase {
     private func policy(
         media: [ConfigPipeline.DirectEndpoint] = [],
         tcp: [ConfigPipeline.DirectEndpoint] = [],
+        tcpDirectAddresses: [String] = [],
         trusted: Bool
     ) -> ConfigPipeline.ManagedDirectRuntimePolicy {
         ConfigPipeline.ManagedDirectRuntimePolicy(
@@ -34,6 +36,7 @@ final class ManagedDirectAddressTrustTests: XCTestCase {
             webDomainSuffixes: [],
             mediaEndpoints: media,
             tcpEndpoints: tcp,
+            tcpDirectAddresses: tcpDirectAddresses,
             directResolverHosts: [],
             trusted: trusted
         )
@@ -140,5 +143,101 @@ final class ManagedDirectAddressTrustTests: XCTestCase {
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectPolicy(
             policy(media: [resolver], trusted: true)
         ))
+    }
+
+    func testSignedPolicyAcceptsCustomTCPPortsAndDirectTCPAddresses() throws {
+        let customTCP = ConfigPipeline.DirectEndpoint(
+            address: "51.4.5.6",
+            port: 55300,
+            transport: "tcp"
+        )
+        let validated = try ConfigPipeline.validatedManagedDirectPolicy(
+            policy(
+                tcp: [customTCP],
+                tcpDirectAddresses: ["103.253.207.41", "81.69.152.51"],
+                trusted: true
+            )
+        )
+        XCTAssertEqual(validated?.tcpEndpoints, [customTCP])
+        XCTAssertEqual(validated?.tcpDirectAddresses, ["103.253.207.41", "81.69.152.51"])
+        XCTAssertTrue(validated?.sessionEndpoints.contains(customTCP) == true)
+
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectPolicy(
+            policy(tcp: [customTCP], trusted: false)
+        ))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectPolicy(
+            policy(tcpDirectAddresses: ["81.69.152.51"], trusted: false)
+        ))
+    }
+
+    func testProtectedIPsDNSPortsAndOverlapsAreRejectedEvenWhenSigned() {
+        for blockedPort: UInt16 in [0, 53, 853] {
+            let dnsPort = ConfigPipeline.DirectEndpoint(
+                address: "51.4.5.6",
+                port: blockedPort,
+                transport: "tcp"
+            )
+            XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectPolicy(
+                policy(tcp: [dnsPort], trusted: true)
+            ))
+        }
+        for protectedIP in ["1.1.1.1", "8.8.8.8", "160.79.104.10", "149.154.167.91", "179.253.244.3"] {
+            let blockedEndpoint = ConfigPipeline.DirectEndpoint(
+                address: protectedIP,
+                port: 443,
+                transport: "tcp"
+            )
+            XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectPolicy(
+                policy(tcp: [blockedEndpoint], trusted: true)
+            ))
+            XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectPolicy(
+                policy(tcpDirectAddresses: [protectedIP], trusted: true)
+            ))
+        }
+        let overlap = ConfigPipeline.DirectEndpoint(
+            address: "81.69.152.51",
+            port: 55300,
+            transport: "tcp"
+        )
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectPolicy(
+            policy(tcp: [overlap], tcpDirectAddresses: ["81.69.152.51"], trusted: true)
+        ))
+    }
+
+    func testUnsignedV5PolicyDecodesNewFieldsAndDropsUnlistedTCPGrants() async throws {
+        let json = """
+        {
+          "version": 5,
+          "domains": [],
+          "mediaEndpoints": [],
+          "tcpEndpoints": [{"address": "139.224.114.71", "ports": [55300]}],
+          "webDomains": [],
+          "directSuffixes": [],
+          "tcpDirectAddresses": ["103.253.207.41", "81.69.152.51"]
+        }
+        """
+        let decoded = try JSONDecoder().decode(TonoTrafficPolicy.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.version, 5)
+        XCTAssertEqual(decoded.tcpEndpoints.map(\.ports), [[55300]])
+        XCTAssertEqual(decoded.tcpDirectAddresses, ["103.253.207.41", "81.69.152.51"])
+        XCTAssertFalse(decoded.trusted)
+
+        let digest = Data(SHA256.hash(data: Data(json.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+        let cache = ManagedTrafficPolicyCache(
+            revision: 11,
+            json: json,
+            sha256: digest,
+            updatedAt: nil,
+            signature: nil
+        )
+        let validated = try await ManagedTrafficPolicyProcessor().validate(
+            cache,
+            protectedAddresses: ["203.0.113.1"]
+        )
+        XCTAssertTrue(validated.tcpEndpoints.isEmpty)
+        XCTAssertTrue(validated.tcpDirectAddresses.isEmpty)
     }
 }

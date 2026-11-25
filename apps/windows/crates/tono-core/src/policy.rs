@@ -31,11 +31,16 @@ pub const POLICY_CACHE_FILE_NAME: &str = "managed-traffic-policy.json";
 pub const POLICY_VERSION_V1: u32 = 1;
 pub const POLICY_VERSION_V2: u32 = 2;
 pub const POLICY_VERSION_V3: u32 = 3;
+pub const POLICY_VERSION_V4: u32 = 4;
+pub const POLICY_VERSION_V5: u32 = 5;
 /// Limits shared with the Mac validator.
 pub const MAX_POLICY_DOMAINS: usize = 32;
 pub const MAX_POLICY_MEDIA: usize = 64;
 pub const MAX_POLICY_WEB_DOMAINS: usize = 32;
 pub const MAX_POLICY_DIRECT_SUFFIXES: usize = 64;
+pub const MAX_POLICY_TCP_ENDPOINTS: usize = 64;
+pub const MAX_POLICY_TCP_DIRECT_ADDRESSES: usize = 64;
+pub const MAX_TCP_ENDPOINT_PORTS: usize = 16;
 
 pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "bilibili.com",
@@ -291,11 +296,18 @@ pub const ALLOWED_DOMAIN_SUFFIXES: &[&str] = &[
 ];
 
 /// Addresses that may never receive a DIRECT permit (the pinned DoH
-/// resolvers ride the tunnel by contract).
+/// resolvers and protected ranges ride the tunnel by contract).
 pub fn is_permanently_protected(address: Ipv4Addr) -> bool {
     address == Ipv4Addr::new(1, 1, 1, 1)
         || address == Ipv4Addr::new(8, 8, 8, 8)
         || crate::direct_domains::is_protected_cidr_ipv4(address)
+}
+
+/// Permanently protected destinations plus Tono control-plane relays.
+pub fn is_protected_direct_ipv4(address: Ipv4Addr) -> bool {
+    is_permanently_protected(address)
+        || address == Ipv4Addr::new(179, 253, 244, 3)
+        || address == Ipv4Addr::new(179, 255, 154, 17)
 }
 
 /// Wire shape of `GET traffic-policy` (digest semantics identical to the
@@ -324,6 +336,10 @@ pub struct TonoTrafficPolicy {
     pub web_domains: Vec<PolicyDomain>,
     #[serde(rename = "directSuffixes", default)]
     pub direct_suffixes: Vec<PolicyDomain>,
+    #[serde(rename = "tcpEndpoints", default)]
+    pub tcp_endpoints: Vec<PolicyMedia>,
+    #[serde(rename = "tcpDirectAddresses", default)]
+    pub tcp_direct_addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -509,6 +525,24 @@ pub fn validate_policy_with_trust(
     } else {
         Vec::new()
     };
+    let policy_tcp: Vec<PolicyMedia> = if version >= POLICY_VERSION_V4 {
+        document
+            .tcp_endpoints
+            .into_iter()
+            .take(MAX_POLICY_TCP_ENDPOINTS)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let policy_tcp_direct_addresses: Vec<String> = if version >= POLICY_VERSION_V5 {
+        document
+            .tcp_direct_addresses
+            .into_iter()
+            .take(MAX_POLICY_TCP_DIRECT_ADDRESSES)
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut domains: Vec<PolicyDomain> = Vec::new();
     for entry in policy_domains {
@@ -609,13 +643,81 @@ pub fn validate_policy_with_trust(
     }
     media.sort_by(|left, right| left.address.cmp(&right.address));
 
+    let mut tcp_endpoints: Vec<PolicyMedia> = Vec::new();
+    let mut seen_tcp_addresses: BTreeSet<Ipv4Addr> = BTreeSet::new();
+    for entry in policy_tcp {
+        if !trusted {
+            continue;
+        }
+        let Ok(address) = entry.address.parse::<Ipv4Addr>() else {
+            continue;
+        };
+        let canonical = address.to_string();
+        if entry.address != canonical
+            || !is_public_ipv4(address)
+            || is_protected_direct_ipv4(address)
+            || protected.contains(&address)
+        {
+            continue;
+        }
+        let Some(ports) = sorted_unique_non_dns_tcp_ports(&entry.ports) else {
+            continue;
+        };
+        if !seen_tcp_addresses.insert(address) {
+            continue;
+        }
+        tcp_endpoints.push(PolicyMedia {
+            address: canonical,
+            ports,
+        });
+    }
+    tcp_endpoints.sort_by(|left, right| left.address.cmp(&right.address));
+
+    let mut tcp_direct_addresses: Vec<String> = Vec::new();
+    let mut seen_tcp_direct_addresses: BTreeSet<Ipv4Addr> = BTreeSet::new();
+    for raw in policy_tcp_direct_addresses {
+        if !trusted {
+            continue;
+        }
+        let Ok(address) = raw.parse::<Ipv4Addr>() else {
+            continue;
+        };
+        let canonical = address.to_string();
+        if raw != canonical
+            || !is_public_ipv4(address)
+            || is_protected_direct_ipv4(address)
+            || protected.contains(&address)
+            || seen_tcp_addresses.contains(&address)
+            || !seen_tcp_direct_addresses.insert(address)
+        {
+            continue;
+        }
+        tcp_direct_addresses.push(canonical);
+    }
+    tcp_direct_addresses.sort();
+
     Ok(TonoTrafficPolicy {
         version,
         domains,
         media_endpoints: media,
         web_domains,
         direct_suffixes,
+        tcp_endpoints,
+        tcp_direct_addresses,
     })
+}
+
+fn sorted_unique_non_dns_tcp_ports(ports: &[u16]) -> Option<Vec<u16>> {
+    if ports.is_empty() || ports.len() > MAX_TCP_ENDPOINT_PORTS {
+        return None;
+    }
+    let mut unique = BTreeSet::new();
+    for &port in ports {
+        if port == 0 || port == 53 || port == 853 || !unique.insert(port) {
+            return None;
+        }
+    }
+    Some(unique.into_iter().collect())
 }
 
 /// Result of a [`PolicyTracker::install`] call.
@@ -1452,6 +1554,47 @@ mod tests {
         assert_eq!(
             seeded.install(&response(5, &good_document()), &no_protected()),
             Err(PolicyError::StaleRevision)
+        );
+    }
+
+    #[test]
+    fn v5_signed_tcp_direct_addresses_and_custom_ports_validate_and_drop_unsafe_entries() {
+        let doc = r#"{
+            "version": 5,
+            "domains": [],
+            "mediaEndpoints": [],
+            "webDomains": [],
+            "directSuffixes": [],
+            "tcpEndpoints": [
+                {"address": "139.224.114.71", "ports": [55310, 55300]},
+                {"address": "103.253.207.41", "ports": [53]},
+                {"address": "8.8.8.8", "ports": [443]}
+            ],
+            "tcpDirectAddresses": [
+                "114.28.170.219",
+                "103.253.207.41",
+                "160.79.104.10",
+                "179.253.244.3",
+                "10.0.0.1",
+                "139.224.114.71"
+            ]
+        }"#;
+        let resp = response(11, doc);
+        let unsigned = validate_policy_with_trust(&resp, &no_protected(), false).unwrap();
+        assert!(unsigned.tcp_endpoints.is_empty());
+        assert!(unsigned.tcp_direct_addresses.is_empty());
+
+        let signed = validate_policy_with_trust(&resp, &no_protected(), true).unwrap();
+        assert_eq!(
+            signed.tcp_endpoints,
+            vec![PolicyMedia {
+                address: "139.224.114.71".into(),
+                ports: vec![55300, 55310],
+            }]
+        );
+        assert_eq!(
+            signed.tcp_direct_addresses,
+            vec!["103.253.207.41".to_string(), "114.28.170.219".to_string()]
         );
     }
 }

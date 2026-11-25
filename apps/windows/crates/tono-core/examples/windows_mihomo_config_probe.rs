@@ -43,6 +43,8 @@ reality-opts:
             443,
         )],
         udp_wechat_rules: vec![(Ipv4Addr::new(93, 184, 216, 36), 443)],
+        tcp_direct_endpoints: Vec::new(),
+        tcp_direct_addresses: Vec::new(),
         web_suffix_rules: vec![("example.net".to_string(), 443)],
         wechat_process_path_regexes: Vec::new(),
         reviewed_direct_ports: vec![80, 443, 8000, 8080],

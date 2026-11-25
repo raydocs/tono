@@ -649,6 +649,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![],
             udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![],
             reviewed_direct_ports: vec![],
         };
