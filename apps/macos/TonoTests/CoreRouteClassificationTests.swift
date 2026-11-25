@@ -321,9 +321,9 @@ final class CoreRouteClassificationTests: XCTestCase {
     func testDashScopeChildrenStayProtectedWhileTheAlibabaDirectParentIsAdmitted() throws {
         for trusted in [false, true] {
             XCTAssertEqual(try ConfigPipeline.validatedManagedDirectSuffix("aliyuncs.com", trusted: trusted), "aliyuncs.com")
+            XCTAssertEqual(try ConfigPipeline.validatedWebDirectDomain("dashscope.aliyuncs.com", trusted: trusted), "dashscope.aliyuncs.com")
             for host in [
-                "dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com",
-                "coding-intl.dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                "dashscope-intl.aliyuncs.com",
                 "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
                 "workspace.cn-beijing.maas.aliyuncs.com", "trial.ap-southeast-1.maas.aliyuncs.com",
                 "token-plan.ap-southeast-1.maas.aliyuncs.com",
@@ -499,15 +499,25 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
             "goofish.com"
         ))
-        // China Mobile Cloud (ecloud.10086.cn), the MIIT ICP filing site, and ToDesk web/API.
-        for host in ["10086.cn", "cmecloud.cn", "miit.gov.cn", "todesk.com", "todesk.cn"] {
+        // China Mobile Cloud, MIIT filing, ToDesk/Oray/Sunlogin, government/dev, ByteDance, and domestic AI suffixes.
+        for host in [
+            "10086.cn", "cmecloud.cn", "miit.gov.cn", "todesk.com", "todesk.cn",
+            "gov.cn", "gitee.com", "gitee.io", "jianying.com", "aliyun.com",
+            "todesk.net", "todgo.com", "oray.net", "sunlogin.net",
+            "doubao.com", "bytedance.com", "icloud.com.cn",
+        ] {
             XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(host))
             XCTAssertTrue(
                 ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
                     .contains(where: { $0.host == host }), host
             )
         }
-        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("gov.cn"))
+        XCTAssertTrue(
+            ConfigPipeline.ManagedDirectRuntimePolicy.productWebDirectSuffixes
+                .contains(where: { $0.host == "cn" })
+        )
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("cn"))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("example.org"))
         XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
             "snssdk.com"
         ))

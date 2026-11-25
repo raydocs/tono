@@ -534,7 +534,11 @@ nonisolated enum HelperProtocolVersion {
     ///   Mesa `179.255.154.17:2053`; the Arosscloud relay is dropped. Armed
     ///   without a tunnel, PF admits exactly these two (TCP 2053, interactive
     ///   user only). An older daemon keeps the old three-address permit.
-    static let current = "4.52.71"
+    /// - 4.52.71 → 4.52.72: remove mainland `dashscope.aliyuncs.com` from
+    ///   `SelectiveFailOpen` and `ThreeTierRoutingContract` (keeping
+    ///   `dashscope-intl.aliyuncs.com`, `dashscope-us.aliyuncs.com`, and
+    ///   `maas.aliyuncs.com` protected on Home/overseas).
+    static let current = "4.52.72"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

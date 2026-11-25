@@ -2785,7 +2785,7 @@ reality-opts:
             let alibaba = rules.iter().position(|rule| rule.contains("DOMAIN-SUFFIX,aliyuncs.com)")
                 && rule.ends_with(",Tono-China-Web-Direct")).unwrap();
             let target = if home.is_some() || socks.is_some() { CLAUDE_HOME_GROUP_NAME } else { EXIT_GROUP_NAME };
-            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+            for suffix in ["dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
                 let guard = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{suffix})),{target}");
                 let protected = rules.iter().position(|rule| *rule == guard).expect(suffix);
                 assert!(protected < first_direct && protected < alibaba, "{suffix}");

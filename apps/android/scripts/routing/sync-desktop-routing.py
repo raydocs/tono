@@ -79,7 +79,7 @@ def generate(desktop: pathlib.Path) -> str:
     overseas_udp_cidrs = rust_array(rust, "OVERSEAS_UDP_REJECT_IPV4_CIDRS")
     overseas_udp_v6_cidrs = rust_array(rust, "OVERSEAS_UDP_REJECT_IPV6_CIDRS")
     protected = rust_array(rust, "PROTECTED_DIRECT_SUFFIXES")
-    assert len(home) == 194 and len(video) == 21, (len(home), len(video))
+    assert len(home) == 193 and len(video) == 21, (len(home), len(video))
     assert len(stun_ports) == 8 and len(encrypted_dns_ports) == 1, (len(stun_ports), len(encrypted_dns_ports))
     assert len(public_stun_suffixes) == 5 and len(mobile_home_aux) == 60 and len(x_cloud_suffixes) == 10 and len(overseas_cloud_suffixes) == 52, (len(public_stun_suffixes), len(mobile_home_aux), len(x_cloud_suffixes), len(overseas_cloud_suffixes))
     assert len(cloud_ipv4_cidrs) == 6 and len(cloud_ipv6_cidrs) == 3, (len(cloud_ipv4_cidrs), len(cloud_ipv6_cidrs))

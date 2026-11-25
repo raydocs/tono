@@ -700,7 +700,7 @@ mod tests {
         }
         assert_eq!(rules[video]["outbound"], "Tono-Exit");
         assert_eq!(rules[home]["outbound"], "Tono-Home-Residential");
-        assert!(rules[home]["domain_suffix"].as_array().unwrap().contains(&json!("dashscope.aliyuncs.com")));
+        assert!(rules[home]["domain_suffix"].as_array().unwrap().contains(&json!("dashscope-intl.aliyuncs.com")));
         assert_eq!(rules[domestic]["domain"], json!(["www.12306.cn", "kyfw.12306.cn", "www.bilibili.com", "api.bilibili.com", "www.jd.com", "www.taobao.com", "www.tmall.com", "www.meituan.com", "www.dianping.com", "www.amap.com"]));
         assert!(rules[domestic].get("domain_suffix").is_none());
         assert_eq!(rules[domestic]["network"], "tcp");
@@ -960,7 +960,7 @@ mod tests {
             let direct = rules.iter().position(|rule| rule["outbound"] == config::DIRECT_GROUP_NAME).unwrap();
             assert!(rules.iter().any(|rule| rule["domain_suffix"] == json!(["aliyuncs.com"])
                 && rule["outbound"] == config::DIRECT_GROUP_NAME));
-            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+            for suffix in ["dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
                 let protected = rules.iter().position(|rule| rule["network"] == "tcp"
                     && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!(suffix)))
                     && rule["outbound"] == target).expect(suffix);

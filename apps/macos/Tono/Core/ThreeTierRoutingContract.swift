@@ -107,7 +107,6 @@ nonisolated enum ThreeTierRoutingContract {
                 "rules": [
                   {
                     "domain_suffix": [
-                      "dashscope.aliyuncs.com",
                       "dashscope-intl.aliyuncs.com",
                       "dashscope-us.aliyuncs.com",
                       "maas.aliyuncs.com",
@@ -504,7 +503,6 @@ nonisolated enum ThreeTierRoutingContract {
                 "rules": [
                   {
                     "domain_suffix": [
-                      "dashscope.aliyuncs.com",
                       "dashscope-intl.aliyuncs.com",
                       "dashscope-us.aliyuncs.com",
                       "maas.aliyuncs.com",
@@ -1109,7 +1107,6 @@ nonisolated enum ThreeTierRoutingContract {
           {
             "network": "tcp",
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -1311,7 +1308,6 @@ nonisolated enum ThreeTierRoutingContract {
           {
             "network": "tcp",
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -1658,7 +1654,6 @@ nonisolated enum ThreeTierRoutingContract {
             "rules": [
               {
                 "domain_suffix": [
-                  "dashscope.aliyuncs.com",
                   "dashscope-intl.aliyuncs.com",
                   "dashscope-us.aliyuncs.com",
                   "maas.aliyuncs.com",
@@ -2057,7 +2052,6 @@ nonisolated enum ThreeTierRoutingContract {
                 "rules": [
                   {
                     "domain_suffix": [
-                      "dashscope.aliyuncs.com",
                       "dashscope-intl.aliyuncs.com",
                       "dashscope-us.aliyuncs.com",
                       "maas.aliyuncs.com",
@@ -2922,7 +2916,6 @@ nonisolated enum ThreeTierRoutingContract {
               "A"
             ],
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -3132,7 +3125,6 @@ nonisolated enum ThreeTierRoutingContract {
               "SVCB"
             ],
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -3793,7 +3785,6 @@ nonisolated enum ThreeTierRoutingContract {
           },
           {
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -4223,7 +4214,6 @@ nonisolated enum ThreeTierRoutingContract {
                 "rules": [
                   {
                     "domain_suffix": [
-                      "dashscope.aliyuncs.com",
                       "dashscope-intl.aliyuncs.com",
                       "dashscope-us.aliyuncs.com",
                       "maas.aliyuncs.com",
@@ -4668,7 +4658,6 @@ nonisolated enum ThreeTierRoutingContract {
                 "rules": [
                   {
                     "domain_suffix": [
-                      "dashscope.aliyuncs.com",
                       "dashscope-intl.aliyuncs.com",
                       "dashscope-us.aliyuncs.com",
                       "maas.aliyuncs.com",
@@ -5136,7 +5125,6 @@ nonisolated enum ThreeTierRoutingContract {
           {
             "network": "tcp",
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -5338,7 +5326,6 @@ nonisolated enum ThreeTierRoutingContract {
           {
             "network": "tcp",
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -5542,7 +5529,6 @@ nonisolated enum ThreeTierRoutingContract {
               "icmp"
             ],
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -6014,7 +6000,6 @@ nonisolated enum ThreeTierRoutingContract {
                 "rules": [
                   {
                     "domain_suffix": [
-                      "dashscope.aliyuncs.com",
                       "dashscope-intl.aliyuncs.com",
                       "dashscope-us.aliyuncs.com",
                       "maas.aliyuncs.com",
@@ -6802,7 +6787,6 @@ nonisolated enum ThreeTierRoutingContract {
                 "rules": [
                   {
                     "domain_suffix": [
-                      "dashscope.aliyuncs.com",
                       "dashscope-intl.aliyuncs.com",
                       "dashscope-us.aliyuncs.com",
                       "maas.aliyuncs.com",
@@ -7349,7 +7333,6 @@ nonisolated enum ThreeTierRoutingContract {
               "A"
             ],
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -7559,7 +7542,6 @@ nonisolated enum ThreeTierRoutingContract {
               "SVCB"
             ],
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",
@@ -8220,7 +8202,6 @@ nonisolated enum ThreeTierRoutingContract {
           },
           {
             "domain_suffix": [
-              "dashscope.aliyuncs.com",
               "dashscope-intl.aliyuncs.com",
               "dashscope-us.aliyuncs.com",
               "maas.aliyuncs.com",

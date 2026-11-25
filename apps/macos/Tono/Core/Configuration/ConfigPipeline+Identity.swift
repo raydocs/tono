@@ -71,6 +71,15 @@ nonisolated extension ConfigPipeline {
         "zhihu.com", "zhimg.com", "goofish.com", "1688.com",
         "10086.cn", "cmecloud.cn", "miit.gov.cn",
         "todesk.com", "todesk.cn",
+        "gov.cn", "gitee.com", "gitee.io", "jianying.com", "aliyun.com",
+        "todesk.net", "todgo.com", "oray.net", "sunlogin.net",
+        "doubao.com", "bytedance.com", "bytedance.net", "byteimg.com",
+        "douyinpic.com", "zijieapi.com", "bdurl.net", "volces.com",
+        "volccdn.com", "volcvideo.com", "bytetos.com", "bytegoofy.com",
+        "byted-static.com", "icloud.com.cn", "icloud-content.com.cn",
+        "apple.cn", "myqcloud.com", "tencentcos.cn", "fangcloud.com",
+        "alibaba.com", "minimaxi.com", "bigmodel.cn", "moonshot.cn",
+        "minimax.cn", "deepseek.com", "kimi.com", "mi.com", "qq.com.cn",
     ]
 
     /// Exact host families that may be placed in the application-direct

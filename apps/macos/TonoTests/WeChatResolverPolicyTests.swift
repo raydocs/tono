@@ -49,7 +49,7 @@ final class WeChatResolverPolicyTests: XCTestCase {
             )
             let target = home == nil ? ConfigPipeline.exitGroupName : ConfigPipeline.claudeHomeGroupName
             let direct = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,aliyuncs.com)),\(ConfigPipeline.webDirectGroupName)"))
-            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+            for suffix in ["dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
                 let tcp = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(target)"), suffix)
                 let udp = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(suffix))),REJECT"), suffix)
                 XCTAssertLessThan(tcp.lowerBound, direct.lowerBound, suffix)
