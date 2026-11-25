@@ -1,15 +1,15 @@
 {
-  "version": "0.0.85",
-  "notes": "# Tono 0.0.85\n\nSupports x64 Windows 10 22H2 / Windows 11.\n\n## Changes since 0.0.84\n\n- **Cloud hot-push for signed `directSuffixes`** (#1851): Windows `sing-box` runtimes now admit well-formed, non-protected `directSuffixes` delivered by a signature-verified cloud `traffic-policy` without waiting for a client rebuild.\n- **Expanded China direct routing** (#1850): Added domestic direct coverage including `.cn`, ToDesk, `assetcloud.zj.gov.cn`, Gitee, Jimeng (`jimeng.jianying.com`), and Aliyun Wanwang (`wanwang.aliyun.com`), and moved mainland `dashscope.aliyuncs.com` back to direct.\n- **Zero-downtime policy key rotation** (#1851): Rotated the production `traffic-policy` Ed25519 key with legacy read fallback.\n- **Per-site bandwidth & stall telemetry** (#1851): Tracks active flows and emits closed TCP/UDP byte totals, duration, and zero-download TCP stall diagnostics on close and disconnect.",
-  "pub_date": "2026-11-25T03:39:19.000Z",
+  "version": "0.0.86",
+  "notes": "# Tono 0.0.86\n\nSupports x64 Windows 10 22H2 / Windows 11.\n\n## Changes since 0.0.85\n\n- **Signed TCP direct IPs** (#1856): The signed `traffic-policy` can now carry `tcpDirectAddresses` (non-DNS IPv4 TCP destinations) and v5 `tcpEndpoints`. The Windows service admits and routes them direct, so a policy update can add or change them without a client rebuild.",
+  "pub_date": "2026-11-25T12:41:02.000Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlZPa2lPYytjUVRFWkR6UVVRZ201N3laUVRmai84OStOaHBkWTIreGs2Q0hWOVFUVDlLREZHc1pISHBHT1l1RzlNQll3bW94VVFiK0pjNkpHUWxBR1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTc3OTExCWZpbGU6VG9ub18wLjAuODVfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NQpTRG1RWFJOcDhvVTZBMG81aGNZOUFSbmMxNlFWQ1NuZDAxZ0NITEEyRmhZMGRiOXBFbDg3Ri9DV0h1QnJNWnFtaFVxekMxdEJjY2RnTXJsNUJyTUVDUT09Cg==",
-      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.85_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZll0bVV5NFMwS3hiTnN6L3haTmxtZWJTNmVEajRiVkIyUUduSm9ldEs2Skd0Ni9ZSWhiTmJxdFVHcFNsRjh6SnU1MHlzSVdiMXpta0pzR3d0WCtsaXcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjEwNDAyCWZpbGU6VG9ub18wLjAuODZfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NgpoRit1bkFwZVl3ZFI4cFU2M3F6S1UrNmFDVkdKU0V6V0xsaEExOG5BbDVlQTdmQ1NVQnU0VFBhTlIxTHJ0Q1lSQS9nZC9yR2pQSDNUcjVFRlFPRTRDZz09Cg==",
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.86_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlZPa2lPYytjUVRFWkR6UVVRZ201N3laUVRmai84OStOaHBkWTIreGs2Q0hWOVFUVDlLREZHc1pISHBHT1l1RzlNQll3bW94VVFiK0pjNkpHUWxBR1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTc3OTExCWZpbGU6VG9ub18wLjAuODVfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NQpTRG1RWFJOcDhvVTZBMG81aGNZOUFSbmMxNlFWQ1NuZDAxZ0NITEEyRmhZMGRiOXBFbDg3Ri9DV0h1QnJNWnFtaFVxekMxdEJjY2RnTXJsNUJyTUVDUT09Cg==",
-      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.85_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZll0bVV5NFMwS3hiTnN6L3haTmxtZWJTNmVEajRiVkIyUUduSm9ldEs2Skd0Ni9ZSWhiTmJxdFVHcFNsRjh6SnU1MHlzSVdiMXpta0pzR3d0WCtsaXcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjEwNDAyCWZpbGU6VG9ub18wLjAuODZfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NgpoRit1bkFwZVl3ZFI4cFU2M3F6S1UrNmFDVkdKU0V6V0xsaEExOG5BbDVlQTdmQ1NVQnU0VFBhTlIxTHJ0Q1lSQS9nZC9yR2pQSDNUcjVFRlFPRTRDZz09Cg==",
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.86_x64-setup.exe"
     }
   }
 }

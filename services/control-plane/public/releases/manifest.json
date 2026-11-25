@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-11-25T04:33:51Z",
+ "generatedAt": "2026-11-25T12:50:51Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
@@ -18,16 +18,16 @@
   "repository": "Published from Tono’s own repository. Everything before 0.0.66 and 0.0.33 was released from a fork of another project, and the Windows updater asked a host blocked from mainland China, so a PC that could not connect was told no update existed."
  },
  "releaseSet": {
-  "id": "2026-11-25-macos-build86-windows-0.0.85",
+  "id": "2026-11-25-macos-build87-windows-0.0.86",
   "status": "both-lines-published-and-reachable",
-  "reason": "macOS Build 86 is the newest item in the Sparkle feed and Windows 0.0.85 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
+  "reason": "macOS Build 87 is the newest item in the Sparkle feed and Windows 0.0.86 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
  },
  "platforms": {
   "macos": {
    "current": {
-    "releaseId": "macos-0.0.85-build86",
-    "version": "0.0.85",
-    "build": 86,
+    "releaseId": "macos-0.0.86-build87",
+    "version": "0.0.86",
+    "build": 87,
     "architecture": "arm64",
     "minimumOS": "26.3",
     "availability": "sparkle-published",
@@ -40,53 +40,53 @@
     },
     "provenance": {
      "releaseLine": "release/macos",
-     "sourceCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
-     "immutableTagCommit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
+     "sourceCommit": "036db12598343dfff13da8a2fda721a38b055996",
+     "immutableTagCommit": "036db12598343dfff13da8a2fda721a38b055996",
      "tagStatus": "exact"
     },
-    "helperContract": "4.52.72",
+    "helperContract": "4.52.73",
     "knownLimitations": [
      "仅 Apple Silicon，需 macOS 26.3 或更高",
      "IPv6 全程关闭：TUN 与 fake-ip 只走 IPv4，AAAA 拨号由 Kill Switch 丢弃后客户端改试 IPv4"
     ],
     "artifact": {
-     "name": "Tono-0.0.85-build86-arm64.zip",
-     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.85-build86-arm64.zip",
-     "size": 19107498,
-     "sha256": "a15c1a56bdfc8875d934698fc437113b69aaf63e6268fc15815fb7c8fcb8ea46",
-     "sparkleEdSignature": "QKGmVtYLM0FP0/ZBAcoKGfpF30/cXED+AVWsJXo3KbTvPMAo2nd0C9VU+1PITQJd5ZWBoc4BUdpSnX/tgA/ZAg=="
+     "name": "Tono-0.0.86-build87-arm64.zip",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.86-build87-arm64.zip",
+     "size": 19111333,
+     "sha256": "56a3d83ef01b7cbbc1d4017e9eb0268c16e8b84e1d28644ea0e6f70f7d7df77b",
+     "sparkleEdSignature": "CdaM8cfh/1S7DBsDLYtRD6BOBswQD3EAsHA5Ifzh9w2GYGQYwDWNVDaCaa7i2q8jGlt6IywLrceFx+l95CIVDw=="
     },
     "diskImage": {
-     "name": "Tono-0.0.85-build86-arm64.dmg",
-     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.85-build86-arm64.dmg",
-     "size": 21392853,
-     "sha256": "99daa11ba05692b4e4a430218e204f993f82e0c63c38e4f3e42a79da90cddc3e"
+     "name": "Tono-0.0.86-build87-arm64.dmg",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.86-build87-arm64.dmg",
+     "size": 21396493,
+     "sha256": "e975d85cf2f068ef409cea837f0b2c85548504deb9e563b88710f5673c44524c"
     },
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.85-build86"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.86-build87"
    }
   },
   "windows": {
    "current": {
-    "releaseId": "windows-0.0.85",
-    "version": "0.0.85",
+    "releaseId": "windows-0.0.86",
+    "version": "0.0.86",
     "architecture": "x86_64",
     "installer": "nsis",
     "availability": "published-stable",
     "update": {
      "mechanism": "tauri-updater-v2",
      "automaticUpdaterEnabled": true,
-     "channelVersion": "0.0.85"
+     "channelVersion": "0.0.86"
     },
-    "commit": "1686de5e5e94471aca00fa604d5f79200e026c3e",
+    "commit": "036db12598343dfff13da8a2fda721a38b055996",
     "releaseLine": "release/windows",
-    "serviceProtocolRevision": 23,
+    "serviceProtocolRevision": 24,
     "minimumServiceRevision": 14,
     "recommended": true,
     "artifact": {
-     "name": "Tono_0.0.85_x64-setup.exe",
-     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.85_x64-setup.exe",
-     "size": 40707247,
-     "sha256": "a8c411533fb59525db56363fbd71c90bc9a790fd635ef0120bdf780b0c2a7a41",
+     "name": "Tono_0.0.86_x64-setup.exe",
+     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.86_x64-setup.exe",
+     "size": 40717009,
+     "sha256": "8316d5e39365e488f919cee06ab0efdcb914753471c16d6e501838581bbbb8b1",
      "authenticodeSigned": false,
      "authenticodeStatus": "not-signed"
     },
@@ -94,11 +94,41 @@
      "安装包未附 Authenticode 证书，全新安装时 Windows SmartScreen 会告警",
      "0.0.32–0.0.34 旧版不可直接覆盖升级：需先在网络恢复后正常卸载旧版并重启确认网络正常，再安装本版"
     ],
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.85"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.86"
    }
   }
  },
  "archive": [
+  {
+   "releaseId": "macos-0.0.86-build87",
+   "platform": "macos",
+   "version": "0.0.86",
+   "build": 87,
+   "publishedAt": "2026-11-25T12:42:32Z",
+   "status": "published-sparkle-current",
+   "sourceCommit": "036db12598343dfff13da8a2fda721a38b055996",
+   "tagCommit": "036db12598343dfff13da8a2fda721a38b055996",
+   "summary": [
+    "客户端开始识别云端签名策略中的 TCP 直连 IP；生产策略 rev 11 已带 18 个国金 QMT IPv4。",
+    "签名 TCP 直连 IP（#1856）：签名 `traffic-policy` 可携带 `tcpDirectAddresses`（无域名的 IPv4 TCP 目的地）与 v5 `tcpEndpoints`，这些地址直连并由 helper 的 fail-closed 过滤放行，无需重新发版",
+    "Helper 协议版本随本版升级"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.86-build87"
+  },
+  {
+   "releaseId": "windows-0.0.86",
+   "platform": "windows",
+   "version": "0.0.86",
+   "publishedAt": "2026-11-25T12:42:35Z",
+   "status": "published-stable-channel-current",
+   "sourceCommit": "036db12598343dfff13da8a2fda721a38b055996",
+   "tagCommit": "036db12598343dfff13da8a2fda721a38b055996",
+   "summary": [
+    "客户端开始识别云端签名策略中的 TCP 直连 IP；生产策略 rev 11 已带 18 个国金 QMT IPv4。",
+    "签名 TCP 直连 IP（#1856）：签名 `traffic-policy` 可携带 `tcpDirectAddresses`（无域名的 IPv4 TCP 目的地）与 v5 `tcpEndpoints`，Windows 服务放行并直连这些地址，无需重新发版"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.86"
+  },
   {
    "releaseId": "macos-0.0.85-build86",
    "platform": "macos",
