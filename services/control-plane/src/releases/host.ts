@@ -6,7 +6,7 @@ export const RELEASE_HOST = 'releases.afk.ccwu.cc';
 // Release-host aliases rewrite to the same static asset path. Include an
 // explicit revision in the inner asset request so a previously cached alias
 // cannot keep serving an older Sparkle feed after an asset-only deployment.
-export const RELEASE_ASSET_REVISION = 'site-public-pages-20260819';
+export const RELEASE_ASSET_REVISION = 'site-public-pages-20261125';
 
 const RELEASE_ASSET_MAP = new Map<string, string>([
   ['/', '/releases/'],

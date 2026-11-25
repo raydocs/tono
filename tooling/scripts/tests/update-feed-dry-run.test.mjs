@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 import { readManifest } from '../desktop-update-v1.mjs'
 import { validateEdSignature } from '../publish-macos-appcast.mjs'
-import { validateCandidates, writeCandidates } from '../update-feed-dry-run.mjs'
+import { liveFloors, validateCandidates, writeCandidates } from '../update-feed-dry-run.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url))
 const committed = path.join(repoRoot, 'docs/reports/update-prep-2026-10-24')
@@ -29,7 +29,15 @@ test('dry-run candidates are newer, unsigned, and stay out of the customer feed'
 
   const dir = await mkdtemp(path.join(tmpdir(), 'tono-update-dry-'))
   try {
-    const report = await writeCandidates(dir)
+    const live = liveFloors()
+    const snapshotFloors = {
+      sparkleBuild: 67,
+      macosShortVersion: '0.0.67',
+      windowsVersion: '0.0.34',
+      sparkleSignature: live.sparkleSignature,
+      windowsSignature: live.windowsSignature,
+    }
+    const report = await writeCandidates(dir, { floors: snapshotFloors })
     assert.equal(report.publishable, false)
     assert.equal(report.wroteCustomerFeed, false)
     assert.equal(report.releaseSequenceIsInstalledFloor, false)
@@ -38,9 +46,10 @@ test('dry-run candidates are newer, unsigned, and stay out of the customer feed'
     assert.equal(manifest.kind, 'tonoUpdateManifest')
     assert.equal(manifest.appVersion, '0.0.80')
     assert.equal(manifest.releaseSequence, 1)
-    const checked = await validateCandidates(dir)
+    const checked = await validateCandidates(dir, { floors: snapshotFloors })
     assert.equal(checked.ok, true)
     assert.equal(checked.sparkleBuild, 81)
+    await assert.rejects(() => validateCandidates(dir), /not above the live appcast/)
     for (const name of [
       'appcast.candidate.xml',
       'latest.candidate.json',

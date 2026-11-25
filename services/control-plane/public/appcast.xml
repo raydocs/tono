@@ -3,6 +3,26 @@
     <channel>
         <title>Tono</title>
         <item>
+            <title>0.0.85</title>
+            <pubDate>Wed, 25 Nov 2026 04:29:30 +0000</pubDate>
+            <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.85-build86</link>
+            <sparkle:version>86</sparkle:version>
+            <sparkle:shortVersionString>0.0.85</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.3</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Tono 0.0.85 (build 86)
+
+Requires Apple Silicon and macOS 26.3+.
+
+## Changes since build 85
+
+- **Expanded China direct routing & LAN access** (#1850): Added domestic direct coverage including `.cn`, ToDesk, `assetcloud.zj.gov.cn`, Gitee, Jimeng (`jimeng.jianying.com`), and Aliyun Wanwang (`wanwang.aliyun.com`), moved mainland `dashscope.aliyuncs.com` back to direct, and enabled local LAN device access by default on macOS.
+- **Zero-downtime policy key rotation & read fallback** (#1851): Rotated the production `traffic-policy` Ed25519 signing key while keeping legacy signature verification fallback for older cached revisions.
+- **Per-site bandwidth & stall telemetry** (#1851): Records closed TCP/UDP byte totals, flow durations, and stalled zero-download TCP attempts to power global site quality monitoring in Ops Console.
+]]></description>
+            <enclosure url="https://releases.afk.ccwu.cc/download/Tono-0.0.85-build86-arm64.zip" length="19107498" type="application/zip" sparkle:edSignature="QKGmVtYLM0FP0/ZBAcoKGfpF30/cXED+AVWsJXo3KbTvPMAo2nd0C9VU+1PITQJd5ZWBoc4BUdpSnX/tgA/ZAg=="/>
+        </item>
+        <item>
             <title>0.0.67</title>
             <pubDate>Tue, 18 Aug 2026 10:51:58 +0000</pubDate>
             <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.67-build67</link>

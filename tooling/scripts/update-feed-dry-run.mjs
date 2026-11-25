@@ -120,9 +120,8 @@ const assertOutsideCustomerFeed = (output) => {
   }
 }
 
-export const writeCandidates = async (output) => {
+export const writeCandidates = async (output, { floors = liveFloors() } = {}) => {
   assertOutsideCustomerFeed(output)
-  const floors = liveFloors()
   const manifest = assembleManifest({
     macos: measurement('macos-arm64', false),
     windows: measurement('windows-x86_64', true),
@@ -160,9 +159,8 @@ export const writeCandidates = async (output) => {
   return report
 }
 
-export const validateCandidates = async (output) => {
+export const validateCandidates = async (output, { floors = liveFloors() } = {}) => {
   assertOutsideCustomerFeed(output)
-  const floors = liveFloors()
   const appcast = await readFile(path.join(output, 'appcast.candidate.xml'), 'utf8')
   const latest = JSON.parse(await readFile(path.join(output, 'latest.candidate.json'), 'utf8'))
   const manifestBytes = await readFile(path.join(output, 'manifest.candidate.json'))
