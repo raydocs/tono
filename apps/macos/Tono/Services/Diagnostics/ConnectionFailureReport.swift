@@ -29,6 +29,18 @@ nonisolated final class ConnectionFailureReport: @unchecked Sendable {
         let at: Date
     }
 
+    /// Where each record is also written, so it outlives the process and is in
+    /// the diagnostics log a customer can send when the network is down. The
+    /// in-memory copy alone was lost on quit, and a stuck launch is often quit
+    /// and reopened. Tests replace it.
+    private let persist: @Sendable (String, [String: String]) -> Void
+
+    init(persist: @escaping @Sendable (String, [String: String]) -> Void = { event, details in
+        LocalTrafficAudit.shared.recordEvent(event, details: details)
+    }) {
+        self.persist = persist
+    }
+
     private let lock = NSLock()
     private var entries: [Area: Entry] = [:]
     private var pendingUpdate: String?
@@ -51,6 +63,11 @@ nonisolated final class ConnectionFailureReport: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         pendingUpdate = line
+        var details = ["state": state]
+        if let phase, phase.allSatisfy({ $0.isLetter || $0.isNumber }), phase.count <= 40 { details["phase"] = phase }
+        details["blocked"] = blocked ? "true" : "false"
+        details["disconnect_requested"] = disconnectRequested == true ? "true" : "false"
+        persist("pending_update_unresumable", details)
     }
 
     func record(_ area: Area, attempts: [ControlPlaneUnreachable.Attempt], stoppedEarly: Bool = false, at: Date = Date()) {
@@ -58,6 +75,11 @@ nonisolated final class ConnectionFailureReport: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         entries[area] = Entry(attempts: attempts, stoppedEarly: stoppedEarly, at: at)
+        persist("connection_failure_report", [
+            "area": area.rawValue.lowercased().replacingOccurrences(of: " ", with: "_"),
+            "paths": Self.summary(attempts),
+            "stopped_early": stoppedEarly ? "true" : "false",
+        ])
     }
 
     /// An attempt for `path` failing with `error`. A package relay's label
