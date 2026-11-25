@@ -73,6 +73,7 @@ actor ManagedTrafficPolicyProcessor {
         let declaredWeb = policy.version >= 2 ? Array(policy.webDomains.prefix(32)) : []
         let declaredSuffixes = policy.version >= 3 ? Array(policy.directSuffixes.prefix(64)) : []
         let declaredTCP = policy.version >= 4 ? Array(policy.tcpEndpoints.prefix(64)) : []
+        let declaredTCPDirect = policy.version >= 5 ? Array(policy.tcpDirectAddresses.prefix(64)) : []
         let policyDomains = Array(policy.domains.prefix(32))
         let policyMedia = Array(policy.mediaEndpoints.prefix(64))
 
@@ -130,10 +131,16 @@ actor ManagedTrafficPolicyProcessor {
                   ),
                   address == entry.address,
                   !protectedAddresses.contains(address),
+                  !ConfigPipeline.isProtectedDirectIPv4(address),
                   seenTCPAddresses.insert(address).inserted,
                   !entry.ports.isEmpty,
+                  entry.ports.count <= 16,
                   Set(entry.ports).count == entry.ports.count,
-                  entry.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
+                  entry.ports.allSatisfy({ port in
+                      trusted
+                          ? ((1...65535).contains(port) && port != 53 && port != 853)
+                          : (port == 80 || port == 443)
+                  }) else {
                 dropped.append(entry.address)
                 return nil
             }
@@ -142,6 +149,25 @@ actor ManagedTrafficPolicyProcessor {
                 ports: entry.ports.sorted()
             )
         }.sorted { $0.address < $1.address }
+
+        var seenTCPDirectAddresses = Set<String>()
+        let tcpDirectAddresses = declaredTCPDirect.compactMap { raw -> String? in
+            guard trusted,
+                  let address = try? ConfigPipeline.validatedManagedDirectAddress(
+                    raw,
+                    field: "managed direct TCP address",
+                    trusted: trusted
+                  ),
+                  address == raw,
+                  !protectedAddresses.contains(address),
+                  !ConfigPipeline.isProtectedDirectIPv4(address),
+                  !seenTCPAddresses.contains(address),
+                  seenTCPDirectAddresses.insert(address).inserted else {
+                dropped.append(raw)
+                return nil
+            }
+            return address
+        }.sorted()
 
         let webDomains = declaredWeb.compactMap { entry -> TonoTrafficPolicyDomain? in
             guard let host = try? ConfigPipeline.validatedWebDirectDomain(entry.host, trusted: trusted),
@@ -171,7 +197,7 @@ actor ManagedTrafficPolicyProcessor {
             )
         }.sorted { $0.host < $1.host }
 
-        if !dropped.isEmpty || policy.version > 4 {
+        if !dropped.isEmpty || policy.version > 5 {
             // Recorded because degrading is only an improvement while it is visible.
             // Hosts are named: which entry a build does not understand is the whole
             // diagnostic, and a count alone would have said nothing useful about the
@@ -184,7 +210,7 @@ actor ManagedTrafficPolicyProcessor {
                     "dropped": String(dropped.count),
                     // Bounded: a report is a diagnostic, not a copy of the document.
                     "hosts": dropped.sorted().prefix(12).joined(separator: ","),
-                    "newer_than_known": String(policy.version > 4),
+                    "newer_than_known": String(policy.version > 5),
                     // Which gate did the dropping: an allowlist this build ships,
                     // or this build's own limits. Without it a signed policy whose
                     // new hosts were dropped anyway is indistinguishable from an
@@ -200,6 +226,7 @@ actor ManagedTrafficPolicyProcessor {
             tcpEndpoints: tcp,
             webDomains: webDomains,
             directSuffixes: directSuffixes,
+            tcpDirectAddresses: tcpDirectAddresses,
             trusted: trusted
         )
     }

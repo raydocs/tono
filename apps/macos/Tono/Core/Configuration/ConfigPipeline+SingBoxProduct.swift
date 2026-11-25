@@ -352,6 +352,23 @@ nonisolated extension ConfigPipeline {
                 rules.append(["domain_suffix": [suffix.host], "port": suffix.ports.map(Int.init),
                     "network": ["tcp", "udp"], "action": "route", "outbound": webDirectGroupName])
             }
+            for endpoint in plan.tcpEndpoints {
+                rules.append([
+                    "network": "tcp",
+                    "ip_cidr": ["\(endpoint.address)/32"],
+                    "port": [Int(endpoint.port)],
+                    "action": "route",
+                    "outbound": directProxyName,
+                ])
+            }
+            for address in plan.tcpDirectAddresses {
+                rules.append([
+                    "network": "tcp",
+                    "ip_cidr": ["\(address)/32"],
+                    "action": "route",
+                    "outbound": directProxyName,
+                ])
+            }
         }
         // Controller /dns/query and outbound resolution need real answers.
         // Only packets arriving from the protected client listeners get fake IP.

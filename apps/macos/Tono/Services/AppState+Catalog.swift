@@ -773,6 +773,16 @@ extension AppState {
                 ports: ports.sorted()
             )
         }.sorted { $0.host < $1.host }
+        let tcpEndpoints = policy.tcpEndpoints.flatMap { endpoint in
+            endpoint.ports.compactMap { port -> ConfigPipeline.DirectEndpoint? in
+                guard let bounded = UInt16(exactly: port) else { return nil }
+                return ConfigPipeline.DirectEndpoint(
+                    address: endpoint.address,
+                    port: bounded,
+                    transport: "tcp"
+                )
+            }
+        }
         let runtime = ConfigPipeline.ManagedDirectRuntimePolicy(
             physicalInterface: physicalInterface,
             domainPins: [],
@@ -783,7 +793,8 @@ extension AppState {
             // bundle-wide process rule already handles the app's rotating
             // HTTPDNS/raw-IP traffic; web pins/suffixes remain separate.
             mediaEndpoints: [],
-            tcpEndpoints: [],
+            tcpEndpoints: tcpEndpoints,
+            tcpDirectAddresses: policy.tcpDirectAddresses,
             directResolverHosts: (policy.domains + policy.webDomains)
                 .map(\.host),
             trusted: policy.trusted,
@@ -804,6 +815,7 @@ extension AppState {
             tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
             proxyEndpoints: proxyEndpoints,
             sessionDirectEndpoints: activeDirectPolicy?.sessionEndpoints ?? [],
+            sessionDirectTCPAddresses: activeDirectPolicy?.tcpDirectAddresses ?? [],
             tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
             reviewedBundleDirect:
                 activeDirectPolicy?.requiresAddressFreeDirectPermit == true
@@ -1088,6 +1100,7 @@ extension AppState {
             webDomainSuffixes: current.webDomainSuffixes,
             mediaEndpoints: current.mediaEndpoints,
             tcpEndpoints: current.tcpEndpoints,
+            tcpDirectAddresses: current.tcpDirectAddresses,
             directResolverHosts: current.directResolverHosts,
             trusted: current.trusted,
             nativeAppDirect: current.nativeAppDirect
@@ -1188,13 +1201,25 @@ extension AppState {
         // Everything this session will permit that is not a web pin, counted by
         // the same computed property the validator counts, so the budget below
         // cannot drift from the ceiling it exists to keep us under.
+        let tcpEndpoints = base?.tcpEndpoints ?? policy.tcpEndpoints.flatMap { endpoint in
+            endpoint.ports.compactMap { port -> ConfigPipeline.DirectEndpoint? in
+                guard let bounded = UInt16(exactly: port) else { return nil }
+                return ConfigPipeline.DirectEndpoint(
+                    address: endpoint.address,
+                    port: bounded,
+                    transport: "tcp"
+                )
+            }
+        }
+        let tcpDirectAddresses = base?.tcpDirectAddresses ?? policy.tcpDirectAddresses
         let withoutWebPins = ConfigPipeline.ManagedDirectRuntimePolicy(
             physicalInterface: physicalInterface,
             domainPins: [],
             webDomainPins: [],
             webDomainSuffixes: base?.webDomainSuffixes ?? [],
             mediaEndpoints: [],
-            tcpEndpoints: [],
+            tcpEndpoints: tcpEndpoints,
+            tcpDirectAddresses: tcpDirectAddresses,
             directResolverHosts: resolverHosts,
             trusted: policy.trusted,
             nativeAppDirect: base?.nativeAppDirect ?? (
@@ -1236,7 +1261,8 @@ extension AppState {
             webDomainPins: budgeted.kept,
             webDomainSuffixes: base?.webDomainSuffixes ?? [],
             mediaEndpoints: [],
-            tcpEndpoints: [],
+            tcpEndpoints: tcpEndpoints,
+            tcpDirectAddresses: tcpDirectAddresses,
             directResolverHosts: resolverHosts,
             trusted: policy.trusted,
             nativeAppDirect: base?.nativeAppDirect ?? (

@@ -40,6 +40,14 @@ pub(super) fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>)
         } else {
             Vec::new()
         },
+        direct_tcp_addresses: if armed.intent.mode == KillSwitchStatusMode::Locked
+            && tun_luid.is_some()
+            && !strict_grants
+        {
+            armed.direct_tcp_addresses.clone()
+        } else {
+            Vec::new()
+        },
         reviewed_direct_ports: if armed.intent.mode == KillSwitchStatusMode::Locked
             && tun_luid.is_some()
         {

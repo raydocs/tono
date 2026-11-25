@@ -151,7 +151,7 @@ if (preview.body.signatureContext !== SIGNATURE_CONTEXT) {
   fail(`the server signs over ${JSON.stringify(preview.body.signatureContext)}, this tool over ${JSON.stringify(SIGNATURE_CONTEXT)}`);
 }
 const parsed = JSON.parse(canonical);
-const counts = ['domains', 'webDomains', 'directSuffixes', 'tcpEndpoints', 'mediaEndpoints']
+const counts = ['domains', 'webDomains', 'directSuffixes', 'tcpEndpoints', 'tcpDirectAddresses', 'mediaEndpoints']
   .filter((field) => Array.isArray(parsed[field]))
   .map((field) => `${field} ${parsed[field].length}`)
   .join(', ');
@@ -177,8 +177,11 @@ if (parsed.revision !== undefined) {
 const SESSION_ENDPOINT_LIMIT = 256;
 const ADDRESSES_PER_HOST = 8;
 const RESOLVER_ENDPOINTS = 2;
+const tcpEndpointCount = (parsed.tcpEndpoints ?? [])
+  .reduce((total, entry) => total + entry.ports.length, 0);
+const tcpDirectCount = (parsed.tcpDirectAddresses ?? []).length;
 const webEndpointCeiling = (parsed.webDomains ?? [])
-  .reduce((total, entry) => total + entry.ports.length * ADDRESSES_PER_HOST, RESOLVER_ENDPOINTS);
+  .reduce((total, entry) => total + entry.ports.length * ADDRESSES_PER_HOST, RESOLVER_ENDPOINTS + tcpEndpointCount + tcpDirectCount);
 process.stdout.write(
   `  client session endpoints: up to ${webEndpointCeiling} of ${SESSION_ENDPOINT_LIMIT}\n`,
 );

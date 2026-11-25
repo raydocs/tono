@@ -88,6 +88,9 @@ struct KillSwitchState {
     /// the TUN; everything else leaves as without Tono. Persisted, so a heal or
     /// power transition keeps the session's scope; strict intent overrides it.
     var aiHomeScoped = false
+    /// Ephemeral session-only all-non-DNS-TCP IPv4 grants. Never persisted to
+    /// disk; cleared on emergency, power-transition, strict, and bootstrap arms.
+    var sessionDirectTCPAddresses: [String] = []
 }
 
 struct HelperCommandResult {
@@ -283,6 +286,7 @@ final class KillSwitchManager {
             object["exitHints"] = [String]()
             object["proxyEndpoints"] = [[String: Any]]()
             object["sessionDirectEndpoints"] = [[String: Any]]()
+            object["sessionDirectTCPAddresses"] = [String]()
             object["tailscaleBootstrapEnabled"] = false
             object["allowSystemResolution"] = false
             object["bootstrapPins"] = [String: [String]]()
@@ -344,6 +348,12 @@ final class KillSwitchManager {
         let sessionDirectEndpoints = try Self.validateSessionDirectEndpoints(
             object["sessionDirectEndpoints"] ?? []
         )
+        let sessionDirectTCPAddresses = try Self.validateSessionDirectTCPAddresses(
+            object["sessionDirectTCPAddresses"] ?? []
+        )
+        guard sessionDirectEndpoints.count + sessionDirectTCPAddresses.count <= 256 else {
+            throw HelperFailure.invalid("Session direct grants exceed the 256-entry bound.")
+        }
         // Omission means off, and a non-boolean is a hard error rather than a
         // silent default: this flag widens the permit, so an ambiguous request
         // must fail instead of guessing. `NSNumber` would accept 0/1, which the
@@ -446,6 +456,7 @@ final class KillSwitchManager {
         )
         state.strictBlocking = Self.strictIntentActive
         state.aiHomeScoped = aiHomeScoped
+        state.sessionDirectTCPAddresses = sessionDirectTCPAddresses
         if let proof = strictProof, let record = try? ReleaseAuthority().load(),
            record.mode == .secured, record.generation == proof.generation,
            record.strictRuntimeDigest == proof.digest {
@@ -1720,7 +1731,7 @@ final class KillSwitchManager {
             name.withCString { if_nametoindex($0) } != 0
         }
     ) -> KillSwitchState {
-        KillSwitchState(
+        var restored = KillSwitchState(
             armed: state.armed,
             tailscaleBootstrapEnabled: state.tailscaleBootstrapEnabled,
             apiHosts: state.apiHosts,
@@ -1736,6 +1747,8 @@ final class KillSwitchManager {
             allowLocalNetworkDevices: state.allowLocalNetworkDevices,
             aiHomeScoped: state.aiHomeScoped
         )
+        restored.sessionDirectTCPAddresses = state.sessionDirectTCPAddresses
+        return restored
     }
 
     static func installEmergencyBlock(allowedUID: uid_t) throws {
@@ -2182,6 +2195,21 @@ final class KillSwitchManager {
         }
     }
 
+    static func isProtectedDirectIPv4(_ address: String) -> Bool {
+        var ipv4 = in_addr()
+        guard inet_pton(AF_INET, address, &ipv4) == 1 else { return false }
+        let bytes = withUnsafeBytes(of: &ipv4) { Array($0) }
+        guard bytes.count == 4 else { return false }
+        return bytes == [1, 1, 1, 1]
+            || bytes == [8, 8, 8, 8]
+            || (bytes[0] == 160 && bytes[1] == 79 && (104...111).contains(bytes[2]))
+            || (bytes[0] == 91 && bytes[1] == 108 && (4...19).contains(bytes[2]))
+            || (bytes[0] == 91 && bytes[1] == 108 && (56...59).contains(bytes[2]))
+            || (bytes[0] == 149 && bytes[1] == 154 && (160...175).contains(bytes[2]))
+            || bytes == [179, 253, 244, 3]
+            || bytes == [179, 255, 154, 17]
+    }
+
     static func validateSessionDirectEndpoints(_ raw: Any) throws -> [KillSwitchEndpoint] {
         guard let values = raw as? [Any], values.count <= 256 else {
             throw HelperFailure.invalid("sessionDirectEndpoints must be a bounded array.")
@@ -2193,11 +2221,12 @@ final class KillSwitchManager {
                   let rawAddress = item["address"] as? String,
                   let address = canonicalPublicAddress(rawAddress),
                   !address.contains(":"), address == rawAddress,
+                  !isProtectedDirectIPv4(address),
                   let transport = item["transport"] as? String,
                   let portNumber = item["port"] as? NSNumber,
                   CFGetTypeID(portNumber) != CFBooleanGetTypeID(),
                   let port = UInt16(exactly: portNumber.intValue),
-                  (transport == "tcp" && (port == 80 || port == 443)) ||
+                  (transport == "tcp" && port >= 1 && port != 53 && port != 853) ||
                     (transport == "udp" && (port == 443 || port == 8000)) else {
                 throw HelperFailure.invalid("Session direct endpoint is invalid.")
             }
@@ -2206,6 +2235,23 @@ final class KillSwitchManager {
         return result.sorted {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }
+    }
+
+    static func validateSessionDirectTCPAddresses(_ raw: Any) throws -> [String] {
+        guard let values = raw as? [Any], values.count <= 64 else {
+            throw HelperFailure.invalid("sessionDirectTCPAddresses must be a bounded array.")
+        }
+        var result = Set<String>()
+        for value in values {
+            guard let rawAddress = value as? String,
+                  let address = canonicalPublicAddress(rawAddress),
+                  !address.contains(":"), address == rawAddress,
+                  !isProtectedDirectIPv4(address) else {
+                throw HelperFailure.invalid("Session direct TCP address is invalid.")
+            }
+            result.insert(address)
+        }
+        return result.sorted()
     }
 
     static func resolveHosts(

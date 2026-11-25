@@ -1470,6 +1470,12 @@ describe('traffic policy web-direct shortcut', () => {
     version: 4 as const,
     tcpEndpoints: [{ address: '8.8.8.8', ports: [443] }],
   };
+  const v5 = {
+    ...v4,
+    version: 5 as const,
+    tcpEndpoints: [{ address: '139.224.114.71', ports: [55300, 55310] }],
+    tcpDirectAddresses: ['103.253.207.41', '81.69.152.51'],
+  };
 
   it('empties only webDomains on v2 and does not mutate the input', () => {
     const frozen = JSON.parse(JSON.stringify(v2));
@@ -1540,6 +1546,33 @@ describe('traffic policy web-direct shortcut', () => {
       webDomains: [],
       directSuffixes: [],
     });
+  });
+
+  it('preserves v5 tcpDirectAddresses on clearWebDomains and clears them on clearAllDirect', () => {
+    const webCleared = clearWebDomains(v5);
+    expect(webCleared).toEqual({
+      ok: true,
+      policy: {
+        version: 5,
+        domains: v5.domains,
+        mediaEndpoints: v5.mediaEndpoints,
+        webDomains: [],
+        directSuffixes: v5.directSuffixes,
+        tcpEndpoints: v5.tcpEndpoints,
+        tcpDirectAddresses: v5.tcpDirectAddresses,
+      },
+    });
+    const allCleared = clearAllDirect(v5);
+    expect(allCleared).toEqual({
+      version: 5,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: [],
+      tcpDirectAddresses: [],
+    });
+    expect(parseTrafficPolicy(allCleared)).toEqual({ ok: true, policy: allCleared });
   });
 });
 

@@ -2592,6 +2592,8 @@ async fn suffix_only_direct_policy_skips_before_runtime_staging() {
             host: "bilibili.com".to_string(),
             ports: vec![443],
         }],
+        tcp_endpoints: Vec::new(),
+        tcp_direct_addresses: Vec::new(),
     };
     let (plan, _) = build_direct_plan(
         "Ethernet 2".to_string(), &[], &[], &[], &document.direct_suffixes, &node, Vec::new(),

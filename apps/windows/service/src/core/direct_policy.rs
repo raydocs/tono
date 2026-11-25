@@ -25,8 +25,13 @@ const MAX_POLICY_DOMAINS: usize = 32;
 const MAX_POLICY_MEDIA: usize = 64;
 const MAX_POLICY_WEB_DOMAINS: usize = 32;
 const MAX_POLICY_DIRECT_SUFFIXES: usize = 64;
+const MAX_POLICY_TCP_ENDPOINTS: usize = 64;
+const MAX_POLICY_TCP_DIRECT_ADDRESSES: usize = 64;
+const MAX_TCP_ENDPOINT_PORTS: usize = 16;
 const POLICY_VERSION_V2: u64 = 2;
 const POLICY_VERSION_V3: u64 = 3;
+const POLICY_VERSION_V4: u64 = 4;
+const POLICY_VERSION_V5: u64 = 5;
 
 /// What a verified policy lists, by the kind of DIRECT rule the compilers derive from it.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -39,6 +44,10 @@ pub(crate) struct DirectPolicy {
     suffixes: BTreeMap<String, BTreeSet<u16>>,
     /// Exact media addresses (`mediaEndpoints`).
     media: BTreeMap<Ipv4Addr, BTreeSet<u16>>,
+    /// Exact direct TCP endpoints (`tcpEndpoints`).
+    tcp_endpoints: BTreeMap<Ipv4Addr, BTreeSet<u16>>,
+    /// Exact direct IPv4 addresses permitted across all non-DNS TCP ports (`tcpDirectAddresses`).
+    tcp_direct_addresses: BTreeSet<Ipv4Addr>,
 }
 
 impl DirectPolicy {
@@ -102,6 +111,16 @@ impl DirectPolicy {
         if version >= POLICY_VERSION_V3 {
             policy.suffixes = hosts(object.get("directSuffixes"), MAX_POLICY_DIRECT_SUFFIXES);
         }
+        if version >= POLICY_VERSION_V4 {
+            policy.tcp_endpoints = tcp_endpoints(object.get("tcpEndpoints"), MAX_POLICY_TCP_ENDPOINTS);
+        }
+        if version >= POLICY_VERSION_V5 {
+            policy.tcp_direct_addresses = tcp_direct_addresses(
+                object.get("tcpDirectAddresses"),
+                MAX_POLICY_TCP_DIRECT_ADDRESSES,
+                &policy.tcp_endpoints,
+            );
+        }
         Ok(policy)
     }
 
@@ -137,6 +156,18 @@ impl DirectPolicy {
             .get(&address)
             .is_some_and(|ports| ports.contains(&port))
     }
+
+    /// An exact TCP endpoint (`address` + non-DNS `port`) from `tcpEndpoints`.
+    pub(crate) fn lists_tcp_endpoint(&self, address: Ipv4Addr, port: u16) -> bool {
+        self.tcp_endpoints
+            .get(&address)
+            .is_some_and(|ports| ports.contains(&port))
+    }
+
+    /// An exact public IPv4 address from `tcpDirectAddresses` (all non-DNS TCP ports).
+    pub(crate) fn lists_tcp_direct_address(&self, address: Ipv4Addr) -> bool {
+        self.tcp_direct_addresses.contains(&address)
+    }
 }
 
 fn ports(value: Option<&Value>) -> BTreeSet<u16> {
@@ -163,6 +194,84 @@ fn hosts(list: Option<&Value>, limit: usize) -> BTreeMap<String, BTreeSet<u16>> 
             .extend(ports(entry.get("ports")));
     }
     map
+}
+
+fn is_public_non_protected_ipv4(address: Ipv4Addr) -> bool {
+    let [a, b, c, _] = address.octets();
+    let special = matches!(
+        (a, b, c),
+        (0, _, _)
+            | (10, _, _)
+            | (100, 64..=127, _)
+            | (127, _, _)
+            | (169, 254, _)
+            | (172, 16..=31, _)
+            | (192, 0, 0)
+            | (192, 0, 2)
+            | (192, 88, 99)
+            | (192, 168, _)
+            | (198, 18..=19, _)
+            | (198, 51, 100)
+            | (203, 0, 113)
+            | (224..=255, _, _)
+    );
+    !special
+        && address != Ipv4Addr::new(1, 1, 1, 1)
+        && address != Ipv4Addr::new(8, 8, 8, 8)
+        && !crate::direct_domains::is_claude_home_ipv4(address)
+        && !crate::direct_domains::is_cloud_exit_ipv4(address)
+        && !crate::API_RELAYS.iter().any(|(relay, _)| *relay == address)
+}
+
+fn tcp_endpoints(list: Option<&Value>, limit: usize) -> BTreeMap<Ipv4Addr, BTreeSet<u16>> {
+    let mut map: BTreeMap<Ipv4Addr, BTreeSet<u16>> = BTreeMap::new();
+    for entry in list.and_then(Value::as_array).into_iter().flatten().take(limit) {
+        let Some(raw) = entry.get("address").and_then(Value::as_str) else {
+            continue;
+        };
+        let Ok(address) = raw.parse::<Ipv4Addr>() else {
+            continue;
+        };
+        if raw != address.to_string()
+            || !is_public_non_protected_ipv4(address)
+            || map.contains_key(&address)
+        {
+            continue;
+        }
+        let valid_ports: BTreeSet<u16> = ports(entry.get("ports"))
+            .into_iter()
+            .filter(|port| *port != 0 && *port != 53 && *port != 853)
+            .take(MAX_TCP_ENDPOINT_PORTS)
+            .collect();
+        if !valid_ports.is_empty() {
+            map.insert(address, valid_ports);
+        }
+    }
+    map
+}
+
+fn tcp_direct_addresses(
+    list: Option<&Value>,
+    limit: usize,
+    tcp_endpoints: &BTreeMap<Ipv4Addr, BTreeSet<u16>>,
+) -> BTreeSet<Ipv4Addr> {
+    let mut set = BTreeSet::new();
+    for entry in list.and_then(Value::as_array).into_iter().flatten().take(limit) {
+        let Some(raw) = entry.as_str() else {
+            continue;
+        };
+        let Ok(address) = raw.parse::<Ipv4Addr>() else {
+            continue;
+        };
+        if raw != address.to_string()
+            || !is_public_non_protected_ipv4(address)
+            || tcp_endpoints.contains_key(&address)
+        {
+            continue;
+        }
+        set.insert(address);
+    }
+    set
 }
 
 fn media(list: Option<&Value>, limit: usize) -> BTreeMap<Ipv4Addr, BTreeSet<u16>> {
@@ -258,5 +367,38 @@ pub(crate) mod tests {
         assert!(policy.lists_suffix("baidu.com", 443), "an always-attached product suffix");
         assert!(!policy.lists_suffix("baidu.com", 8080));
         assert!(!policy.lists_suffix("example.org", 443));
+    }
+
+    #[test]
+    fn v5_policy_lists_tcp_endpoints_and_direct_addresses_and_excludes_protected_and_dns_ports() {
+        let (signing, public) = key(3);
+        let json = r#"{
+            "version": 5,
+            "revision": 11,
+            "domains": [],
+            "mediaEndpoints": [],
+            "webDomains": [],
+            "directSuffixes": [],
+            "tcpEndpoints": [
+                {"address": "139.224.114.71", "ports": [53, 853, 55300]},
+                {"address": "179.253.244.3", "ports": [443]},
+                {"address": "160.79.104.10", "ports": [443]}
+            ],
+            "tcpDirectAddresses": [
+                "103.253.207.41",
+                "139.224.114.71",
+                "1.1.1.1",
+                "91.108.4.1"
+            ]
+        }"#;
+        let policy = DirectPolicy::verify_with_key(&sign(&signing, json, 11), &public).unwrap();
+        assert!(policy.lists_tcp_endpoint("139.224.114.71".parse().unwrap(), 55300));
+        assert!(!policy.lists_tcp_endpoint("139.224.114.71".parse().unwrap(), 53));
+        assert!(!policy.lists_tcp_endpoint("139.224.114.71".parse().unwrap(), 853));
+        assert!(!policy.lists_tcp_endpoint("179.253.244.3".parse().unwrap(), 443));
+        assert!(policy.lists_tcp_direct_address("103.253.207.41".parse().unwrap()));
+        assert!(!policy.lists_tcp_direct_address("139.224.114.71".parse().unwrap()));
+        assert!(!policy.lists_tcp_direct_address("1.1.1.1".parse().unwrap()));
+        assert!(!policy.lists_tcp_direct_address("91.108.4.1".parse().unwrap()));
     }
 }

@@ -92,8 +92,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// shared LAN set including CGNAT; strict LAN survives Core death (2026-11-04); v17:
 /// `…9e10…` AI Home AI-prefix-only rule set (`ai_home_scoped`, decision 130); v18: `…9e11…`
 /// the API relay list is Westwood 179.253.244.3 (moved from the blocked 179.253.233.220) and
-/// Mesa only; Arosscloud dropped (2026-11-17).)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e11_0000_4a6c_0000_0000_0000_0000;
+/// Mesa only; Arosscloud dropped (2026-11-17); v19: `…9e12…` Class G supports signed non-DNS TCP IPv4
+/// permits (`direct_tcp_addresses`).)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e12_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -224,6 +225,10 @@ pub struct RuleConfig {
     /// core may reach on the physical NIC. Rendered **only in `Locked`** (see rule G);
     /// never persisted, never restored, never inherited by the next arm — omission = clear.
     pub direct_endpoints: Vec<ProxyEndpoint>,
+    /// Cloud-approved DIRECT public IPv4 addresses permitted across all non-DNS TCP ports
+    /// (`1..=52`, `54..=852`, `854..=65535`). Rendered **only in `Locked`** (see rule G);
+    /// volatile, memory-only, never persisted.
+    pub direct_tcp_addresses: Vec<std::net::Ipv4Addr>,
     /// Ports the App declared it routes process-scoped DIRECT traffic on, already filtered to
     /// `REVIEWED_DIRECT_PORTS` by the Service. Rule H renders exactly these and nothing when
     /// empty, so the permit surface and the routing surface are the same set by construction
@@ -651,6 +656,7 @@ const SSDP_PORT: u16 = 1900;
 /// Every remote port except DNS (53) and DNS over TLS (853). Protocols without ports carry
 /// their ICMP code or zero in this field, so they fall in the first range.
 const NON_DNS_PORT_RANGES: [(u16, u16); 3] = [(0, 52), (54, 852), (854, u16::MAX)];
+const NON_DNS_TCP_PORT_RANGES: [(u16, u16); 3] = [(1, 52), (54, 852), (854, u16::MAX)];
 
 fn v4_conditions(prefixes: &[([u8; 4], u8)]) -> Vec<Condition> {
     prefixes
@@ -952,6 +958,31 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
                     C::Protocol(protocol),
                     C::RemotePort(port),
                 ],
+                false,
+            ));
+        }
+        for ip in &config.direct_tcp_addresses {
+            let addr = IpAddr::V4(*ip);
+            if !is_public_unreserved(&addr) {
+                continue;
+            }
+            let mut conditions = vec![
+                C::AleAppId,
+                remote_address_condition(addr),
+                C::Protocol(IpProtocol::Tcp),
+            ];
+            conditions.extend(
+                NON_DNS_TCP_PORT_RANGES
+                    .iter()
+                    .map(|(min, max)| C::RemotePortRange { min: *min, max: *max }),
+            );
+            filters.push(spec(
+                format!("session/permit-direct-tcp-all/ale/{}/{ip}", config.app_path),
+                "session permit approved DIRECT TCP IPv4 ALE",
+                L::AleAuthConnectV4,
+                WEIGHT_HARD_PERMIT,
+                A::Permit,
+                conditions,
                 false,
             ));
         }
@@ -1426,6 +1457,7 @@ mod tests {
             app_path: r"C:\ProgramData\Tono\bin\mihomo.exe".to_owned(),
             tono_app_path: r"C:\Program Files\Tono\Tono.exe".to_owned(),
             direct_endpoints: Vec::new(),
+            direct_tcp_addresses: Vec::new(),
             reviewed_direct_ports: Vec::new(),
         }
     }
@@ -3309,6 +3341,41 @@ mod tests {
                 Some(FilterAction::Block)
             };
             assert_eq!(arbitrate_sublayer(&filters, &ai_on_tun), expected_tun);
+        }
+    }
+
+    #[test]
+    fn direct_tcp_addresses_permit_staged_core_on_non_dns_tcp_ports_only_when_locked() {
+        let mut locked = config(KillSwitchStatusMode::Locked);
+        locked.direct_tcp_addresses = vec!["103.253.207.41".parse().unwrap()];
+        let filters = expected_filters(&locked);
+
+        let mut core_custom = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", 55300);
+        core_custom.app_path = Some(&locked.app_path);
+        assert_eq!(arbitrate_sublayer(&filters, &core_custom), Some(FilterAction::Permit));
+
+        let mut core_443 = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", 443);
+        core_443.app_path = Some(&locked.app_path);
+        assert_eq!(arbitrate_sublayer(&filters, &core_443), Some(FilterAction::Permit));
+
+        for denied_port in [53_u16, 853_u16] {
+            let mut dns_pkt = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", denied_port);
+            dns_pkt.app_path = Some(&locked.app_path);
+            assert_eq!(arbitrate_sublayer(&filters, &dns_pkt), Some(FilterAction::Block));
+        }
+
+        let mut core_udp = packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "103.253.207.41", 55300);
+        core_udp.app_path = Some(&locked.app_path);
+        assert_eq!(arbitrate_sublayer(&filters, &core_udp), Some(FilterAction::Block));
+
+        let other_app = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "103.253.207.41", 55300);
+        assert_eq!(arbitrate_sublayer(&filters, &other_app), Some(FilterAction::Block));
+
+        for non_locked in [KillSwitchStatusMode::Bootstrap, KillSwitchStatusMode::Blocked] {
+            let mut other = config(non_locked);
+            other.direct_tcp_addresses = vec!["103.253.207.41".parse().unwrap()];
+            let non_locked_filters = expected_filters(&other);
+            assert_eq!(arbitrate_sublayer(&non_locked_filters, &core_custom), Some(FilterAction::Block));
         }
     }
 }

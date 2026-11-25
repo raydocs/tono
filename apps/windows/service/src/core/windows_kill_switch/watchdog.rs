@@ -9,7 +9,7 @@ pub(super) fn direct_reload_invalidation_reason(
     now: std::time::Instant,
 ) -> Option<&'static str> {
     let Some(lease) = armed.direct_reload.as_ref() else {
-        return (!armed.direct_endpoints.is_empty())
+        return (!armed.direct_endpoints.is_empty() || !armed.direct_tcp_addresses.is_empty())
             .then_some("DIRECT endpoints exist without a Service-owned lease");
     };
     if lease.expires_at.is_none_or(|deadline| now >= deadline) {

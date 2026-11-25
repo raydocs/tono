@@ -301,6 +301,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             match windows_kill_switch::commit_sing_box_direct_while_locked(
                 &request.payload.direct_endpoints,
                 &request.payload.reviewed_direct_ports,
+                &request.payload.direct_tcp_addresses,
+                request.payload.traffic_policy.as_ref(),
                 active.generation,
             )
             .await

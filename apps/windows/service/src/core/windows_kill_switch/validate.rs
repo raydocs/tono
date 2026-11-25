@@ -88,6 +88,86 @@ pub(super) fn validate_direct_endpoints(config: &KillSwitchConfig) -> Result<()>
     Ok(())
 }
 
+/// Signed sing-box DIRECT validation: preserves legacy reviewed ports (80/443 TCP, 443/8000 UDP),
+/// and admits custom non-DNS TCP ports or all-non-DNS-TCP IPv4 addresses only when listed in the
+/// signature-verified [`crate::core::direct_policy::DirectPolicy`].
+pub(super) fn validate_sing_box_direct_grants(
+    config: &KillSwitchConfig,
+    direct_tcp_addresses: &[String],
+    policy: Option<&crate::core::direct_policy::DirectPolicy>,
+) -> Result<Vec<Ipv4Addr>> {
+    const MAX_DIRECT_ENDPOINTS: usize = 256;
+    const MAX_DIRECT_TCP_ADDRESSES: usize = 64;
+    if direct_tcp_addresses.len() > MAX_DIRECT_TCP_ADDRESSES {
+        bail!("direct_tcp_addresses exceeds the {MAX_DIRECT_TCP_ADDRESSES}-entry bound");
+    }
+    if config.direct_endpoints.len() + direct_tcp_addresses.len() > MAX_DIRECT_ENDPOINTS {
+        bail!("DIRECT endpoints exceed the {MAX_DIRECT_ENDPOINTS}-entry bound");
+    }
+    let node_ips = config
+        .proxy_endpoints
+        .iter()
+        .filter_map(|endpoint| wfp_model::parse_endpoint(endpoint).map(|(ip, _, _)| ip))
+        .collect::<Vec<_>>();
+    let forbidden_direct_ipv4 = |ipv4: Ipv4Addr| -> Result<()> {
+        if !is_public_direct_ipv4(ipv4) {
+            bail!("direct address {ipv4} is not a public-unicast address");
+        }
+        if ipv4 == Ipv4Addr::new(1, 1, 1, 1)
+            || ipv4 == Ipv4Addr::new(8, 8, 8, 8)
+            || crate::direct_domains::is_claude_home_ipv4(ipv4)
+            || crate::direct_domains::is_cloud_exit_ipv4(ipv4)
+            || crate::API_RELAYS.iter().any(|(relay, _)| *relay == ipv4)
+        {
+            bail!("direct address {ipv4} is a permanently protected destination");
+        }
+        if node_ips.contains(&IpAddr::V4(ipv4)) {
+            bail!("direct address {ipv4} duplicates a selected node address");
+        }
+        Ok(())
+    };
+    for endpoint in &config.direct_endpoints {
+        let Some((ip, port, protocol)) = wfp_model::parse_endpoint(endpoint) else {
+            bail!("invalid direct endpoint {}:{}", endpoint.ip, endpoint.port);
+        };
+        let IpAddr::V4(ipv4) = ip else {
+            bail!("direct endpoint {ip} must be an IPv4 public-unicast address");
+        };
+        forbidden_direct_ipv4(ipv4)?;
+        let port_ok = match protocol {
+            wfp_model::IpProtocol::Tcp if matches!(port, 80 | 443) => true,
+            wfp_model::IpProtocol::Udp if matches!(port, 443 | 8000) => true,
+            wfp_model::IpProtocol::Tcp if port != 0 && port != 53 && port != 853 => {
+                policy.is_some_and(|verified| verified.lists_tcp_endpoint(ipv4, port))
+            }
+            _ => false,
+        };
+        if !port_ok {
+            bail!(
+                "direct endpoint {ip}:{port}/{protocol:?} is not authorized by the signed traffic policy"
+            );
+        }
+    }
+    let mut tcp_addrs = Vec::with_capacity(direct_tcp_addresses.len());
+    for raw in direct_tcp_addresses {
+        let trimmed = raw.trim();
+        let ipv4: Ipv4Addr = trimmed
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid direct_tcp_addresses entry {raw:?}"))?;
+        if trimmed != ipv4.to_string() {
+            bail!("non-canonical direct_tcp_addresses entry {raw:?}");
+        }
+        forbidden_direct_ipv4(ipv4)?;
+        if !policy.is_some_and(|verified| verified.lists_tcp_direct_address(ipv4)) {
+            bail!("direct_tcp_addresses entry {ipv4} is not authorized by the signed traffic policy");
+        }
+        tcp_addrs.push(ipv4);
+    }
+    tcp_addrs.sort_unstable();
+    tcp_addrs.dedup();
+    Ok(tcp_addrs)
+}
+
 /// A conservative IPv4-only public-unicast gate for physical-interface DIRECT grants.
 ///
 /// The generated outbound is explicitly `ip-version: ipv4`; rejecting every special-use range here

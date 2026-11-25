@@ -12,6 +12,15 @@ export type TrafficPolicyDoc =
     webDomains: PolicyHost[];
     directSuffixes: PolicyHost[];
     tcpEndpoints: PolicyEndpoint[];
+  }
+  | {
+    version: 5;
+    domains: PolicyHost[];
+    mediaEndpoints: PolicyEndpoint[];
+    webDomains: PolicyHost[];
+    directSuffixes: PolicyHost[];
+    tcpEndpoints: PolicyEndpoint[];
+    tcpDirectAddresses: string[];
   };
 
 export type PolicyParse =
@@ -48,6 +57,10 @@ function isEndpointList(value: unknown): value is PolicyEndpoint[] {
     && Array.isArray(entry.ports)
     && entry.ports.every((port) => typeof port === 'number')
   ));
+}
+
+function isAddressList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
 export function parseTrafficPolicy(input: unknown): PolicyParse {
@@ -99,6 +112,28 @@ export function parseTrafficPolicy(input: unknown): PolicyParse {
       },
     };
   }
+  if (value.version === 5 && sameKeys(value, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes', 'tcpEndpoints', 'tcpDirectAddresses'])) {
+    if (
+      !isHostList(value.webDomains) ||
+      !isHostList(value.directSuffixes) ||
+      !isEndpointList(value.tcpEndpoints) ||
+      !isAddressList(value.tcpDirectAddresses)
+    ) {
+      return { ok: false, reason: 'v5 字段不合法' };
+    }
+    return {
+      ok: true,
+      policy: {
+        version: 5,
+        domains: value.domains,
+        mediaEndpoints: value.mediaEndpoints,
+        webDomains: value.webDomains,
+        directSuffixes: value.directSuffixes,
+        tcpEndpoints: value.tcpEndpoints,
+        tcpDirectAddresses: value.tcpDirectAddresses,
+      },
+    };
+  }
   return { ok: false, reason: '无法识别的规则版本或字段' };
 }
 
@@ -130,8 +165,9 @@ export function clearAllDirect(policy: TrafficPolicyDoc): TrafficPolicyDoc {
   next.domains = [];
   next.mediaEndpoints = [];
   if (next.version !== 1) next.webDomains = [];
-  if (next.version === 3 || next.version === 4) next.directSuffixes = [];
-  if (next.version === 4) next.tcpEndpoints = [];
+  if (next.version === 3 || next.version === 4 || next.version === 5) next.directSuffixes = [];
+  if (next.version === 4 || next.version === 5) next.tcpEndpoints = [];
+  if (next.version === 5) next.tcpDirectAddresses = [];
   return next;
 }
 

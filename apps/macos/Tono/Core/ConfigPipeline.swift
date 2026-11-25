@@ -82,6 +82,8 @@ nonisolated struct ConfigPipeline {
         /// These receive TCP rules and per-endpoint health fallbacks; UDP
         /// media endpoints remain isolated in `mediaEndpoints`.
         let tcpEndpoints: [DirectEndpoint]
+        /// Signed public IPv4 addresses permitted across all non-DNS TCP ports.
+        let tcpDirectAddresses: [String]
         /// Policy hostnames (pre-resolution) that must resolve through the
         /// interface-bound direct outbound via the China DoH resolvers, so the
         /// pinned answers are region-correct instead of exit-geolocated.
@@ -102,6 +104,7 @@ nonisolated struct ConfigPipeline {
             webDomainSuffixes: [DirectDomainSuffix] = [],
             mediaEndpoints: [DirectEndpoint],
             tcpEndpoints: [DirectEndpoint] = [],
+            tcpDirectAddresses: [String] = [],
             directResolverHosts: [String] = [],
             trusted: Bool = false,
             nativeAppDirect: Bool = true
@@ -112,6 +115,7 @@ nonisolated struct ConfigPipeline {
             self.webDomainSuffixes = webDomainSuffixes
             self.mediaEndpoints = mediaEndpoints
             self.tcpEndpoints = tcpEndpoints
+            self.tcpDirectAddresses = tcpDirectAddresses
             self.directResolverHosts = directResolverHosts
             self.trusted = trusted
             self.nativeAppDirect = nativeAppDirect
@@ -300,6 +304,7 @@ nonisolated struct ConfigPipeline {
             domainPins.isEmpty && webDomainPins.isEmpty
                 && webDomainSuffixes.isEmpty && mediaEndpoints.isEmpty
                 && tcpEndpoints.isEmpty
+                && tcpDirectAddresses.isEmpty
                 && directResolverHosts.isEmpty
         }
     }

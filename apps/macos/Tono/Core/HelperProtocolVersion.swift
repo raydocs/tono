@@ -538,7 +538,11 @@ nonisolated enum HelperProtocolVersion {
     ///   `SelectiveFailOpen` and `ThreeTierRoutingContract` (keeping
     ///   `dashscope-intl.aliyuncs.com`, `dashscope-us.aliyuncs.com`, and
     ///   `maas.aliyuncs.com` protected on Home/overseas).
-    static let current = "4.52.72"
+    /// - 4.52.72 → 4.52.73: extend signed session direct grants with custom
+    ///   non-DNS TCP ports in `sessionDirectEndpoints` and signed all-non-DNS-TCP
+    ///   IPv4 grants in `sessionDirectTCPAddresses`, while rejecting protected
+    ///   destinations in helper validation.
+    static let current = "4.52.73"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

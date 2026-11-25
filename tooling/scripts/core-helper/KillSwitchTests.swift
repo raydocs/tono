@@ -1033,11 +1033,11 @@ extension KillSwitchManager {
                 return false
             }
             let directEndpoints = try validateSessionDirectEndpoints([
-                ["address": "8.8.8.8", "transport": "udp", "port": 8000],
-                ["address": "1.1.1.1", "transport": "tcp", "port": 443],
-                ["address": "8.8.8.8", "transport": "tcp", "port": 80],
+                ["address": "223.5.5.5", "transport": "udp", "port": 8000],
+                ["address": "103.253.207.41", "transport": "tcp", "port": 55300],
+                ["address": "119.29.29.29", "transport": "tcp", "port": 80],
                 ["address": "1.0.0.1", "transport": "udp", "port": 443],
-                ["address": "8.8.8.8", "transport": "udp", "port": 8000],
+                ["address": "223.5.5.5", "transport": "udp", "port": 8000],
             ])
             guard directEndpoints.count == 4,
                   directEndpoints.map(\.json).map({ $0["transport"] as? String }) ==
@@ -1047,14 +1047,43 @@ extension KillSwitchManager {
                 [["address": "2606:4700:4700::1111", "transport": "tcp", "port": 443]],
                 [["address": "8.8.8.0/24", "transport": "tcp", "port": 443]],
                 [["address": "example.com", "transport": "tcp", "port": 443]],
-                [["address": "8.8.8.8", "transport": "tcp", "port": 8000]],
-                [["address": "8.8.8.8", "transport": "udp", "port": 80]],
-                [["address": "8.8.8.8", "transport": "quic", "port": 443]],
-                Array(repeating: ["address": "8.8.8.8", "transport": "tcp", "port": 443], count: 257),
+                [["address": "103.253.207.41", "transport": "tcp", "port": 53]],
+                [["address": "103.253.207.41", "transport": "tcp", "port": 853]],
+                [["address": "103.253.207.41", "transport": "tcp", "port": 0]],
+                [["address": "1.1.1.1", "transport": "tcp", "port": 443]],
+                [["address": "8.8.8.8", "transport": "tcp", "port": 443]],
+                [["address": "160.79.104.10", "transport": "tcp", "port": 443]],
+                [["address": "149.154.167.91", "transport": "tcp", "port": 443]],
+                [["address": "179.253.244.3", "transport": "tcp", "port": 443]],
+                [["address": "223.5.5.5", "transport": "udp", "port": 80]],
+                [["address": "223.5.5.5", "transport": "quic", "port": 443]],
+                Array(repeating: ["address": "223.5.5.5", "transport": "tcp", "port": 443], count: 257),
             ]
             for invalid in invalidDirectEndpoints {
                 do {
                     _ = try validateSessionDirectEndpoints(invalid)
+                    return false
+                } catch {}
+            }
+            let directTCPAddresses = try validateSessionDirectTCPAddresses([
+                "103.253.207.41", "81.69.152.51", "103.253.207.41",
+            ])
+            guard directTCPAddresses == ["103.253.207.41", "81.69.152.51"] else { return false }
+            let invalidDirectTCPAddresses: [Any] = [
+                ["10.0.0.1"],
+                ["2606:4700:4700::1111"],
+                ["103.253.207.0/24"],
+                ["example.com"],
+                ["1.1.1.1"],
+                ["8.8.8.8"],
+                ["160.79.104.10"],
+                ["149.154.167.91"],
+                ["179.253.244.3"],
+                Array(repeating: "81.69.152.51", count: 65),
+            ]
+            for invalid in invalidDirectTCPAddresses {
+                do {
+                    _ = try validateSessionDirectTCPAddresses(invalid)
                     return false
                 } catch {}
             }
@@ -1652,9 +1681,39 @@ extension KillSwitchManager {
                 emergencyState.cachedDERPEndpoints == state.cachedDERPEndpoints
             let emergencySessionCleared: Bool =
                 emergencyState.sessionDirectEndpoints.isEmpty
+                && emergencyState.sessionDirectTCPAddresses.isEmpty
             let sessionNotPersisted: Bool = persisted["sessionDirectEndpoints"] == nil
+                && persisted["sessionDirectTCPAddresses"] == nil
+            var tcpDirectState = KillSwitchState(
+                armed: true,
+                tailscaleBootstrapEnabled: state.tailscaleBootstrapEnabled,
+                apiHosts: state.apiHosts,
+                exitHints: state.exitHints,
+                tunnelInterfaces: ["utun199"],
+                resolvedHosts: state.resolvedHosts,
+                pinnedHosts: state.pinnedHosts,
+                derpEndpoints: state.derpEndpoints,
+                cachedDERPEndpoints: state.cachedDERPEndpoints,
+                proxyTargets: state.proxyTargets,
+                sessionDirectEndpoints: state.sessionDirectEndpoints,
+                reviewedBundleDirectEnabled: true,
+                allowLocalNetworkDevices: true
+            )
+            tcpDirectState.sessionDirectTCPAddresses = directTCPAddresses
+            let tcpDirectRules = renderRules(state: tcpDirectState, allowedUID: 501)
+            let tcpDirectRendered =
+                tcpDirectRules.contains(
+                    "pass out quick inet proto tcp to 103.253.207.41 port { 1:52, 54:852, 854:65535 } user root keep state (if-bound) label \"tono-direct\""
+                )
+                && withdrawnHosts(
+                    Set(passRules(in: tcpDirectRules)).subtracting(passRules(in: tunneledRules))
+                ) == ["103.253.207.41", "81.69.152.51"]
+                && emergencyState(preserving: tcpDirectState).sessionDirectTCPAddresses.isEmpty
+                && persistentObject(tcpDirectState, allowedUID: 501)["sessionDirectTCPAddresses"] == nil
+            let tcpDirectParse = pfSyntaxAccepts(tcpDirectRules)
             let statesAgree = inactivePinsMatch && emergencyPinsMatch
                 && derpCacheMatch && emergencySessionCleared && sessionNotPersisted
+                && tcpDirectRendered && (tcpDirectParse ?? true)
             let cacheOnlyMatch: Bool = cacheOnlyResolved["api.example.com"] == ["1.1.1.1"]
             let bootstrapMatch: Bool = bootstrapPins["api.example.com"] == ["1.1.1.1"]
             let pinsAgree = cacheOnlyMatch && bootstrapMatch && rejectedUnrequestedPin

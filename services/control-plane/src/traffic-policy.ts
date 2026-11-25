@@ -3,13 +3,47 @@ import { sha256, decryptTrafficPolicy, verifyTrafficPolicySignature } from './cr
 import { ApiError } from './errors';
 
 export type TrafficPolicy = {
-  version: 1 | 2 | 3 | 4;
+  version: 1 | 2 | 3 | 4 | 5;
   domains: Array<{ host: string; ports: number[] }>;
   mediaEndpoints: Array<{ address: string; ports: number[] }>;
   webDomains?: Array<{ host: string; ports: number[] }>;
   directSuffixes?: Array<{ host: string; ports: number[] }>;
   tcpEndpoints?: Array<{ address: string; ports: number[] }>;
+  tcpDirectAddresses?: string[];
 };
+
+const NON_DNS_FORBIDDEN_PORTS = new Set([53, 853]);
+const MAX_TCP_ENDPOINT_PORTS = 16;
+const MAX_TCP_DIRECT_ADDRESSES = 64;
+
+function isProtectedDirectIPv4(address: string): boolean {
+  if (!isPublicIPv4(address)) return true;
+  if (address === '1.1.1.1' || address === '8.8.8.8') return true;
+  if (address === '179.253.244.3' || address === '179.255.154.17') return true;
+  const [a, b, c] = address.split('.').map(Number);
+  if (a === 160 && b === 79 && c >= 104 && c <= 111) return true; // CLAUDE_HOME_IPV4_CIDRS 160.79.104.0/21
+  if (a === 91 && b === 108 && (
+    (c >= 4 && c <= 7) || (c >= 8 && c <= 11) || (c >= 12 && c <= 15) ||
+    (c >= 16 && c <= 19) || (c >= 56 && c <= 59)
+  )) return true; // CLOUD_IPV4_CIDRS 91.108.{4,8,12,16,56}.0/22
+  if (a === 149 && b === 154 && c >= 160 && c <= 175) return true; // CLOUD_IPV4_CIDRS 149.154.160.0/20
+  return false;
+}
+
+function canonicalNonDnsTcpPorts(value: unknown, name: string): number[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAX_TCP_ENDPOINT_PORTS ||
+    value.some((port) => !Number.isInteger(port) || port < 1 || port > 65535 || NON_DNS_FORBIDDEN_PORTS.has(port))
+  ) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+  }
+  if (new Set(value).size !== value.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Duplicate ${name}`);
+  }
+  return [...value].sort((a, b) => a - b) as number[];
+}
 
 export const emptyTrafficPolicy = (): TrafficPolicy => ({ version: 1, domains: [], mediaEndpoints: [] });
 
@@ -77,6 +111,9 @@ export function canonicalTrafficPolicy(
   if (!trusted && !admitStoredUnsignedEndpoints && policy.tcpEndpoints?.length) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'TCP endpoints require a signed policy');
   }
+  if (!trusted && !admitStoredUnsignedEndpoints && policy.tcpDirectAddresses?.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'TCP direct addresses require a signed policy');
+  }
   return policy;
 }
 
@@ -93,15 +130,19 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes']);
   const isVersion4 = policy.version === 4 &&
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes', 'tcpEndpoints']);
-  if ((!isVersion1 && !isVersion2 && !isVersion3 && !isVersion4) ||
+  const isVersion5 = policy.version === 5 &&
+    exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes', 'tcpEndpoints', 'tcpDirectAddresses']);
+  if ((!isVersion1 && !isVersion2 && !isVersion3 && !isVersion4 && !isVersion5) ||
       !Array.isArray(policy.domains) || policy.domains.length > 32 ||
       !Array.isArray(policy.mediaEndpoints) || policy.mediaEndpoints.length > 64 ||
-      ((isVersion2 || isVersion3 || isVersion4) &&
+      ((isVersion2 || isVersion3 || isVersion4 || isVersion5) &&
         (!Array.isArray(policy.webDomains) || policy.webDomains.length > 32)) ||
-      ((isVersion3 || isVersion4) &&
+      ((isVersion3 || isVersion4 || isVersion5) &&
         (!Array.isArray(policy.directSuffixes) || policy.directSuffixes.length > 64)) ||
-      (isVersion4 &&
-        (!Array.isArray(policy.tcpEndpoints) || policy.tcpEndpoints.length > 64))) {
+      ((isVersion4 || isVersion5) &&
+        (!Array.isArray(policy.tcpEndpoints) || policy.tcpEndpoints.length > 64)) ||
+      (isVersion5 &&
+        (!Array.isArray(policy.tcpDirectAddresses) || policy.tcpDirectAddresses.length > MAX_TCP_DIRECT_ADDRESSES))) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid traffic policy version or shape');
   }
   const allowedWeChatSuffixes = ['qq.com', 'qq.com.cn', 'qpic.cn', 'qlogo.cn', 'gtimg.cn', 'gtimg.com', 'wechat.com', 'weixin.com', 'weixinbridge.com', 'wxs.qq.com'];
@@ -415,19 +456,44 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     }
     const { address, ports } = entry as Row;
     if (typeof address !== 'string' || !isPublicIPv4(address) ||
-        seenTCPAddresses.has(address)) {
+        isProtectedDirectIPv4(address) || seenTCPAddresses.has(address)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate TCP address');
     }
     seenTCPAddresses.add(address);
-    return { address, ports: canonicalPorts(ports, [80, 443], 'TCP endpoint ports') };
+    const canonical = trusted
+      ? canonicalNonDnsTcpPorts(ports, 'TCP endpoint ports')
+      : canonicalPorts(ports, [80, 443], 'TCP endpoint ports');
+    return { address, ports: canonical };
   }).sort((a, b) => a.address < b.address ? -1 : a.address > b.address ? 1 : 0);
+  if (isVersion4) {
+    return {
+      version: 4,
+      domains,
+      mediaEndpoints,
+      webDomains,
+      directSuffixes,
+      tcpEndpoints,
+    };
+  }
+
+  const seenTCPDirectAddresses = new Set<string>();
+  const tcpDirectAddresses = (policy.tcpDirectAddresses as unknown[]).map((entry: unknown) => {
+    if (typeof entry !== 'string' || !isPublicIPv4(entry) ||
+        isProtectedDirectIPv4(entry) || seenTCPAddresses.has(entry) ||
+        seenTCPDirectAddresses.has(entry)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate TCP direct address');
+    }
+    seenTCPDirectAddresses.add(entry);
+    return entry;
+  }).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
   return {
-    version: 4,
+    version: 5,
     domains,
     mediaEndpoints,
     webDomains,
     directSuffixes,
     tcpEndpoints,
+    tcpDirectAddresses,
   };
 }
 

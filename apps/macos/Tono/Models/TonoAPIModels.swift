@@ -212,6 +212,10 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
     /// resolve or pin IPs; the runtime emits exact allowlisted
     /// DOMAIN-SUFFIX rules instead.
     let directSuffixes: [TonoTrafficPolicyDomain]
+    /// Version-5 signed public IPv4 literals permitted across all non-DNS TCP
+    /// ports (`1...52`, `54...852`, `854...65535`). Signature-only; never
+    /// admitted from unsigned policies or compiled-in allowlists.
+    let tcpDirectAddresses: [String]
     /// Runtime-only authorship state. This is deliberately not part of the
     /// server JSON: it becomes true only after the detached Ed25519 signature
     /// over those exact bytes verifies locally. Carrying it with the sanitized
@@ -226,6 +230,7 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
         tcpEndpoints: [TonoTrafficPolicyMediaEndpoint] = [],
         webDomains: [TonoTrafficPolicyDomain] = [],
         directSuffixes: [TonoTrafficPolicyDomain] = [],
+        tcpDirectAddresses: [String] = [],
         trusted: Bool = false
     ) {
         self.version = version
@@ -234,6 +239,7 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
         self.tcpEndpoints = tcpEndpoints
         self.webDomains = webDomains
         self.directSuffixes = directSuffixes
+        self.tcpDirectAddresses = tcpDirectAddresses
         self.trusted = trusted
     }
 
@@ -260,6 +266,10 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
             [TonoTrafficPolicyDomain].self,
             forKey: .directSuffixes
         ) ?? []
+        tcpDirectAddresses = try container.decodeIfPresent(
+            [String].self,
+            forKey: .tcpDirectAddresses
+        ) ?? []
         // Trust is never accepted from the document itself. The processor sets
         // it only after verifying the detached signature over the source JSON.
         trusted = false
@@ -267,7 +277,7 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case version, domains, mediaEndpoints, tcpEndpoints, webDomains,
-             directSuffixes
+             directSuffixes, tcpDirectAddresses
     }
 }
 nonisolated struct TonoTrafficPolicyDomain: Codable, Sendable, Equatable {

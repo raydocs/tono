@@ -104,14 +104,24 @@ export async function postDraftFromCandidates(req: Request, e: Env, actor: Actor
     const host = String(row.etld1).toLowerCase();
     if (!suffixes.has(host)) suffixes.set(host, { host, ports: [443] });
   }
-  const draftInput = {
-    version: 4 as const,
-    domains: policy.domains,
-    mediaEndpoints: policy.mediaEndpoints,
-    webDomains: policy.webDomains ?? [],
-    directSuffixes: [...suffixes.values()],
-    tcpEndpoints: policy.tcpEndpoints ?? [],
-  };
+  const draftInput = policy.version === 5
+    ? {
+        version: 5 as const,
+        domains: policy.domains,
+        mediaEndpoints: policy.mediaEndpoints,
+        webDomains: policy.webDomains ?? [],
+        directSuffixes: [...suffixes.values()],
+        tcpEndpoints: policy.tcpEndpoints ?? [],
+        tcpDirectAddresses: policy.tcpDirectAddresses ?? [],
+      }
+    : {
+        version: 4 as const,
+        domains: policy.domains,
+        mediaEndpoints: policy.mediaEndpoints,
+        webDomains: policy.webDomains ?? [],
+        directSuffixes: [...suffixes.values()],
+        tcpEndpoints: policy.tcpEndpoints ?? [],
+      };
   let draft: unknown = draftInput;
   let note = 'draft only; not published';
   try {

@@ -4228,6 +4228,7 @@ fn the_foreign_flag_is_taken_from_the_state_the_status_was_built_from() {
         tun_luid: None,
         core_instance: None,
         direct_endpoints: Vec::new(),
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
@@ -4337,6 +4338,7 @@ async fn write_authorization_follows_the_recorded_owner() -> Result<()> {
         tun_luid: None,
         core_instance: None,
         direct_endpoints: Vec::new(),
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     });
@@ -4437,6 +4439,7 @@ fn a_tunnel_permit_expires_with_the_core_instance_it_was_granted_for() {
             port: 443,
             protocol: ProxyProtocol::Tcp,
         }],
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
@@ -4514,6 +4517,7 @@ fn direct_endpoint_canonicalization_deduplicates_and_has_order_independent_diges
             generation: 0,
         }),
         direct_endpoints: Vec::new(),
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
@@ -5578,6 +5582,7 @@ fn locking_renders_the_permit_from_the_very_instance_it_recorded() {
         tun_luid: Some(0x7777),
         core_instance: None,
         direct_endpoints: Vec::new(),
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
@@ -5604,6 +5609,7 @@ async fn the_status_flag_tracks_what_the_last_exact_install_proved() {
         tun_luid: Some(0x99),
         core_instance: Some(running),
         direct_endpoints: Vec::new(),
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
@@ -6137,6 +6143,91 @@ async fn ai_home_start_requires_matching_contract_and_guards_session_mutations()
     let disarmed = status().await;
     assert!(!disarmed.wanted);
     assert!(!disarmed.ai_home_scoped);
+    cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn sing_box_direct_tcp_addresses_and_custom_ports_require_signed_policy_and_stay_volatile()
+-> Result<()> {
+    cleanup().await;
+    locked_direct_test_session().await?;
+    let mut cfg = test_config();
+    cfg.direct_endpoints = vec![ProxyEndpoint {
+        ip: "139.224.114.71".to_owned(),
+        port: 55300,
+        protocol: ProxyProtocol::Tcp,
+    }];
+    let tcp_addrs = vec!["103.253.207.41".to_owned()];
+
+    // Without a signed policy, both custom-port TCP endpoints and direct_tcp_addresses are refused.
+    assert!(
+        commit_sing_box_direct_while_locked(&cfg.direct_endpoints, &[], &[], None, 199)
+            .await
+            .is_err()
+    );
+    assert!(
+        commit_sing_box_direct_while_locked(&[], &[], &tcp_addrs, None, 199)
+            .await
+            .is_err()
+    );
+
+    // Sign a v5 policy covering 139.224.114.71:55300 and 103.253.207.41 using the direct_policy test helper.
+    use base64::Engine as _;
+    use ed25519_dalek::{Signer, SigningKey};
+    let signing = SigningKey::from_bytes(&[9_u8; 32]);
+    let json = r#"{"version":5,"revision":11,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[],"tcpEndpoints":[{"address":"139.224.114.71","ports":[55300]}],"tcpDirectAddresses":["103.253.207.41"]}"#;
+    let mut message = crate::policy_signature::TRAFFIC_POLICY_SIGNATURE_CONTEXT
+        .as_bytes()
+        .to_vec();
+    message.extend_from_slice(json.as_bytes());
+    let wrong_key_signed = crate::SignedTrafficPolicy {
+        revision: 11,
+        json: json.to_owned(),
+        signature: base64::engine::general_purpose::STANDARD
+            .encode(signing.sign(&message).to_bytes()),
+    };
+    // Production `DirectPolicy::verify` rejects a policy not signed by the compiled production key.
+    assert!(
+        commit_sing_box_direct_while_locked(
+            &cfg.direct_endpoints,
+            &[],
+            &tcp_addrs,
+            Some(&wrong_key_signed),
+            199,
+        )
+        .await
+        .is_err()
+    );
+
+    // Direct `validate_sing_box_direct_grants` against a verified DirectPolicy admits exact
+    // signed entries and refuses unlisted/DNS/protected targets.
+    let public = base64::engine::general_purpose::STANDARD
+        .encode(signing.verifying_key().to_bytes());
+    let policy =
+        crate::core::direct_policy::DirectPolicy::verify_with_key(&wrong_key_signed, &public)
+            .unwrap();
+    let admitted = validate::validate_sing_box_direct_grants(&cfg, &tcp_addrs, Some(&policy))?;
+    assert_eq!(admitted, vec!["103.253.207.41".parse::<Ipv4Addr>()?]);
+
+    let mut bad_port = cfg.clone();
+    bad_port.direct_endpoints[0].port = 53;
+    assert!(validate::validate_sing_box_direct_grants(&bad_port, &[], Some(&policy)).is_err());
+
+    let mut bad_unlisted = cfg.clone();
+    bad_unlisted.direct_endpoints[0].port = 55301;
+    assert!(validate::validate_sing_box_direct_grants(&bad_unlisted, &[], Some(&policy)).is_err());
+
+    assert!(
+        validate::validate_sing_box_direct_grants(
+            &test_config(),
+            &["103.253.207.42".to_owned()],
+            Some(&policy),
+        )
+        .is_err()
+    );
+
     cleanup().await;
     Ok(())
 }

@@ -196,6 +196,8 @@ pub struct DirectPlan {
     pub tcp_web_rules: Vec<(String, std::net::Ipv4Addr, u16)>,
     pub web_suffix_rules: Vec<(String, u16)>,
     pub udp_wechat_rules: Vec<(std::net::Ipv4Addr, u16)>,
+    pub tcp_direct_endpoints: Vec<(std::net::Ipv4Addr, u16)>,
+    pub tcp_direct_addresses: Vec<std::net::Ipv4Addr>,
     pub wechat_process_path_regexes: Vec<String>,
     /// Ports the kill switch will let the staged core reach directly, straight from
     /// `tono_service_protocol::REVIEWED_DIRECT_PORTS`. The process rules below are
@@ -1505,6 +1507,8 @@ reality-opts:
             )],
             web_suffix_rules: vec![("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)],
             udp_wechat_rules: vec![(std::net::Ipv4Addr::new(9, 0, 0, 20), 443)],
+            tcp_direct_endpoints: Vec::new(),
+            tcp_direct_addresses: Vec::new(),
             wechat_process_path_regexes: Vec::new(),
             // Mirrors what the App passes from `tono_service_protocol::REVIEWED_DIRECT_PORTS`.
             reviewed_direct_ports: vec![80, 443, 8000, 8080],
@@ -1986,6 +1990,8 @@ reality-opts:
             tcp_web_rules: Vec::new(),
             web_suffix_rules: Vec::new(),
             udp_wechat_rules: Vec::new(),
+            tcp_direct_endpoints: Vec::new(),
+            tcp_direct_addresses: Vec::new(),
             wechat_process_path_regexes: Vec::new(),
             reviewed_direct_ports: Vec::new(),
         };

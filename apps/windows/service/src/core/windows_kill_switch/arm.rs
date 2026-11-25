@@ -208,6 +208,7 @@ pub(crate) async fn arm_bootstrap_waiting(
         core_instance: None,
         // In memory only — populated exclusively by the lease-backed reload transaction.
         direct_endpoints: Vec::new(),
+        direct_tcp_addresses: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
@@ -469,6 +470,7 @@ async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
     .is_some()
     {
         armed.direct_endpoints.clear();
+        armed.direct_tcp_addresses.clear();
         armed.reviewed_direct_ports.clear();
         armed.direct_reload = None;
     }

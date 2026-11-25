@@ -163,6 +163,14 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_AI_HOME
     }
+
+    /// Whether `CommitSingBoxDirect` verifies signed custom-port TCP endpoints and all-non-DNS-TCP
+    /// IPv4 addresses against the compiled policy key.
+    pub const fn supports_sing_box_direct_tcp_endpoints(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision
+                >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_TCP_ENDPOINTS
+    }
 }
 
 /// The image file name selects the engine. Omitted and unknown names stay mihomo,
@@ -453,6 +461,14 @@ pub struct CommitSingBoxDirectRequest {
     pub direct_endpoints: Vec<ProxyEndpoint>,
     #[serde(default)]
     pub reviewed_direct_ports: Vec<u16>,
+    /// Revision 24. Exact public IPv4 addresses permitted on all non-DNS TCP ports
+    /// (`1..=52`, `54..=852`, `854..=65535`), verified against `traffic_policy`.
+    #[serde(default)]
+    pub direct_tcp_addresses: Vec<String>,
+    /// Revision 24. Signed traffic policy authorizing custom-port TCP endpoints and
+    /// `direct_tcp_addresses` in WFP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic_policy: Option<SignedTrafficPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -530,9 +546,37 @@ pub fn canonical_direct_endpoints(
     Ok(canonical)
 }
 
+/// Normalize, sort, and deduplicate exact IPv4-only DIRECT TCP addresses before hashing.
+pub fn canonical_direct_tcp_addresses(addresses: &[String]) -> Result<Vec<String>, String> {
+    let mut canonical = addresses
+        .iter()
+        .map(|raw| {
+            raw.trim()
+                .parse::<std::net::Ipv4Addr>()
+                .map_err(|_| format!("invalid DIRECT TCP address {raw:?}"))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    canonical.sort_unstable();
+    canonical.dedup();
+    Ok(canonical
+        .into_iter()
+        .map(|address| address.to_string())
+        .collect())
+}
+
 /// SHA-256 commit proof for a canonical exact DIRECT endpoint set.
 pub fn direct_endpoint_digest(endpoints: &[ProxyEndpoint]) -> Result<String, String> {
+    direct_endpoint_digest_with_tcp_addresses(endpoints, &[])
+}
+
+/// SHA-256 commit proof combining exact endpoint tuples and optional all-non-DNS-TCP IPv4 addresses.
+/// When `tcp_addresses` is empty, the output is byte-identical to [`direct_endpoint_digest`].
+pub fn direct_endpoint_digest_with_tcp_addresses(
+    endpoints: &[ProxyEndpoint],
+    tcp_addresses: &[String],
+) -> Result<String, String> {
     let canonical = canonical_direct_endpoints(endpoints)?;
+    let canonical_tcp = canonical_direct_tcp_addresses(tcp_addresses)?;
     let mut hash = Sha256::new();
     for endpoint in canonical {
         let ip = endpoint
@@ -551,6 +595,15 @@ pub fn direct_endpoint_digest(endpoints: &[ProxyEndpoint]) -> Result<String, Str
         }
         hash.update([direct_protocol_order(endpoint.protocol)]);
         hash.update(endpoint.port.to_be_bytes());
+    }
+    if !canonical_tcp.is_empty() {
+        hash.update(b"\xfftcp-direct-v1\0");
+        for raw in canonical_tcp {
+            let ip = raw
+                .parse::<std::net::Ipv4Addr>()
+                .map_err(|_| "canonical DIRECT TCP address became invalid".to_owned())?;
+            hash.update(ip.octets());
+        }
     }
     Ok(hash
         .finalize()

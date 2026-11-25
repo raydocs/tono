@@ -604,6 +604,8 @@ pub(super) async fn apply_cloud_policy(
         && policy.document.media_endpoints.is_empty()
         && policy.document.web_domains.is_empty()
         && policy.document.direct_suffixes.is_empty()
+        && policy.document.tcp_endpoints.is_empty()
+        && policy.document.tcp_direct_addresses.is_empty()
     {
         return Ok(None);
     }
@@ -673,12 +675,23 @@ pub(super) async fn apply_cloud_policy(
                 == tono_core::policy_signature::SignatureVerdict::Trusted
         })
     };
-    let (plan, direct_endpoints) = match build_direct_plan_with_trust(
+    let (tcp_endpoints, tcp_direct_addresses) =
+        if sing_box && sing_box_direct_tcp_endpoints_ready().await {
+            (
+                policy.document.tcp_endpoints.as_slice(),
+                policy.document.tcp_direct_addresses.as_slice(),
+            )
+        } else {
+            (&[][..], &[][..])
+        };
+    let (plan, direct_endpoints) = match build_direct_plan_with_signed_tcp(
         interface,
         &wechat_pins,
         &web_pins,
         &policy.document.media_endpoints,
         &policy.document.direct_suffixes,
+        tcp_endpoints,
+        tcp_direct_addresses,
         node,
         wechat_path_regexes,
         sing_box && policy_trusted,
@@ -694,13 +707,9 @@ pub(super) async fn apply_cloud_policy(
         && plan.tcp_web_rules.is_empty()
         && plan.web_suffix_rules.is_empty()
         && plan.udp_wechat_rules.is_empty()
+        && plan.tcp_direct_endpoints.is_empty()
+        && plan.tcp_direct_addresses.is_empty()
     {
-        return Ok(None);
-    }
-    let expected_controller_rules = expected_controller_direct_rules(&plan);
-    // A suffix-only plan emits no rules without native-app pins. Opening the reload bracket
-    // for an empty graph would retract the healthy TUN permit and then fail controller read-back.
-    if expected_controller_rules.is_empty() {
         return Ok(None);
     }
     // Declared to the Service exactly when `runtime_value` emits process-scoped rules, and with
@@ -735,6 +744,13 @@ pub(super) async fn apply_cloud_policy(
             direct_interface,
         )
         .await;
+    }
+
+    let expected_controller_rules = expected_controller_direct_rules(&plan);
+    // A suffix-only plan emits no rules without native-app pins. Opening the reload bracket
+    // for an empty graph would retract the healthy TUN permit and then fail controller read-back.
+    if expected_controller_rules.is_empty() {
+        return Ok(None);
     }
 
     // Build the staged bundle before the irreversible bracket. The controller secret and ports
@@ -1744,12 +1760,38 @@ async fn sing_box_direct_service_ready() -> bool {
     }
 }
 
-fn sing_box_rules_keep_ai_blocked(rules: &[tono_core::sing_box::ClashRuleProof]) -> bool {
-    rules.iter().any(|rule| {
+async fn sing_box_direct_tcp_endpoints_ready() -> bool {
+    match tono_service_protocol::get_version().await {
+        Ok(response) if response.code == 0 => response
+            .data
+            .as_ref()
+            .is_some_and(tono_service_protocol::ProtocolInfo::supports_sing_box_direct_tcp_endpoints),
+        _ => false,
+    }
+}
+
+fn sing_box_rules_keep_ai_blocked(
+    rules: &[tono_core::sing_box::ClashRuleProof],
+    expect_process_path_regex: bool,
+) -> bool {
+    let keeps_ai_suffix = rules.iter().any(|rule| {
         rule.payload.contains("dashscope-intl.aliyuncs.com")
             && rule.proxy.starts_with("route(")
             && !rule.proxy.contains(config::DIRECT_GROUP_NAME)
-    }) && rules.iter().any(|rule| rule.payload.contains("process_path_regex="))
+    });
+    let keeps_ai_cidr = rules.iter().any(|rule| {
+        rule.payload.contains("160.79.104.0/21")
+            && rule.proxy.starts_with("route(")
+            && !rule.proxy.contains(config::DIRECT_GROUP_NAME)
+    });
+    let keeps_home_process = rules.iter().any(|rule| {
+        rule.payload.contains("Claude.exe")
+            && rule.proxy.starts_with("route(")
+            && !rule.proxy.contains(config::DIRECT_GROUP_NAME)
+    });
+    let keeps_process_regex = !expect_process_path_regex
+        || rules.iter().any(|rule| rule.payload.contains("process_path_regex="));
+    keeps_ai_suffix && keeps_ai_cidr && keeps_home_process && keeps_process_regex
 }
 
 fn clash_rules_match(
@@ -1864,7 +1906,10 @@ async fn replace_sing_box_for_direct(
             return Ok(None);
         }
     };
-    if !sing_box_rules_keep_ai_blocked(&expected) {
+    if !sing_box_rules_keep_ai_blocked(
+        &expected,
+        !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty(),
+    ) {
         skip_optional_direct_policy(
             state,
             generation,
@@ -1924,10 +1969,22 @@ async fn replace_sing_box_for_direct(
         )
         .await;
     }
+    let direct_tcp_addresses: Vec<String> = plan
+        .tcp_direct_addresses
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let expected_digest = tono_service_protocol::direct_endpoint_digest_with_tcp_addresses(
+        &endpoints,
+        &direct_tcp_addresses,
+    )
+    .map_err(StageFailure::error)?;
     let committed = match service::tono_commit_sing_box_direct(
         session,
         endpoints.clone(),
         reviewed_direct_ports.clone(),
+        direct_tcp_addresses,
+        Some(signed_policy),
     )
     .await
     {
@@ -1945,6 +2002,16 @@ async fn replace_sing_box_for_direct(
             .await;
         }
     };
+    if committed.endpoint_digest != expected_digest {
+        return restore_sing_box_full_tunnel(
+            state,
+            generation,
+            session,
+            full_tunnel,
+            "sing-box DIRECT commit digest did not match the requested set; restored the full tunnel".to_owned(),
+        )
+        .await;
+    }
     let endpoint_digest = committed.endpoint_digest.clone();
     let snapshot = match service::tono_service_status_snapshot().await {
         Ok(snapshot) => snapshot,
@@ -2240,6 +2307,33 @@ pub fn build_direct_plan_with_trust(
     wechat_process_path_regexes: Vec<String>,
     policy_trusted: bool,
 ) -> Result<(tono_core::config::DirectPlan, Vec<ProxyEndpoint>), String> {
+    build_direct_plan_with_signed_tcp(
+        interface,
+        wechat_pins,
+        web_pins,
+        media,
+        suffixes,
+        &[],
+        &[],
+        node,
+        wechat_process_path_regexes,
+        policy_trusted,
+    )
+}
+
+#[allow(clippy::too_many_arguments, reason = "direct plan inputs across policy versions")]
+pub fn build_direct_plan_with_signed_tcp(
+    interface: String,
+    wechat_pins: &[(String, Vec<std::net::Ipv4Addr>, Vec<u16>)],
+    web_pins: &[(String, Vec<std::net::Ipv4Addr>, Vec<u16>)],
+    media: &[tono_core::policy::PolicyMedia],
+    suffixes: &[tono_core::policy::PolicyDomain],
+    tcp_endpoints: &[tono_core::policy::PolicyMedia],
+    tcp_direct_addresses_input: &[String],
+    node: &ValidatedNode,
+    wechat_process_path_regexes: Vec<String>,
+    policy_trusted: bool,
+) -> Result<(tono_core::config::DirectPlan, Vec<ProxyEndpoint>), String> {
     let mut hosts: Vec<(String, String)> = Vec::new();
     let mut wechat_tcp = Vec::new();
     let mut web_tcp = Vec::new();
@@ -2307,16 +2401,58 @@ pub fn build_direct_plan_with_trust(
     web_suffix_rules.sort_unstable();
     web_suffix_rules.dedup();
 
+    let mut tcp_direct_endpoints: Vec<(std::net::Ipv4Addr, u16)> = Vec::new();
+    let mut tcp_direct_addresses: Vec<std::net::Ipv4Addr> = Vec::new();
+    if policy_trusted {
+        for entry in tcp_endpoints {
+            let Ok(ip) = entry.address.parse::<std::net::Ipv4Addr>() else {
+                continue;
+            };
+            if ip == node.server
+                || !tono_core::node::is_public_ipv4(ip)
+                || tono_core::policy::is_protected_direct_ipv4(ip)
+            {
+                continue;
+            }
+            for &port in &entry.ports {
+                if port != 0 && port != 53 && port != 853 {
+                    tcp_direct_endpoints.push((ip, port));
+                }
+            }
+        }
+        tcp_direct_endpoints.sort_unstable();
+        tcp_direct_endpoints.dedup();
+
+        let tcp_endpoint_ips: std::collections::BTreeSet<std::net::Ipv4Addr> =
+            tcp_direct_endpoints.iter().map(|(ip, _)| *ip).collect();
+        for raw in tcp_direct_addresses_input {
+            let Ok(ip) = raw.parse::<std::net::Ipv4Addr>() else {
+                continue;
+            };
+            if ip == node.server
+                || !tono_core::node::is_public_ipv4(ip)
+                || tono_core::policy::is_protected_direct_ipv4(ip)
+                || tcp_endpoint_ips.contains(&ip)
+            {
+                continue;
+            }
+            tcp_direct_addresses.push(ip);
+        }
+        tcp_direct_addresses.sort_unstable();
+        tcp_direct_addresses.dedup();
+    }
+
     let mut endpoint_keys: std::collections::BTreeSet<(std::net::Ipv4Addr, u16, bool)> = wechat_tcp
         .iter()
         .chain(web_tcp.iter())
         .map(|(_, ip, port)| (*ip, *port, false))
         .collect();
     endpoint_keys.extend(udp.iter().map(|(ip, port)| (*ip, *port, true)));
-    if endpoint_keys.len() > MAX_DIRECT_ENDPOINTS {
+    endpoint_keys.extend(tcp_direct_endpoints.iter().map(|(ip, port)| (*ip, *port, false)));
+    if endpoint_keys.len() + tcp_direct_addresses.len() > MAX_DIRECT_ENDPOINTS {
         return Err(format!(
             "cloud DIRECT policy resolved to {} unique endpoints; maximum is {MAX_DIRECT_ENDPOINTS}",
-            endpoint_keys.len()
+            endpoint_keys.len() + tcp_direct_addresses.len()
         ));
     }
     let endpoints = endpoint_keys
@@ -2343,6 +2479,8 @@ pub fn build_direct_plan_with_trust(
         tcp_web_rules: web_tcp,
         web_suffix_rules,
         udp_wechat_rules: udp,
+        tcp_direct_endpoints,
+        tcp_direct_addresses,
         wechat_process_path_regexes,
         // Straight from the Service crate, not a second copy of the numbers: the rules emitted
         // from this plan and the WFP permit the Service renders are then the same surface by
@@ -2433,6 +2571,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![("aliyuncs.com".into(), 443), ("bilibili.com".into(), 80)],
             udp_wechat_rules: vec![("101.1.2.4".parse().unwrap(), 8000)],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![r"^C:\\Program Files\\Tencent\\WeChat\\".into()],
             reviewed_direct_ports: vec![80, 443, 8080],
         };
@@ -2532,6 +2672,8 @@ mod cancellation_tests {
             media_endpoints: Vec::new(),
             web_domains: Vec::new(),
             direct_suffixes: Vec::new(),
+            tcp_endpoints: Vec::new(),
+            tcp_direct_addresses: Vec::new(),
         };
         let policy = CapturedTrafficPolicy {
             revision: 7,
@@ -2619,6 +2761,8 @@ mod cancellation_tests {
             media_endpoints: Vec::new(),
             web_domains: Vec::new(),
             direct_suffixes: Vec::new(),
+            tcp_endpoints: Vec::new(),
+            tcp_direct_addresses: Vec::new(),
         };
         let policy = CapturedTrafficPolicy {
             revision: 7,
@@ -2667,6 +2811,8 @@ mod cancellation_tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![],
             udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![r"^C:\\Program Files\\Tencent\\WeChat\\".into()],
             // What `build_direct_plan` hands over: the mihomo set, with 8000.
             reviewed_direct_ports: tono_service_protocol::REVIEWED_DIRECT_PORTS.to_vec(),
@@ -2699,6 +2845,8 @@ mod cancellation_tests {
                 media_endpoints: Vec::new(),
                 web_domains: Vec::new(),
                 direct_suffixes: Vec::new(),
+                tcp_endpoints: Vec::new(),
+                tcp_direct_addresses: Vec::new(),
             },
         };
         let sent = signed_policy_for(Some(&signed_response(7, "digest", Some("c2ln"))), &policy).unwrap();
@@ -2747,6 +2895,73 @@ mod cancellation_tests {
             "{:?}",
             inner.optional_direct_skip
         );
+    }
+
+    #[test]
+    fn signed_v5_tcp_direct_only_plan_emits_sing_box_rules_and_keeps_ai_blocked() {
+        let reference: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../../../docs/reports/sing-box-evaluation/migration-m0/reference.json"
+        ))
+        .unwrap();
+        let nodes: Vec<tono_core::node::ValidatedNode> = reference["input"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|node| tono_core::node::admit_node(&serde_yaml_ng::to_value(node).unwrap()).unwrap())
+            .collect();
+        let node = nodes.iter().find(|n| n.name == "Fixture Beta").unwrap();
+        let tcp_eps = vec![tono_core::policy::PolicyMedia {
+            address: "139.224.114.71".into(),
+            ports: vec![55300],
+        }];
+        let tcp_addrs = vec!["103.253.207.41".to_string(), "81.69.152.51".to_string()];
+        let (plan, endpoints) = build_direct_plan_with_signed_tcp(
+            "Ethernet".into(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &tcp_eps,
+            &tcp_addrs,
+            node,
+            Vec::new(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(plan.tcp_direct_endpoints, vec![("139.224.114.71".parse().unwrap(), 55300)]);
+        assert_eq!(
+            plan.tcp_direct_addresses,
+            vec![
+                "81.69.152.51".parse::<std::net::Ipv4Addr>().unwrap(),
+                "103.253.207.41".parse::<std::net::Ipv4Addr>().unwrap(),
+            ]
+        );
+        assert_eq!(endpoints.len(), 1);
+        assert_eq!(endpoints[0].port, 55300);
+
+        let document = super::super::core_select::sing_box_runtime_document(
+            &nodes,
+            "Fixture Beta",
+            &tono_core::CatalogRouting::default(),
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            tono_core::config::RuntimePorts {
+                mixed_port: 29190,
+                controller_port: 29191,
+            },
+            Some(&plan),
+            0,
+        )
+        .unwrap();
+        let expected = expected_clash_api_rules(&document).unwrap();
+        assert!(sing_box_rules_keep_ai_blocked(&expected, false));
+        assert!(expected.iter().any(|r| {
+            r.payload.contains("139.224.114.71/32")
+                && r.payload.contains("port=55300")
+                && r.proxy == "route(Tono-China-Direct)"
+        }));
+        assert!(expected.iter().any(|r| {
+            r.payload.contains("103.253.207.41/32") && r.proxy == "route(Tono-China-Direct)"
+        }));
     }
     use tokio::io::AsyncReadExt as _;
     use tokio::sync::oneshot;

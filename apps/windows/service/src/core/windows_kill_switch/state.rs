@@ -165,6 +165,9 @@ pub(super) struct Armed {
     /// re-lock re-render them without another round trip. Every restore path rebuilds with an
     /// empty set (fail-closed until the app's next connect transaction re-issues them).
     pub(super) direct_endpoints: Vec<ProxyEndpoint>,
+    /// Cloud-approved DIRECT public IPv4 addresses permitted on all non-DNS TCP ports
+    /// (`tcpDirectAddresses`). Same volatile, memory-only lifetime as `direct_endpoints`.
+    pub(super) direct_tcp_addresses: Vec<Ipv4Addr>,
     /// Ports the App declared it emitted process-scoped DIRECT rules for, already intersected
     /// with `REVIEWED_DIRECT_PORTS`. Same lifetime as `direct_endpoints`: memory only, cleared
     /// on omission, never restored.
