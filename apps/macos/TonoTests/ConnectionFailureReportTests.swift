@@ -53,4 +53,16 @@ final class ConnectionFailureReportTests: XCTestCase {
         XCTAssertTrue(ConnectionFailureReport.shared.currentLines()
             .contains { $0.hasPrefix("Update metadata: system_dns:timeout, relay:connect") })
     }
+
+    func testPendingUpdateLineNamesTheStateAndNeverFreeText() {
+        let report = ConnectionFailureReport()
+        report.recordPendingUpdate(execution: "consumed", phase: "installationAuthorized",
+                                   blocked: false, disconnectRequested: nil)
+        XCTAssertEqual(report.lines(protection: "armed, no tunnel", osVersion: "26.3.1").last,
+                       "Pending update: execution consumed, phase installationAuthorized")
+        report.recordPendingUpdate(execution: "/Users/someone/secret", phase: "bad phase!",
+                                   blocked: true, disconnectRequested: true)
+        XCTAssertEqual(report.lines(protection: "not armed", osVersion: "26.3.1").last,
+                       "Pending update: execution unknown, blocked, disconnect requested")
+    }
 }

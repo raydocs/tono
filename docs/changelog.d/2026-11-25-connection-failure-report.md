@@ -5,3 +5,4 @@
 - 测试：新增 `ConnectionFailureReportTests`（标签与类的白名单、IP/邮箱不外泄、skipped 与 userFacing 文案）；更新 `MacUsabilityRenderTests` 复制诊断用例（固定行用空报告，另断言报告行追加）。
 - 未运行：本机不跑 xcodebuild，由托管 CI 验证；红测（旧代码失败）未在本机运行；未做真机验证。Windows 端诊断未检查。
 - 未解决：两名用户的真实根因仍未证实，需要其平台、系统版本、弹窗原文和 traffic-audit.jsonl。
+- 续记（同日）：用户截图登录页卡在 `Pending update needs recovery; no successor grant.`。出处是 helper `UpdateTransaction.reconcile` 的守卫（执行态不是 `replaced`、已 blocked、已请求断开，或仍是发起更新的同一进程同一次开机），App 启动时 `RuntimeCleanup.cleanupStaleRuntime` 把它原样抛到登录页，没有任何下一步。现在 reconcile 失败时改为先给出「检查更新 → Disconnect and Retry」的说明，再附 helper 原句；复制诊断多一行 `Pending update: execution …, phase …`（只取封闭词表）。未改 helper：`AppUpdater.disconnectRetriable` 对「consumed 且无 blocked/disconnect 标记」的尝试返回 false，此类卡住的客户在尝试过期（48h）前没有自助出口，这一点留作单独的 helper 修复。

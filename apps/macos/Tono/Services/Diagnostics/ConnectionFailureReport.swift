@@ -31,6 +31,27 @@ nonisolated final class ConnectionFailureReport: @unchecked Sendable {
 
     private let lock = NSLock()
     private var entries: [Area: Entry] = [:]
+    private var pendingUpdate: String?
+
+    /// The helper's execution states for an update attempt (`UpdateStorage.Execution`).
+    static let executions: Set<String> = [
+        "reserved", "staged", "consumed", "replacing", "replaced", "rollingBack", "rolledBack",
+    ]
+
+    /// The helper holds an update attempt this launch could not resume: its
+    /// state and flags, never a path or hash. Support reads which guard of
+    /// the helper's `reconcile` refused (execution other than `replaced`,
+    /// blocked, or disconnect already requested).
+    func recordPendingUpdate(execution: String?, phase: String?, blocked: Bool, disconnectRequested: Bool?) {
+        let state = execution.flatMap { Self.executions.contains($0) ? $0 : nil } ?? "unknown"
+        var line = "Pending update: execution \(state)"
+        if let phase, phase.allSatisfy({ $0.isLetter || $0.isNumber }), phase.count <= 40 { line += ", phase \(phase)" }
+        line += blocked ? ", blocked" : ""
+        if disconnectRequested == true { line += ", disconnect requested" }
+        lock.lock()
+        defer { lock.unlock() }
+        pendingUpdate = line
+    }
 
     func record(_ area: Area, attempts: [ControlPlaneUnreachable.Attempt], stoppedEarly: Bool = false, at: Date = Date()) {
         guard !attempts.isEmpty else { return }
@@ -60,6 +81,7 @@ nonisolated final class ConnectionFailureReport: @unchecked Sendable {
     func lines(protection: String, osVersion: String, now: Date = Date()) -> [String] {
         lock.lock()
         let snapshot = entries
+        let pending = pendingUpdate
         lock.unlock()
         var lines = ["macOS: \(osVersion)", "Protection: \(protection)"]
         for area in Area.allCases {
@@ -69,6 +91,7 @@ nonisolated final class ConnectionFailureReport: @unchecked Sendable {
             if entry.stoppedEarly { line += " (not sent again)" }
             lines.append(line + " (\(minutes) min ago)")
         }
+        if let pending { lines.append(pending) }
         return lines
     }
 

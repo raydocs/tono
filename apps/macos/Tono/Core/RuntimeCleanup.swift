@@ -219,10 +219,27 @@ enum RuntimeCleanup {
         if let pending = pendingUpdate, pending.pending {
             nativeUpdatePending = true
             nativeUpdateBlocksConnect = true
-            let adopted = try await nativeUpdate("reconcile")
+            let resumeSentence = String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt.")
+            let adopted: HelperManager.UpdateStatus
+            do {
+                adopted = try await nativeUpdate("reconcile")
+            } catch {
+                // The helper's refusal alone ("no successor grant") told the
+                // customer nothing to do. Say what the menu offers and keep the
+                // attempt's state for the copyable diagnostics.
+                ConnectionFailureReport.shared.recordPendingUpdate(
+                    execution: pendingUpdate?.execution,
+                    phase: pendingUpdate?.receipt.map { String(describing: $0.phase) },
+                    blocked: pendingUpdate?.receipt?.blockedReason != nil,
+                    disconnectRequested: pendingUpdate?.disconnectRequested)
+                throw NativeUpdateDownload.failure(resumeSentence + "\n" + error.localizedDescription)
+            }
             guard let receipt = adopted.receipt, receipt.blockedReason == nil,
                   receipt.phase == .installedIdentityVerified || receipt.phase == .recoveryVerified else {
-                throw NativeUpdateDownload.failure(String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt."))
+                ConnectionFailureReport.shared.recordPendingUpdate(
+                    execution: adopted.execution, phase: adopted.receipt.map { String(describing: $0.phase) },
+                    blocked: adopted.receipt?.blockedReason != nil, disconnectRequested: adopted.disconnectRequested)
+                throw NativeUpdateDownload.failure(resumeSentence)
             }
             nativeUpdateRecovery = receipt.requiredRecovery
             KillSwitchService.isArmed = receipt.requiredRecovery != .unprotected
