@@ -781,14 +781,14 @@ mod tests {
 
         // An arbitrary non-protected suffix can be hot-pushed by a signed policy without a
         // compiled allowlist rebuild, while protected or unlisted suffixes stay refused.
-        let hotpush_json = r#"{"version":4,"domains":[{"host":"res.wx.qq.com","ports":[443]}],"directSuffixes":[{"host":"todesk.com","ports":[443]}]}"#;
+        let hotpush_json = r#"{"version":4,"domains":[{"host":"res.wx.qq.com","ports":[443]}],"directSuffixes":[{"host":"hotpush-fixture.example.net","ports":[443]}]}"#;
         let (signing, public) = key(2);
         let hotpush = DirectPolicy::verify_with_key(&sign(&signing, hotpush_json, 8), &public).unwrap();
         assert_eq!(
-            admitted_by(suffix_rule("todesk.com", 443), DirectBinding::Policy(&hotpush)),
+            admitted_by(suffix_rule("hotpush-fixture.example.net", 443), DirectBinding::Policy(&hotpush)),
             Ok(())
         );
-        assert!(admitted_by(suffix_rule("todesk.com", 443), by).is_err());
+        assert!(admitted_by(suffix_rule("hotpush-fixture.example.net", 443), by).is_err());
         assert!(admitted_by(suffix_rule("claude.ai", 443), DirectBinding::ShapeOnly).is_err());
     }
 

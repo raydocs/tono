@@ -583,7 +583,14 @@ impl ConnectionCloseTracker {
                 } else {
                     conn.metadata.network.trim().to_ascii_uppercase()
                 },
-                process: process_name(conn),
+                process: {
+                    let source = if conn.metadata.process_path.trim().is_empty() {
+                        &conn.metadata.process
+                    } else {
+                        &conn.metadata.process_path
+                    };
+                    source.rsplit(['\\', '/']).next().unwrap_or_default().to_owned()
+                },
                 route: if conn.chains.is_empty() {
                     "DIRECT".to_owned()
                 } else {

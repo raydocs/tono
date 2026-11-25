@@ -3112,13 +3112,7 @@ async fn offline_ready_connect_is_refused_as_soon_as_the_server_forbids_the_sess
 
 #[test]
 fn signed_policy_allows_arbitrary_non_protected_direct_suffix() {
-    let node = ValidatedNode {
-        name: "HK Edge 01".to_string(),
-        server: std::net::Ipv4Addr::new(203, 0, 113, 9),
-        port: 443,
-        protocol: "vless",
-        raw: serde_json::Value::Null,
-    };
+    let node = node();
     let wechat_pins = vec![(
         "res.wx.qq.com".to_string(),
         vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
@@ -3126,11 +3120,11 @@ fn signed_policy_allows_arbitrary_non_protected_direct_suffix() {
     )];
     let suffixes = vec![
         tono_core::policy::PolicyDomain {
-            host: "todesk.com".to_string(),
+            host: "hotpush-fixture.example.net".to_string(),
             ports: vec![443],
         },
         tono_core::policy::PolicyDomain {
-            host: "zj.gov.cn".to_string(),
+            host: "gov-fixture.example.org".to_string(),
             ports: vec![80, 443],
         },
         tono_core::policy::PolicyDomain {
@@ -3149,7 +3143,7 @@ fn signed_policy_allows_arbitrary_non_protected_direct_suffix() {
         false,
     )
     .unwrap();
-    assert!(!untrusted.web_suffix_rules.iter().any(|(h, _)| h == "todesk.com"));
+    assert!(!untrusted.web_suffix_rules.iter().any(|(h, _)| h == "hotpush-fixture.example.net"));
 
     let (trusted, _) = super::direct::build_direct_plan_with_trust(
         "Ethernet 2".to_string(),
@@ -3162,7 +3156,7 @@ fn signed_policy_allows_arbitrary_non_protected_direct_suffix() {
         true,
     )
     .unwrap();
-    assert!(trusted.web_suffix_rules.contains(&("todesk.com".to_string(), 443)));
-    assert!(trusted.web_suffix_rules.contains(&("zj.gov.cn".to_string(), 443)));
+    assert!(trusted.web_suffix_rules.contains(&("hotpush-fixture.example.net".to_string(), 443)));
+    assert!(trusted.web_suffix_rules.contains(&("gov-fixture.example.org".to_string(), 443)));
     assert!(!trusted.web_suffix_rules.iter().any(|(h, _)| h == "claude.ai"));
 }
