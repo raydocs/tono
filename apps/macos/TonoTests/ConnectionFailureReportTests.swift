@@ -14,7 +14,7 @@ final class ConnectionFailureReportTests: XCTestCase {
         ]
         XCTAssertEqual(ConnectionFailureReport.summary(attempts), "system_dns:dns, relay:timeout, other:connect")
 
-        let report = ConnectionFailureReport()
+        let report = ConnectionFailureReport(persist: { _, _ in })
         let start = Date(timeIntervalSince1970: 1_000)
         report.record(.controlPlane, attempts: attempts, stoppedEarly: true, at: start)
         let lines = report.lines(protection: "armed, no tunnel", osVersion: "26.3.1",
@@ -55,7 +55,7 @@ final class ConnectionFailureReportTests: XCTestCase {
     }
 
     func testPendingUpdateLineNamesTheStateAndNeverFreeText() {
-        let report = ConnectionFailureReport()
+        let report = ConnectionFailureReport(persist: { _, _ in })
         report.recordPendingUpdate(execution: "consumed", phase: "installationAuthorized",
                                    blocked: false, disconnectRequested: nil)
         XCTAssertEqual(report.lines(protection: "armed, no tunnel", osVersion: "26.3.1").last,
@@ -64,5 +64,29 @@ final class ConnectionFailureReportTests: XCTestCase {
                                    blocked: true, disconnectRequested: true)
         XCTAssertEqual(report.lines(protection: "not armed", osVersion: "26.3.1").last,
                        "Pending update: execution unknown, blocked, disconnect requested")
+    }
+
+    func testEveryRecordIsAlsoWrittenToThePersistentLogWithClosedFields() {
+        final class Sink: @unchecked Sendable {
+            let lock = NSLock()
+            var events: [(String, [String: String])] = []
+            func add(_ event: String, _ details: [String: String]) {
+                lock.lock(); events.append((event, details)); lock.unlock()
+            }
+        }
+        let sink = Sink()
+        let report = ConnectionFailureReport(persist: { sink.add($0, $1) })
+        report.record(.updatePackage, attempts: [
+            ConnectionFailureReport.attempt(path: "direct", error: URLError(.timedOut)),
+            ConnectionFailureReport.attempt(path: "relay 203.0.113.9:443", error: URLError(.cannotConnectToHost)),
+        ])
+        report.recordPendingUpdate(execution: "consumed", phase: "installationAuthorized",
+                                   blocked: true, disconnectRequested: nil)
+        XCTAssertEqual(sink.events.map(\.0), ["connection_failure_report", "pending_update_unresumable"])
+        XCTAssertEqual(sink.events[0].1, ["area": "update_package", "paths": "direct:timeout, relay:connect",
+                                          "stopped_early": "false"])
+        XCTAssertEqual(sink.events[1].1, ["state": "consumed", "phase": "installationAuthorized",
+                                          "blocked": "true", "disconnect_requested": "false"])
+        XCTAssertFalse(sink.events.flatMap { $0.1.values }.contains { $0.contains("203.0.113.9") })
     }
 }
