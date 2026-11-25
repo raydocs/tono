@@ -28,6 +28,17 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertFalse(AppUpdater.disconnectRetriable(installing), "do not interrupt a healthy consumed update")
     }
 
+    func testAbandonedConsumedUpdateBecomesRetriableOnlyAfterTheExecutorWentSilent() {
+        let consumed = status(.installationAuthorized, execution: "consumed") // updated at 100, expires at 200
+        XCTAssertFalse(AppUpdater.disconnectRetriable(consumed, now: 150), "a fresh consumed update is healthy")
+        XCTAssertTrue(AppUpdater.disconnectRetriable(consumed, now: 100 + AppUpdater.executorSilence),
+                      "an attempt idle past the silence bound must not hold the customer until expiry")
+        XCTAssertTrue(AppUpdater.disconnectRetriable(consumed, now: 200), "an expired attempt is retriable")
+        let replaced = status(.installedIdentityVerified, execution: "replaced")
+        XCTAssertFalse(AppUpdater.disconnectRetriable(replaced, now: 100 + AppUpdater.executorSilence),
+                       "a replaced attempt keeps the successor path, not the silence rule")
+    }
+
     func testNativeCallerNeverExecutesAfterPreparationFailure() async throws {
         var calls = [String]()
         do {
