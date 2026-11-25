@@ -1708,7 +1708,7 @@ extension KillSwitchManager {
                 && withdrawnHosts(
                     Set(passRules(in: tcpDirectRules)).subtracting(passRules(in: tunneledRules))
                 ) == ["103.253.207.41", "81.69.152.51"]
-                && emergencyState(preserving: tcpDirectState).sessionDirectTCPAddresses.isEmpty
+                && Self.emergencyState(preserving: tcpDirectState).sessionDirectTCPAddresses.isEmpty
                 && persistentObject(tcpDirectState, allowedUID: 501)["sessionDirectTCPAddresses"] == nil
             let tcpDirectParse = pfSyntaxAccepts(tcpDirectRules)
             let statesAgree = inactivePinsMatch && emergencyPinsMatch

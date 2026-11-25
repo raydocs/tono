@@ -900,6 +900,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![],
             udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![],
             reviewed_direct_ports: vec![],
         };
@@ -947,6 +949,8 @@ mod tests {
             tcp_web_rules: vec![],
             web_suffix_rules: vec![],
             udp_wechat_rules: vec![],
+            tcp_direct_endpoints: vec![],
+            tcp_direct_addresses: vec![],
             wechat_process_path_regexes: vec![],
             reviewed_direct_ports: vec![],
         };
@@ -968,7 +972,8 @@ mod tests {
             hosts: vec![("qq.com".into(), "101.1.2.3".into())],
             tcp_wechat_rules: vec![("qq.com".into(), "101.1.2.3".parse().unwrap(), 443)],
             tcp_web_rules: vec![], web_suffix_rules: vec![("aliyuncs.com".into(), 443)],
-            udp_wechat_rules: vec![], wechat_process_path_regexes: vec![r"^C:\\WeChat\\.*$".into()],
+            udp_wechat_rules: vec![], tcp_direct_endpoints: vec![], tcp_direct_addresses: vec![],
+            wechat_process_path_regexes: vec![r"^C:\\WeChat\\.*$".into()],
             reviewed_direct_ports: vec![443],
         };
         let check = |routing: CatalogRouting, target: &str| {

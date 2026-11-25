@@ -5561,6 +5561,7 @@ fn locking_renders_the_permit_from_the_very_instance_it_recorded() {
             tun_luid: Some(0x7777),
             core_instance: recorded,
             direct_endpoints: Vec::new(),
+            direct_tcp_addresses: Vec::new(),
             reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };

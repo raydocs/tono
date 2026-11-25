@@ -21,6 +21,7 @@ function isProtectedDirectIPv4(address: string): boolean {
   if (address === '1.1.1.1' || address === '8.8.8.8') return true;
   if (address === '179.253.244.3' || address === '179.255.154.17') return true;
   const [a, b, c] = address.split('.').map(Number);
+  if (a === undefined || b === undefined || c === undefined) return true;
   if (a === 160 && b === 79 && c >= 104 && c <= 111) return true; // CLAUDE_HOME_IPV4_CIDRS 160.79.104.0/21
   if (a === 91 && b === 108 && (
     (c >= 4 && c <= 7) || (c >= 8 && c <= 11) || (c >= 12 && c <= 15) ||
