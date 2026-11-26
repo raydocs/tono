@@ -297,8 +297,35 @@ nonisolated enum NativeUpdateDownload {
         }
     }
 
-    static func failure(_ message: String) -> NSError {
-        NSError(domain: "Tono.NativeUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    nonisolated struct Failure: LocalizedError, CustomNSError, Sendable {
+        static let errorDomain = "Tono.NativeUpdate"
+        let message: String
+        var errorCode: Int { 1 }
+        var errorUserInfo: [String: Any] { [NSLocalizedDescriptionKey: message] }
+        var errorDescription: String? { message }
+    }
+
+    static func failure(_ message: String) -> Failure {
+        Failure(message: message)
+    }
+
+    /// Whether `message` came from `RuntimeCleanup.pendingUpdateRecoveryMessage`
+    /// or `Copy.pendingUnfinished`, so a gate that mounts after retirement
+    /// still recognizes and clears a stale pending-update error.
+    @MainActor
+    static func isPendingUpdateRecoveryMessage(_ message: String) -> Bool {
+        let nonRetriablePrefix = RuntimeCleanup.pendingUpdateRecoveryMessage(for: nil)
+        let retriableStatus = HelperManager.UpdateStatus(
+            pending: true,
+            receipt: nil,
+            execution: "staged",
+            disconnectVerified: nil,
+            diagnostic: nil
+        )
+        let retriablePrefix = RuntimeCleanup.pendingUpdateRecoveryMessage(for: retriableStatus)
+        return message.hasPrefix(nonRetriablePrefix)
+            || message.hasPrefix(retriablePrefix)
+            || message == Copy.pendingUnfinished
     }
 
     /// The alert shows `sentence`, then, when `report` is given, the path
@@ -307,7 +334,7 @@ nonisolated enum NativeUpdateDownload {
     static func userFacing(
         _ sentence: String, diagnostic: String,
         report: (area: ConnectionFailureReport.Area, attempts: [ControlPlaneUnreachable.Attempt])? = nil
-    ) -> NSError {
+    ) -> Failure {
         updateLog.error("native update: \(diagnostic, privacy: .public)")
         guard let report else { return failure(sentence) }
         ConnectionFailureReport.shared.record(report.area, attempts: report.attempts)

@@ -90,6 +90,9 @@ nonisolated enum KillSwitchService {
         var prepare: (_ administratorPrompt: Bool) throws -> Void = {
             try HelperManager.installIfNeeded(administratorPrompt: $0)
         }
+        var retryPause: () -> Void = {
+            Thread.sleep(forTimeInterval: 0.3)
+        }
     }
 
     nonisolated(unsafe) static var armIPC = ArmIPC()
@@ -365,7 +368,26 @@ nonisolated enum KillSwitchService {
                 "killswitch_arm_superseded_retry",
                 details: ["first_attempt": String(message.prefix(200))]
             )
-            return try attempt()
+            do {
+                return try attempt()
+            } catch HelperIPCError.connectFailed {
+                // Attempt 1 already saw a concurrent protection change win; a
+                // refused retry cannot downgrade the outcome to "never reached".
+                throw HelperIPCError.commandFailed(message, code: "KILLSWITCH_ARM_SUPERSEDED")
+            }
+        } catch HelperIPCError.emptyResponse {
+            LocalTrafficAudit.shared.recordEvent(
+                "killswitch_arm_empty_response_retry",
+                details: ["attempt": "1"]
+            )
+            armIPC.retryPause()
+            do {
+                return try attempt()
+            } catch HelperIPCError.connectFailed {
+                // Attempt 1 already delivered the arm before its reply was lost;
+                // a refused retry cannot downgrade the outcome to "never reached".
+                throw HelperIPCError.emptyResponse
+            }
         }
     }
 

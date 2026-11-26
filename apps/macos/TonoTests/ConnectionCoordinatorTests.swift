@@ -331,6 +331,81 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(attemptPerformed)
         XCTAssertTrue(cleanedUp)
     }
+
+    func testBeginUserConnectMintsFreshUserSessionEvenAfterPriorAdmission() {
+        let coordinator = ConnectionCoordinator()
+        coordinator.beginUserConnect()
+        let first = coordinator.helperSession
+        XCTAssertTrue(first.userInitiated)
+        XCTAssertTrue(first.adopt(77))
+
+        coordinator.beginUserConnect()
+        let second = coordinator.helperSession
+        XCTAssertTrue(first.isRetired)
+        XCTAssertEqual(first.value, 77)
+        XCTAssertFalse(second === first)
+        XCTAssertTrue(second.userInitiated)
+        XCTAssertNil(second.value)
+        XCTAssertFalse(second.isRetired)
+    }
+
+    func testResetHelperSessionRetiresOldSessionAndBlocksAutomaticAdmission() {
+        let coordinator = ConnectionCoordinator()
+        coordinator.beginUserConnect()
+        let admitted = coordinator.helperSession
+        XCTAssertTrue(admitted.adopt(88))
+
+        coordinator.resetHelperSession()
+        let next = coordinator.helperSession
+        XCTAssertTrue(admitted.isRetired)
+        XCTAssertFalse(next === admitted)
+        XCTAssertNil(next.value)
+        XCTAssertFalse(next.userInitiated)
+        XCTAssertFalse(HelperManager.mayAdmit(
+            .init(released: true, generation: 89),
+            userInitiated: next.userInitiated
+        ))
+    }
+
+    func testPreemptiveReleaseIsAwaitedByFinishAndConnectAfterDisconnectWithoutWaitingForOlderDisconnect() async {
+        let coordinator = ConnectionCoordinator()
+        let oldDisconnectGate = DisconnectGate()
+        coordinator.enqueueDisconnect { _ in
+            await oldDisconnectGate.wait()
+        }
+
+        let releaseGate = DisconnectGate()
+        let releaseStarted = expectation(description: "preemptive release starts immediately")
+        coordinator.beginPreemptiveRelease()
+        coordinator.trackPreemptiveRelease {
+            releaseStarted.fulfill()
+            await releaseGate.wait()
+        }
+        await fulfillment(of: [releaseStarted], timeout: 1)
+        oldDisconnectGate.open()
+        await coordinator.disconnectSequence?.value
+
+        let finishDone = expectation(description: "finishPendingDisconnect waits for preemptive release")
+        let finishTask = Task {
+            await coordinator.finishPendingDisconnect()
+            finishDone.fulfill()
+        }
+        var deferredConnected = false
+        let deferred = coordinator.connectAfterDisconnect {
+            deferredConnected = true
+        }
+        XCTAssertTrue(coordinator.hasPendingDeferredConnect)
+        await Task.yield()
+        XCTAssertFalse(deferredConnected)
+
+        releaseGate.open()
+        await fulfillment(of: [finishDone], timeout: 1)
+        await finishTask.value
+        await deferred.value
+        XCTAssertFalse(coordinator.hasPendingDeferredConnect)
+        XCTAssertTrue(deferredConnected)
+        XCTAssertNil(coordinator.preemptiveReleaseTask)
+    }
 }
 
 /// Explicit suspension instead of sleeps: teardown may complete before or after

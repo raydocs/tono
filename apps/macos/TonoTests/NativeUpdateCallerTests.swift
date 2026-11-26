@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import ScreenCaptureKit
+import SwiftUI
 import XCTest
 @testable import Tono
 
@@ -465,5 +466,259 @@ final class NativeUpdateCallerTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    func testNativeUpdateFailureConformsToLocalizedErrorAndLoginUnavailableCopy() {
+        let detail = "Update execution already ran, but the update is still marked pending."
+        let error: Error = NativeUpdateDownload.failure(detail)
+        let localized = error as? LocalizedError
+        XCTAssertEqual(localized?.errorDescription, detail)
+        let nsError = error as NSError
+        XCTAssertEqual(nsError.domain, "Tono.NativeUpdate")
+        XCTAssertEqual(nsError.code, 1)
+
+        let userFacingError: Error = NativeUpdateDownload.userFacing(detail, diagnostic: "raw-diagnostic")
+        XCTAssertEqual((userFacingError as? LocalizedError)?.errorDescription, detail)
+
+        XCTAssertEqual(
+            LoginView.unavailableStatus(updatePending: true),
+            String(localized: "Update not completed")
+        )
+        XCTAssertEqual(
+            LoginView.unavailableStatus(updatePending: false),
+            String(localized: "Secure sign-in service is unavailable")
+        )
+        XCTAssertTrue(
+            LoginView.shouldLoadAuthMethods(
+                state: .signedOut,
+                authMethods: nil,
+                user: nil,
+                updatePending: false
+            )
+        )
+        XCTAssertFalse(
+            LoginView.shouldLoadAuthMethods(
+                state: .error("pending update"),
+                authMethods: nil,
+                user: nil,
+                updatePending: false
+            )
+        )
+        XCTAssertFalse(
+            LoginView.shouldLoadAuthMethods(
+                state: .signedOut,
+                authMethods: nil,
+                user: nil,
+                updatePending: true
+            )
+        )
+    }
+
+    func testRetiringNativeUpdateClearsStuckPendingUpdateLoginError() async throws {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let recovery = RuntimeCleanup.nativeUpdateRecovery
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        let savedRestoreOverride = LoginView.updateRetirementRestoreOverride
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            RuntimeCleanup.nativeUpdateRecovery = recovery
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+            LoginView.updateRetirementRestoreOverride = savedRestoreOverride
+        }
+
+        let stagedStatus = self.status(.preparing, execution: "staged")
+        let pendingMessage = RuntimeCleanup.pendingUpdateRecoveryMessage(for: stagedStatus)
+        XCTAssertTrue(NativeUpdateDownload.isPendingUpdateRecoveryMessage(pendingMessage))
+        XCTAssertTrue(NativeUpdateDownload.isPendingUpdateRecoveryMessage(RuntimeCleanup.pendingUpdateRecoveryMessage(for: nil)))
+        XCTAssertFalse(NativeUpdateDownload.isPendingUpdateRecoveryMessage("Tono could not reach any of its relays."))
+
+        XCTAssertTrue(
+            LoginView.shouldRetryRestoreAfterUpdateRetirement(
+                state: .error(pendingMessage),
+                authMethods: nil,
+                user: nil,
+                updatePending: false
+            )
+        )
+        XCTAssertFalse(
+            LoginView.shouldRetryRestoreAfterUpdateRetirement(
+                state: .error(pendingMessage),
+                authMethods: nil,
+                user: nil,
+                updatePending: true
+            )
+        )
+        XCTAssertFalse(
+            LoginView.shouldRetryStalePendingUpdateOnAppear(
+                state: .error("Tono could not reach any of its relays."),
+                user: nil,
+                updatePending: false
+            )
+        )
+        XCTAssertTrue(
+            LoginView.shouldRetryStalePendingUpdateOnAppear(
+                state: .error(pendingMessage),
+                user: nil,
+                updatePending: false
+            )
+        )
+
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = true
+        RuntimeCleanup.nativeUpdateRecovery = .protectedOffline
+        RuntimeCleanup.markCoreStarted(tunEnabled: true)
+
+        let app = AppState()
+        let session = AccountSession(
+            sidecar: TonoSidecarService(),
+            descriptorConsumer: { _ in },
+            killSwitchDisarmConsumer: {}
+        )
+        session.state = .error(pendingMessage)
+
+        var restoreCalls = 0
+        LoginView.updateRetirementRestoreOverride = {
+            restoreCalls += 1
+            session.authMethods = TonoAuthMethodsResponse(
+                email: TonoAuthMethod(enabled: true, clientId: nil),
+                apple: TonoAuthMethod(enabled: false, clientId: nil),
+                google: TonoAuthMethod(enabled: false, clientId: nil)
+            )
+            session.state = .signedOut
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 720),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: LoginView(session: session).environment(app))
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        var retiredPosted = false
+        let token = NotificationCenter.default.addObserver(
+            forName: .nativeUpdateRetired,
+            object: app,
+            queue: .main
+        ) { _ in
+            retiredPosted = true
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        try await app.retireDisconnectedNativeUpdate(nativeUpdate: { operation in
+            switch operation {
+            case "status":
+                return stagedStatus
+            case "disconnect":
+                return .init(pending: true, receipt: nil, execution: nil, disconnectVerified: true, diagnostic: nil)
+            case "retire":
+                return .init(pending: false, receipt: nil, execution: nil, disconnectVerified: true, diagnostic: nil)
+            default:
+                XCTFail("Unexpected update operation: \(operation)")
+                throw Failure.preparation
+            }
+        })
+
+        XCTAssertTrue(retiredPosted)
+        XCTAssertFalse(app.nativeUpdatePending)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdatePending)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect)
+
+        let deadline = Date().addingTimeInterval(1.0)
+        while (restoreCalls == 0 || session.state != .signedOut) && Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+            await Task.yield()
+        }
+
+        XCTAssertEqual(restoreCalls, 1)
+        XCTAssertEqual(session.state, .signedOut)
+        XCTAssertNotNil(session.authMethods)
+    }
+
+    func testDisconnectPendingNativeUpdateDelaysRetiredNotificationUntilDisconnectSequenceCompletes() async throws {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let strictIntent = AppProfile.defaults.object(forKey: "strictRoutingSessionIntent")
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            AppProfile.defaults.set(strictIntent, forKey: "strictRoutingSessionIntent")
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = true
+
+        let app = AppState()
+        app.nativeUpdateDisconnect = { throw Failure.lostAcknowledgement }
+        app.nativeUpdateStatus = {
+            .init(pending: false, receipt: nil, execution: nil, disconnectVerified: false, diagnostic: nil)
+        }
+
+        let (disarmsStarted, disarmStarted) = AsyncStream<Void>.makeStream()
+        let (disarmReplies, replyDisarm) = AsyncStream<Void>.makeStream()
+        defer {
+            disarmStarted.finish()
+            replyDisarm.finish()
+        }
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.restrictToBootstrap = {}
+        runtime.disarm = {
+            disarmStarted.yield(())
+            for await _ in disarmReplies { break }
+            KillSwitchService.isArmed = false
+        }
+        app.networkProtection = runtime
+
+        var retiredPosted = false
+        let token = NotificationCenter.default.addObserver(
+            forName: .nativeUpdateRetired,
+            object: app,
+            queue: .main
+        ) { _ in
+            retiredPosted = true
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        app.disconnectPendingNativeUpdate()
+        for await _ in disarmsStarted { break }
+
+        XCTAssertNotNil(app.connectionCoordinator.disconnectSequence)
+        XCTAssertFalse(app.nativeUpdatePending)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdatePending)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect)
+        XCTAssertFalse(
+            retiredPosted,
+            ".nativeUpdateRetired must not post before disconnectSequence finishes releasing protection"
+        )
+
+        replyDisarm.yield(())
+        await app.nativeUpdateDisconnectTask?.value
+
+        XCTAssertTrue(retiredPosted)
+        XCTAssertFalse(KillSwitchService.isArmed)
     }
 }

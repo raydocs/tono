@@ -14,11 +14,13 @@ extension AppState {
             errorMessage = NativeUpdateDownload.Copy.pendingUnfinished
             return
         }
-        connectionCoordinator.beginUserConnect()
-        connect()
+        if isDisconnecting || (!isConnected && !isConnecting) {
+            autoConnectRequested = false
+        }
+        connect(preservingUnarmedBackoff: false, userInitiated: true)
     }
 
-    func connect(preservingUnarmedBackoff: Bool) {
+    func connect(preservingUnarmedBackoff: Bool, userInitiated: Bool = false) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         var capturedRoutingMode = "stable"
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
@@ -29,7 +31,10 @@ extension AppState {
                       !self.isConnected,
                       !self.isConnecting,
                       !self.isDisconnecting else { return }
-                self.connect(preservingUnarmedBackoff: preservingUnarmedBackoff)
+                self.connect(
+                    preservingUnarmedBackoff: preservingUnarmedBackoff,
+                    userInitiated: userInitiated
+                )
             },
             prepare: { [weak self] in
                 guard let self else { return (false, UUID()) }
@@ -147,11 +152,28 @@ extension AppState {
                 self.automaticResumeHeldAfterRestart = false
 
                 // Session-dynamic mixed/controller ports avoid collisions with leftover
-                // 7890/9090 listeners from other proxies or a previous core.
-                let sessionPorts = SessionRuntimePorts.allocatePair()
+                // 7890/9090 listeners from other proxies or a previous core. A strict
+                // session binds its runtime digest at connect, so protected reconnects
+                // reuse its bound ports instead of rotating them and breaking bindRuntime.
+                let sessionPorts: (mixed: Int, controller: Int)
+                let strictReconnectActive = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+                    && capturedRoutingMode == "three-tier"
+                    && (self.isProtectedReconnectScheduled || self.isProtectionBlocked || KillSwitchService.isArmed)
+                    && !(self.config.mixedPort == 28_990 && self.config.externalController == "127.0.0.1:9090")
+                if strictReconnectActive,
+                   self.config.mixedPort > 0,
+                   !self.config.externalController.isEmpty,
+                   let controllerPort = self.config.externalController
+                       .split(separator: ":").last
+                       .flatMap({ Int($0) }),
+                   controllerPort > 0 {
+                    sessionPorts = (self.config.mixedPort, controllerPort)
+                } else {
+                    sessionPorts = SessionRuntimePorts.allocatePair()
+                    self.config.mixedPort = sessionPorts.mixed
+                    self.config.externalController = "127.0.0.1:\(sessionPorts.controller)"
+                }
                 let port = sessionPorts.mixed
-                self.config.mixedPort = port
-                self.config.externalController = "127.0.0.1:\(sessionPorts.controller)"
                 // Tono always requires TUN; LAN exposure is never allowed.
                 self.config.tunEnabled = true
                 self.config.allowLan = false
@@ -184,6 +206,9 @@ extension AppState {
                     generation: Int(self.connectionCoordinator.protectionOperationGeneration &+ 1),
                     transport: selectedExit?.catalogTransport
                 )
+                if userInitiated {
+                    self.connectionCoordinator.beginUserConnect()
+                }
                 return (true, UUID())
             },
             onWatchdog: { [weak self] attemptID in
@@ -894,31 +919,42 @@ extension AppState {
         let generation = connectionCoordinator.protectionOperationGeneration
         LocalTrafficAudit.shared.recordEvent("preemptive_release_requested", details: [:])
         let sessionPorts: Set<Int> = config.mixedPort > 0 ? [config.mixedPort] : []
-        Task { [weak self] in
-            // R-F4: the Restore names the session it is for. With no admitted
-            // session it names the generation current now, read from the
-            // release service, so a Connect admitted in between supersedes it.
-            let result = await Task.detached(priority: .userInitiated) {
-                Result {
-                    try HelperManager.requestRelease(
-                        requestID: requestID,
-                        expectedGeneration: expectedGeneration ?? HelperManager.releaseStatusGeneration()
-                    )
-                }
-            }.value
-            guard let self else { return }
-            // A newer Connect or Restore owns the UI now.
-            guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
-            // R-M1: a system proxy Tono set points at a listener that is gone.
-            // It is cleared and read back before anything is reported; the
-            // release service cannot reach it. Not when a newer session won.
+        let preemptiveOverride = preemptiveReleaseOperation
+        connectionCoordinator.trackPreemptiveRelease { [weak self] in
+            let result: Result<HelperManager.ReleaseOutcome, Error>
             var tonoProxyRemains: Bool? = false
-            if case .success(let answer) = result, answer.outcome != "superseded", answer.outcome != "busy" {
-                // Bounded: a clear that outlasts it is reported unknown.
-                tonoProxyRemains = await SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts, within: 10)
+            if let preemptiveOverride {
+                let outcome = await preemptiveOverride(requestID, expectedGeneration, sessionPorts)
+                guard let self else { return }
+                // A newer Connect or Restore owns the UI now.
                 guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+                result = outcome.result
+                tonoProxyRemains = outcome.tonoProxyRemains
+            } else {
+                // R-F4: the Restore names the session it is for. With no admitted
+                // session it names the generation current now, read from the
+                // release service, so a Connect admitted in between supersedes it.
+                result = await Task.detached(priority: .userInitiated) {
+                    Result {
+                        try HelperManager.requestRelease(
+                            requestID: requestID,
+                            expectedGeneration: expectedGeneration ?? HelperManager.releaseStatusGeneration()
+                        )
+                    }
+                }.value
+                guard let self else { return }
+                // A newer Connect or Restore owns the UI now.
+                guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+                // R-M1: a system proxy Tono set points at a listener that is gone.
+                // It is cleared and read back before anything is reported; the
+                // release service cannot reach it. Not when a newer session won.
+                if case .success(let answer) = result, answer.outcome != "superseded", answer.outcome != "busy" {
+                    // Bounded: a clear that outlasts it is reported unknown.
+                    tonoProxyRemains = await SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts, within: 10)
+                    guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+                }
             }
-            self.finishPreemptiveRelease(result, updateWasPending: updateWasPending, tonoProxyRemains: tonoProxyRemains)
+            self?.finishPreemptiveRelease(result, updateWasPending: updateWasPending, tonoProxyRemains: tonoProxyRemains)
         }
     }
 
@@ -1423,6 +1459,7 @@ extension AppState {
                         self.selectiveAIRecoveryPending = selectiveRecoveryPending
                     }
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
+                        AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
                         self.protectedDNSService = nil
                         self.recoveryCause = nil
                         RuntimeCleanup.clearConnectBootSession()
@@ -2636,6 +2673,7 @@ extension AppState {
 
     func acceptConfirmedExternalProtectionRelease() {
         self.connectionCoordinator.bumpGeneration()
+        self.connectionCoordinator.resetHelperSession()
         confirmedReleaseGeneration = self.connectionCoordinator.protectionOperationGeneration
         recoveryCause = nil
         KillSwitchService.isArmed = false

@@ -7,7 +7,8 @@ struct ProxiesView: View {
     @Environment(AccountSession.self) var accountSession
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.seaAccent) var seaAccent
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @SeaDisplayPreferences var displayPreferences
+    var reduceMotion: Bool { displayPreferences.reduceMotion }
     @FocusState var isSearchFocused: Bool
     @State var showingAddNode = false
     @State var editingNode: ProxyNode?
@@ -76,7 +77,7 @@ struct ProxiesView: View {
         }
         .frame(maxWidth: showsSeaAppearance ? 760 : .infinity, alignment: .leading)
         .padding(.horizontal, 32)
-        .padding(.vertical, 16)
+        .padding(.vertical, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: showingAddNode) { _, showing in
             if !showing { editingNode = nil }

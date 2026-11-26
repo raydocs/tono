@@ -1,3 +1,5 @@
+import Foundation
+import Network
 import XCTest
 @testable import Tono
 
@@ -623,5 +625,147 @@ final class ProtectedConnectivityTests: XCTestCase {
         let current: UInt64 = 4
         let incoming: UInt64 = 3
         XCTAssertNotEqual(current, incoming)
+    }
+
+    @MainActor
+    func testDelayGateIsBypassedOnFailedTUNVerificationSoDeadExitsClassifyAsUnreachable() async throws {
+        let delayWasProven = SingBoxDelayGate.isProven
+        defer {
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        SingBoxDelayGate.suspend()
+
+        final class RequestCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            var count: Int {
+                lock.lock()
+                defer { lock.unlock() }
+                return value
+            }
+            func increment() {
+                lock.lock()
+                value += 1
+                lock.unlock()
+            }
+        }
+
+        let counter = RequestCounter()
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: "net.tono.tests.delay-gate-controller")
+        let ready = expectation(description: "loopback controller fixture ready")
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, _ in
+                counter.increment()
+                let response = Data("HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                connection.send(content: response, completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+            }
+        }
+        defer {
+            listener.stateUpdateHandler = nil
+            listener.newConnectionHandler = nil
+            listener.cancel()
+        }
+        listener.start(queue: queue)
+        await fulfillment(of: [ready], timeout: 3)
+        let port = try XCTUnwrap(listener.port)
+
+        let api = CoreControllerClient(port: Int(port.rawValue))
+        let reality = Fixture.realityNode()
+        let app = AppState()
+
+        // Default callers keep SingBoxDelayGate deferral while unproven.
+        let deferredDelay = await api.testProxyDelay(name: ConfigPipeline.exitGroupName)
+        XCTAssertEqual(deferredDelay.message, SingBoxDelayGate.deferredMessage)
+        XCTAssertEqual(counter.count, 0)
+
+        let deferredProbe = await app.advisoryControllerExitProbe(api: api, selectedExit: reality)
+        XCTAssertEqual(deferredProbe, .ok)
+        XCTAssertEqual(counter.count, 0)
+
+        // Winning TUN keeps the deferred advisory contract without hitting /delay early.
+        let connected = await app.verifyProtectedConnection(
+            advisoryProbe: {
+                Task { await app.advisoryControllerExitProbe(api: api, selectedExit: reality) }
+            },
+            mixedPort: 12345,
+            generation: 0,
+            rounds: 1,
+            raceProbes: { _, proxyPort, _ in
+                proxyPort == nil ? .won("Google") : .lost([])
+            }
+        )
+        XCTAssertEqual(connected, .connected(controllerAdvisory: nil))
+        XCTAssertEqual(counter.count, 0)
+
+        // Direct bypass hits /delay even before SingBoxDelayGate.prove().
+        let directBypass = await app.advisoryControllerExitProbe(
+            api: api,
+            selectedExit: reality,
+            ignoreDelayGate: true
+        )
+        guard case .failed = directBypass else {
+            return XCTFail("expected direct bypass probe failure, got \(directBypass)")
+        }
+        XCTAssertEqual(counter.count, 1)
+
+        // Failed TUN failure-diagnostics bypasses SingBoxDelayGate inside verifyProtectedConnection
+        // so dead exits classify as .coreExitUnreachable (enabling Hy2AutoSwitch) instead of .tunRouteUnavailable.
+        let failedOrigin = ProbeOriginResult(
+            label: "Google",
+            url: ProtectedProbeOrigin.google.url,
+            expectedStatus: 204,
+            actualStatus: nil,
+            category: .timeout,
+            elapsedMs: 100,
+            detail: "timeout"
+        )
+        let verdict = await app.verifyProtectedConnection(
+            advisoryProbe: {
+                Task { await app.advisoryControllerExitProbe(api: api, selectedExit: reality) }
+            },
+            mixedPort: 12345,
+            generation: 0,
+            rounds: 1,
+            raceProbes: { _, _, _ in .lost([failedOrigin]) }
+        )
+        XCTAssertEqual(counter.count, 2)
+        guard case .failed(let failure) = verdict else {
+            return XCTFail("dead exit must fail verification")
+        }
+        if PhysicalNetworkReachability.shared.isPhysicallyOffline {
+            XCTAssertEqual(failure.code, .networkEnvironmentOffline)
+        } else {
+            XCTAssertEqual(failure.code, .coreExitUnreachable)
+            var hy2 = Fixture.hy2Node()
+            hy2.certificatePublicKeySHA256 = Data(repeating: 7, count: 32).base64EncodedString()
+            let switcher = Hy2AutoSwitch(defaults: UserDefaults(suiteName: "ProtectedConnectivityTests.\(UUID().uuidString)")!)
+            switcher.applyCatalogPermission(true, owner: "test-owner", catalog: [reality, hy2])
+            for _ in 0..<Hy2AutoSwitch.tcpFailureThreshold {
+                XCTAssertNil(switcher.noteConnectFailure(dialed: reality.name, code: failure.code, now: Date()))
+            }
+            let switched = switcher.beginAttempt(selected: reality, catalog: [reality, hy2], owner: "test-owner", now: Date())
+            XCTAssertEqual(switched?.hy2, hy2.name)
+        }
+    }
+
+    func testOptionalPolicySyncErrorGuardDistinguishesRefusalFromLostReply() {
+        let refusal = HelperIPCError.commandFailed("Stop the running Core before binding strict routing.", code: nil)
+        XCTAssertFalse(AppState.optionalPolicyReplacementStarted(afterSyncError: refusal))
+        XCTAssertEqual(AppState.optionalPolicyFailureAction(replacementStarted: false), .keepSession)
+
+        XCTAssertFalse(AppState.optionalPolicyReplacementStarted(afterSyncError: HelperIPCError.connectFailed))
+        XCTAssertTrue(AppState.optionalPolicyReplacementStarted(afterSyncError: HelperIPCError.emptyResponse))
+        XCTAssertTrue(AppState.optionalPolicyReplacementStarted(afterSyncError: HelperIPCError.invalidResponse))
+        XCTAssertEqual(AppState.optionalPolicyFailureAction(replacementStarted: true), .teardown)
     }
 }

@@ -79,4 +79,9 @@ enum TonoMotion {
     static func easeInOut(_ duration: Double, reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeInOut(duration: duration)
     }
+
+    /// Critically damped tactile spring for button press and toggle transitions.
+    static func tactileSpring(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .spring(duration: 0.25, bounce: 0)
+    }
 }

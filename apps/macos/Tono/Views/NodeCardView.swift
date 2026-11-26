@@ -318,6 +318,7 @@ private func cityGlyphShape(for city: String) -> AnyShape {
 /// neutral so it sits quietly in both light and dark mode.
 struct NodeRouteMark: View {
     @Environment(\.colorScheme) private var colorScheme
+    @SeaDisplayPreferences private var displayPreferences
     var size: CGFloat = 44
     var city: String? = nil
     /// The sea look strokes with its sunrise gradient on a warm-tinted tile.
@@ -337,14 +338,24 @@ struct NodeRouteMark: View {
             .padding(size * 0.26)
             .frame(width: size, height: size)
             .background(
-                warmTile ? Color(hex: "FFD6A0").opacity(0.09) : .primary.opacity(colorScheme == .dark ? 0.07 : 0.045),
+                warmTile
+                    ? (displayPreferences.reduceTransparency ? Color(hex: "2B221D") : Color(hex: "FFD6A0").opacity(0.09))
+                    : .primary.opacity(colorScheme == .dark ? 0.07 : 0.045),
                 in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                     .strokeBorder(
-                        warmTile ? Color(hex: "FFD6A0").opacity(0.18) : .primary.opacity(colorScheme == .dark ? 0.13 : 0.10),
-                        lineWidth: 0.7
+                        warmTile
+                            ? AnyShapeStyle(LinearGradient(
+                                colors: [
+                                    Color(hex: "FFD6A0").opacity(displayPreferences.contrast == .increased ? 0.52 : 0.26),
+                                    Color(hex: "FFD6A0").opacity(0.08),
+                                ],
+                                startPoint: .top, endPoint: .bottom
+                            ))
+                            : AnyShapeStyle(.primary.opacity(displayPreferences.contrast == .increased ? 0.35 : (colorScheme == .dark ? 0.14 : 0.10))),
+                        lineWidth: displayPreferences.contrast == .increased ? 1 : 0.7
                     )
             }
             .accessibilityHidden(true)
@@ -357,8 +368,10 @@ struct NodeRouteMark: View {
 /// top edge. Keeps every state legible without loud fills.
 struct NodeCardSurface<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     var isActive: Bool = false
+    var isSwitching: Bool = false
     var isDisabled: Bool = false
     /// When provided, the active top hairline slides between cards on
     /// selection instead of blinking out and in.
@@ -367,39 +380,49 @@ struct NodeCardSurface<Content: View>: View {
 
     @State private var isHovering = false
 
+    private var fillStyle: AnyShapeStyle {
+        if displayPreferences.reduceTransparency {
+            if isSwitching { return AnyShapeStyle(Color(hex: "202331")) }
+            if isActive { return AnyShapeStyle(colorScheme == .dark ? Color(hex: "242134") : Color(hex: "EFEBF9")) }
+            return AnyShapeStyle(colorScheme == .dark ? (isHovering ? SeaTheme.opaqueQuiet : SeaTheme.opaquePanel) : Color(nsColor: .controlBackgroundColor))
+        }
+        if isSwitching {
+            return AnyShapeStyle(TonoBrand.accent.opacity(colorScheme == .dark ? 0.10 : 0.06))
+        }
+        if isActive {
+            return AnyShapeStyle(TonoBrand.accent.opacity(colorScheme == .dark ? 0.13 : 0.08))
+        }
+        return AnyShapeStyle(.white.opacity(colorScheme == .dark
+            ? (isHovering ? 0.10 : 0.07)
+            : (isHovering ? 0.66 : 0.58)))
+    }
+
     var body: some View {
         content()
             .padding(15)
             .frame(maxWidth: .infinity, minHeight: 122, alignment: .leading)
-            .background(
-                isActive
-                    ? TonoBrand.accent.opacity(colorScheme == .dark ? 0.13 : 0.08)
-                    : .white.opacity(colorScheme == .dark
-                        ? (isHovering ? 0.10 : 0.07)
-                        : (isHovering ? 0.66 : 0.58)),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
+            .background(fillStyle, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(
-                        isActive
+                        isActive || isSwitching
                             ? LinearGradient(
                                 colors: [
-                                    TonoBrand.accent.opacity(0.6),
-                                    TonoBrand.accent.opacity(0.35),
+                                    TonoBrand.accent.opacity(displayPreferences.contrast == .increased ? 0.85 : (isActive ? 0.62 : 0.45)),
+                                    TonoBrand.accent.opacity(isActive ? 0.35 : 0.20),
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
                             : LinearGradient(
                                 colors: [
-                                    .white.opacity(colorScheme == .dark ? 0.16 : 0.72),
+                                    .white.opacity(displayPreferences.contrast == .increased ? 0.52 : (colorScheme == .dark ? (isHovering ? 0.22 : 0.16) : 0.72)),
                                     .white.opacity(colorScheme == .dark ? 0.06 : 0.34),
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
-                        lineWidth: isActive ? 1.1 : 0.7
+                        lineWidth: isActive || isSwitching || displayPreferences.contrast == .increased ? 1.1 : 0.7
                     )
             }
             .overlay(alignment: .top) {
@@ -417,7 +440,7 @@ struct NodeCardSurface<Content: View>: View {
             // each card). The translucent fill + hairline + shadow carry the
             // glass read on their own.
             .shadow(
-                color: isActive ? TonoBrand.accent.opacity(0.16) : .black.opacity(0.04),
+                color: displayPreferences.reduceTransparency ? .clear : (isActive ? TonoBrand.accent.opacity(0.16) : .black.opacity(0.04)),
                 radius: isActive ? 14 : 7,
                 y: isActive ? 6 : 3
             )
@@ -425,7 +448,18 @@ struct NodeCardSurface<Content: View>: View {
             .opacity(isDisabled ? 0.55 : 1)
             .animation(TonoMotion.easeOut(0.15, reduceMotion: reduceMotion), value: isHovering)
             .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isActive)
-            .onHover { isHovering = $0 }
+            .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isSwitching)
+            .onHover { isHovering = !isDisabled && $0 }
+    }
+}
+
+struct NodeCardPressButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
+            .animation(TonoMotion.press(reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 
@@ -444,7 +478,8 @@ private struct ActiveLineMatch: ViewModifier {
 }
 
 struct NodeLatencyBadge: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     let latency: Int
     var didFail: Bool = false
 
@@ -478,7 +513,7 @@ struct NodeLatencyBadge: View {
                 // Digits roll as results land, so a latency sweep reads as a
                 // wave of numbers arriving card by card.
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
                     .foregroundStyle(tint)
                     .contentTransition(reduceMotion ? .identity : .numericText())
                 if let detail {
@@ -490,9 +525,12 @@ struct NodeLatencyBadge: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
-        .background(tint.opacity(0.10), in: Capsule())
+        .background(tint.opacity(displayPreferences.reduceTransparency ? 0.18 : 0.10), in: Capsule())
         .overlay {
-            Capsule().strokeBorder(tint.opacity(0.18), lineWidth: 0.7)
+            Capsule().strokeBorder(
+                tint.opacity(displayPreferences.contrast == .increased ? 0.55 : 0.22),
+                lineWidth: displayPreferences.contrast == .increased ? 1 : 0.7
+            )
         }
         .fixedSize()
         .animation(TonoMotion.numeric(reduceMotion: reduceMotion), value: latency)
@@ -580,7 +618,7 @@ struct NodeCardView: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NodeCardPressButtonStyle(reduceMotion: reduceMotion))
         .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isSelected)
         .accessibilityLabel(accessibilitySummary)
     }

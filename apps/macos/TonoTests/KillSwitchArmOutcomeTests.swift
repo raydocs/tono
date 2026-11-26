@@ -16,6 +16,7 @@ final class KillSwitchArmOutcomeTests: XCTestCase {
             KillSwitchService.isArmed = false
         }
         // The request was delivered; the receive timed out after the commit.
+        KillSwitchService.armIPC.retryPause = {}
         KillSwitchService.armIPC.deliver = { _ in throw HelperIPCError.emptyResponse }
         KillSwitchService.armIPC.status = { throw HelperIPCError.connectFailed }
 
@@ -67,5 +68,126 @@ final class KillSwitchArmOutcomeTests: XCTestCase {
         }
         XCTAssertEqual(preparations, [false], "the restriction prepares the helper, never with the administrator prompt")
         XCTAssertTrue(KillSwitchService.isArmed)
+    }
+
+    func testArmRetriesOnceOnTransientEmptyResponseBeforeSucceeding() throws {
+        let savedIPC = KillSwitchService.armIPC
+        let savedHome = KillSwitchService.readAIHomeSession
+        KillSwitchService.isArmed = false
+        KillSwitchService.readAIHomeSession = { false }
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.readAIHomeSession = savedHome
+            KillSwitchService.isArmed = false
+        }
+        var attempts = 0
+        var pauses = 0
+        KillSwitchService.armIPC.retryPause = { pauses += 1 }
+        KillSwitchService.armIPC.deliver = { _ in
+            attempts += 1
+            if attempts == 1 {
+                throw HelperIPCError.emptyResponse
+            }
+            return (
+                armed: true,
+                wanted: true,
+                live: true,
+                healed: false,
+                flushedStates: false,
+                killedHosts: 0,
+                localNetworkDevices: LocalNetworkDevicesSync.desired.allow,
+                aiHomeScoped: nil
+            )
+        }
+
+        try KillSwitchService.arm(
+            apiHosts: [],
+            tunnelInterfaces: ["utun199"],
+            proxyEndpoints: [],
+            sessionDirectEndpoints: [],
+            helperPrepared: true,
+            reviewedBundleDirect: false
+        )
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(pauses, 1)
+        XCTAssertTrue(KillSwitchService.isArmed)
+    }
+
+    func testEmptyResponseRetryConnectFailureStillKeepsFailClosedIntent() {
+        let savedIPC = KillSwitchService.armIPC
+        let savedHome = KillSwitchService.readAIHomeSession
+        KillSwitchService.isArmed = false
+        KillSwitchService.readAIHomeSession = { false }
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.readAIHomeSession = savedHome
+            KillSwitchService.isArmed = false
+        }
+        var attempts = 0
+        KillSwitchService.armIPC.retryPause = {}
+        KillSwitchService.armIPC.status = { throw HelperIPCError.connectFailed }
+        KillSwitchService.armIPC.deliver = { _ in
+            attempts += 1
+            if attempts == 1 {
+                throw HelperIPCError.emptyResponse
+            }
+            throw HelperIPCError.connectFailed
+        }
+
+        XCTAssertThrowsError(
+            try KillSwitchService.arm(
+                apiHosts: [],
+                tunnelInterfaces: ["utun199"],
+                proxyEndpoints: [],
+                sessionDirectEndpoints: [],
+                helperPrepared: true,
+                reviewedBundleDirect: false
+            )
+        )
+        XCTAssertEqual(attempts, 2)
+        XCTAssertTrue(
+            KillSwitchService.isArmed,
+            "a connectFailed retry after emptyResponse must still keep fail-closed intent"
+        )
+    }
+
+    func testSupersededRetryConnectFailureKeepsFailClosedIntent() {
+        let savedIPC = KillSwitchService.armIPC
+        let savedHome = KillSwitchService.readAIHomeSession
+        KillSwitchService.isArmed = false
+        KillSwitchService.readAIHomeSession = { false }
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.readAIHomeSession = savedHome
+            KillSwitchService.isArmed = false
+        }
+        var attempts = 0
+        KillSwitchService.armIPC.status = { throw HelperIPCError.connectFailed }
+        KillSwitchService.armIPC.deliver = { _ in
+            attempts += 1
+            if attempts == 1 {
+                throw HelperIPCError.commandFailed(
+                    "Superseded by another protection change.",
+                    code: "KILLSWITCH_ARM_SUPERSEDED"
+                )
+            }
+            throw HelperIPCError.connectFailed
+        }
+
+        XCTAssertThrowsError(
+            try KillSwitchService.arm(
+                apiHosts: [],
+                tunnelInterfaces: ["utun199"],
+                proxyEndpoints: [],
+                sessionDirectEndpoints: [],
+                helperPrepared: true,
+                reviewedBundleDirect: false
+            )
+        )
+        XCTAssertEqual(attempts, 2)
+        XCTAssertTrue(
+            KillSwitchService.isArmed,
+            "a connectFailed retry after KILLSWITCH_ARM_SUPERSEDED must still keep fail-closed intent"
+        )
     }
 }

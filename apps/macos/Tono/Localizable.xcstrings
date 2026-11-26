@@ -8747,6 +8747,16 @@
         }
       }
     },
+    "Could not switch to %@; kept your connection on %@.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到 %1$@ 失败，已保持原有连接（%2$@）。"
+          }
+        }
+      }
+    },
     "Update not completed": {
       "localizations": {
         "zh-Hans": {
@@ -9177,6 +9187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "上一次会话的保护可能仍在生效，从这个网络连不上 Tono 中继。Tono 不会改变保护状态。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+          }
+        }
+      }
+    },
+    "Disconnect before switching cloud servers in Strict mode.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "严格模式下请先断开连接再切换云端节点。"
           }
         }
       }

@@ -15,6 +15,7 @@ struct DashboardView: View {
     @State private var showsDataUsagePopover = false
     @State private var showsSeaDetails = false
     @State private var showsSeaSteps = false
+    @State private var isTrafficCardHovered = false
     /// When the pill last flipped into connecting. A click that lands within
     /// `cancelGraceInterval` of that moment is ignored: the pill is now the
     /// Cancel control while connecting, so without this a double-click on
@@ -170,13 +171,25 @@ struct DashboardView: View {
                     seaDashboardHeader
                     if appState.updateIncomplete {
                         Text(UpdateHandoffStore.incompleteUpdateCopy)
-                            .font(.system(size: 13)).foregroundStyle(SeaTheme.warm)
+                            .font(.system(size: 13, weight: .medium)).foregroundStyle(SeaTheme.warm)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(
+                                displayPreferences.reduceTransparency ? SeaTheme.opaqueAttention : SeaTheme.warm.opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(SeaTheme.warm.opacity(displayPreferences.contrast == .increased ? 0.55 : 0.24), lineWidth: 0.75)
+                            }
                             .accessibilityIdentifier("updateIncompleteNotice")
                     }
                     if appState.selectiveAIRecoveryPending && !appState.isConnected {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 10) {
                             Text("AI recovery rules may still be active. Restore internet to remove them.")
                                 .font(.callout).foregroundStyle(SeaTheme.warm)
+                                .fixedSize(horizontal: false, vertical: true)
                             if Self.showsInlineSelectiveAIRecoveryButton(
                                 seaAttentionActions: seaAttentionActions,
                                 isConnecting: appState.isConnecting,
@@ -188,6 +201,16 @@ struct DashboardView: View {
                                 Button("Restore normal internet") { appState.restoreInternet() }
                                     .buttonStyle(SeaHomePillStyle(primary: false))
                             }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(
+                            displayPreferences.reduceTransparency ? SeaTheme.opaqueAttention : SeaTheme.warm.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(SeaTheme.warm.opacity(displayPreferences.contrast == .increased ? 0.55 : 0.24), lineWidth: 0.75)
                         }
                         .accessibilityIdentifier("selectiveAIRecoveryNotice")
                     }
@@ -229,14 +252,8 @@ struct DashboardView: View {
                                 .foregroundStyle(SeaTheme.muted)
                         }
                         Spacer(minLength: 12)
-                        Button { showsSeaDetails = true } label: {
-                            HStack(spacing: 6) {
-                                Text("Details")
-                                SeaChevron(expanded: true)
-                            }
-                            .font(.system(size: 13)).foregroundStyle(SeaTheme.muted)
-                        }
-                        .buttonStyle(.plain).accessibilityIdentifier("seaDashboardDetails")
+                        SeaDetailsTriggerButton(reduceMotion: reduceMotion) { showsSeaDetails = true }
+                            .accessibilityIdentifier("seaDashboardDetails")
                     }
                 }
                 .foregroundStyle(SeaTheme.text)
@@ -336,9 +353,13 @@ struct DashboardView: View {
     private var seaStageDots: some View {
         HStack(spacing: 6) {
             ForEach(ConnectionStage.allCases, id: \.self) { stage in
-                Circle().fill(stage == appState.connectionStage ? Color(hex: "FFF3D4")
-                    : appState.completedConnectionStages.contains(stage) ? Color(hex: "FFD9A0") : .white.opacity(0.26))
-                    .frame(width: 6, height: 6)
+                let isCurrent = stage == appState.connectionStage
+                let isDone = appState.completedConnectionStages.contains(stage)
+                Capsule()
+                    .fill(isCurrent ? Color(hex: "FFF3D4")
+                        : isDone ? Color(hex: "FFD9A0") : .white.opacity(0.28))
+                    .frame(width: isCurrent ? 14 : 6, height: 6)
+                    .shadow(color: isCurrent ? Color(hex: "FFF3D4").opacity(0.45) : .clear, radius: 4)
             }
         }
         .accessibilityLabel(Text(appState.connectionStage.localizedTitle))
@@ -362,17 +383,22 @@ struct DashboardView: View {
     private var seaLineChip: some View {
         Button { appState.selectedPage = .proxies } label: {
             HStack(spacing: 8) {
-                Circle().fill(seaPhase == .day ? SeaTheme.warm : SeaTheme.cool.opacity(0.60))
-                    .frame(width: 6, height: 6).accessibilityHidden(true)
-                if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
-                    Text(nodeRouteTitle(for: name)).lineLimit(1)
-                    let runtime = appState.proxyService.node(named: name)
-                    SeaHomeLatencyReading(sample: appState.proxyService.lastExitSample,
-                        name: name, failed: runtime?.lastTestFailed == true)
-                } else { Text("No server selected") }
+                if appState.switchingNodeId != nil {
+                    ProgressView().controlSize(.mini)
+                    Text("Switching server…").lineLimit(1)
+                } else {
+                    Circle().fill(seaPhase == .day ? SeaTheme.warm : SeaTheme.cool.opacity(0.65))
+                        .frame(width: 6, height: 6).accessibilityHidden(true)
+                    if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
+                        Text(nodeRouteTitle(for: name)).lineLimit(1)
+                        let runtime = appState.proxyService.node(named: name)
+                        SeaHomeLatencyReading(sample: appState.proxyService.lastExitSample,
+                            name: name, failed: runtime?.lastTestFailed == true)
+                    } else { Text("No server selected") }
+                }
                 SeaChevron(expanded: true)
             }
-            .font(.system(size: 13)).foregroundStyle(SeaTheme.text)
+            .font(.system(size: 13, weight: .medium)).foregroundStyle(SeaTheme.text)
         }
         .buttonStyle(SeaHomePillStyle(primary: false)).frame(maxWidth: 300, alignment: .leading)
         .accessibilityHint("Choose another route")
@@ -465,10 +491,13 @@ struct DashboardView: View {
                     value: trafficSummaryValue,
                     detail: trafficSummaryDetail,
                     systemImage: "waveform.path.ecg",
-                    tint: showsSeaAppearance ? SeaTheme.cool : Color(hex: "5856D6")
+                    tint: showsSeaAppearance ? SeaTheme.cool : Color(hex: "5856D6"),
+                    hovered: isTrafficCardHovered
                 )
             }
             .buttonStyle(.plain)
+            .onHover { isTrafficCardHovered = $0 }
+            .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: isTrafficCardHovered)
             .popover(isPresented: $showsDataUsagePopover, arrowEdge: .top) {
                 DataUsageSummaryView(appState: appState, isCard: false)
                     .padding(16)
@@ -630,14 +659,16 @@ struct DashboardView: View {
         // Same width and glass as the stat cards above — the bar is part of
         // the same bottom cluster, not a separate patch.
         .background(
-            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            displayPreferences.reduceTransparency
+                ? AnyShapeStyle(colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .controlBackgroundColor))
+                : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.055 : 0.5)),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(
-                    .white.opacity(colorScheme == .dark ? 0.10 : 0.7),
-                    lineWidth: 0.5
+                    .white.opacity(displayPreferences.contrast == .increased ? 0.45 : (colorScheme == .dark ? 0.12 : 0.7)),
+                    lineWidth: displayPreferences.contrast == .increased ? 1 : 0.65
                 )
         }
         .padding(.top, 10)
@@ -677,7 +708,7 @@ struct DashboardView: View {
                 .foregroundStyle(.tertiary)
                 .textCase(.uppercase)
             Text(value)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12, weight: .medium)).monospacedDigit()
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -750,12 +781,42 @@ private struct ConnectionProgressCard: View {
             .frame(maxWidth: 520, alignment: .leading)
             .background {
                 if homePresentation {
-                    RoundedRectangle(cornerRadius: 18)
-                        .fill(LinearGradient(colors: [Color(hex: "1A1012").opacity(0.56), Color(hex: "1A1012").opacity(0.66)], startPoint: .top, endPoint: .bottom))
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+                    let opaque = displayPreferences.reduceTransparency || displayPreferences.contrast == .increased
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(opaque
+                            ? AnyShapeStyle(SeaTheme.opaquePanel)
+                            : AnyShapeStyle(LinearGradient(
+                                colors: [Color(hex: "1B1318").opacity(0.84), Color(hex: "130E14").opacity(0.90)],
+                                startPoint: .top, endPoint: .bottom
+                            )))
+                } else if displayPreferences.reduceTransparency {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(SeaTheme.opaquePanel)
                 }
             }
-            .glassEffect(.regular.tint(homePresentation ? .black.opacity(0.3) : cardTint), in: RoundedRectangle(cornerRadius: 18))
+            .overlay {
+                if homePresentation {
+                    let hasFailure = appState.lastConnectionFailure != nil && !appState.isConnecting
+                    let accentBorderColor: Color = hasFailure
+                        ? (appState.isProtectionBlocked ? SeaTheme.attention : SeaTheme.danger)
+                        : .white
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(
+                            displayPreferences.contrast == .increased
+                                ? AnyShapeStyle(accentBorderColor.opacity(0.55))
+                                : AnyShapeStyle(LinearGradient(
+                                    colors: [accentBorderColor.opacity(hasFailure ? 0.28 : 0.18), .white.opacity(0.05)],
+                                    startPoint: .top, endPoint: .bottom
+                                )),
+                            lineWidth: displayPreferences.contrast == .increased ? 1 : 0.75
+                        )
+                }
+            }
+            .modifier(ProgressCardGlassEffect(enabled: !homePresentation && !displayPreferences.reduceTransparency, tint: cardTint))
+            .shadow(
+                color: homePresentation && !displayPreferences.reduceTransparency ? .black.opacity(0.28) : .clear,
+                radius: 16, y: 8
+            )
             // A failure shifts the tint over 220 ms; it does not snap or shake.
             .animation(
                 TonoMotion.stateChange(reduceMotion: reduceMotion),
@@ -769,9 +830,10 @@ private struct ConnectionProgressCard: View {
     private var stageDots: some View {
         HStack(spacing: 6) {
             ForEach(ConnectionStage.allCases, id: \.self) { stage in
-                Circle()
+                let isCurrent = stage == appState.connectionStage
+                Capsule()
                     .fill(dotColor(stage))
-                    .frame(width: 6, height: 6)
+                    .frame(width: isCurrent ? 14 : 6, height: 6)
             }
         }
         .padding(.leading, 43)
@@ -846,7 +908,7 @@ private struct ConnectionProgressCard: View {
                         .foregroundStyle(.secondary)
                 } else if let nextAttempt = appState.protectedReconnectNextAttemptAt {
                     Text("Retry \(appState.protectedReconnectAttempt) in \(seconds(until: nextAttempt, now: now))s")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12)).monospacedDigit()
                         .foregroundStyle(.secondary)
                 } else if let failure = appState.lastConnectionFailure {
                     VStack(alignment: .leading, spacing: 3) {
@@ -901,14 +963,22 @@ private struct ConnectionProgressCard: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
+                }
             } else if appState.protectedReconnectAttempt > 0 {
                 // Sea: a neutral count, not an orange alarm badge.
                 Text("TRY \(appState.protectedReconnectAttempt)")
-                    .font(seaAppearance ? .system(size: 11).monospacedDigit() : .system(size: 10, weight: .bold, design: .rounded))
+                    .font(seaAppearance ? .system(size: 11, weight: .medium).monospacedDigit() : .system(size: 10, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(seaAppearance ? SeaTheme.muted : headerColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(seaAppearance ? Color.white.opacity(0.06) : headerColor.opacity(0.10), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder((seaAppearance ? Color.white : headerColor).opacity(0.14), lineWidth: 0.6)
+                    }
             }
         }
     }
@@ -925,9 +995,13 @@ private struct ConnectionProgressCard: View {
     }
 
     private var headerColor: Color {
-        appState.lastConnectionFailure != nil && !appState.isConnecting
-            ? (seaAppearance ? SeaTheme.attention : .orange)
-            : (seaAppearance ? SeaTheme.cool : TonoBrand.accent)
+        if appState.lastConnectionFailure != nil && !appState.isConnecting {
+            if seaAppearance {
+                return appState.isProtectionBlocked ? SeaTheme.attention : SeaTheme.danger
+            }
+            return appState.isProtectionBlocked ? .orange : TonoStatus.error
+        }
+        return seaAppearance ? SeaTheme.cool : TonoBrand.accent
     }
 
     private var activeStartedAt: Date? {
@@ -993,38 +1067,55 @@ private struct ConnectionProgressCard: View {
     @ViewBuilder
     private func failureBlock(_ failure: ConnectionFailure) -> some View {
         if seaAppearance {
-            // Sea: a neutral box in the system font, no amber alarm. The
-            // support code is a diagnostic, kept copyable under Technical details.
+            let tone = appState.isProtectionBlocked ? SeaTheme.attention : SeaTheme.danger
+            // Sea: a quiet smoked box in the system font with clear status border.
+            // The support code stays copyable under Technical details.
             VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("What failed")
-                        .font(.system(size: 12))
-                        .foregroundStyle(SeaTheme.text)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(tone)
+                        Text("What failed")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(SeaTheme.text)
+                    }
                     Text(failure.message)
                         .font(.system(size: 12))
-                        .foregroundStyle(SeaTheme.muted)
+                        .foregroundStyle(SeaTheme.text.opacity(0.86))
+                        .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 if !appState.isProtectionBlocked {
                     DisclosureGroup(isExpanded: $failureDetailsExpanded) {
                         Text("Support code \("TONO_CONNECT_RELEASED")")
-                            .font(.system(size: 12))
+                            .font(.system(size: 12)).monospacedDigit()
                             .foregroundStyle(SeaTheme.muted)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 6)
                     } label: {
                         Text("Technical details")
-                            .font(.system(size: 12))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(SeaTheme.muted)
                     }
                     .modifier(SeaDisclosureTreatment())
                 }
             }
-            .padding(10)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+            .background(
+                displayPreferences.reduceTransparency ? SeaTheme.opaqueQuiet : .white.opacity(0.055),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        tone.opacity(displayPreferences.contrast == .increased ? 0.55 : 0.24),
+                        lineWidth: displayPreferences.contrast == .increased ? 1 : 0.75
+                    )
+            }
         } else {
             legacyFailureBlock(failure)
         }
@@ -1140,14 +1231,9 @@ private struct ConnectionProgressCard: View {
             Spacer()
 
             if let failure = appState.lastConnectionFailure {
-                Button {
+                SeaCardCopyButton(reduceMotion: reduceMotion) {
                     copyFailure(failure)
-                } label: {
-                    Label("Copy details", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
             }
         }
     }
@@ -1191,13 +1277,73 @@ private struct ConnectionProgressCard: View {
     }
 }
 
+private struct ProgressCardGlassEffect: ViewModifier {
+    let enabled: Bool
+    let tint: Color
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(.regular.tint(tint), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        } else {
+            content
+        }
+    }
+}
+
+private struct SeaDetailsTriggerButton: View {
+    let reduceMotion: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text("Details")
+                SeaChevron(expanded: true)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(hovered ? SeaTheme.text : SeaTheme.text.opacity(0.82))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.white.opacity(hovered ? 0.08 : 0), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
+    }
+}
+
+private struct SeaCardCopyButton: View {
+    let reduceMotion: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Label("Copy details", systemImage: "doc.on.doc")
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(hovered ? SeaTheme.text : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.white.opacity(hovered ? 0.07 : 0), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
+    }
+}
+
 private struct DashboardStatCard: View {
     @Environment(\.colorScheme) private var colorScheme
+    @SeaDisplayPreferences private var displayPreferences
     let title: LocalizedStringKey
     let value: String
     let detail: String
     let systemImage: String
     let tint: Color
+    var hovered: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -1205,7 +1351,7 @@ private struct DashboardStatCard: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -1214,12 +1360,12 @@ private struct DashboardStatCard: View {
                     .textCase(.uppercase)
 
                 Text(value)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
 
                 Text(detail)
-                    .font(.system(size: 10))
+                    .font(.system(size: 10)).monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -1233,14 +1379,16 @@ private struct DashboardStatCard: View {
         // in the icon chip. Tinted glass side by side read as mismatched
         // patches, and adjacent Liquid Glass shapes render merge bridges.
         .background(
-            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            displayPreferences.reduceTransparency
+                ? AnyShapeStyle(colorScheme == .dark ? (hovered ? SeaTheme.opaqueQuiet : SeaTheme.opaquePanel) : Color(nsColor: .controlBackgroundColor))
+                : AnyShapeStyle(.white.opacity(colorScheme == .dark ? (hovered ? 0.085 : 0.055) : (hovered ? 0.62 : 0.50))),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(
-                    .white.opacity(colorScheme == .dark ? 0.10 : 0.7),
-                    lineWidth: 0.5
+                    .white.opacity(displayPreferences.contrast == .increased ? 0.45 : (colorScheme == .dark ? (hovered ? 0.18 : 0.11) : 0.7)),
+                    lineWidth: displayPreferences.contrast == .increased ? 1 : 0.65
                 )
         }
     }
@@ -1265,7 +1413,7 @@ private struct SeaHomeHeaderWordsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(shownTitle))
-                .font(.system(size: 56, weight: .light)).tracking(1.12)
+                .font(.system(size: 52, weight: .light)).tracking(-0.4)
                 .lineLimit(1).minimumScaleFactor(0.65)
                 .shadow(color: Color(hex: "0C060A").opacity(0.45), radius: 18, y: 2)
                 .foregroundStyle(SeaTheme.text)

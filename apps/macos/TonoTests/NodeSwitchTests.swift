@@ -1,3 +1,4 @@
+import Network
 import XCTest
 @testable import Tono
 
@@ -91,5 +92,881 @@ final class NodeSwitchTests: XCTestCase {
             rule: "Match",
             rulePayload: nil
         )
+    }
+
+    private enum TestApplyError: Error {
+        case syncFailed
+        case armFailed
+        case reloadFailed
+    }
+
+    @MainActor
+    private func stubbedNetworkProtection() -> NetworkProtectionOperations {
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { coreRuntime in
+            coreRuntime.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = { KillSwitchService.isArmed = false }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        return runtime
+    }
+
+    @MainActor
+    func testFailedSwitchRollsBackInPlaceWithoutDisconnecting() async throws {
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let delayWasProven = SingBoxDelayGate.isProven
+        defer {
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let app = AppState()
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let next = Fixture.realityNode(
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+        app.networkInfo = NetworkInfo(ip: "203.0.114.10", org: "AS64512", location: "JP")
+        app.lastClassifiedFailure = nil
+
+        var armedEndpointSets: [[ConfigPipeline.DialEndpoint]] = []
+        var appliedOverlays: [String?] = []
+        var events: [String] = []
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { endpoints in
+                armedEndpointSets.append(endpoints)
+                events.append("arm:\(endpoints.map(\.host).joined(separator: ","))")
+            },
+            applyRuntimeConfig: { overlay in
+                appliedOverlays.append(overlay.selectedNodeName)
+                events.append("reload:\(overlay.selectedNodeName ?? "nil")")
+            },
+            waitForTunnel: {
+                events.append("waitForTunnel")
+                return true
+            },
+            verify: { selectedExit in
+                events.append("verify:\(selectedExit?.name ?? "home")")
+                if selectedExit?.name == next.name {
+                    return .failed(
+                        ProtectedConnectivity.failure(
+                            .coreExitUnreachable,
+                            stage: "verifyingTraffic",
+                            attempt: 1,
+                            generation: 0,
+                            detail: "test exit unreachable"
+                        )
+                    )
+                }
+                return .connected(controllerAdvisory: nil)
+            },
+            closeConnections: { exitName in
+                events.append("close:\(exitName ?? "nil")")
+            },
+            rememberNode: { node, name in
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+                events.append("remember:\(name)")
+            },
+            refreshProxy: {
+                events.append("refresh")
+            }
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+
+        XCTAssertTrue(app.isConnected, "failed switch rollback should keep the active session connected")
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+        XCTAssertEqual(app.activeNode?.id, previous.id)
+        XCTAssertEqual(app.networkInfo.ip, "203.0.114.10")
+        XCTAssertEqual(app.networkInfo.org, "AS64512")
+        XCTAssertEqual(app.networkInfo.location, "JP")
+        XCTAssertNil(app.lastClassifiedFailure)
+        XCTAssertEqual(appliedOverlays, [next.name, previous.name])
+        XCTAssertEqual(armedEndpointSets.count, 2)
+        XCTAssertEqual(armedEndpointSets[0].map(\.host), ["203.0.114.10", "203.0.114.20"])
+        XCTAssertEqual(armedEndpointSets[1].map(\.host), ["203.0.114.10"])
+        XCTAssertTrue(events.contains("close:\(next.name)"))
+        XCTAssertNotNil(app.errorMessage)
+    }
+
+    @MainActor
+    func testSwitchWaitsForTunnelBeforeVerifyingAndAbortsToRollbackWhenMissing() async {
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let delayWasProven = SingBoxDelayGate.isProven
+        defer {
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let app = AppState()
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let next = Fixture.realityNode(
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+
+        var tunnelCalls = 0
+        var verifiedExits: [String?] = []
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in },
+            applyRuntimeConfig: { _ in },
+            waitForTunnel: {
+                tunnelCalls += 1
+                return tunnelCalls > 1
+            },
+            verify: { selectedExit in
+                verifiedExits.append(selectedExit?.name)
+                return .connected(controllerAdvisory: nil)
+            },
+            closeConnections: { _ in },
+            rememberNode: { node, name in
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+            },
+            refreshProxy: {}
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+
+        XCTAssertEqual(tunnelCalls, 2)
+        XCTAssertEqual(verifiedExits, [previous.name])
+        XCTAssertTrue(app.isConnected)
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+    }
+
+    @MainActor
+    func testApplyRuntimeConfigFailureRollsBackToPreviousExit() async {
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let delayWasProven = SingBoxDelayGate.isProven
+        defer {
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let app = AppState()
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let next = Fixture.realityNode(
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+
+        var armedEndpointSets: [[ConfigPipeline.DialEndpoint]] = []
+        var appliedOverlays: [String?] = []
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { endpoints in armedEndpointSets.append(endpoints) },
+            applyRuntimeConfig: { overlay in
+                if overlay.selectedNodeName == next.name {
+                    throw TestApplyError.syncFailed
+                }
+                appliedOverlays.append(overlay.selectedNodeName)
+            },
+            waitForTunnel: { true },
+            verify: { _ in .connected(controllerAdvisory: nil) },
+            closeConnections: { _ in },
+            rememberNode: { node, name in
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+            },
+            refreshProxy: {}
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+
+        XCTAssertTrue(app.isConnected)
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+        XCTAssertEqual(appliedOverlays, [previous.name])
+        XCTAssertEqual(armedEndpointSets.count, 2)
+        XCTAssertEqual(armedEndpointSets[0].map(\.host), ["203.0.114.10", "203.0.114.20"])
+        XCTAssertEqual(armedEndpointSets[1].map(\.host), ["203.0.114.10"])
+    }
+
+    @MainActor
+    func testMidSwitchCatalogRemovalDoesNotRollBackToRemovedExit() async {
+        let armed = KillSwitchService.isArmed
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let delayWasProven = SingBoxDelayGate.isProven
+        let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let updatePending = RuntimeCleanup.nativeUpdatePending
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        let app = AppState()
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = { KillSwitchService.isArmed = false }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        app.networkProtection = runtime
+        defer {
+            KillSwitchService.isArmed = armed
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+            RuntimeCleanup.nativeUpdatePending = updatePending
+            app.connectionCoordinator.cancelReconnectTasks()
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let next = Fixture.realityNode(
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+        KillSwitchService.isArmed = true
+
+        var appliedOverlays: [String?] = []
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in },
+            applyRuntimeConfig: { overlay in appliedOverlays.append(overlay.selectedNodeName) },
+            waitForTunnel: { true },
+            verify: { selectedExit in
+                if selectedExit?.name == next.name {
+                    app.pendingRemovedCatalogExit = true
+                    app.proxyRegions = [
+                        ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [next])
+                    ]
+                    return .failed(
+                        ProtectedConnectivity.failure(
+                            .coreExitUnreachable,
+                            stage: "verifyingTraffic",
+                            attempt: 1,
+                            generation: 0,
+                            detail: "test exit unreachable"
+                        )
+                    )
+                }
+                return .connected(controllerAdvisory: nil)
+            },
+            closeConnections: { _ in },
+            rememberNode: { node, name in
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+            },
+            refreshProxy: {}
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertEqual(appliedOverlays, [next.name])
+        XCTAssertFalse(app.isConnected)
+    }
+
+    @MainActor
+    func testPreserveTeardownDuringRollbackDoesNotRevertSelectionToFailedTarget() async {
+        await assertPreserveTeardownDuringOrAfterRollbackKeepsPrevious(suspendInRefresh: false)
+    }
+
+    @MainActor
+    func testPreserveTeardownAfterRollbackRememberedDoesNotRevertSelectionToFailedTarget() async {
+        await assertPreserveTeardownDuringOrAfterRollbackKeepsPrevious(suspendInRefresh: true)
+    }
+
+    @MainActor
+    private func assertPreserveTeardownDuringOrAfterRollbackKeepsPrevious(
+        suspendInRefresh: Bool
+    ) async {
+        let armed = KillSwitchService.isArmed
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let delayWasProven = SingBoxDelayGate.isProven
+        let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let updatePending = RuntimeCleanup.nativeUpdatePending
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        let app = AppState()
+        app.networkProtection = stubbedNetworkProtection()
+        defer {
+            KillSwitchService.isArmed = armed
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+            RuntimeCleanup.nativeUpdatePending = updatePending
+            app.connectionCoordinator.cancelReconnectTasks()
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let next = Fixture.realityNode(
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.persistProxySelection(previous.name)
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        KillSwitchService.isArmed = true
+
+        let paused = expectation(description: "switch paused during or after rollback")
+        var continuation: CheckedContinuation<Void, Never>?
+        var didPause = false
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in },
+            applyRuntimeConfig: { overlay in
+                if !suspendInRefresh, overlay.selectedNodeName == previous.name, !didPause {
+                    didPause = true
+                    await withCheckedContinuation { reply in
+                        continuation = reply
+                        paused.fulfill()
+                    }
+                }
+            },
+            waitForTunnel: { true },
+            verify: { selectedExit in
+                if selectedExit?.name == next.name {
+                    return .failed(
+                        ProtectedConnectivity.failure(
+                            .coreExitUnreachable,
+                            stage: "verifyingTraffic",
+                            attempt: 1,
+                            generation: 0,
+                            detail: "test exit unreachable"
+                        )
+                    )
+                }
+                return .connected(controllerAdvisory: nil)
+            },
+            closeConnections: { _ in },
+            rememberNode: { node, name in
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+                app.persistProxySelection(name)
+            },
+            refreshProxy: {
+                if suspendInRefresh, !didPause {
+                    didPause = true
+                    await withCheckedContinuation { reply in
+                        continuation = reply
+                        paused.fulfill()
+                    }
+                }
+            }
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await fulfillment(of: [paused], timeout: 5)
+        app.prepareForSystemSleep()
+        continuation?.resume()
+        continuation = nil
+        await app.connectionCoordinator.nodeSwitchTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertFalse(app.isConnected)
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+        XCTAssertEqual(app.selectedNodeId, previous.id)
+        XCTAssertEqual(app.activeNode?.id, previous.id)
+        XCTAssertEqual(
+            AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName),
+            previous.name
+        )
+        XCTAssertEqual(app.preferManagedCatalogExitForConnect()?.id, previous.id)
+    }
+
+    @MainActor
+    func testRollbackNarrowFailureRecoversTowardPreviousExitRatherThanFailedTarget() async {
+        let armed = KillSwitchService.isArmed
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let delayWasProven = SingBoxDelayGate.isProven
+        let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let updatePending = RuntimeCleanup.nativeUpdatePending
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        let app = AppState()
+        app.networkProtection = stubbedNetworkProtection()
+        defer {
+            KillSwitchService.isArmed = armed
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+            RuntimeCleanup.nativeUpdatePending = updatePending
+            app.connectionCoordinator.cancelReconnectTasks()
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let next = Fixture.realityNode(
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.persistProxySelection(previous.name)
+        app.isConnected = true
+        KillSwitchService.isArmed = true
+
+        var armCallCount = 0
+        var appliedOverlays: [String?] = []
+        var remembered: [String] = []
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in
+                armCallCount += 1
+                if armCallCount == 2 {
+                    throw TestApplyError.armFailed
+                }
+            },
+            applyRuntimeConfig: { overlay in
+                appliedOverlays.append(overlay.selectedNodeName)
+            },
+            waitForTunnel: { true },
+            verify: { selectedExit in
+                if selectedExit?.name == next.name {
+                    return .failed(
+                        ProtectedConnectivity.failure(
+                            .coreExitUnreachable,
+                            stage: "verifyingTraffic",
+                            attempt: 1,
+                            generation: 0,
+                            detail: "test exit unreachable"
+                        )
+                    )
+                }
+                return .connected(controllerAdvisory: nil)
+            },
+            closeConnections: { _ in },
+            rememberNode: { node, name in
+                remembered.append(name)
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+            },
+            refreshProxy: {}
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertEqual(appliedOverlays, [next.name, previous.name])
+        XCTAssertEqual(armCallCount, 2)
+        XCTAssertTrue(remembered.isEmpty)
+        XCTAssertFalse(app.isConnected)
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+        XCTAssertEqual(app.selectedNodeId, previous.id)
+        XCTAssertEqual(app.activeNode?.id, previous.id)
+        XCTAssertEqual(
+            AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName),
+            previous.name
+        )
+        XCTAssertNil(app.lastClassifiedFailure)
+        XCTAssertNotNil(app.connectionCoordinator.protectedReconnectTask)
+    }
+
+    @MainActor
+    func testDisabledHomeExitIsNotRolledBackTo() async {
+        let transports: [TonoTransportDescriptor?] = [nil, TonoTransportDescriptor(port: 1080)]
+        for transport in transports {
+            let armed = KillSwitchService.isArmed
+            let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+            let delayWasProven = SingBoxDelayGate.isProven
+            let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+            let updatePending = RuntimeCleanup.nativeUpdatePending
+            RuntimeCleanup.nativeUpdateBlocksConnect = false
+            RuntimeCleanup.nativeUpdatePending = false
+            let app = AppState()
+            app.networkProtection = stubbedNetworkProtection()
+            defer {
+                KillSwitchService.isArmed = armed
+                AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+                RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+                RuntimeCleanup.nativeUpdatePending = updatePending
+                app.connectionCoordinator.cancelReconnectTasks()
+                if delayWasProven { SingBoxDelayGate.prove() }
+                else { SingBoxDelayGate.suspend() }
+            }
+            let homeProxy = Fixture.realityNode(
+                name: "Tokyo-Home", id: "tokyo-home", server: "203.0.114.10", port: 443
+            )
+            let next = Fixture.realityNode(
+                name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+            )
+            app.tonoTransport = transport
+            app.proxyRegions = [
+                ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [homeProxy, next])
+            ]
+            app.managedCatalogRouting = TonoExitCatalogRouting(
+                homeProxy: homeProxy.name,
+                defaultProxy: next.name,
+                homeSocks5: nil
+            )
+            app.selectedNodeId = ConfigPipeline.homeNodeName
+            app.activeNode = nil
+            app.proxyService.activeNodeName = ConfigPipeline.homeNodeName
+            app.isConnected = true
+            KillSwitchService.isArmed = true
+
+            var appliedOverlays: [String?] = []
+            var verifiedExits: [String?] = []
+            let ops = AppState.NodeSwitchOperations(
+                armKillSwitch: { _ in },
+                applyRuntimeConfig: { overlay in
+                    appliedOverlays.append(overlay.selectedNodeName)
+                },
+                waitForTunnel: { true },
+                verify: { selectedExit in
+                    verifiedExits.append(selectedExit?.name)
+                    return .failed(
+                        ProtectedConnectivity.failure(
+                            .coreExitUnreachable,
+                            stage: "verifyingTraffic",
+                            attempt: 1,
+                            generation: 0,
+                            detail: "test exit unreachable"
+                        )
+                    )
+                },
+                closeConnections: { _ in },
+                rememberNode: { node, name in
+                    app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                    app.activeNode = node
+                    app.proxyService.activeNodeName = name
+                },
+                refreshProxy: {}
+            )
+
+            app.selectNode(next.name, operations: ops)
+            await app.connectionCoordinator.nodeSwitchTask?.value
+            await app.connectionCoordinator.disconnectSequence?.value
+
+            XCTAssertEqual(appliedOverlays, [next.name])
+            XCTAssertEqual(verifiedExits, [next.name])
+            XCTAssertFalse(app.isConnected)
+            XCTAssertEqual(app.proxyService.activeNodeName, next.name)
+        }
+    }
+
+    @MainActor
+    func testReloadCoreConfigUpdatesLoadedDigestEvenWhenControllerReloadFails() async throws {
+        let savedConsumer = RuntimeCleanup.launchProtectionConsumer
+        let savedSlot = AppProfile.defaults.object(forKey: SingBoxFakeIPRotation.defaultsKey)
+        let savedSelection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let savedSession = AppProfile.defaults.object(forKey: SettingsKey.routingSession)
+        let savedIPC = KillSwitchService.armIPC
+        let savedArmed = KillSwitchService.isArmed
+        let app = AppState()
+        let configFile = app.coreRuntime.configFilePath
+        let savedConfig = try? Data(contentsOf: configFile)
+        try app.coreRuntime.captureRoutingMode("stable", physicalInterface: nil)
+        let node = Fixture.realityNode(name: "Los Angeles · Canyon")
+        app.proxyRegions = [ProxyRegion(id: "custom", name: "Custom", nodes: [node])]
+        app.selectedNodeId = node.id
+        app.activeNode = node
+        app.proxyService.activeNodeName = node.name
+        app.coreController = CoreControllerClient(port: 9)
+        app.config.tunEnabled = true
+        app.isConnected = true
+        app.loadedRuntimeConfigDigest = "stale-digest"
+        KillSwitchService.isArmed = true
+        KillSwitchService.armIPC.prepare = { _ in }
+        KillSwitchService.armIPC.deliver = { _ in
+            (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow, nil)
+        }
+        defer {
+            RuntimeCleanup.launchProtectionConsumer = savedConsumer
+            AppProfile.defaults.set(savedSlot, forKey: SingBoxFakeIPRotation.defaultsKey)
+            AppProfile.defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+            AppProfile.defaults.set(savedSession, forKey: SettingsKey.routingSession)
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = savedArmed
+            if let savedConfig { try? savedConfig.write(to: configFile) }
+            else { try? FileManager.default.removeItem(at: configFile) }
+        }
+
+        var syncedDigest: String?
+        var operations = AppState.ConfigReloadOperations()
+        operations.sync = { _, digest in
+            syncedDigest = digest
+            return "/var/run/tono-core/runtime/config.json"
+        }
+        operations.reload = { _, _ in
+            throw TestApplyError.reloadFailed
+        }
+
+        app.reloadCoreConfig(operations: operations)
+        await app.connectionCoordinator.configReloadTask?.value
+
+        XCTAssertNotNil(syncedDigest)
+        XCTAssertEqual(app.loadedRuntimeConfigDigest, syncedDigest)
+        XCTAssertNotEqual(app.loadedRuntimeConfigDigest, "stale-digest")
+        XCTAssertTrue(app.isConnected)
+    }
+
+    @MainActor
+    func testThreeTierLiveSwitchRefusesWithoutDisconnectingOrTouchingState() async throws {
+        let savedSession = AppProfile.defaults.object(forKey: SettingsKey.routingSession)
+        let savedSelection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let app = AppState()
+        try app.coreRuntime.captureRoutingMode("three-tier", physicalInterface: "en0")
+        defer {
+            AppProfile.defaults.set(savedSession, forKey: SettingsKey.routingSession)
+            AppProfile.defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+        }
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let next = Fixture.realityNode(
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+        app.networkInfo = NetworkInfo(ip: "203.0.114.10", org: "AS64512", location: "JP")
+
+        var opsCalled = false
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in opsCalled = true },
+            applyRuntimeConfig: { _ in opsCalled = true },
+            waitForTunnel: { opsCalled = true; return true },
+            verify: { _ in opsCalled = true; return .connected(controllerAdvisory: nil) },
+            closeConnections: { _ in opsCalled = true },
+            rememberNode: { _, _ in opsCalled = true },
+            refreshProxy: { opsCalled = true }
+        )
+
+        app.selectNode(next.name, operations: ops)
+
+        XCTAssertFalse(opsCalled)
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.switchingNodeId)
+        XCTAssertNil(app.connectionCoordinator.nodeSwitchTask)
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+        XCTAssertEqual(app.activeNode?.id, previous.id)
+        XCTAssertEqual(app.networkInfo.ip, "203.0.114.10")
+        XCTAssertEqual(
+            app.errorMessage,
+            String(localized: "Disconnect before switching cloud servers in Strict mode.")
+        )
+    }
+
+    @MainActor
+    func testReloadCoreConfigSkipsInStrictThreeTierMode() throws {
+        let savedSession = AppProfile.defaults.object(forKey: SettingsKey.routingSession)
+        let app = AppState()
+        try app.coreRuntime.captureRoutingMode("three-tier", physicalInterface: "en0")
+        defer {
+            AppProfile.defaults.set(savedSession, forKey: SettingsKey.routingSession)
+        }
+        let node = Fixture.realityNode(name: "Tokyo-1", id: "tokyo-1")
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [node])]
+        app.selectedNodeId = node.id
+        app.activeNode = node
+        app.proxyService.activeNodeName = node.name
+        app.coreController = CoreControllerClient(port: 9)
+        app.isConnected = true
+
+        var syncCalls = 0
+        var operations = AppState.ConfigReloadOperations()
+        operations.sync = { _, _ in
+            syncCalls += 1
+            return "/var/run/tono-core/runtime/config.json"
+        }
+
+        app.reloadCoreConfig(operations: operations)
+
+        XCTAssertEqual(syncCalls, 0)
+        XCTAssertNil(app.connectionCoordinator.configReloadTask)
+        XCTAssertFalse(app.pendingFullConfigReload)
+        XCTAssertNil(app.pendingDirectPolicyReload)
+        XCTAssertTrue(app.isConnected)
+    }
+
+    @MainActor
+    func testReloadCoreConfigUsesOperationsWaitForTunnelAndLocalDNSSeams() async throws {
+        for failAtDNS in [false, true] {
+            let savedConsumer = RuntimeCleanup.launchProtectionConsumer
+            let savedSlot = AppProfile.defaults.object(forKey: SingBoxFakeIPRotation.defaultsKey)
+            let savedSelection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+            let savedSession = AppProfile.defaults.object(forKey: SettingsKey.routingSession)
+            let savedIPC = KillSwitchService.armIPC
+            let savedArmed = KillSwitchService.isArmed
+            let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+            let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+            RuntimeCleanup.nativeUpdateBlocksConnect = false
+            RuntimeCleanup.nativeUpdatePending = false
+            let app = AppState()
+            app.networkProtection = stubbedNetworkProtection()
+            let configFile = app.coreRuntime.configFilePath
+            let savedConfig = try? Data(contentsOf: configFile)
+            try app.coreRuntime.captureRoutingMode("stable", physicalInterface: nil)
+
+            let queue = DispatchQueue(label: "NodeSwitchTests.controller")
+            let listener = try NWListener(using: .tcp, on: .any)
+            let ready = expectation(description: "controller stub ready")
+            listener.stateUpdateHandler = { state in
+                if case .ready = state { ready.fulfill() }
+            }
+            listener.newConnectionHandler = { connection in
+                connection.start(queue: queue)
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, _ in
+                    let response = Data("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                    connection.send(content: response, completion: .contentProcessed { _ in
+                        connection.cancel()
+                    })
+                }
+            }
+            listener.start(queue: queue)
+            await fulfillment(of: [ready], timeout: 3)
+            let port = try XCTUnwrap(listener.port)
+
+            let node = Fixture.realityNode(name: "Los Angeles · Canyon")
+            app.proxyRegions = [ProxyRegion(id: "custom", name: "Custom", nodes: [node])]
+            app.selectedNodeId = node.id
+            app.activeNode = node
+            app.proxyService.activeNodeName = node.name
+            app.tonoTransport = TonoTransportDescriptor(port: 1080)
+            app.coreController = CoreControllerClient(port: Int(port.rawValue))
+            app.config.tunEnabled = true
+            app.isConnected = true
+            KillSwitchService.isArmed = true
+            KillSwitchService.armIPC.prepare = { _ in }
+            KillSwitchService.armIPC.deliver = { _ in
+                (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow, nil)
+            }
+            defer {
+                listener.stateUpdateHandler = nil
+                listener.newConnectionHandler = nil
+                listener.cancel()
+                app.connectionCoordinator.cancelReconnectTasks()
+                RuntimeCleanup.launchProtectionConsumer = savedConsumer
+                AppProfile.defaults.set(savedSlot, forKey: SingBoxFakeIPRotation.defaultsKey)
+                AppProfile.defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+                AppProfile.defaults.set(savedSession, forKey: SettingsKey.routingSession)
+                KillSwitchService.armIPC = savedIPC
+                KillSwitchService.isArmed = savedArmed
+                RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+                RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+                if let savedConfig { try? savedConfig.write(to: configFile) }
+                else { try? FileManager.default.removeItem(at: configFile) }
+            }
+
+            var waitTunnelCalls = 0
+            var waitDNSCalls = 0
+            var operations = AppState.ConfigReloadOperations()
+            operations.sync = { _, _ in "/var/run/tono-core/runtime/config.json" }
+            operations.reload = { _, _ in }
+            operations.waitForTunnel = {
+                waitTunnelCalls += 1
+                return failAtDNS
+            }
+            operations.waitForLocalDNS = {
+                waitDNSCalls += 1
+                return false
+            }
+
+            app.reloadCoreConfig(operations: operations)
+            await app.connectionCoordinator.configReloadTask?.value
+            await app.finishPendingDisconnect()
+
+            XCTAssertEqual(waitTunnelCalls, 1)
+            XCTAssertEqual(waitDNSCalls, failAtDNS ? 1 : 0)
+            XCTAssertFalse(app.isConnected)
+        }
+    }
+
+    @MainActor
+    func testPreTransitionFailureRestoresNetworkInfoWithoutDisconnecting() async {
+        let delayWasProven = SingBoxDelayGate.isProven
+        defer {
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let app = AppState()
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let invalid = Fixture.realityNode(
+            name: "Invalid-Port", id: "invalid-port", server: "203.0.114.20", port: 0
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, invalid])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+        app.isRecoveringProtectedConnection = false
+        app.networkInfo = NetworkInfo(ip: "203.0.114.10", org: "AS64512", location: "JP")
+
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in XCTFail("invalid node must fail before arming") },
+            applyRuntimeConfig: { _ in XCTFail("invalid node must fail before apply") },
+            waitForTunnel: { true },
+            verify: { _ in .connected(controllerAdvisory: nil) },
+            closeConnections: { _ in },
+            rememberNode: { _, _ in },
+            refreshProxy: {}
+        )
+
+        app.selectNode(invalid.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+
+        XCTAssertTrue(app.isConnected)
+        XCTAssertEqual(app.networkInfo.ip, "203.0.114.10")
+        XCTAssertEqual(app.networkInfo.org, "AS64512")
+        XCTAssertEqual(app.networkInfo.location, "JP")
+        XCTAssertNotNil(app.errorMessage)
     }
 }

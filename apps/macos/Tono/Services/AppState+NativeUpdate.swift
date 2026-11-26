@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    nonisolated static let nativeUpdateRetired = Notification.Name("TonoNativeUpdateRetired")
+}
+
 extension AppState {
     func installNativeUpdate(manifest: Data, signature: Data, package: URL) async throws {
         let coordinator = PrivilegedRuntimeCoordinator.shared
@@ -142,6 +146,14 @@ extension AppState {
                     let automatic = preserving && !nativeUpdateExplicitReleaseRequested
                     if !automatic { dispatchedAutomatic = false }
                     disconnect(releaseKillSwitch: true, automaticFailureRelease: automatic)
+                    let disconnectTask = connectionCoordinator.disconnectSequence
+                    let preemptiveTask = connectionCoordinator.preemptiveReleaseTask
+                    await disconnectTask?.value
+                    await preemptiveTask?.value
+                    guard !Task.isCancelled,
+                          !nativeUpdatePending,
+                          !RuntimeCleanup.nativeUpdatePending else { return }
+                    NotificationCenter.default.post(name: .nativeUpdateRetired, object: self)
                     return
                 }
                 // The helper may have released PF before the reply or ledger
@@ -218,6 +230,7 @@ extension AppState {
         updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         errorMessage = nil
         RuntimeCleanup.clearCoreStarted()
+        NotificationCenter.default.post(name: .nativeUpdateRetired, object: self)
     }
 }
 

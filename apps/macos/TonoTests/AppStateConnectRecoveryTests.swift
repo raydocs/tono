@@ -41,6 +41,12 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         return app
     }
 
+    private func cancelAndDrainConnect(_ app: AppState) async {
+        let pendingConnect = app.connectionCoordinator.connectTask
+        app.connectionCoordinator.cancelConnectionTasks()
+        await pendingConnect?.value
+    }
+
     func testAutomaticRecoveryKeepsAdmittedModeUntilExplicitSessionEnd() async {
         let saved = RuntimeState()
         let defaults = AppProfile.defaults
@@ -76,7 +82,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.userConnect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
         app.isConnected = true
         defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
@@ -88,14 +94,14 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connect(preservingUnarmedBackoff: true)
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
 
         app.disconnect(releaseKillSwitch: true)
         await app.finishPendingDisconnect()
         app.userConnect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "three-tier")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
         app.isConnected = true
         defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
@@ -105,13 +111,14 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "three-tier")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
 
         app.disconnect(releaseKillSwitch: true)
         await app.finishPendingDisconnect()
         app.userConnect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
+        await cancelAndDrainConnect(app)
     }
 
     func testMissingTUNDuringNodeSwitchDoesNotCountTowardPostSwitchVerdict() async {
@@ -318,6 +325,407 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertFalse(app.isProtectionBlocked)
         XCTAssertFalse(app.isDisconnecting)
         XCTAssertFalse(KillSwitchService.isArmed)
+    }
+
+    func testExternalProtectionReleaseResetsStaleHelperSessionWhilePreservingRF3() async {
+        let saved = RuntimeState()
+        let defaults = AppProfile.defaults
+        let selection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer {
+            saved.restore()
+            defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        KillSwitchService.isArmed = true
+
+        let app = makeApp()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            app.connectionCoordinator.cancelReconnectTasks()
+        }
+        app.proxyRegions = [ProxyRegion(
+            id: AppState.managedCatalogRegionID,
+            name: "TONO CLOUD",
+            nodes: [Fixture.realityNode()]
+        )]
+        app.recordConnectBootSession = {}
+        app.isProtectionBlocked = true
+
+        // Simulate an already-admitted session that is later released externally.
+        app.connectionCoordinator.beginUserConnect()
+        let admittedSession = app.connectionCoordinator.helperSession
+        XCTAssertTrue(admittedSession.adopt(41))
+
+        app.acceptConfirmedExternalProtectionRelease()
+
+        XCTAssertTrue(admittedSession.isRetired)
+        let resetSession = app.connectionCoordinator.helperSession
+        XCTAssertFalse(resetSession === admittedSession)
+        XCTAssertNil(resetSession.value)
+        XCTAssertFalse(resetSession.userInitiated)
+        XCTAssertFalse(HelperManager.mayAdmit(
+            .init(released: true, generation: 42),
+            userInitiated: resetSession.userInitiated
+        ), "R-F3: external release must still prevent automatic reconnects from admitting")
+
+        // Automatic connect keeps userInitiated == false.
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertFalse(app.connectionCoordinator.helperSession.userInitiated)
+        await cancelAndDrainConnect(app)
+        app.isConnecting = false
+
+        // Explicit user Connect mints a fresh user-initiated generation.
+        app.userConnect()
+        XCTAssertTrue(app.isConnecting)
+        let userSession = app.connectionCoordinator.helperSession
+        XCTAssertNil(userSession.value)
+        XCTAssertTrue(userSession.userInitiated)
+        XCTAssertTrue(HelperManager.mayAdmit(
+            .init(released: true, generation: 42),
+            userInitiated: userSession.userInitiated
+        ))
+
+        // A stale userConnect() while connected must not retire the active session.
+        await cancelAndDrainConnect(app)
+        app.isConnecting = false
+        app.isConnected = true
+        XCTAssertTrue(userSession.adopt(43))
+        app.userConnect()
+        XCTAssertTrue(app.connectionCoordinator.helperSession === userSession)
+        XCTAssertFalse(userSession.isRetired)
+        XCTAssertEqual(userSession.value, 43)
+    }
+
+    func testRestoreInternetPreemptivelyIsAwaitedByFinishPendingDisconnectAndConnect() async {
+        let saved = RuntimeState()
+        let defaults = AppProfile.defaults
+        let selection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let strictIntent = defaults.object(forKey: "strictRoutingSessionIntent")
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer {
+            saved.restore()
+            defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            defaults.set(strictIntent, forKey: "strictRoutingSessionIntent")
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        KillSwitchService.isArmed = true
+
+        let app = makeApp()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            app.connectionCoordinator.cancelReconnectTasks()
+        }
+        app.proxyRegions = [ProxyRegion(
+            id: AppState.managedCatalogRegionID,
+            name: "TONO CLOUD",
+            nodes: [Fixture.realityNode()]
+        )]
+        app.recordConnectBootSession = {}
+        app.isConnected = true
+        app.initialDataLoaded = true
+
+        final class Gate: @unchecked Sendable {
+            private let lock = NSLock()
+            private var openFlag = false
+            private var continuations: [CheckedContinuation<Void, Never>] = []
+            func wait() async {
+                await withCheckedContinuation { cont in
+                    lock.lock()
+                    if openFlag {
+                        lock.unlock()
+                        cont.resume()
+                    } else {
+                        continuations.append(cont)
+                        lock.unlock()
+                    }
+                }
+            }
+            func open() {
+                lock.lock()
+                openFlag = true
+                let pending = continuations
+                continuations.removeAll()
+                lock.unlock()
+                for cont in pending { cont.resume() }
+            }
+        }
+
+        let gate = Gate()
+        let releaseEntered = expectation(description: "preemptive release entered")
+        let restored = HelperManager.ReleaseOutcome(
+            outcome: "restored",
+            generation: 12,
+            components: [
+                .init(name: "pf", readback: "restored", risk: "settled", detail: nil),
+                .init(name: "ai", readback: "restored", risk: "settled", detail: nil),
+                .init(name: "dns", readback: "restored", risk: "settled", detail: nil),
+                .init(name: "core", readback: "restored", risk: "settled", detail: nil),
+            ],
+            stuck: [],
+            finished: true,
+            detail: nil
+        )
+        app.preemptiveReleaseOperation = { _, _, _ in
+            releaseEntered.fulfill()
+            await gate.wait()
+            return (.success(restored), false)
+        }
+
+        app.restoreInternetPreemptively()
+        await fulfillment(of: [releaseEntered], timeout: 1)
+        XCTAssertTrue(app.isDisconnecting)
+        XCTAssertNotNil(app.connectionCoordinator.preemptiveReleaseTask)
+
+        // attemptAutomaticConnect() and finishPendingDisconnect() must wait rather than busy-loop.
+        let finishDone = expectation(description: "finishPendingDisconnect waits for preemptive release")
+        let finishTask = Task {
+            await app.finishPendingDisconnect()
+            finishDone.fulfill()
+        }
+        app.autoConnectRequested = true
+        app.attemptAutomaticConnect()
+
+        // User Connect clicked during in-flight preemptive release defers instead of dropping
+        // and supersedes any pending automatic connect.
+        app.userConnect()
+        XCTAssertFalse(app.autoConnectRequested)
+        XCTAssertTrue(app.connectionCoordinator.hasPendingDeferredConnect)
+        // Even if an automatic connect wakeup races ahead of the deferred Connect task,
+        // hasPendingDeferredConnect prevents it from stealing the attempt.
+        app.autoConnectRequested = true
+        app.attemptAutomaticConnect()
+        await Task.yield()
+        XCTAssertFalse(app.isConnecting)
+
+        gate.open()
+        await fulfillment(of: [finishDone], timeout: 1)
+        await finishTask.value
+        for _ in 0..<20 where !app.isConnecting {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertFalse(app.isDisconnecting)
+        XCTAssertNil(app.connectionCoordinator.preemptiveReleaseTask)
+        XCTAssertFalse(app.connectionCoordinator.hasPendingDeferredConnect)
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertTrue(app.connectionCoordinator.helperSession.userInitiated)
+        app.autoConnectRequested = false
+        await cancelAndDrainConnect(app)
+        app.connectionCoordinator.cancelReconnectTasks()
+    }
+
+    func testOptionalPolicyAnsweredSyncRefusalKeepsWorkingSession() async throws {
+        let saved = RuntimeState()
+        let defaults = AppProfile.defaults
+        let savedRoutingMode = defaults.object(forKey: SettingsKey.desktopRoutingMode)
+        let savedRoutingSession = defaults.object(forKey: SettingsKey.routingSession)
+        let savedSelection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let savedIPC = KillSwitchService.armIPC
+        let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let updatePending = RuntimeCleanup.nativeUpdatePending
+
+        let app = makeApp()
+        let configURL = app.coreRuntime.configFilePath
+        let savedConfigData = try? Data(contentsOf: configURL)
+        defer {
+            saved.restore()
+            defaults.set(savedRoutingMode, forKey: SettingsKey.desktopRoutingMode)
+            defaults.set(savedRoutingSession, forKey: SettingsKey.routingSession)
+            defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+            KillSwitchService.armIPC = savedIPC
+            RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+            RuntimeCleanup.nativeUpdatePending = updatePending
+            if let savedConfigData {
+                try? savedConfigData.write(to: configURL)
+            } else {
+                try? FileManager.default.removeItem(at: configURL)
+            }
+            app.connectionCoordinator.cancelReconnectTasks()
+        }
+
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        KillSwitchService.isArmed = true
+        KillSwitchService.armIPC.status = { (true, true, true, false) }
+        KillSwitchService.armIPC.deliver = { _ in
+            (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow, nil)
+        }
+
+        defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
+        try app.coreRuntime.captureRoutingMode("stable", physicalInterface: "en0")
+        let node = Fixture.realityNode()
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [node])]
+        _ = app.applyProxySelection(node.name)
+        app.config.mixedPort = 29190
+        app.config.externalController = "127.0.0.1:29191"
+        app.config.secret = String(repeating: "a", count: 64)
+        app.isConnected = true
+        app.coreController = CoreControllerClient()
+        app.loadedRuntimeConfigDigest = "prior-installed-digest"
+        app.activeDirectPolicy = try app.initialDirectPolicy(
+            physicalInterface: "en0",
+            policy: TonoTrafficPolicy(
+                version: 3,
+                domains: [],
+                mediaEndpoints: [],
+                directSuffixes: [.init(host: "example.net", ports: [443])],
+                trusted: true
+            )
+        )
+        app.managedTrafficPolicy = TonoTrafficPolicy(
+            version: 3,
+            domains: [],
+            mediaEndpoints: [],
+            directSuffixes: [.init(host: "example.org", ports: [443])],
+            trusted: true
+        )
+        app.managedTrafficPolicyRevision = 55
+
+        var syncCalls = 0
+        app.optionalPolicySyncCoreConfig = { _, _ in
+            syncCalls += 1
+            throw HelperIPCError.commandFailed("Stop the running Core before binding strict routing.", code: nil)
+        }
+
+        app.scheduleBackgroundOptionalPolicy()
+        while let owner = app.connectionCoordinator.configReloadTask {
+            await owner.value
+        }
+
+        XCTAssertEqual(syncCalls, 3)
+        XCTAssertTrue(app.isConnected, "an answered /core/sync refusal must keep the working session")
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence)
+        XCTAssertEqual(app.loadedRuntimeConfigDigest, "prior-installed-digest")
+
+        // A lost reply leaves the running Core unknown and must tear down.
+        app.managedTrafficPolicyRevision = 56
+        app.optionalPolicySyncCoreConfig = { _, _ in
+            throw HelperIPCError.emptyResponse
+        }
+        app.scheduleBackgroundOptionalPolicy()
+        while let owner = app.connectionCoordinator.configReloadTask {
+            await owner.value
+        }
+        await app.finishPendingDisconnect()
+
+        XCTAssertFalse(app.isConnected, "a lost /core/sync reply must tear down rather than leave unknown state")
+        XCTAssertNil(app.loadedRuntimeConfigDigest)
+    }
+
+    func testStrictRoutingReconnectReusesBoundSessionPorts() async {
+        let saved = RuntimeState()
+        let defaults = AppProfile.defaults
+        let savedRoutingMode = defaults.object(forKey: SettingsKey.desktopRoutingMode)
+        let savedRoutingSession = defaults.object(forKey: SettingsKey.routingSession)
+        let savedStrictIntent = defaults.object(forKey: "strictRoutingSessionIntent")
+        let savedSelection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer {
+            saved.restore()
+            defaults.set(savedRoutingMode, forKey: SettingsKey.desktopRoutingMode)
+            defaults.set(savedRoutingSession, forKey: SettingsKey.routingSession)
+            defaults.set(savedStrictIntent, forKey: "strictRoutingSessionIntent")
+            defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        KillSwitchService.isArmed = true
+        defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
+        defaults.set("three-tier", forKey: SettingsKey.routingSession)
+        defaults.set(true, forKey: "strictRoutingSessionIntent")
+
+        let app = makeApp()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            app.connectionCoordinator.cancelReconnectTasks()
+        }
+        app.proxyRegions = [ProxyRegion(
+            id: AppState.managedCatalogRegionID,
+            name: "TONO CLOUD",
+            nodes: [Fixture.realityNode()]
+        )]
+        app.recordConnectBootSession = {}
+        app.connectionCoordinator.capturedRoutingMode = "three-tier"
+
+        // Reconnect with strictRoutingSessionIntent and active protection reuses bound ports.
+        app.isProtectionBlocked = true
+        app.config.mixedPort = 34_120
+        app.config.externalController = "127.0.0.1:34121"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertEqual(app.config.mixedPort, 34_120)
+        XCTAssertEqual(app.config.externalController, "127.0.0.1:34121")
+        await cancelAndDrainConnect(app)
+        app.isConnecting = false
+
+        // Default RuntimeConfig ports (28990 / 127.0.0.1:9090) must not be reused even under strict reconnect.
+        app.config.mixedPort = 28_990
+        app.config.externalController = "127.0.0.1:9090"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertFalse(app.config.mixedPort == 28_990 && app.config.externalController == "127.0.0.1:9090")
+        await cancelAndDrainConnect(app)
+        app.isConnecting = false
+
+        // Fresh unprotected strict connect (even with leftover intent) allocates ephemeral ports.
+        KillSwitchService.isArmed = false
+        app.isProtectionBlocked = false
+        app.isProtectedReconnectScheduled = false
+        app.config.mixedPort = 28_990
+        app.config.externalController = "127.0.0.1:9090"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertFalse(app.config.mixedPort == 28_990 && app.config.externalController == "127.0.0.1:9090")
+        await cancelAndDrainConnect(app)
+        app.isConnecting = false
+
+        // Missing or invalid prior ports still fall back to allocating a valid pair.
+        KillSwitchService.isArmed = true
+        app.isProtectionBlocked = true
+        app.config.mixedPort = 0
+        app.config.externalController = ""
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertGreaterThan(app.config.mixedPort, 0)
+        XCTAssertFalse(app.config.externalController.isEmpty)
+        await cancelAndDrainConnect(app)
+        app.isConnecting = false
+
+        // Explicit release clears strictRoutingSessionIntent, so switching to stable rotates ports.
+        app.preemptiveReleaseOperation = { _, _, _ in
+            let restored = HelperManager.ReleaseOutcome(
+                outcome: "restored",
+                generation: 1,
+                components: [
+                    .init(name: "pf", readback: "restored", risk: "settled", detail: nil),
+                    .init(name: "ai", readback: "restored", risk: "settled", detail: nil),
+                    .init(name: "dns", readback: "restored", risk: "settled", detail: nil),
+                    .init(name: "core", readback: "restored", risk: "settled", detail: nil),
+                ],
+                stuck: [],
+                finished: true,
+                detail: nil
+            )
+            return (.success(restored), false)
+        }
+        defaults.set(true, forKey: "strictRoutingSessionIntent")
+        app.disconnect(releaseKillSwitch: true)
+        await app.finishPendingDisconnect()
+        XCTAssertFalse(defaults.bool(forKey: "strictRoutingSessionIntent"))
+
+        defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
+        app.config.mixedPort = 1
+        app.config.externalController = "127.0.0.1:2"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertNotEqual(app.config.mixedPort, 1)
+        XCTAssertNotEqual(app.config.externalController, "127.0.0.1:2")
+        await cancelAndDrainConnect(app)
+        app.connectionCoordinator.cancelReconnectTasks()
     }
 
     func testActivationDoesNotTreatNeverArmedProtectionAsAnExternalRelease() async {

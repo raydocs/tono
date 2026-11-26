@@ -3,9 +3,93 @@ import SwiftUI
 extension AppState {
     // MARK: - Proxy Management
 
+    struct NodeSwitchOperations {
+        var armKillSwitch: (_ proxyEndpoints: [ConfigPipeline.DialEndpoint]) async throws -> Void
+        var applyRuntimeConfig: (_ overlay: ConfigPipeline.OverlayConfig) async throws -> Void
+        var waitForTunnel: () async -> Bool
+        var verify: (_ selectedExit: ProxyNode?) async throws -> ConnectivityVerdict
+        var closeConnections: (_ exitName: String?) async -> Void
+        var rememberNode: (_ node: ProxyNode?, _ name: String) -> Void
+        var refreshProxy: () async -> Void
+    }
+
+    private func defaultNodeSwitchOperations(
+        api: CoreControllerClient,
+        generation: UInt64
+    ) -> NodeSwitchOperations {
+        NodeSwitchOperations(
+            armKillSwitch: { [weak self] proxyEndpoints in
+                guard let self else { throw CancellationError() }
+                try await self.armSwitchKillSwitch(proxyEndpoints: proxyEndpoints)
+            },
+            applyRuntimeConfig: { [weak self] overlay in
+                guard let self else { throw CancellationError() }
+                let runtimeNodes = self.importedExitNodes
+                let digest = try await self.coreRuntime.writeRuntimeConfig(
+                    overlay: overlay,
+                    customNodes: runtimeNodes,
+                    directPolicy: self.activeDirectPolicy,
+                    installed: self.loadedRuntimeConfigDigest
+                )
+                try Task.checkCancellation()
+                let path: String
+                do {
+                    path = try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
+                        configDirectory: self.coreRuntime.configDirectory.path,
+                        configSHA256: digest
+                    )
+                } catch {
+                    if Self.syncReplyWasLost(error) { self.loadedRuntimeConfigDigest = nil }
+                    throw error
+                }
+                try Task.checkCancellation()
+                self.loadedRuntimeConfigDigest = digest
+                try await api.reloadConfig(path: path)
+                self.commitResidentialRouteAuditContext(
+                    overlay: overlay,
+                    nodes: runtimeNodes,
+                    digest: digest
+                )
+            },
+            waitForTunnel: { [weak self] in
+                guard await AppState.waitForOwnedTunnelInterface() else { return false }
+                guard let self else { return false }
+                _ = await self.testLocalProtectedDNS(timeout: 2)
+                return true
+            },
+            verify: { [weak self] selectedExit in
+                guard let self else { throw CancellationError() }
+                return await self.verifyProtectedConnection(
+                    advisoryProbe: {
+                        Task {
+                            await self.advisoryControllerExitProbe(
+                                api: api,
+                                selectedExit: selectedExit
+                            )
+                        }
+                    },
+                    mixedPort: self.config.mixedPort,
+                    generation: generation,
+                    rounds: 1
+                )
+            },
+            closeConnections: { [weak self] exitName in
+                guard let self else { return }
+                await self.closeConnectionsBoundToExit(exitName, using: api)
+            },
+            rememberNode: { [weak self] node, name in
+                self?.rememberSwitchedNode(node, name: name)
+            },
+            refreshProxy: { [weak self] in
+                await self?.proxyService.refresh()
+            }
+        )
+    }
+
     /// Select a node/group by name or id.
     func selectNode(_ nameOrId: String, releaseNetworkIfSwitchFails: Bool = false,
-                    forceRuntimeReplacement: Bool = false) {
+                    forceRuntimeReplacement: Bool = false,
+                    operations: NodeSwitchOperations? = nil) {
         guard !isDisconnecting, switchingNodeId == nil else { return }
         guard connectionCoordinator.configReloadTask == nil else {
             errorMessage = String(
@@ -30,13 +114,10 @@ extension AppState {
             errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
             return
         }
-        // A17: a pick is the user's own block. Manual hy2 stays hy2, and the
-        // node's automatic-switch memory starts over.
-        hy2AutoSwitch.noteManualSelection(nodeName)
-
         if isConnected, !forceRuntimeReplacement,
            let current = proxyService.activeNodeName,
            proxyTarget(current, matches: nodeName) {
+            hy2AutoSwitch.noteManualSelection(nodeName)
             selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
             activeNode = desiredNode
             persistProxySelection(nodeName)
@@ -46,6 +127,13 @@ extension AppState {
             }
             return
         }
+        if isConnected, coreRuntime.routingMode == "three-tier" {
+            errorMessage = String(localized: "Disconnect before switching cloud servers in Strict mode.")
+            return
+        }
+        // A17: a pick is the user's own block. Manual hy2 stays hy2, and the
+        // node's automatic-switch memory starts over.
+        hy2AutoSwitch.noteManualSelection(nodeName)
 
         guard isConnected else {
             selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
@@ -73,6 +161,7 @@ extension AppState {
         }
         // Cancel previous IP detection
         networkInfoTask?.cancel()
+        let previousNetworkInfo = networkInfo
         networkInfo = NetworkInfo()
         switchingNodeId = desiredNode?.id ?? nodeName
         let api = coreController
@@ -89,25 +178,38 @@ extension AppState {
         let routeCatalogDigest = managedCatalogDigest
         connectionCoordinator.nodeSwitchTask = Task { [weak self] in
             guard let self else { return }
+            var switchTargetRejected = false
+            var recoveryHandledSelection = false
             defer {
                 self.switchingNodeId = nil
                 if self.connectionCoordinator.protectionOperationGeneration == switchGeneration {
                     self.startPendingConfigReloadIfPossible()
-                } else if !self.isConnected,
+                } else if !switchTargetRejected,
+                          !recoveryHandledSelection,
+                          !self.isConnected,
                           !self.connectionCoordinator.disconnectQueueRequestsRelease {
                     // A preserve teardown (sleep, network change, policy
                     // update) retired this switch. Its reconnect must go where
                     // the switch was going, not back to the exit it was
                     // leaving (X1-5). The session is already down, so this is
                     // the next connect target, not a claim about the runtime.
-                    if nodeName == ConfigPipeline.homeNodeName {
+                    if nodeName == ConfigPipeline.homeNodeName,
+                       AppProfile.homeExitEnabled,
+                       self.tonoTransport != nil {
                         self.rememberSwitchedNode(nil, name: nodeName)
-                    } else if let current = self.localProxyNode(matching: nodeName) {
+                    } else if nodeName != ConfigPipeline.homeNodeName,
+                              let current = self.localProxyNode(matching: nodeName) {
                         self.rememberSwitchedNode(current, name: current.name)
                     }
                 }
             }
-            guard let api else { return }
+            let ops: NodeSwitchOperations
+            if let operations {
+                ops = operations
+            } else {
+                guard let api else { return }
+                ops = defaultNodeSwitchOperations(api: api, generation: switchGeneration)
+            }
             @MainActor func checkSwitchCurrent() throws {
                 try Task.checkCancellation()
                 guard self.connectionCoordinator.protectionOperationGeneration == switchGeneration else {
@@ -117,6 +219,8 @@ extension AppState {
             // Until a verified selector has an exact endpoint set, a failed arm/rollback
             // cannot be treated as an ordinary UI error over a still-Connected session.
             var protectionTransitionInFlight = false
+            var recoveryNode = desiredNode
+            var recoveryName = nodeName
             SingBoxDelayGate.suspend()
             defer {
                 if self.isConnected { SingBoxDelayGate.prove() }
@@ -124,7 +228,11 @@ extension AppState {
             do {
                 try checkSwitchCurrent()
                 let previousName = self.proxyService.activeNodeName
+                let previousNode: ProxyNode? = previousName == ConfigPipeline.homeNodeName
+                    ? nil
+                    : (self.selectedExitNode() ?? previousName.flatMap { self.localProxyNode(matching: $0) })
                 let previousEndpoints = self.currentProxyEndpoints()
+                let previousClassifiedFailure = self.lastClassifiedFailure
                 let nextEndpoints = try ConfigPipeline.dialEndpoints(for: desiredNode)
                     + self.claudeHomeDialEndpoints(excluding: desiredNode)
                 let transitionEndpoints = ConfigPipeline.uniqueDialEndpoints(
@@ -134,56 +242,115 @@ extension AppState {
                 // still-selected old exit; a failed switch then rolled the
                 // selector back without restoring that PF permit.
                 protectionTransitionInFlight = true
-                try await self.armSwitchKillSwitch(proxyEndpoints: transitionEndpoints)
+                try await ops.armKillSwitch(transitionEndpoints)
                 try checkSwitchCurrent()
                 ConnectionTelemetryBuffer.shared.record(
                     "switchBegin",
                     node: desiredNode?.id,
                     generation: Int(switchGeneration)
                 )
-                var nextOverlay = self.currentOwnedRuntimeOverlay()
-                nextOverlay.selectedNodeName = nodeName
-                let digest = try await self.coreRuntime.writeRuntimeConfig(
-                    overlay: nextOverlay, customNodes: self.importedExitNodes,
-                    directPolicy: self.activeDirectPolicy,
-                    installed: self.loadedRuntimeConfigDigest
-                )
-                try checkSwitchCurrent()
-                let path = try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
-                    configDirectory: self.coreRuntime.configDirectory.path, configSHA256: digest)
-                try await api.reloadConfig(path: path)
-                self.loadedRuntimeConfigDigest = digest
-                self.commitResidentialRouteAuditContext(overlay: nextOverlay,
-                    nodes: self.importedExitNodes, digest: digest)
-                try checkSwitchCurrent()
-                // Prove the new exit before tearing leftover sockets on the
-                // previous destination. Closing everything first dumped the
-                // session onto an unverified node.
-                let switchVerdict = await self.verifyProtectedConnection(
-                    advisoryProbe: {
-                        Task {
-                            await self.advisoryControllerExitProbe(
-                                api: api,
-                                selectedExit: desiredNode
-                            )
+                var switchError: Error?
+                do {
+                    var nextOverlay = self.currentOwnedRuntimeOverlay()
+                    nextOverlay.selectedNodeName = nodeName
+                    try await ops.applyRuntimeConfig(nextOverlay)
+                    try checkSwitchCurrent()
+                    let tunnelReady = await ops.waitForTunnel()
+                    try checkSwitchCurrent()
+                    // Prove the new exit before tearing leftover sockets on the
+                    // previous destination. Closing everything first dumped the
+                    // session onto an unverified node.
+                    if !tunnelReady {
+                        switchError = CoreControllerError.protectionFailed(
+                            ProtectedFailureCode.tunRouteUnavailable.userMessage
+                        )
+                    } else {
+                        let switchVerdict = try await ops.verify(desiredNode)
+                        try checkSwitchCurrent()
+                        if case .failed(let failure) = switchVerdict {
+                            self.lastClassifiedFailure = failure
+                            switchError = CoreControllerError.protectionFailed(failure.userMessage)
                         }
-                    },
-                    mixedPort: self.config.mixedPort,
-                    generation: switchGeneration,
-                    rounds: 1
-                )
-                try checkSwitchCurrent()
-                if case .failed(let failure) = switchVerdict {
-                    self.lastClassifiedFailure = failure
-                    throw CoreControllerError.protectionFailed(failure.userMessage)
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    try checkSwitchCurrent()
+                    guard !self.isDisconnecting else { throw CancellationError() }
+                    switchError = error
+                }
+                if let switchError {
+                    switchTargetRejected = true
+                    let rollbackStillAllowed = !self.pendingRemovedCatalogExit
+                        && !previousEndpoints.isEmpty
+                        && previousName.map { name in
+                            !self.proxyTarget(name, matches: nodeName)
+                                && (name == ConfigPipeline.homeNodeName
+                                    ? (AppProfile.homeExitEnabled && self.tonoTransport != nil)
+                                    : self.localProxyNode(matching: name) != nil)
+                        } == true
+                    if rollbackStillAllowed, let rollbackName = previousName {
+                        var rollbackArmFailed = false
+                        do {
+                            let rollbackNode: ProxyNode? = rollbackName == ConfigPipeline.homeNodeName
+                                ? nil
+                                : (self.localProxyNode(matching: rollbackName) ?? previousNode)
+                            var rollbackOverlay = self.currentOwnedRuntimeOverlay()
+                            rollbackOverlay.selectedNodeName = rollbackName
+                            try await ops.applyRuntimeConfig(rollbackOverlay)
+                            try checkSwitchCurrent()
+                            let rollbackTunnelReady = await ops.waitForTunnel()
+                            try checkSwitchCurrent()
+                            guard rollbackTunnelReady else {
+                                throw switchError
+                            }
+                            let rollbackVerdict = try await ops.verify(rollbackNode)
+                            try checkSwitchCurrent()
+                            if case .failed = rollbackVerdict {
+                                throw switchError
+                            }
+                            await ops.closeConnections(nodeName)
+                            try checkSwitchCurrent()
+                            recoveryNode = rollbackNode
+                            recoveryName = rollbackName
+                            self.lastClassifiedFailure = previousClassifiedFailure
+                            rollbackArmFailed = true
+                            try await ops.armKillSwitch(previousEndpoints)
+                            try checkSwitchCurrent()
+                            ops.rememberNode(rollbackNode, rollbackName)
+                            self.networkInfo = previousNetworkInfo
+                            protectionTransitionInFlight = false
+                            self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
+                            await ops.refreshProxy()
+                            try checkSwitchCurrent()
+                            LocalTrafficAudit.shared.recordEvent(
+                                "node_switch_rolled_back",
+                                details: [
+                                    "requested_exit": nodeName,
+                                    "restored_exit": rollbackName,
+                                    "error": switchError.localizedDescription,
+                                ]
+                            )
+                            self.errorMessage = String(
+                                localized: "Could not switch to \(nodeName); kept your connection on \(rollbackName)."
+                            )
+                            return
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            throw rollbackArmFailed ? error : switchError
+                        }
+                    }
+                    throw switchError
                 }
                 SingBoxDelayGate.prove()
-                await self.closeConnectionsBoundToExit(previousName, using: api)
+                await ops.closeConnections(previousName)
                 guard await self.connectionCoordinator.finishNodeSwitch(
                     generation: switchGeneration,
-                    converge: { try await self.armSwitchKillSwitch(proxyEndpoints: nextEndpoints) },
-                    commit: { self.rememberSwitchedNode(desiredNode, name: nodeName) },
+                    converge: { try await ops.armKillSwitch(nextEndpoints) },
+                    commit: { ops.rememberNode(desiredNode, nodeName) },
                     recover: { error in
+                        recoveryHandledSelection = true
                         self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
                         self.recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error,
                                                      releaseNetwork: releaseNetworkIfSwitchFails)
@@ -192,7 +359,7 @@ extension AppState {
                 protectionTransitionInFlight = false
                 self.recordVerifiedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration,
                                                 catalogDigest: routeCatalogDigest)
-                await proxyService.refresh()
+                await ops.refreshProxy()
                 try checkSwitchCurrent()
                 ConnectionTelemetryBuffer.shared.record(
                     "switchOk",
@@ -239,13 +406,15 @@ extension AppState {
                     ]
                 )
                 if protectionTransitionInFlight || isRecoveringProtectedConnection {
+                    recoveryHandledSelection = true
                     recoverFailedNodeSwitch(
-                        desiredNode,
-                        name: nodeName,
+                        recoveryNode,
+                        name: recoveryName,
                         error: error,
                         releaseNetwork: releaseNetworkIfSwitchFails
                     )
                 } else {
+                    self.networkInfo = previousNetworkInfo
                     errorMessage = error.localizedDescription
                 }
             }
@@ -458,6 +627,7 @@ extension AppState {
         var waitForTunnel: () async -> Bool = {
             await AppState.waitForOwnedTunnelInterface()
         }
+        var waitForLocalDNS: (() async -> Bool)? = nil
     }
 
     /// Whether a failed `/core/sync` may still have replaced the Core. The
@@ -492,6 +662,9 @@ extension AppState {
             ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
         operations: ConfigReloadOperations = ConfigReloadOperations()
     ) {
+        if isConnected, coreRuntime.routingMode == "three-tier" {
+            return
+        }
         // Do not cancel a mutation after PF or Mihomo may already have accepted
         // part of it. Coalesce behind the active transaction instead; the most
         // recent pin set wins, while a requested full rewrite is preserved.
@@ -619,10 +792,10 @@ extension AppState {
                     throw error
                 }
                 try Task.checkCancellation()
+                self.loadedRuntimeConfigDigest = digest
                 if !pinsOnlyRefresh {
                     try await operations.reload(api, runtimeConfigPath)
                 }
-                self.loadedRuntimeConfigDigest = digest
                 self.commitResidentialRouteAuditContext(
                     overlay: overlay,
                     nodes: runtimeNodes,
@@ -635,7 +808,7 @@ extension AppState {
                 if !pinsOnlyRefresh, tunnelArmed,
                    effectiveDirectPolicy?.requiresAddressFreeDirectPermit == true {
                     try Task.checkCancellation()
-                    guard await Self.waitForOwnedTunnelInterface() else {
+                    guard await operations.waitForTunnel() else {
                         throw KillSwitchService.Error.commandFailed(
                             "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
                         )
@@ -713,6 +886,22 @@ extension AppState {
                 try Task.checkCancellation()
                 if ownedRuntime, selectedExitName != nil, !pinsOnlyRefresh {
                     try await api.closeAllConnections()
+                    try Task.checkCancellation()
+                    guard await operations.waitForTunnel() else {
+                        throw CoreControllerError.protectionFailed(
+                            "Updated cloud server health check failed"
+                        )
+                    }
+                    try Task.checkCancellation()
+                    if let waitForLocalDNS = operations.waitForLocalDNS {
+                        guard await waitForLocalDNS() else {
+                            throw CoreControllerError.protectionFailed(
+                                "Updated cloud server health check failed"
+                            )
+                        }
+                    } else {
+                        _ = await self.testLocalProtectedDNS(timeout: 2)
+                    }
                     try Task.checkCancellation()
                     // `/delay` is advisory. A 504 after reload must not tear
                     // a tunnel the real TUN probe still proves.

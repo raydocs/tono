@@ -1897,6 +1897,10 @@ nonisolated struct HelperManager {
             }
         }
 
+        if response.isEmpty {
+            throw HelperIPCError.emptyResponse
+        }
+
         guard let split = response.range(of: Data("\r\n\r\n".utf8)),
               let header = String(data: response[..<split.lowerBound], encoding: .utf8),
               let statusLine = header.components(separatedBy: "\r\n").first else {

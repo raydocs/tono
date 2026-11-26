@@ -10,6 +10,8 @@ struct MenuBarView: View {
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
     @Environment(\.openWindow) private var openWindow
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @State private var routeProposal: RouteRecommendation?
     @State private var showingRouteConfirmation = false
     @State private var staleRouteProposal = false
@@ -106,7 +108,7 @@ struct MenuBarView: View {
                 Text(seaAppearance ? LocalizedStringKey(SeaStatusWords.key(kind: status.kind, connected: appState.isConnected, protectionBlocked: appState.isProtectionBlocked,
                     unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
                     disconnecting: appState.isDisconnecting)) : status.title)
-                    .font(.system(size: seaAppearance ? 20 : 11, weight: seaAppearance ? .light : .regular))
+                    .font(.system(size: seaAppearance ? 20 : 11, weight: seaAppearance ? .medium : .regular))
                     .foregroundStyle(seaAppearance ? SeaTheme.text : .secondary)
                     .lineLimit(seaAppearance ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -114,7 +116,7 @@ struct MenuBarView: View {
                     Text(appState.isRecoveringProtectedConnection
                          ? String(localized: "Recovering protected connection…")
                          : String(localized: "Exit not responding — checking"))
-                        .font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(SeaTheme.attention)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -123,15 +125,34 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, seaAppearance ? 16 : 12)
-        .padding(.bottom, 8)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
     private var currentNode: some View {
         if seaAppearance {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(seaNodeLabel)
-                    .font(.system(size: 13)).foregroundStyle(SeaTheme.muted).lineLimit(1)
+            VStack(alignment: .leading, spacing: 6) {
+                if appState.switchingNodeId != nil {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.mini)
+                        Text("Switching server…")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(SeaTheme.cool)
+                            .lineLimit(1)
+                    }
+                } else {
+                    let activeName = appState.activeNode?.name ?? appState.proxyService.activeNodeName ?? ""
+                    HStack(spacing: 8) {
+                        if !activeName.isEmpty {
+                            let cleanCity = nodeCityParts(ProxyNode.displayName(for: ConfigParser.extractFlag(from: activeName).cleanName)).city
+                            NodeRouteMark(size: 20, city: cleanCity, gradient: SeaTheme.primaryGradient, warmTile: true)
+                        }
+                        Text(seaNodeLabel)
+                            .font(.system(size: 13, weight: activeName.isEmpty ? .regular : .medium))
+                            .foregroundStyle(activeName.isEmpty ? SeaTheme.muted : SeaTheme.text)
+                            .lineLimit(1)
+                    }
+                }
                 if appState.isConnected, appState.trafficFeedLive || appState.isClaudeHomeActive {
                     HStack(spacing: 6) {
                         if appState.trafficFeedLive {
@@ -145,6 +166,20 @@ struct MenuBarView: View {
                     }
                     .font(.system(size: 12)).foregroundStyle(SeaTheme.tertiary).lineLimit(1)
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                displayPreferences.reduceTransparency ? SeaTheme.opaqueQuiet : .white.opacity(0.055),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        SeaTheme.specularBorder(contrast: displayPreferences.contrast, reduceTransparency: displayPreferences.reduceTransparency, topOpacity: 0.14, bottomOpacity: 0.04),
+                        lineWidth: displayPreferences.contrast == .increased ? 1 : 0.65
+                    )
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
@@ -303,11 +338,22 @@ struct MenuBarView: View {
                 favorites: appState.routePreferences.favorites(owner: owner, catalog: catalog),
                 selected: appState.activeNode?.name ?? appState.proxyService.activeNodeName)
             if !routes.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Rectangle()
+                        .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.28 : 0.07))
+                        .frame(height: 0.75)
+                        .padding(.bottom, 6)
                     ForEach(routes) { node in
-                        Button {
+                        let isSwitching = appState.switchingNodeId == node.id || appState.switchingNodeId == node.name
+                        SeaMenuQuickRouteRow(
+                            node: node,
+                            isSwitching: isSwitching,
+                            enabled: canAct && appState.switchingNodeId == nil,
+                            display: displayPreferences
+                        ) {
                             guard accountSession.user?.id == owner,
-                                  owner == ManagedExitCatalogOwnership.currentAccount, canAct else { return }
+                                  owner == ManagedExitCatalogOwnership.currentAccount,
+                                  canAct, appState.switchingNodeId == nil else { return }
                             switch SeaMenuPresentation.action(for: node, recommendation: recommendation) {
                             case .reviewRecommendation(let proposal):
                                 routeProposal = proposal
@@ -316,19 +362,7 @@ struct MenuBarView: View {
                             case .selectManualNode(let name):
                                 appState.selectNode(name)
                             }
-                        } label: {
-                            HStack(spacing: 8) {
-                                NodeRouteMark(size: 20, city: nodeCityParts(node.displayName).city,
-                                              gradient: SeaTheme.primaryGradient, warmTile: true)
-                                Text(nodeRouteTitle(node)).lineLimit(1)
-                                Spacer(minLength: 4)
-                                Image(systemName: "arrow.right").font(.system(size: 12))
-                                    .foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
-                            }
-                            .font(.system(size: 14)).foregroundStyle(SeaTheme.text)
-                            .frame(minHeight: 36).contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain).disabled(!canAct)
                         .accessibilityLabel(String(localized: "Connect using \(nodeRouteTitle(node))"))
                     }
                     if staleRouteProposal {
@@ -344,19 +378,27 @@ struct MenuBarView: View {
 
     /// One row of text buttons: Open Tono, Switch server, Quit.
     private var seaFooter: some View {
-        HStack(spacing: 0) {
-            Button("Open Tono", action: openMainWindow)
-            Spacer(minLength: 8)
-            Button("Switch server") {
-                appState.selectedPage = .proxies
-                openMainWindow()
+        VStack(spacing: 4) {
+            Rectangle()
+                .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.28 : 0.07))
+                .frame(height: 0.75)
+                .padding(.horizontal, 16)
+            HStack(spacing: 0) {
+                Button("Open Tono", action: openMainWindow)
+                    .buttonStyle(SeaMenuFooterButtonStyle())
+                Spacer(minLength: 4)
+                Button("Switch server") {
+                    appState.selectedPage = .proxies
+                    openMainWindow()
+                }
+                .buttonStyle(SeaMenuFooterButtonStyle())
+                Spacer(minLength: 4)
+                Button("Quit") { NSApp.terminate(nil) }
+                    .buttonStyle(SeaMenuFooterButtonStyle(destructive: true))
+                    .accessibilityLabel("Quit Tono")
             }
-            Spacer(minLength: 8)
-            Button("Quit") { NSApp.terminate(nil) }
-                .accessibilityLabel("Quit Tono")
+            .padding(.horizontal, 12)
         }
-        .buttonStyle(SeaMenuFooterButtonStyle())
-        .padding(.horizontal, 16)
         .padding(.top, 4)
     }
 
@@ -386,16 +428,88 @@ struct MenuBarView: View {
         .padding(.vertical, seaAppearance ? 0 : 6)
     }
 
-    private struct SeaMenuFooterButtonStyle: ButtonStyle {
-        @SeaDisplayPreferences private var display
+    private struct SeaMenuQuickRouteRow: View {
+        let node: ProxyNode
+        let isSwitching: Bool
+        let enabled: Bool
+        let display: SeaDisplayOptions
+        let action: () -> Void
+        @State private var hovered = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    NodeRouteMark(size: 20, city: nodeCityParts(node.displayName).city,
+                                  gradient: SeaTheme.primaryGradient, warmTile: true)
+                    Text(nodeRouteTitle(node)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if isSwitching {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(hovered && enabled ? SeaTheme.text : SeaTheme.muted)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .font(.system(size: 13.5, weight: .medium)).foregroundStyle(SeaTheme.text)
+                .padding(.horizontal, 8)
+                .frame(minHeight: 34)
+                .background(
+                    display.reduceTransparency
+                        ? (hovered && enabled ? Color(hex: "2B2421") : Color.clear)
+                        : Color(hex: "FFD6A0").opacity(hovered && enabled ? 0.08 : 0),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+                .overlay {
+                    if display.contrast == .increased && hovered && enabled {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(Color(hex: "FFD6A0").opacity(0.45), lineWidth: 1)
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(SeaMenuRowButtonStyle(reduceMotion: display.reduceMotion))
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.45)
+            .onHover { hovered = enabled ? $0 : false }
+            .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
+        }
+    }
+
+    private struct SeaMenuRowButtonStyle: ButtonStyle {
+        let reduceMotion: Bool
+
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
-                .font(.system(size: 13))
-                .foregroundStyle(SeaTheme.muted)
-                .frame(minHeight: 32)
-                .contentShape(Rectangle())
-                .opacity(configuration.isPressed ? 0.6 : 1)
+                .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
+                .animation(TonoMotion.press(reduceMotion: reduceMotion), value: configuration.isPressed)
+        }
+    }
+
+    private struct SeaMenuFooterButtonStyle: ButtonStyle {
+        var destructive: Bool = false
+        @SeaDisplayPreferences private var display
+        @State private var hovered = false
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(
+                    hovered
+                        ? (destructive ? SeaTheme.danger : SeaTheme.text)
+                        : SeaTheme.text.opacity(0.84)
+                )
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(minHeight: 30)
+                .background(.white.opacity(hovered ? 0.08 : 0), in: Capsule())
+                .contentShape(Capsule())
+                .opacity(configuration.isPressed ? 0.65 : 1)
+                .scaleEffect(configuration.isPressed && !display.reduceMotion ? 0.97 : 1)
                 .animation(TonoMotion.press(reduceMotion: display.reduceMotion), value: configuration.isPressed)
+                .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
+                .onHover { hovered = $0 }
         }
     }
 
