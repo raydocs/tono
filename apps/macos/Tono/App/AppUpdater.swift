@@ -84,11 +84,12 @@ final class AppUpdater: ObservableObject {
             try await appState.installNativeUpdate(manifest: offer.bytes, signature: offer.signature, package: package)
             // The result is a helper-owned consumed receipt, not an App-owned
             // InstallStarted stamp. The executor waits for this process to exit.
+            // Latch handoff termination before calling AppKit so even the
+            // delegate-less fallback skips ordinary PF teardown.
+            AppDelegate.nativeUpdateTerminationRequested = true
             if let delegate = AppDelegate.resolve(attached: appDelegate) {
                 delegate.terminateForNativeUpdate()
             } else {
-                // Fallback if the delegate was never attached; termination cleanup
-                // still checks pendingNativeUpdate() and skips ordinary PF release.
                 NSApp.terminate(nil)
             }
         } catch {

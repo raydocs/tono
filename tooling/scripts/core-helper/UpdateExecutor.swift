@@ -269,7 +269,7 @@ enum UpdateExecutor {
     /// A user who was Unprotected or chose Restore internet gets no new hold.
     static func aiHoldOwed(
         stateFileExists: () -> Bool = KillSwitchManager.stateFileExists,
-        pfActive: () throws -> Bool = KillSwitchManager.effectiveStatus,
+        pfActive: () throws -> Bool = KillSwitchManager.effectiveStatusConservative,
         disposition: () throws -> Bool? = { try KillSwitchManager.selectiveRecoveryDisposition() }
     ) -> Bool {
         if stateFileExists() { return true }

@@ -1230,6 +1230,48 @@ extension KillSwitchManager {
         return try childAnchorActive()
     }
 
+    /// Same observation as `effectiveStatus()`, but treats a `pfctl` command
+    /// that exits non-zero as an unreadable observation instead of conflating
+    /// it with an inactive PF policy — except when the child anchor is proven
+    /// absent (`-sA` omits `killSwitchAnchor`, or `-a <anchor> -sr` reports
+    /// "Anchor does not exist"). On an unprotected Mac where macOS or another
+    /// program enabled PF while `/etc/pf.conf` keeps Tono's empty anchor hook,
+    /// a flushed child anchor reads cleanly as inactive instead of triggering
+    /// a false AI hold.
+    static func effectiveStatusConservative(
+        query: ([String]) throws -> String
+    ) throws -> Bool {
+        let info = try query(["-s", "info"])
+        guard info.lowercased().contains("status: enabled") else { return false }
+        let main = try query(["-sr"])
+        guard main.contains("anchor \"\(killSwitchAnchor)\"") else { return false }
+        let anchors = try query(["-sA"])
+        let loadedAnchors = anchors
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard loadedAnchors.contains(killSwitchAnchor) else { return false }
+        do {
+            return anchorTextBlocks(try query(["-a", killSwitchAnchor, "-sr"]))
+        } catch let error as HelperFailure where error.message.lowercased().contains("anchor does not exist") {
+            return false
+        }
+    }
+
+    static func effectiveStatusConservative() throws -> Bool {
+        try effectiveStatusConservative { arguments in
+            let result = try run("/sbin/pfctl", arguments, deadline: pfctlQueryDeadline)
+            guard result.status == 0 else {
+                throw HelperFailure.system(
+                    result.message.isEmpty ? "PF status query failed." : result.message
+                )
+            }
+            guard let text = String(data: result.output, encoding: .utf8) else {
+                throw HelperFailure.system("PF status query was not readable.")
+            }
+            return text
+        }
+    }
+
     // MARK: - PF enable reference
 
     /// A token this helper acquired but could not record. Held in memory only,

@@ -9,6 +9,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// `NSApp.delegate` is SwiftUI's private wrapper, so `NSApp.delegate as? AppDelegate`
     /// evaluates to `nil` at runtime.
     static weak var current: AppDelegate?
+    /// One-way handoff latch set only when this process has consumed a native
+    /// update and is terminating so the root executor can replace it. Unlike
+    /// `RuntimeCleanup.nativeUpdatePending`, it is never set by stale launch
+    /// hints, so ordinary `Cmd+Q` still queries the helper and clears stale
+    /// update gates before releasing PF.
+    static var nativeUpdateTerminationRequested = false
+
+    static func shouldSkipNetworkTerminationCleanup(
+        runtimeStopped: Bool,
+        nativeUpdateTerminationRequested: Bool
+    ) -> Bool {
+        runtimeStopped || nativeUpdateTerminationRequested
+    }
 
     /// Reference to app state for cleanup on termination
     var appState: AppState?
@@ -250,7 +263,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         networkChangeMonitor?.stop()
         networkChangeMonitor = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
-        guard !runtimeStopped else { return }
+        guard !Self.shouldSkipNetworkTerminationCleanup(
+            runtimeStopped: runtimeStopped,
+            nativeUpdateTerminationRequested: Self.nativeUpdateTerminationRequested
+        ) else { return }
         // AppKit reached termination without completing the ordered async
         // cleanup. Stop local runtime work, but never open PF when DNS/core
         // restoration could not be proven before process exit.
@@ -290,6 +306,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Root has already persisted consumption and owns teardown/relaunch.
     /// Never route update termination through the ordinary PF release path.
     func terminateForNativeUpdate() {
+        Self.nativeUpdateTerminationRequested = true
         runtimeStopped = true
         NSApp.terminate(nil)
     }
@@ -338,7 +355,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishTerminationCleanup() async {
         if !runtimeStopped {
-            await finishNetworkTerminationCleanup()
+            // The normal path marks `runtimeStopped` before terminating. The
+            // AppUpdater fallback can only call `NSApp.terminate(nil)` when no
+            // delegate instance was resolvable, so check the dedicated
+            // handoff latch here rather than the launch-time display hint
+            // `RuntimeCleanup.nativeUpdatePending` (ordinary Quit must still
+            // query the helper to clear stale gates).
+            if Self.nativeUpdateTerminationRequested {
+                await appState?.finishPendingPersistence()
+            } else {
+                await finishNetworkTerminationCleanup()
+            }
         }
         await accountSession?.api.finishCredentialPersistence()
     }
