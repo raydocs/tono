@@ -14,9 +14,9 @@ extension AppState {
             )
             RuntimeCleanup.nativeUpdatePending = true
             isProtectionBlocked = status.receipt?.requiredRecovery != .unprotected
-            // Decision 086: preparation armed without a tunnel inside the
-            // helper; route the control plane by the helper's state.
-            await coordinator.reconcileKillSwitchTunnelState()
+            // Nothing slower than this may run before the caller quits: the
+            // executor waits only 30 seconds for this process to exit. The
+            // relaunched App reconciles the tunnel state itself (decision 086).
         } catch {
             // Preparation may have armed without a tunnel before the failure
             // (Prepare succeeded, Execute did not): follow the helper.

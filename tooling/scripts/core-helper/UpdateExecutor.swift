@@ -168,8 +168,15 @@ enum UpdateExecutor {
             // Do not hold flock during this wait (the status query needs it).
             if initial.execution == .consumed, initial.initiatingBoot == (try TonoAuthenticatedPeer.bootSession()) {
                 for _ in 0..<300 where processExists(initial.initiatingToken) { usleep(100_000) }
-                guard !processExists(initial.initiatingToken) else {
-                    throw HelperFailure.invalid("Initiating App did not exit after update consumption.")
+                // The App asked for this update and root already consumed it.
+                // An App that is still alive here (a hung quit) used to leave
+                // the attempt blocked for good, and every later launch then
+                // showed a pending update. End that one process instead.
+                if processExists(initial.initiatingToken) {
+                    NSLog("tono update executor: initiating App still running after 30s; ending it")
+                    guard endInitiator(initial.initiatingToken) else {
+                        throw HelperFailure.invalid("Initiating App did not exit after update consumption.")
+                    }
                 }
             }
             try storage.locked {
@@ -230,6 +237,9 @@ enum UpdateExecutor {
             try launchSuccessor(uid: uid, attempt: installed)
             return true
         } catch {
+            // The reason was never recorded: a blocked attempt looked the same
+            // whatever stopped it. Our own failure text only, no paths.
+            NSLog("tono update executor failed: %{public}@", "\(error)")
             // Keep all evidence; do not turn an exception into "not installed".
             // A failed rollback used to leave the helper stopped and PF up
             // with no recovery short of another boot (BRICK-M8). Release the
@@ -331,6 +341,28 @@ enum UpdateExecutor {
     /// Audit tokens are only meaningful within one boot; a token that no longer
     /// resolves to a live code object proves that incarnation exited. Shared
     /// with the transaction's successor re-adoption check.
+    /// The pid inside an audit token (`audit_token_t.val[5]`). Nil for a token of
+    /// another size.
+    static func pid(of token: Data) -> pid_t? {
+        guard token.count == MemoryLayout<audit_token_t>.size else { return nil }
+        return token.withUnsafeBytes { $0.load(fromByteOffset: 5 * MemoryLayout<UInt32>.size, as: pid_t.self) }
+    }
+
+    /// SIGKILL to the process the token names, only while that exact
+    /// incarnation still resolves. Not SIGTERM: a terminating App would run
+    /// its ordinary quit cleanup, which can release PF, and an update quit
+    /// must never take that path (`terminateForNativeUpdate`).
+    static func endInitiator(_ token: Data,
+                             signal send: (pid_t, Int32) -> Void = { _ = kill($0, $1) },
+                             exists: (Data) -> Bool = processExists,
+                             pause: (UInt32) -> Void = { usleep($0) }) -> Bool {
+        guard let pid = pid(of: token), pid > 1, pid != getpid() else { return false }
+        guard exists(token) else { return true }
+        send(pid, SIGKILL)
+        for _ in 0..<50 where exists(token) { pause(100_000) }
+        return !exists(token)
+    }
+
     static func processExists(_ token: Data) -> Bool {
         var code: SecCode?
         return SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: token] as CFDictionary, [], &code) == errSecSuccess
