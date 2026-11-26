@@ -10,6 +10,10 @@ extension AppState {
     /// Connect from the user's own click: the only connect that may protect
     /// a Mac again after Restore internet released it.
     func userConnect() {
+        if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect {
+            errorMessage = NativeUpdateDownload.Copy.pendingUnfinished
+            return
+        }
         connectionCoordinator.beginUserConnect()
         connect()
     }

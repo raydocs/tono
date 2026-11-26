@@ -8797,6 +8797,16 @@
         }
       }
     },
+    "The pending update cannot be resumed by this copy of Tono. First click Restore internet, then choose Check for Updates and Disconnect and Retry to end this update attempt.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Tono 副本无法继续待完成的更新。请先点击“恢复正常网络”，再选择“检查更新”并点“断开并重试”以结束此次更新尝试。"
+          }
+        }
+      }
+    },
     "You're up to date": {
       "localizations": {
         "zh-Hans": {

@@ -355,6 +355,26 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertNil(AppDelegate.resolve(attached: nil, current: nil, nsAppDelegate: wrapper))
     }
 
+    func testPendingUpdateHintLeadsWithRestoreInternetWhenRetryIsUnavailableAndUserConnectSurfacesError() {
+        let freshConsumed = status(.installationAuthorized, execution: "consumed") // updated at 100, expires at 200
+        let restoreFirst = RuntimeCleanup.pendingUpdateRecoveryMessage(for: freshConsumed, now: 150)
+        XCTAssertTrue(
+            restoreFirst.contains("Restore internet") || restoreFirst.contains("恢复正常网络"),
+            "Non-retriable pending update hint must lead with Restore internet: \(restoreFirst)"
+        )
+        let expiredConsumed = RuntimeCleanup.pendingUpdateRecoveryMessage(for: freshConsumed, now: 200)
+        XCTAssertFalse(
+            expiredConsumed.contains("First click Restore internet") || expiredConsumed.contains("请先点击“恢复正常网络”"),
+            "Already-retriable pending update hint should go directly to Check for Updates: \(expiredConsumed)"
+        )
+
+        let app = AppState()
+        app.nativeUpdatePending = true
+        app.errorMessage = nil
+        app.userConnect()
+        XCTAssertEqual(app.errorMessage, NativeUpdateDownload.Copy.pendingUnfinished)
+    }
+
     func testUpdateSentencesHaveSimplifiedChinese() throws {
         let catalog = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()

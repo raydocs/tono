@@ -547,7 +547,11 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.74 → 4.52.75: update executor failure release installs the
     ///   secondary AI hold only when owed (decision 125), never on an
     ///   Unprotected or explicitly restored Mac.
-    static let current = "4.52.75"
+    /// - 4.52.75 → 4.52.76: update retirement after verified Disconnect accepts
+    ///   a manually installed signed Tono.app whose sealed releaseSequence is
+    ///   at least the attempt's target sequence while root helper/core binaries
+    ///   still match the expected hashes.
+    static let current = "4.52.76"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
