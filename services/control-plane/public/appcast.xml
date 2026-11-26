@@ -3,6 +3,26 @@
     <channel>
         <title>Tono</title>
         <item>
+            <title>0.0.88</title>
+            <pubDate>Thu, 26 Nov 2026 08:39:37 +0000</pubDate>
+            <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.88-build89</link>
+            <sparkle:version>89</sparkle:version>
+            <sparkle:shortVersionString>0.0.88</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.3</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Tono 0.0.88 (build 89)
+
+Requires Apple Silicon and macOS 26.3+.
+
+## Changes since build 88
+
+- **Switch rollback & connectivity verification** (#1868): Kept live connections protected during failed server switches with in-place rollback, added tunnel and local DNS readiness checks, bypassed the delay gate during failed TUN diagnostics so unreachable exits classify accurately, and refused live server switches or reloads while connected in Strict mode.
+- **Helper lifecycle, PF & update recovery** (#1866, #1867, #1868): Moved helper protocol to `4.52.78` with mid-launch sync rollback recovery, distinguished empty vs unreadable PF anchors and isolated the update termination fence, retried transient empty helper IPC replies without breaking fail-closed protection, cleared stale pending-update sign-in errors and duplicate restore buttons, and fixed preemptive release/external-release session tracking.
+- **Tahoe UI & responsiveness** (#1868): Refined Liquid Glass panel/card stroke contrast, button hover/spring feedback, header typography, switching status indicators, and Accessibility display-preference fallbacks across Home, Servers, Menu Bar, Sidebar, and Sign-in.
+]]></description>
+            <enclosure url="https://releases.afk.ccwu.cc/download/Tono-0.0.88-build89-arm64.zip" length="19272126" type="application/zip" sparkle:edSignature="mv47uzJ4gdxQvYmvUM0pV1Xlc7RGiXwdiQXz89jcUwKHQaSbqAf9EjMu9Rcuq57v6Iizl6K3uiSjLDOTxJ7IAA=="/>
+        </item>
+        <item>
             <title>0.0.86</title>
             <pubDate>Wed, 25 Nov 2026 12:50:12 +0000</pubDate>
             <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.86-build87</link>

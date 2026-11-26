@@ -42,23 +42,24 @@
       <!-- generated:cards -->
         <article class="card current">
           <div class="card-title"><span class="platform">macOS</span><span class="status good">已发布 · 自动更新</span></div>
-          <h3>0.0.86 · Build 87</h3>
-          <p>Apple Silicon、macOS 26.3+。本版新增签名策略 TCP 直连 IP 支持，之后新增或调整直连 IP 只需推送策略。</p>
+          <h3>0.0.88 · Build 89</h3>
+          <p>Apple Silicon、macOS 26.3+。本版重点修复节点切换失败整条断开与回滚问题、误报无法验证连接、Helper IPC/更新退役卡死与 PF 探针缺陷，并持续打磨 Tahoe 液态玻璃界面与交互细节。</p>
           <ul>
-            <li>签名 TCP 直连 IP（#1856）：签名 <code>traffic-policy</code> 可携带 <code>tcpDirectAddresses</code>（无域名的 IPv4 TCP 目的地）与 v5 <code>tcpEndpoints</code>，这些地址直连并由 helper 的 fail-closed 过滤放行，无需重新发版</li>
-            <li>Helper 协议版本随本版升级</li>
+            <li>节点切换回滚与连通性分类修复（#1868）：切换节点失败时优先原位回滚至原节点不断开现有保护；补充 utun 接口与本地 DNS 就绪校验；在 TUN 失败诊断期间绕过延迟门控，避免不可达节点被误判为链路不可用；Strict（严格）模式下已连接时阻止在线切换或重载并恢复清晰中文提示</li>
+            <li>Helper 与网络恢复加固（#1866、#1867、#1868）：Helper 协议升级至 <code>4.52.78</code>，支持启动中断期间经校验后的回滚同步；区分空 anchor 与不可读 PF 状态、独立更新退出栅栏并清理抢占式恢复后的重复操作按钮；增加 Helper IPC 空响应受控重试；修复更新退役与外部释放后的 <code>helperSession</code> 及卡在登录页的挂起更新报错</li>
+            <li>界面与交互优化（#1868）：优化主界面、节点页、菜单栏、侧边栏与登录页的液态玻璃边框对比度、按钮悬停/弹性触感、数字等宽排版、节点切换中指示器及降透明度/高对比度无障碍回退</li>
           </ul>
-          <a class="text-link" href="https://releases.afk.ccwu.cc/download/Tono-0.0.86-build87-arm64.dmg">下载 Build 87 安装包 →</a>
+          <a class="text-link" href="https://releases.afk.ccwu.cc/download/Tono-0.0.88-build89-arm64.dmg">下载 Build 89 安装包 →</a>
         </article>
 
         <article class="card">
           <div class="card-title"><span class="platform">Windows</span><span class="status good">已发布 · 自动更新</span></div>
-          <h3>0.0.86</h3>
-          <p>支持 x64 Windows 10 22H2 / Windows 11。本版新增签名策略 TCP 直连 IP 支持，之后新增或调整直连 IP 只需推送策略。</p>
+          <h3>0.0.88</h3>
+          <p>支持 x64 Windows 10 22H2 / Windows 11。本版与 macOS 0.0.88（Build 89）保持桌面端版本号一致，Windows 运行时较 0.0.87 无变更。</p>
           <ul>
-            <li>签名 TCP 直连 IP（#1856）：签名 <code>traffic-policy</code> 可携带 <code>tcpDirectAddresses</code>（无域名的 IPv4 TCP 目的地）与 v5 <code>tcpEndpoints</code>，Windows 服务放行并直连这些地址，无需重新发版</li>
+            <li>桌面版本号对齐：与 macOS 0.0.88（Build 89）保持同步，Windows 客户端运行时较 0.0.87 无改动</li>
           </ul>
-          <a class="text-link" href="https://releases.afk.ccwu.cc/download/Tono_0.0.86_x64-setup.exe">下载 Windows 0.0.86 →</a>
+          <a class="text-link" href="https://releases.afk.ccwu.cc/download/Tono_0.0.88_x64-setup.exe">下载 Windows 0.0.88 →</a>
         </article>
       <!-- /generated:cards -->
       </div>
@@ -71,10 +72,10 @@
       </div>
       <div class="contract">
       <!-- generated:contract -->
-        <div><strong>macOS</strong><span>Build 87 · helper 4.52.73</span></div>
-        <div><strong>macOS 更新 feed</strong><span>0.0.86 · Sparkle 已指向</span></div>
-        <div><strong>Windows 已发布包</strong><span>0.0.86 · 服务协议 24</span></div>
-        <div><strong>Windows 更新通道</strong><span>0.0.86 · 与安装包一致</span></div>
+        <div><strong>macOS</strong><span>Build 89 · helper 4.52.78</span></div>
+        <div><strong>macOS 更新 feed</strong><span>0.0.88 · Sparkle 已指向</span></div>
+        <div><strong>Windows 已发布包</strong><span>0.0.88 · 服务协议 24</span></div>
+        <div><strong>Windows 更新通道</strong><span>0.0.88 · 与安装包一致</span></div>
       <!-- /generated:contract -->
       </div>
       <p class="note">已经装过的用户现在可以从应用内更新。早些时候 Mac 更新源停在 Build 62、Windows 更新通道停在 0.0.25，中间打出来的包只躺在 GitHub 上——「打过包」和「用户拿得到」不是一回事。以本页清单为准，不要只看 GitHub 的发布列表。</p>
@@ -87,8 +88,8 @@
       </div>
       <div class="timeline">
       <!-- generated:timeline -->
-        <article><time>2026-11-25</time><h3>macOS 0.0.86 · Build 87</h3><p>客户端开始识别云端签名策略中的 TCP 直连 IP；生产策略 rev 11 已带 18 个国金 QMT IPv4。</p></article>
-        <article><time>2026-11-25</time><h3>Windows 0.0.86</h3><p>客户端开始识别云端签名策略中的 TCP 直连 IP；生产策略 rev 11 已带 18 个国金 QMT IPv4。</p></article>
+        <article><time>2026-11-26</time><h3>macOS 0.0.88 · Build 89</h3><p>修复切换失败与连接验证体验痛点，升级 Helper 至 <code>4.52.78</code>，并优化 macOS Tahoe 界面视觉层级与交互反馈。</p></article>
+        <article><time>2026-11-26</time><h3>Windows 0.0.88</h3><p>桌面版本号与 macOS 0.0.88（Build 89）同步。</p></article>
       <!-- /generated:timeline -->
         <p class="note">这两版是基准。之前的每一个构建都已撤下——它们带着这两版修好的缺陷：微信在连接后自行找到的服务器被静默丢弃、Kill Switch 解除后会自行重新武装、隧道明明出不去却仍显示已连接；其中若干版本因为更新通道从未推进，任何客户都不曾拿到过。旧版本的 tag 已一并删除，但源码没有丢失——每个被撤下的构建都已合入主线，仍可按 commit 检出重建。删掉的只是“它仍是一个选项”这层暗示。</p>
       </div>
