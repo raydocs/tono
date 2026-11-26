@@ -54,7 +54,8 @@ extension AppState {
             waitForTunnel: { [weak self] in
                 guard await AppState.waitForOwnedTunnelInterface() else { return false }
                 guard let self else { return false }
-                return await self.testLocalProtectedDNS()
+                _ = await self.testLocalProtectedDNS(timeout: 2)
+                return true
             },
             verify: { [weak self] selectedExit in
                 guard let self else { throw CancellationError() }
@@ -113,13 +114,10 @@ extension AppState {
             errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
             return
         }
-        // A17: a pick is the user's own block. Manual hy2 stays hy2, and the
-        // node's automatic-switch memory starts over.
-        hy2AutoSwitch.noteManualSelection(nodeName)
-
         if isConnected, !forceRuntimeReplacement,
            let current = proxyService.activeNodeName,
            proxyTarget(current, matches: nodeName) {
+            hy2AutoSwitch.noteManualSelection(nodeName)
             selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
             activeNode = desiredNode
             persistProxySelection(nodeName)
@@ -129,6 +127,13 @@ extension AppState {
             }
             return
         }
+        if isConnected, coreRuntime.routingMode == "three-tier" {
+            errorMessage = String(localized: "Disconnect before switching cloud servers in Strict mode.")
+            return
+        }
+        // A17: a pick is the user's own block. Manual hy2 stays hy2, and the
+        // node's automatic-switch memory starts over.
+        hy2AutoSwitch.noteManualSelection(nodeName)
 
         guard isConnected else {
             selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
@@ -621,6 +626,7 @@ extension AppState {
         var waitForTunnel: () async -> Bool = {
             await AppState.waitForOwnedTunnelInterface()
         }
+        var waitForLocalDNS: (() async -> Bool)? = nil
     }
 
     /// Whether a failed `/core/sync` may still have replaced the Core. The
@@ -655,6 +661,9 @@ extension AppState {
             ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
         operations: ConfigReloadOperations = ConfigReloadOperations()
     ) {
+        if isConnected, coreRuntime.routingMode == "three-tier" {
+            return
+        }
         // Do not cancel a mutation after PF or Mihomo may already have accepted
         // part of it. Coalesce behind the active transaction instead; the most
         // recent pin set wins, while a requested full rewrite is preserved.
@@ -798,7 +807,7 @@ extension AppState {
                 if !pinsOnlyRefresh, tunnelArmed,
                    effectiveDirectPolicy?.requiresAddressFreeDirectPermit == true {
                     try Task.checkCancellation()
-                    guard await Self.waitForOwnedTunnelInterface() else {
+                    guard await operations.waitForTunnel() else {
                         throw KillSwitchService.Error.commandFailed(
                             "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
                         )
@@ -877,11 +886,20 @@ extension AppState {
                 if ownedRuntime, selectedExitName != nil, !pinsOnlyRefresh {
                     try await api.closeAllConnections()
                     try Task.checkCancellation()
-                    guard await Self.waitForOwnedTunnelInterface(),
-                          await self.testLocalProtectedDNS() else {
+                    guard await operations.waitForTunnel() else {
                         throw CoreControllerError.protectionFailed(
                             "Updated cloud server health check failed"
                         )
+                    }
+                    try Task.checkCancellation()
+                    if let waitForLocalDNS = operations.waitForLocalDNS {
+                        guard await waitForLocalDNS() else {
+                            throw CoreControllerError.protectionFailed(
+                                "Updated cloud server health check failed"
+                            )
+                        }
+                    } else {
+                        _ = await self.testLocalProtectedDNS(timeout: 2)
                     }
                     try Task.checkCancellation()
                     // `/delay` is advisory. A 504 after reload must not tear

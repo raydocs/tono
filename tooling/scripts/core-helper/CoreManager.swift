@@ -37,13 +37,24 @@ struct StrictRuntimeProof {
 }
 
 final class CoreManager {
+    struct SelfTestEnvironment {
+        let runtimeDirectory: String
+        let pidPath: String
+        let verifyBinary: () throws -> Void
+        let snapshot: (_ configDirectory: String, _ expectedSHA256: String) throws -> String
+        let launchCommand: (_ configPath: String) -> (executablePath: String, arguments: [String])
+        let preflight: (_ configPath: String) throws -> Void
+    }
+
     private let lock = NSLock()
     private let diagnosticLock = NSLock()
     private let allowedUID: uid_t
+    private let selfTestEnvironment: SelfTestEnvironment?
     private var process: Process?
     private var diagnosticPipe: Pipe?
     private var diagnosticData = Data()
     private var lastFailure: String?
+    private var syncRecoveryEligible = false
 
     init(allowedUID: uid_t) throws {
         // No account lookup here. Recovery (`--emergency-disarm`, `--emergency-reset`,
@@ -52,8 +63,58 @@ final class CoreManager {
         // deleted. The home directory is resolved where it is needed: when a
         // start or sync validates the user's config directory.
         self.allowedUID = allowedUID
+        self.selfTestEnvironment = nil
         try ensureRootDirectory(runtimeDirectory, permissions: 0o700)
         try terminateStaleCore()
+    }
+
+    init(selfTestAllowedUID: uid_t = geteuid(), environment: SelfTestEnvironment) {
+        self.allowedUID = selfTestAllowedUID
+        self.selfTestEnvironment = environment
+    }
+
+    var isSyncRecoveryEligible: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return syncRecoveryEligible
+    }
+
+    private var activeRuntimeDirectory: String {
+        selfTestEnvironment?.runtimeDirectory ?? runtimeDirectory
+    }
+
+    private var activePIDPath: String {
+        selfTestEnvironment?.pidPath ?? pidPath
+    }
+
+    private func verifyCoreBinary() throws {
+        if let selfTestEnvironment {
+            try selfTestEnvironment.verifyBinary()
+            return
+        }
+        _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
+    }
+
+    private func prepareSnapshot(_ configDirectory: String, expectedSHA256: String) throws -> String {
+        if let selfTestEnvironment {
+            return try selfTestEnvironment.snapshot(configDirectory, expectedSHA256)
+        }
+        return try snapshot(configDirectory, expectedSHA256: expectedSHA256)
+    }
+
+    private func launchCommand(for configPath: String) -> (executablePath: String, arguments: [String]) {
+        if let selfTestEnvironment {
+            return selfTestEnvironment.launchCommand(configPath)
+        }
+        return (mihomoPath, ["run", "-D", runtimeDirectory, "-c", configPath])
+    }
+
+    private func runPreflight(configPath: String) throws {
+        if let selfTestEnvironment {
+            try selfTestEnvironment.preflight(configPath)
+            return
+        }
+        try CoreListenPreflight.check(configPath: configPath)
     }
 
     private func validateConfigDirectory(_ requested: String) throws -> String {
@@ -207,8 +268,9 @@ final class CoreManager {
                 message: "sing-box is already running."
             )
         }
-        _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
-        let configPath = try snapshot(
+        syncRecoveryEligible = false
+        try verifyCoreBinary()
+        let configPath = try prepareSnapshot(
             configDirectory,
             expectedSHA256: configSHA256
         )
@@ -217,15 +279,16 @@ final class CoreManager {
 
     private func launchValidatedSnapshotLocked(configPath: String, startAllowed: () -> Bool) throws {
         // Recheck the root-owned binary at launch, including after a sync stop.
-        _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
+        try verifyCoreBinary()
+        let command = launchCommand(for: configPath)
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: mihomoPath)
-        child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
-        child.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
+        child.executableURL = URL(fileURLWithPath: command.executablePath)
+        child.arguments = command.arguments
+        child.currentDirectoryURL = URL(fileURLWithPath: activeRuntimeDirectory, isDirectory: true)
         child.environment = [
             // Never give a root process a user-writable HOME. Mihomo receives
             // all required inputs through its root-owned -d/-f paths.
-            "HOME": runtimeDirectory,
+            "HOME": activeRuntimeDirectory,
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         ]
         resetDiagnostics()
@@ -233,7 +296,7 @@ final class CoreManager {
         // these ports belongs to another program and the core would only exit.
         // Checked after the reset, so an older core's last words cannot stand
         // in for this refusal.
-        try CoreListenPreflight.check(configPath: configPath)
+        try runPreflight(configPath: configPath)
         startDiagnosticCapture(for: child)
         do {
             guard startAllowed() else {
@@ -270,6 +333,7 @@ final class CoreManager {
             stopDiagnosticCapture()
             throw HelperFailure.system(failure)
         }
+        syncRecoveryEligible = false
     }
 
     /// Serialized protected replacement. The caller keeps PF and system DNS
@@ -279,20 +343,22 @@ final class CoreManager {
               beforeStop: () throws -> Void = {}) throws -> String {
         lock.lock()
         defer { lock.unlock() }
-        guard process?.isRunning == true else {
+        guard process?.isRunning == true || syncRecoveryEligible else {
             throw HelperFailure.invalid("sing-box is not running.")
         }
         // Refuse malformed or swapped bytes before disrupting the live child.
-        let configPath = try snapshot(configDirectory, expectedSHA256: configSHA256)
+        let configPath = try prepareSnapshot(configDirectory, expectedSHA256: configSHA256)
         try beforeStop()
+        syncRecoveryEligible = true
         try stopLocked()
         try launchValidatedSnapshotLocked(configPath: configPath, startAllowed: startAllowed)
-        return runtimeConfigPath
+        return configPath
     }
 
     func stop() throws {
         lock.lock()
         defer { lock.unlock() }
+        syncRecoveryEligible = false
         try stopLocked()
     }
 
@@ -424,8 +490,9 @@ final class CoreManager {
     }
 
     private func writePID(_ pid: Int32) throws {
+        let currentPIDPath = activePIDPath
         let data = Data("\(pid)\n".utf8)
-        let temporary = "\(pidPath).new"
+        let temporary = "\(currentPIDPath).new"
         let fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw HelperFailure.system("Could not persist Mihomo state.") }
         defer { close(fd) }
@@ -433,21 +500,25 @@ final class CoreManager {
             guard let base = $0.baseAddress else { return }
             try writeAll(fd, bytes: base, count: $0.count)
         }
-        guard fsync(fd) == 0, fchown(fd, 0, 0) == 0, fchmod(fd, 0o600) == 0,
-              rename(temporary, pidPath) == 0 else {
+        let owner: uid_t = selfTestEnvironment == nil ? 0 : geteuid()
+        let group: gid_t = selfTestEnvironment == nil ? 0 : getegid()
+        guard fsync(fd) == 0, fchown(fd, owner, group) == 0, fchmod(fd, 0o600) == 0,
+              rename(temporary, currentPIDPath) == 0 else {
             unlink(temporary)
             throw HelperFailure.system("Could not persist Mihomo state.")
         }
     }
 
     private func removePIDFile() throws {
+        let currentPIDPath = activePIDPath
         var metadata = stat()
-        guard lstat(pidPath, &metadata) == 0 else {
+        guard lstat(currentPIDPath, &metadata) == 0 else {
             if errno == ENOENT { return }
             throw HelperFailure.system("Could not inspect Mihomo state.")
         }
-        guard fileType(metadata) == mode_t(S_IFREG), metadata.st_uid == 0,
-              unlink(pidPath) == 0 else {
+        let expectedOwner: uid_t = selfTestEnvironment == nil ? 0 : geteuid()
+        guard fileType(metadata) == mode_t(S_IFREG), metadata.st_uid == expectedOwner,
+              unlink(currentPIDPath) == 0 else {
             throw HelperFailure.invalid("Mihomo state file is unsafe.")
         }
     }

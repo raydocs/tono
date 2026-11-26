@@ -1044,7 +1044,8 @@ final class KillSwitchManager {
     static func aiHomeWideningMayBeLoaded(
         next: KillSwitchState,
         previous: KillSwitchState?,
-        load: KernelLoadOutcome
+        load: KernelLoadOutcome,
+        strictIntentActive: Bool = KillSwitchManager.strictIntentActive
     ) -> Bool {
         next.aiHomeScoped && previous?.aiHomeScoped != true && !strictIntentActive && load == .acceptedOrUnknown
     }
@@ -1058,9 +1059,12 @@ final class KillSwitchManager {
         localNetwork: Bool,
         next: KillSwitchState,
         previous: KillSwitchState?,
-        load: KernelLoadOutcome
+        load: KernelLoadOutcome,
+        strictIntentActive: Bool = KillSwitchManager.strictIntentActive
     ) -> (unconfirmed: Bool, subject: String, holdsAI: Bool) {
-        if aiHomeWideningMayBeLoaded(next: next, previous: previous, load: load) {
+        if aiHomeWideningMayBeLoaded(
+            next: next, previous: previous, load: load, strictIntentActive: strictIntentActive
+        ) {
             return (true, aiHomeFaultSubject, true)
         }
         return (localNetwork, "Allow local network devices off", false)
@@ -1346,7 +1350,8 @@ final class KillSwitchManager {
     static func releaseInstalledBlock(
         recordDisposition: (Bool) throws -> Void = { try saveSelectiveRecoveryDisposition($0) },
         release: () throws -> Void = { try KillSwitchManager.releasePersistedBlockUnlocked() },
-        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
+        strictIntentActive: Bool = KillSwitchManager.strictIntentActive
     ) {
         guard !strictIntentActive else { return }
         do {

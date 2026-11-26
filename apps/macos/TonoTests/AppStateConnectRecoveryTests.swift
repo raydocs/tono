@@ -606,6 +606,116 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertNil(app.loadedRuntimeConfigDigest)
     }
 
+    func testStrictRoutingReconnectReusesBoundSessionPorts() async {
+        let saved = RuntimeState()
+        let defaults = AppProfile.defaults
+        let savedRoutingMode = defaults.object(forKey: SettingsKey.desktopRoutingMode)
+        let savedRoutingSession = defaults.object(forKey: SettingsKey.routingSession)
+        let savedStrictIntent = defaults.object(forKey: "strictRoutingSessionIntent")
+        let savedSelection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer {
+            saved.restore()
+            defaults.set(savedRoutingMode, forKey: SettingsKey.desktopRoutingMode)
+            defaults.set(savedRoutingSession, forKey: SettingsKey.routingSession)
+            defaults.set(savedStrictIntent, forKey: "strictRoutingSessionIntent")
+            defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        KillSwitchService.isArmed = true
+        defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
+        defaults.set("three-tier", forKey: SettingsKey.routingSession)
+        defaults.set(true, forKey: "strictRoutingSessionIntent")
+
+        let app = makeApp()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            app.connectionCoordinator.cancelReconnectTasks()
+        }
+        app.proxyRegions = [ProxyRegion(
+            id: AppState.managedCatalogRegionID,
+            name: "TONO CLOUD",
+            nodes: [Fixture.realityNode()]
+        )]
+        app.recordConnectBootSession = {}
+        app.connectionCoordinator.capturedRoutingMode = "three-tier"
+
+        // Reconnect with strictRoutingSessionIntent and active protection reuses bound ports.
+        app.isProtectionBlocked = true
+        app.config.mixedPort = 34_120
+        app.config.externalController = "127.0.0.1:34121"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertEqual(app.config.mixedPort, 34_120)
+        XCTAssertEqual(app.config.externalController, "127.0.0.1:34121")
+        app.connectionCoordinator.cancelConnectionTasks()
+        app.isConnecting = false
+
+        // Default RuntimeConfig ports (28990 / 127.0.0.1:9090) must not be reused even under strict reconnect.
+        app.config.mixedPort = 28_990
+        app.config.externalController = "127.0.0.1:9090"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertFalse(app.config.mixedPort == 28_990 && app.config.externalController == "127.0.0.1:9090")
+        app.connectionCoordinator.cancelConnectionTasks()
+        app.isConnecting = false
+
+        // Fresh unprotected strict connect (even with leftover intent) allocates ephemeral ports.
+        KillSwitchService.isArmed = false
+        app.isProtectionBlocked = false
+        app.isProtectedReconnectScheduled = false
+        app.config.mixedPort = 28_990
+        app.config.externalController = "127.0.0.1:9090"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertFalse(app.config.mixedPort == 28_990 && app.config.externalController == "127.0.0.1:9090")
+        app.connectionCoordinator.cancelConnectionTasks()
+        app.isConnecting = false
+
+        // Missing or invalid prior ports still fall back to allocating a valid pair.
+        KillSwitchService.isArmed = true
+        app.isProtectionBlocked = true
+        app.config.mixedPort = 0
+        app.config.externalController = ""
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertGreaterThan(app.config.mixedPort, 0)
+        XCTAssertFalse(app.config.externalController.isEmpty)
+        app.connectionCoordinator.cancelConnectionTasks()
+        app.isConnecting = false
+
+        // Explicit release clears strictRoutingSessionIntent, so switching to stable rotates ports.
+        app.preemptiveReleaseOperation = { _, _, _ in
+            let restored = HelperManager.ReleaseOutcome(
+                outcome: "restored",
+                generation: 1,
+                components: [
+                    .init(name: "pf", readback: "restored", risk: "settled", detail: nil),
+                    .init(name: "ai", readback: "restored", risk: "settled", detail: nil),
+                    .init(name: "dns", readback: "restored", risk: "settled", detail: nil),
+                    .init(name: "core", readback: "restored", risk: "settled", detail: nil),
+                ],
+                stuck: [],
+                finished: true,
+                detail: nil
+            )
+            return (.success(restored), false)
+        }
+        defaults.set(true, forKey: "strictRoutingSessionIntent")
+        app.disconnect(releaseKillSwitch: true)
+        await app.finishPendingDisconnect()
+        XCTAssertFalse(defaults.bool(forKey: "strictRoutingSessionIntent"))
+
+        defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
+        app.config.mixedPort = 1
+        app.config.externalController = "127.0.0.1:2"
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertNotEqual(app.config.mixedPort, 1)
+        XCTAssertNotEqual(app.config.externalController, "127.0.0.1:2")
+    }
+
     func testActivationDoesNotTreatNeverArmedProtectionAsAnExternalRelease() async {
         let saved = RuntimeState()
         defer { saved.restore() }

@@ -646,4 +646,79 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertEqual(session.state, .signedOut)
         XCTAssertNotNil(session.authMethods)
     }
+
+    func testDisconnectPendingNativeUpdateDelaysRetiredNotificationUntilDisconnectSequenceCompletes() async throws {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let strictIntent = AppProfile.defaults.object(forKey: "strictRoutingSessionIntent")
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            AppProfile.defaults.set(strictIntent, forKey: "strictRoutingSessionIntent")
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = true
+
+        let app = AppState()
+        app.nativeUpdateDisconnect = { throw Failure.lostAcknowledgement }
+        app.nativeUpdateStatus = {
+            .init(pending: false, receipt: nil, execution: nil, disconnectVerified: false, diagnostic: nil)
+        }
+
+        let (disarmsStarted, disarmStarted) = AsyncStream<Void>.makeStream()
+        let (disarmReplies, replyDisarm) = AsyncStream<Void>.makeStream()
+        defer {
+            disarmStarted.finish()
+            replyDisarm.finish()
+        }
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.restrictToBootstrap = {}
+        runtime.disarm = {
+            disarmStarted.yield(())
+            for await _ in disarmReplies { break }
+            KillSwitchService.isArmed = false
+        }
+        app.networkProtection = runtime
+
+        var retiredPosted = false
+        let token = NotificationCenter.default.addObserver(
+            forName: .nativeUpdateRetired,
+            object: app,
+            queue: .main
+        ) { _ in
+            retiredPosted = true
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        app.disconnectPendingNativeUpdate()
+        for await _ in disarmsStarted { break }
+
+        XCTAssertNotNil(app.connectionCoordinator.disconnectSequence)
+        XCTAssertFalse(app.nativeUpdatePending)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdatePending)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect)
+        XCTAssertFalse(
+            retiredPosted,
+            ".nativeUpdateRetired must not post before disconnectSequence finishes releasing protection"
+        )
+
+        replyDisarm.yield(())
+        await app.nativeUpdateDisconnectTask?.value
+
+        XCTAssertTrue(retiredPosted)
+        XCTAssertFalse(KillSwitchService.isArmed)
+    }
 }

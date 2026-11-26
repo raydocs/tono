@@ -152,11 +152,28 @@ extension AppState {
                 self.automaticResumeHeldAfterRestart = false
 
                 // Session-dynamic mixed/controller ports avoid collisions with leftover
-                // 7890/9090 listeners from other proxies or a previous core.
-                let sessionPorts = SessionRuntimePorts.allocatePair()
+                // 7890/9090 listeners from other proxies or a previous core. A strict
+                // session binds its runtime digest at connect, so protected reconnects
+                // reuse its bound ports instead of rotating them and breaking bindRuntime.
+                let sessionPorts: (mixed: Int, controller: Int)
+                let strictReconnectActive = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+                    && capturedRoutingMode == "three-tier"
+                    && (self.isProtectedReconnectScheduled || self.isProtectionBlocked || KillSwitchService.isArmed)
+                    && !(self.config.mixedPort == 28_990 && self.config.externalController == "127.0.0.1:9090")
+                if strictReconnectActive,
+                   self.config.mixedPort > 0,
+                   !self.config.externalController.isEmpty,
+                   let controllerPort = self.config.externalController
+                       .split(separator: ":").last
+                       .flatMap({ Int($0) }),
+                   controllerPort > 0 {
+                    sessionPorts = (self.config.mixedPort, controllerPort)
+                } else {
+                    sessionPorts = SessionRuntimePorts.allocatePair()
+                    self.config.mixedPort = sessionPorts.mixed
+                    self.config.externalController = "127.0.0.1:\(sessionPorts.controller)"
+                }
                 let port = sessionPorts.mixed
-                self.config.mixedPort = port
-                self.config.externalController = "127.0.0.1:\(sessionPorts.controller)"
                 // Tono always requires TUN; LAN exposure is never allowed.
                 self.config.tunEnabled = true
                 self.config.allowLan = false
@@ -1442,6 +1459,7 @@ extension AppState {
                         self.selectiveAIRecoveryPending = selectiveRecoveryPending
                     }
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
+                        AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
                         self.protectedDNSService = nil
                         self.recoveryCause = nil
                         RuntimeCleanup.clearConnectBootSession()

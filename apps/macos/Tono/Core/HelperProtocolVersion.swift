@@ -554,7 +554,12 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.76 → 4.52.77: failed-update AI-hold accounting treats a non-zero
     ///   PF status query as unreadable instead of inactive, preserving the hold
     ///   when PF remains active but cannot be queried.
-    static let current = "4.52.77"
+    /// - 4.52.77 → 4.52.78: `CoreManager` tracks `syncRecoveryEligible` across a
+    ///   mid-launch `/core/sync` failure after stopping the previous Core, so a
+    ///   subsequent validated rollback `/core/sync` can relaunch instead of being
+    ///   refused as stopped; launch success, explicit `/core/stop`, and
+    ///   `/core/start` clear it.
+    static let current = "4.52.78"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

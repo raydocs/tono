@@ -9190,6 +9190,16 @@
           }
         }
       }
+    },
+    "Disconnect before switching cloud servers in Strict mode.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "严格模式下请先断开连接再切换云端节点。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

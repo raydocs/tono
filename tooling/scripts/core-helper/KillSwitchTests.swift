@@ -918,7 +918,7 @@ extension KillSwitchManager {
 
     static func runSelfTests() -> Bool {
         let strictLAN = [runStrictLANLiveSelfTest(), runStrictLANCoreDeathSelfTest(), runStrictLANDNSSelfTest()]
-        guard strictLAN.allSatisfy({ $0 }) else { return false }
+        guard strictLAN.allSatisfy({ $0 }), runCoreSyncRecoverySelfTests() else { return false }
         do {
             guard canonicalPublicAddress("8.8.8.8") == "8.8.8.8",
                   canonicalPublicAddress("2606:4700:4700::1111") != nil,
@@ -2365,9 +2365,17 @@ extension KillSwitchManager {
             },
             applySelectiveLayer: {
                 events.append(intentPresent ? "applied-before-release" : "apply-ai-hold")
-            }
+            },
+            strictIntentActive: false
         )
-        return events == ["release", "apply-ai-hold"]
+        var strictEvents: [String] = []
+        releaseInstalledBlock(
+            recordDisposition: { _ in strictEvents.append("record") },
+            release: { strictEvents.append("release") },
+            applySelectiveLayer: { strictEvents.append("apply") },
+            strictIntentActive: true
+        )
+        return events == ["release", "apply-ai-hold"] && strictEvents.isEmpty
     }
 
     static func runFailedBarrierUnreleasedSelfTest() -> Bool {
@@ -2376,7 +2384,8 @@ extension KillSwitchManager {
         releaseInstalledBlock(
             recordDisposition: { _ in },
             release: { throw ReleaseFailed() },
-            applySelectiveLayer: { applied = true }
+            applySelectiveLayer: { applied = true },
+            strictIntentActive: false
         )
         return !applied
     }
@@ -2719,18 +2728,20 @@ extension KillSwitchManager {
         check("tightening-saves-whole-host", !scopeBeforeCommit(next: whole, previous: scoped).aiHomeScoped)
         // A failed switch to AI Home whose load may have committed takes the
         // stricter block; one that never loaded keeps the whole-host rules.
-        check("widening-loaded-is-tightening", aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .acceptedOrUnknown)
-            && aiHomeWideningMayBeLoaded(next: scoped, previous: nil, load: .acceptedOrUnknown))
-        check("widening-unloaded-keeps", !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .rejected)
-            && !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .notIssued))
-        check("same-scope-or-tightening-not-widening", !aiHomeWideningMayBeLoaded(next: scoped, previous: scoped, load: .acceptedOrUnknown)
-            && !aiHomeWideningMayBeLoaded(next: whole, previous: scoped, load: .acceptedOrUnknown))
+        check("widening-loaded-is-tightening", aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .acceptedOrUnknown, strictIntentActive: false)
+            && aiHomeWideningMayBeLoaded(next: scoped, previous: nil, load: .acceptedOrUnknown, strictIntentActive: false)
+            && !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .acceptedOrUnknown, strictIntentActive: true))
+        check("widening-unloaded-keeps", !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .rejected, strictIntentActive: false)
+            && !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .notIssued, strictIntentActive: false))
+        check("same-scope-or-tightening-not-widening", !aiHomeWideningMayBeLoaded(next: scoped, previous: scoped, load: .acceptedOrUnknown, strictIntentActive: false)
+            && !aiHomeWideningMayBeLoaded(next: whole, previous: scoped, load: .acceptedOrUnknown, strictIntentActive: false))
         var stricterInstalled = false
         var fault = false
-        let tightening = failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .acceptedOrUnknown)
+        let tightening = failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .acceptedOrUnknown, strictIntentActive: false)
         check("widening-tightening-wiring", tightening.unconfirmed
-            && !failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .rejected).unconfirmed
-            && failedArmTightening(localNetwork: true, next: whole, previous: whole, load: .notIssued)
+            && !failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .rejected, strictIntentActive: false).unconfirmed
+            && !failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .acceptedOrUnknown, strictIntentActive: true).unconfirmed
+            && failedArmTightening(localNetwork: true, next: whole, previous: whole, load: .notIssued, strictIntentActive: false)
                 == (true, "Allow local network devices off", false))
         let widened = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
                                 tighteningUnconfirmed: tightening.unconfirmed, faultSubject: tightening.subject,
@@ -2741,9 +2752,11 @@ extension KillSwitchManager {
         // A retry with the LAN baseline unknown is both a LAN tightening and
         // a widening: the widening's subject, and so the AI hold, wins.
         check("widening-wins-over-lan-tightening",
-              failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown)
-                == (true, aiHomeFaultSubject, true))
-        let retry = failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown)
+              failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown, strictIntentActive: false)
+                == (true, aiHomeFaultSubject, true)
+                && failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown, strictIntentActive: true)
+                    == (true, "Allow local network devices off", false))
+        let retry = failedArmTightening(localNetwork: true, next: scoped, previous: whole, load: .acceptedOrUnknown, strictIntentActive: false)
         var retryHeld = 0
         var retryFault = false
         let retried = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
@@ -2828,5 +2841,190 @@ extension KillSwitchManager {
             FileHandle.standardError.write(Data("AI Home lifecycle self-test failed; kernel holds:\n\(kernel)\n".utf8))
         }
         return passed
+    }
+
+    /// `--self-test` (non-root, isolated temp directory, no live PF/network):
+    /// verifies `CoreManager.syncRecoveryEligible` transitions so a validated
+    /// rollback `POST /core/sync` can recover after a forward sync stops the
+    /// old Core and fails mid-launch, while stopped/ineligible sync stays refused
+    /// and launch success, `stop()`, and `start()` clear eligibility.
+    static func runCoreSyncRecoverySelfTests() -> Bool {
+        var template = Array((FileManager.default.temporaryDirectory.path + "/tono-core-sync-test.XXXXXX").utf8CString)
+        guard mkdtemp(&template) != nil else { return false }
+        let root = String(cString: template)
+        let runtimeDir = root + "/runtime"
+        let configDir = root + "/config"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        do {
+            try FileManager.default.createDirectory(atPath: runtimeDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(atPath: configDir, withIntermediateDirectories: true)
+        } catch {
+            return false
+        }
+
+        let liveConfig = runtimeDir + "/live.json"
+        let earlyExitConfig = runtimeDir + "/early-exit.json"
+        let preflightFailConfig = runtimeDir + "/preflight-fail.json"
+        let manager = CoreManager(
+            environment: .init(
+                runtimeDirectory: runtimeDir,
+                pidPath: root + "/sing-box.pid",
+                verifyBinary: {},
+                snapshot: { _, sha in
+                    switch sha {
+                    case "live": return liveConfig
+                    case "early-exit": return earlyExitConfig
+                    case "preflight-fail": return preflightFailConfig
+                    default: throw HelperFailure.invalid("Unexpected test digest.")
+                    }
+                },
+                launchCommand: { configPath in
+                    if configPath == earlyExitConfig {
+                        return ("/usr/bin/false", [])
+                    }
+                    return ("/bin/sleep", ["30"])
+                },
+                preflight: { configPath in
+                    if configPath == preflightFailConfig {
+                        throw HelperFailure.coded(
+                            code: CoreListenPreflight.portInUseCode,
+                            message: "Port 53 (UDP) on 127.0.0.1 is already in use by test (PID 1)."
+                        )
+                    }
+                }
+            )
+        )
+        defer { try? manager.stop() }
+
+        var failures: [String] = []
+        func check(_ name: String, _ condition: Bool) {
+            if !condition { failures.append(name) }
+        }
+        func expectNotRunningSyncRefusal(_ name: String) {
+            do {
+                _ = try manager.sync(configDirectory: configDir, configSHA256: "live")
+                failures.append(name)
+            } catch let failure as HelperFailure {
+                check(name, failure.message == "sing-box is not running.")
+            } catch {
+                failures.append(name)
+            }
+        }
+
+        // 1. Stopped and ineligible refuses sync.
+        check("initially-not-eligible", !manager.isSyncRecoveryEligible && !manager.status().running)
+        expectNotRunningSyncRefusal("stopped-ineligible-sync-refused")
+        check("still-not-eligible-after-refusal", !manager.isSyncRecoveryEligible)
+
+        // 2. Start succeeds; pre-stop snapshot/beforeStop errors leave running process and !syncRecoveryEligible.
+        do {
+            try manager.start(configDirectory: configDir, configSHA256: "live")
+        } catch {
+            failures.append("initial-start")
+        }
+        let pid1 = manager.status().pid
+        check("initial-start-running", manager.status().running && pid1 != nil && !manager.isSyncRecoveryEligible)
+        do {
+            _ = try manager.sync(configDirectory: configDir, configSHA256: "bad")
+            failures.append("bad-snapshot-sync-refused")
+        } catch {}
+        check("bad-snapshot-keeps-live-child",
+              manager.status().running && manager.status().pid == pid1 && !manager.isSyncRecoveryEligible)
+        do {
+            _ = try manager.sync(configDirectory: configDir, configSHA256: "live",
+                                 beforeStop: { throw HelperFailure.system("withhold failed") })
+            failures.append("beforeStop-sync-refused")
+        } catch {}
+        check("beforeStop-failure-keeps-live-child",
+              manager.status().running && manager.status().pid == pid1 && !manager.isSyncRecoveryEligible)
+
+        // 3. Mid-launch failure via startAllowed == false after stopLocked sets syncRecoveryEligible.
+        do {
+            _ = try manager.sync(configDirectory: configDir, configSHA256: "live", startAllowed: { false })
+            failures.append("mid-launch-sleep-refused")
+        } catch {}
+        check("mid-launch-sleep-sets-eligible",
+              !manager.status().running && manager.status().pid == nil && manager.isSyncRecoveryEligible)
+
+        // 4. Failed rollback validation/startAllowed keeps syncRecoveryEligible for another retry;
+        //    successful rollback sync relaunches and clears syncRecoveryEligible.
+        do {
+            _ = try manager.sync(configDirectory: configDir, configSHA256: "bad")
+            failures.append("invalid-rollback-refused")
+        } catch {}
+        check("invalid-rollback-keeps-eligible", manager.isSyncRecoveryEligible && !manager.status().running)
+        do {
+            _ = try manager.sync(configDirectory: configDir, configSHA256: "live", startAllowed: { false })
+            failures.append("asleep-rollback-refused")
+        } catch {}
+        check("asleep-rollback-keeps-eligible", manager.isSyncRecoveryEligible && !manager.status().running)
+        do {
+            let recoveredPath = try manager.sync(configDirectory: configDir, configSHA256: "live")
+            let pid2 = manager.status().pid
+            check("rollback-sync-succeeds-and-clears-eligible",
+                  recoveredPath == liveConfig && manager.status().running && pid2 != nil && pid2 != pid1
+                    && !manager.isSyncRecoveryEligible)
+        } catch {
+            failures.append("rollback-sync-succeeds")
+        }
+
+        // 5. After sync success cleared eligibility, explicit stop() refuses future sync.
+        do { try manager.stop() } catch { failures.append("stop-after-recovery") }
+        check("stopped-and-ineligible-after-stop", !manager.status().running && !manager.isSyncRecoveryEligible)
+        expectNotRunningSyncRefusal("sync-refused-after-stop")
+
+        // 6. Mid-launch preflight failure sets syncRecoveryEligible, and explicit stop() clears it.
+        do {
+            try manager.start(configDirectory: configDir, configSHA256: "live")
+            do {
+                _ = try manager.sync(configDirectory: configDir, configSHA256: "preflight-fail")
+                failures.append("mid-launch-preflight-refused")
+            } catch {}
+            check("mid-launch-preflight-sets-eligible",
+                  !manager.status().running && manager.isSyncRecoveryEligible)
+            try manager.stop()
+            check("explicit-stop-clears-eligible", !manager.isSyncRecoveryEligible)
+            expectNotRunningSyncRefusal("sync-refused-after-explicit-stop")
+        } catch {
+            failures.append("explicit-stop-clears-eligible-setup")
+        }
+
+        // 7. Mid-launch early-exit failure sets syncRecoveryEligible, and start() clears it
+        //    (both when start fails and when start succeeds).
+        do {
+            try manager.start(configDirectory: configDir, configSHA256: "live")
+            do {
+                _ = try manager.sync(configDirectory: configDir, configSHA256: "early-exit")
+                failures.append("mid-launch-early-exit-refused")
+            } catch {}
+            check("mid-launch-early-exit-sets-eligible",
+                  !manager.status().running && manager.isSyncRecoveryEligible)
+            do {
+                try manager.start(configDirectory: configDir, configSHA256: "bad")
+                failures.append("failing-start-refused")
+            } catch {}
+            check("failing-start-clears-eligible", !manager.isSyncRecoveryEligible)
+            expectNotRunningSyncRefusal("sync-refused-after-failing-start")
+
+            try manager.start(configDirectory: configDir, configSHA256: "live")
+            do {
+                _ = try manager.sync(configDirectory: configDir, configSHA256: "early-exit")
+                failures.append("second-early-exit-refused")
+            } catch {}
+            check("second-early-exit-sets-eligible", manager.isSyncRecoveryEligible)
+            try manager.start(configDirectory: configDir, configSHA256: "live")
+            check("successful-start-clears-eligible",
+                  manager.status().running && !manager.isSyncRecoveryEligible)
+            try manager.stop()
+        } catch {
+            failures.append("start-clears-eligible-setup")
+        }
+
+        if !failures.isEmpty {
+            FileHandle.standardError.write(Data(
+                "self-test: core sync recovery failed: \(failures.joined(separator: ", "))\n".utf8
+            ))
+        }
+        return failures.isEmpty
     }
 }

@@ -146,6 +146,13 @@ extension AppState {
                     let automatic = preserving && !nativeUpdateExplicitReleaseRequested
                     if !automatic { dispatchedAutomatic = false }
                     disconnect(releaseKillSwitch: true, automaticFailureRelease: automatic)
+                    let disconnectTask = connectionCoordinator.disconnectSequence
+                    let preemptiveTask = connectionCoordinator.preemptiveReleaseTask
+                    await disconnectTask?.value
+                    await preemptiveTask?.value
+                    guard !Task.isCancelled,
+                          !nativeUpdatePending,
+                          !RuntimeCleanup.nativeUpdatePending else { return }
                     NotificationCenter.default.post(name: .nativeUpdateRetired, object: self)
                     return
                 }
