@@ -542,7 +542,7 @@ nonisolated enum HelperProtocolVersion {
     ///   non-DNS TCP ports in `sessionDirectEndpoints` and signed all-non-DNS-TCP
     ///   IPv4 grants in `sessionDirectTCPAddresses`, while rejecting protected
     ///   destinations in helper validation.
-    static let current = "4.52.73"
+    static let current = "4.52.74"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

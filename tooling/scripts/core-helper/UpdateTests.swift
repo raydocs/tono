@@ -166,6 +166,36 @@ func runUpdateSelfTests() -> Bool {
         try engine.gate(method: "POST", path: "/core/start", peer: successor)
     }
 
+    test("executor-ends-a-hung-initiating-app-instead-of-blocking-the-attempt") { _ in
+        func token(pid: pid_t) -> Data {
+            var words = [UInt32](repeating: 0, count: 8)
+            words[5] = UInt32(bitPattern: pid)
+            return words.withUnsafeBytes { Data($0) }
+        }
+        try check(UpdateExecutor.pid(of: token(pid: 4242)) == 4242, "Audit token pid was misread")
+        try check(UpdateExecutor.pid(of: Data([1, 2, 3])) == nil, "Short token named a process")
+        var signals = [(pid_t, Int32)]()
+        var alive = true
+        let ended = UpdateExecutor.endInitiator(
+            token(pid: 4242),
+            signal: { pid, number in signals.append((pid, number)); alive = false },
+            exists: { _ in alive }, pause: { _ in }
+        )
+        try check(ended && signals.count == 1 && signals[0].0 == 4242 && signals[0].1 == SIGKILL,
+                  "A lingering initiator was not ended with a single SIGKILL")
+        signals = []
+        alive = true
+        try check(!UpdateExecutor.endInitiator(token(pid: 4242), signal: { signals.append(($0, $1)) },
+                                               exists: { _ in alive }, pause: { _ in }),
+                  "An initiator that survived SIGKILL was reported as ended")
+        try check(!UpdateExecutor.endInitiator(token(pid: getpid()), signal: { _, _ in signals.append((0, 0)) },
+                                               exists: { _ in true }, pause: { _ in }) && signals.count == 1,
+                  "The executor signalled itself")
+        try check(!UpdateExecutor.endInitiator(token(pid: 1), signal: { _, _ in signals.append((0, 0)) },
+                                               exists: { _ in true }, pause: { _ in }) && signals.count == 1,
+                  "The executor signalled launchd")
+    }
+
     test("successor-incarnation-components-and-recovery-binding") { directory in
         let store = try UpdateStorage(root: directory)
         var recovery: UpdateContractV1.Protection = .protectedOffline
