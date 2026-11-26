@@ -8,14 +8,18 @@ import AppKit
 final class AppUpdater: ObservableObject {
     @Published private(set) var canCheckForUpdates = false
     private weak var appState: AppState?
+    private weak var appDelegate: AppDelegate?
     private var automaticCheck: Task<Void, Never>?
 
     init(enabled: Bool) {
         canCheckForUpdates = enabled
     }
 
-    func attach(appState: AppState) {
+    func attach(appState: AppState, appDelegate: AppDelegate? = nil) {
         self.appState = appState
+        if let appDelegate {
+            self.appDelegate = appDelegate
+        }
         guard canCheckForUpdates, automaticCheck == nil else { return }
         automaticCheck = Task { [weak self] in
             try? await Task.sleep(for: .seconds(30))
@@ -80,7 +84,13 @@ final class AppUpdater: ObservableObject {
             try await appState.installNativeUpdate(manifest: offer.bytes, signature: offer.signature, package: package)
             // The result is a helper-owned consumed receipt, not an App-owned
             // InstallStarted stamp. The executor waits for this process to exit.
-            (NSApp.delegate as? AppDelegate)?.terminateForNativeUpdate()
+            if let delegate = AppDelegate.resolve(attached: appDelegate) {
+                delegate.terminateForNativeUpdate()
+            } else {
+                // Fallback if the delegate was never attached; termination cleanup
+                // still checks pendingNativeUpdate() and skips ordinary PF release.
+                NSApp.terminate(nil)
+            }
         } catch {
             // Missing metadata (other than an unpublished channel, above) is
             // an error, never "up to date". Background

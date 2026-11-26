@@ -192,7 +192,8 @@ struct TonoApp: App {
                 }
                 appDelegate.appState = appState
                 appDelegate.accountSession = accountSession
-                updater.attach(appState: appState)
+                AppDelegate.current = appDelegate
+                updater.attach(appState: appState, appDelegate: appDelegate)
                 // Disk only — network remains gated on account + transport ready.
                 await appState.loadInitialData()
                 // Load the verified local catalog before account restoration so

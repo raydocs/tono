@@ -336,6 +336,25 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertFalse(AppUpdater.reportsFailure(userInitiated: false, offerAccepted: false, updatePending: false))
     }
 
+    func testAppDelegateResolveFindsRealDelegateBehindSwiftUIWrapper() {
+        final class SwiftUIWrapperDelegate: NSObject, NSApplicationDelegate {}
+        let wrapper = SwiftUIWrapperDelegate()
+        let delegate = AppDelegate()
+        XCTAssertNil(wrapper as? AppDelegate, "SwiftUI's NSApp.delegate wrapper is not AppDelegate")
+        XCTAssertTrue(
+            AppDelegate.resolve(attached: delegate, current: nil, nsAppDelegate: wrapper) === delegate,
+            "attached AppDelegate must be found for native update exit"
+        )
+        XCTAssertTrue(
+            AppDelegate.resolve(attached: nil, current: delegate, nsAppDelegate: wrapper) === delegate,
+            "live AppDelegate.current must be found when NSApp.delegate is SwiftUI's wrapper"
+        )
+        XCTAssertTrue(
+            AppDelegate.resolve(attached: nil, current: nil, nsAppDelegate: delegate) === delegate
+        )
+        XCTAssertNil(AppDelegate.resolve(attached: nil, current: nil, nsAppDelegate: wrapper))
+    }
+
     func testUpdateSentencesHaveSimplifiedChinese() throws {
         let catalog = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
