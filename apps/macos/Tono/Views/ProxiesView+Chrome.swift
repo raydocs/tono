@@ -85,7 +85,7 @@ extension ProxiesView {
                     Text(catalogStatusTitle)
                         .font(.system(size: 12, weight: .semibold))
                     Text(catalogStatusDetail)
-                        .font(.system(size: 10))
+                        .font(.system(size: 10)).monospacedDigit()
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

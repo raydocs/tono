@@ -24,6 +24,7 @@ private struct SeaHomePill: View {
     @State private var hovered = false
 
     var body: some View {
+        let sheenOpacity: Double = configuration.isPressed ? 0.16 : (hovered && enabled ? 0.08 : 0)
         configuration.label
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(primary ? SeaTheme.ink : SeaTheme.text)
@@ -31,26 +32,42 @@ private struct SeaHomePill: View {
             .frame(minWidth: 120, minHeight: 48, maxHeight: 48)
             .background {
                 if primary {
-                    Capsule(style: .circular).fill(SeaTheme.primaryGradient)
+                    Capsule(style: .circular)
+                        .fill(SeaTheme.primaryGradient)
+                        .overlay {
+                            Capsule(style: .circular).fill(.white.opacity(sheenOpacity))
+                        }
+                } else if opaque {
+                    Capsule(style: .circular)
+                        .fill(hovered && enabled ? Color(hex: "352725") : Color(hex: "2B201E"))
                 } else {
                     Capsule(style: .circular).fill(LinearGradient(
-                        colors: [Color(hex: "28100E").opacity(opaque ? 1 : 0.34),
-                                 Color(hex: "28100E").opacity(opaque ? 1 : 0.46)],
+                        colors: [Color(hex: "28100E").opacity(hovered && enabled ? 0.26 : 0.34),
+                                 Color(hex: "28100E").opacity(hovered && enabled ? 0.38 : 0.46)],
                         startPoint: .top, endPoint: .bottom))
                         .background(.ultraThinMaterial, in: Capsule(style: .circular))
+                        .overlay {
+                            Capsule(style: .circular).fill(.white.opacity(sheenOpacity))
+                        }
                 }
             }
             .overlay {
                 Capsule(style: .circular).strokeBorder(LinearGradient(
-                    colors: [Color(hex: "FFEBD2").opacity(opaque ? 0.5 : 0.28), .white.opacity(0.05)],
-                    startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                    colors: [Color(hex: "FFEBD2").opacity(opaque ? 0.55 : (hovered && enabled ? 0.42 : 0.30)),
+                             .white.opacity(opaque ? 0.18 : 0.06)],
+                    startPoint: .top, endPoint: .bottom), lineWidth: opaque ? 1 : 0.85)
             }
+            .shadow(
+                color: opaque ? .clear : (primary ? SeaTheme.warm.opacity(hovered && enabled ? 0.26 : 0.16) : .black.opacity(0.24)),
+                radius: primary ? (hovered && enabled ? 14 : 10) : 10,
+                y: 4
+            )
             .contentShape(Capsule(style: .circular))
-            .opacity(enabled ? (hovered ? 0.88 : 1) : 0.45)
+            .opacity(enabled ? 1 : 0.45)
             .scaleEffect(SeaHomePresentation.pressScale(pressed: configuration.isPressed, reduceMotion: reduceMotion))
-            .animation(TonoMotion.press(reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(TonoMotion.tactileSpring(reduceMotion: reduceMotion), value: configuration.isPressed)
             .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
-            .onHover { hovered = $0 }
+            .onHover { hovered = enabled ? $0 : false }
     }
 }
 

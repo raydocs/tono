@@ -22,6 +22,7 @@ enum SeaTheme {
     static let opaqueTrack = Color(hex: "232127")
     static let opaqueGood = Color(hex: "2A3231")
     static let opaqueAttention = Color(hex: "41352D")
+    static let opaqueDanger = Color(hex: "362124")
     static let danger = Color(hex: "FF9A8A")
     static let good = Color(hex: "BFECC9")
     static let attention = Color(hex: "FFD9A0")
@@ -31,6 +32,24 @@ enum SeaTheme {
                 .init(color: Color(hex: "FF9E63"), location: 1)],
         startPoint: .topLeading, endPoint: .bottomTrailing
     )
+
+    static func specularBorder(
+        contrast: ColorSchemeContrast,
+        reduceTransparency: Bool,
+        topOpacity: Double = 0.16,
+        bottomOpacity: Double = 0.04
+    ) -> AnyShapeStyle {
+        if contrast == .increased {
+            return AnyShapeStyle(Color.white.opacity(0.48))
+        }
+        if reduceTransparency {
+            return AnyShapeStyle(Color.white.opacity(0.16))
+        }
+        return AnyShapeStyle(LinearGradient(
+            colors: [.white.opacity(topOpacity), .white.opacity(bottomOpacity)],
+            startPoint: .top, endPoint: .bottom
+        ))
+    }
 }
 
 struct SeaPanelSurface: ViewModifier {
@@ -39,22 +58,23 @@ struct SeaPanelSurface: ViewModifier {
 
     @ViewBuilder func body(content: Content) -> some View {
         if enabled {
+            let opaque = display.reduceTransparency || display.contrast == .increased
             content
                 .background {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(display.reduceTransparency || display.contrast == .increased
+                        .fill(opaque
                             ? AnyShapeStyle(SeaTheme.opaquePanel)
-                            : AnyShapeStyle(LinearGradient(colors: [.white.opacity(0.075), .white.opacity(0.04)],
+                            : AnyShapeStyle(LinearGradient(colors: [.white.opacity(0.078), .white.opacity(0.036)],
                                                          startPoint: .top, endPoint: .bottom)))
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.white.opacity(display.contrast == .increased ? 0.45 : (display.reduceTransparency ? 0.14 : 0.06)), lineWidth: 1)
+                        .strokeBorder(
+                            SeaTheme.specularBorder(contrast: display.contrast, reduceTransparency: display.reduceTransparency),
+                            lineWidth: display.contrast == .increased ? 1 : 0.75
+                        )
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .clear], startPoint: .top, endPoint: .bottom), lineWidth: 1)
-                }
+                .shadow(color: opaque ? .clear : .black.opacity(0.18), radius: 12, y: 5)
         } else { content }
     }
 }
@@ -74,7 +94,7 @@ struct SeaPanel<Content: View>: View {
         VStack(alignment: .leading, spacing: 16) {
             if let title {
                 Text(LocalizedStringKey(title))
-                    .font(.system(size: 13, weight: .regular))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(SeaTheme.muted)
                     .accessibilityAddTraits(.isHeader)
             }
@@ -119,7 +139,7 @@ struct SeaPageHeading: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(LocalizedStringKey(title))
-                .font(.system(size: 28, weight: .regular)).tracking(-0.5)
+                .font(.system(size: 28, weight: .medium)).tracking(-0.5)
                 .foregroundStyle(SeaTheme.text).accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(LocalizedStringKey(subtitle)).font(.system(size: 13))

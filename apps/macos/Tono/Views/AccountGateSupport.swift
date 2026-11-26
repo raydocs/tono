@@ -90,7 +90,7 @@ struct AccountBlockedView: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             Text(value)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12, weight: .medium)).monospacedDigit()
                 .lineLimit(1)
         }
         .padding(.horizontal, 12)
@@ -99,6 +99,10 @@ struct AccountBlockedView: View {
             .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.10 : 0.5), lineWidth: 0.6)
+        }
     }
 }
 
@@ -127,31 +131,40 @@ struct GateAdaptiveButtonStyle: ButtonStyle {
 struct GateSecondaryButtonStyle: ButtonStyle {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
+    @State private var isHovered = false
 
     func makeBody(configuration: Configuration) -> some View {
+        let baseOpacity = colorScheme == .dark
+            ? (isHovered && isEnabled ? 0.11 : 0.075)
+            : (isHovered && isEnabled ? 0.94 : 0.85)
         configuration.label
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.primary)
             .frame(maxWidth: .infinity)
             .frame(height: 44)
             .background(
-                .white.opacity(colorScheme == .dark ? 0.07 : 0.85),
+                displayPreferences.reduceTransparency
+                    ? AnyShapeStyle(colorScheme == .dark ? (isHovered && isEnabled ? Color(hex: "343139") : SeaTheme.opaqueQuiet) : Color(nsColor: .controlBackgroundColor))
+                    : AnyShapeStyle(.white.opacity(baseOpacity)),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
                         colorScheme == .dark
-                            ? .white.opacity(0.14)
-                            : .black.opacity(0.10),
-                        lineWidth: 0.5
+                            ? .white.opacity(displayPreferences.contrast == .increased ? 0.45 : (isHovered && isEnabled ? 0.22 : 0.14))
+                            : .black.opacity(displayPreferences.contrast == .increased ? 0.35 : 0.10),
+                        lineWidth: displayPreferences.contrast == .increased ? 1 : 0.65
                     )
             }
             .opacity(isEnabled ? 1 : 0.4)
-            .brightness(configuration.isPressed ? -0.03 : 0)
+            .brightness(configuration.isPressed ? -0.02 : 0)
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
-            .animation(TonoMotion.easeOut(0.12, reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(TonoMotion.tactileSpring(reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: isHovered)
+            .onHover { isHovered = isEnabled ? $0 : false }
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -243,7 +256,7 @@ struct SignInDiagnosticCopyButton: View {
             } else if copy.copied == false {
                 Text("Could not copy. You can copy the safe text manually.")
                 DisclosureGroup("Copy manually") {
-                    Text(copy.manualText).textSelection(.enabled)
+                    Text(copy.manualText).monospacedDigit().textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -256,10 +269,12 @@ struct SignInDiagnosticCopyButton: View {
 /// behind the scrim cannot interleave with the caption.
 struct RestoringSessionCard: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @State private var showSlowHint = false
 
     var body: some View {
+        let opaque = displayPreferences.reduceTransparency || displayPreferences.contrast == .increased
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 ProgressView()
@@ -284,19 +299,24 @@ struct RestoringSessionCard: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 16)
-        .background(
-            // Sits on the scrimmed (dimmed) dashboard, so it keeps a touch
-            // more wash than the login card for text contrast.
-            .white.opacity(colorScheme == .dark ? 0.07 : 0.30),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
+        .background {
+            if opaque {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .windowBackgroundColor))
+            } else {
+                // Sits on the scrimmed (dimmed) dashboard, so it keeps a touch
+                // more wash than the login card for text contrast.
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.white.opacity(colorScheme == .dark ? 0.07 : 0.30))
+            }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
                         colors: [
-                            .white.opacity(colorScheme == .dark ? 0.22 : 0.85),
-                            .white.opacity(colorScheme == .dark ? 0.06 : 0.25),
+                            .white.opacity(displayPreferences.contrast == .increased ? 0.55 : (colorScheme == .dark ? 0.22 : 0.85)),
+                            .white.opacity(displayPreferences.contrast == .increased ? 0.28 : (colorScheme == .dark ? 0.06 : 0.25)),
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -304,17 +324,30 @@ struct RestoringSessionCard: View {
                     lineWidth: 1
                 )
         }
-        .glassEffect(
-            .regular.tint(.white.opacity(colorScheme == .dark ? 0.03 : 0.05)),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 18, y: 8)
+        .modifier(RestoringCardGlassEffect(enabled: !opaque, colorScheme: colorScheme))
+        .shadow(color: opaque ? .clear : .black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 18, y: 8)
         .task {
             try? await Task.sleep(for: .seconds(15))
             guard !Task.isCancelled else { return }
             withAnimation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion)) {
                 showSlowHint = true
             }
+        }
+    }
+}
+
+private struct RestoringCardGlassEffect: ViewModifier {
+    let enabled: Bool
+    let colorScheme: ColorScheme
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(
+                .regular.tint(.white.opacity(colorScheme == .dark ? 0.03 : 0.05)),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+        } else {
+            content
         }
     }
 }
@@ -386,22 +419,36 @@ enum LoginErrorCopy {
 
 struct LoginErrorBlock: View {
     @SeaAppearancePreference private var seaAppearance
+    @SeaDisplayPreferences private var displayPreferences
+    @Environment(\.colorScheme) private var colorScheme
     let message: String
     @Binding var isExpanded: Bool
     var reduceMotion: Bool
     var recovery: SignInRecovery? = nil
+    @State private var isDetailsHovered = false
+
+    private var headlineColor: Color {
+        seaAppearance || colorScheme == .dark ? SeaTheme.danger : TonoStatus.error
+    }
+
+    private var blockFill: Color {
+        if displayPreferences.reduceTransparency {
+            return colorScheme == .dark ? Color(hex: "26181C") : Color(hex: "FCECEE")
+        }
+        return TonoStatus.error.opacity(colorScheme == .dark ? 0.09 : 0.06)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            // A quiet inline notice, not a colored slab: the red type and dot
-            // carry the severity, the surface stays almost part of the card.
+        VStack(alignment: .leading, spacing: 8) {
+            // A quiet inline notice, not a colored slab: clear danger type,
+            // crisp hairline border, and progressive technical details.
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TonoStatus.error)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(headlineColor)
                 Text(LoginErrorCopy.headline(from: message))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(TonoStatus.error)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(headlineColor)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -419,31 +466,45 @@ struct LoginErrorBlock: View {
                             .font(.system(size: 9, weight: .semibold))
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.vertical, 4)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(isDetailsHovered ? .primary : .secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3.5)
+                .background(.white.opacity(isDetailsHovered ? (colorScheme == .dark ? 0.07 : 0.45) : 0), in: Capsule())
+                .padding(.leading, -7)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onHover { isDetailsHovered = $0 }
+            .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: isDetailsHovered)
 
             if isExpanded {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    Rectangle()
+                        .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.24 : (colorScheme == .dark ? 0.08 : 0.14)))
+                        .frame(height: 0.75)
 
-                if LoginErrorCopy.mentionsHelper(message) {
-                    Text(LoginErrorCopy.helperAdminExplanation)
+                    Text(message)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(colorScheme == .dark ? SeaTheme.text.opacity(0.86) : .primary.opacity(0.85))
+                        .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if LoginErrorCopy.mentionsHelper(message) {
+                        Text(LoginErrorCopy.helperAdminExplanation)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(1.5)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if recovery?.phase != .userAction {
+                        SignInDiagnosticCopyButton().id(message)
+                    }
                 }
-                if recovery?.phase != .userAction {
-                    SignInDiagnosticCopyButton().id(message)
-                }
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             }
             if recovery?.phase == .userAction {
                 SignInDiagnosticCopyButton(cause: recovery?.cause, contact: true).id(message)
@@ -452,10 +513,13 @@ struct LoginErrorBlock: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TonoStatus.error.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(blockFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(TonoStatus.error.opacity(0.12), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(
+                    TonoStatus.error.opacity(displayPreferences.contrast == .increased ? 0.55 : (colorScheme == .dark ? 0.24 : 0.18)),
+                    lineWidth: displayPreferences.contrast == .increased ? 1 : 0.75
+                )
         }
     }
 }

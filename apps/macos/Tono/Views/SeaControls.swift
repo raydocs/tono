@@ -46,37 +46,69 @@ private struct SeaStyledButton: View {
         switch variant {
         case .primary: SeaTheme.ink
         case .quiet: SeaTheme.text
-        case .text: accent
-        case .danger: SeaTheme.danger
+        case .text: hovered && enabled ? SeaTheme.text : accent
+        case .danger: hovered && enabled ? Color(hex: "FFB5A8") : SeaTheme.danger
         }
     }
 
+    private var quietFill: Color {
+        if display.reduceTransparency {
+            return hovered && enabled ? Color(hex: "343139") : SeaTheme.opaqueQuiet
+        }
+        if configuration.isPressed { return .white.opacity(0.16) }
+        return .white.opacity(hovered && enabled ? 0.13 : 0.08)
+    }
+
     var body: some View {
+        let sheenOpacity: Double = configuration.isPressed ? 0.16 : (hovered && enabled ? 0.08 : 0)
         configuration.label
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(size: size == .row ? 13 : 15, weight: .medium))
             .foregroundStyle(foreground)
             .padding(.horizontal, variant == .text || variant == .danger ? 0 : 18)
             .frame(minHeight: size.height)
             .background {
                 if variant == .primary {
-                    Capsule().fill(SeaTheme.primaryGradient)
+                    Capsule()
+                        .fill(SeaTheme.primaryGradient)
+                        .overlay {
+                            Capsule().fill(.white.opacity(sheenOpacity))
+                        }
                 } else if variant == .quiet {
-                    Capsule().fill(display.reduceTransparency ? SeaTheme.opaqueQuiet : .white.opacity(0.08))
+                    Capsule().fill(quietFill)
                 }
             }
             .overlay {
                 // Text and danger actions have no surface; a tight stroke
                 // around bare words would read as a broken button.
-                if display.contrast == .increased && (variant == .primary || variant == .quiet) {
-                    Capsule().strokeBorder(foreground.opacity(0.45), lineWidth: 1)
+                if variant == .primary {
+                    Capsule().strokeBorder(
+                        display.contrast == .increased
+                            ? AnyShapeStyle(foreground.opacity(0.55))
+                            : AnyShapeStyle(LinearGradient(
+                                colors: [Color(hex: "FFEBD2").opacity(0.45), .white.opacity(0.06)],
+                                startPoint: .top, endPoint: .bottom)),
+                        lineWidth: display.contrast == .increased ? 1 : 0.75
+                    )
+                } else if variant == .quiet {
+                    Capsule().strokeBorder(
+                        display.contrast == .increased
+                            ? AnyShapeStyle(foreground.opacity(0.45))
+                            : SeaTheme.specularBorder(contrast: display.contrast, reduceTransparency: display.reduceTransparency, topOpacity: 0.18, bottomOpacity: 0.05),
+                        lineWidth: display.contrast == .increased ? 1 : 0.75
+                    )
                 }
             }
+            .shadow(
+                color: variant == .primary && !display.reduceTransparency && display.contrast != .increased && enabled
+                    ? SeaTheme.warm.opacity(hovered ? 0.24 : 0.14) : .clear,
+                radius: hovered ? 12 : 8, y: 3
+            )
             .contentShape(Capsule())
-            .opacity(enabled ? (hovered ? 0.88 : 1) : 0.42)
+            .opacity(enabled ? (configuration.isPressed && (variant == .text || variant == .danger) ? 0.65 : 1) : 0.42)
             .scaleEffect(SeaHomePresentation.pressScale(pressed: configuration.isPressed, reduceMotion: display.reduceMotion))
-            .animation(TonoMotion.press(reduceMotion: display.reduceMotion), value: configuration.isPressed)
+            .animation(TonoMotion.tactileSpring(reduceMotion: display.reduceMotion), value: configuration.isPressed)
             .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
-            .onHover { hovered = $0 }
+            .onHover { hovered = enabled ? $0 : false }
     }
 }
 
@@ -110,23 +142,49 @@ struct SeaToggleStyle: ToggleStyle {
     @SeaDisplayPreferences private var display
 
     func makeBody(configuration: Configuration) -> some View {
+        SeaToggleSwitch(configuration: configuration, enabled: enabled, display: display)
+    }
+}
+
+private struct SeaToggleSwitch: View {
+    let configuration: ToggleStyleConfiguration
+    let enabled: Bool
+    let display: SeaDisplayOptions
+    @State private var hovered = false
+
+    var body: some View {
         Button { configuration.isOn.toggle() } label: {
             // On is the sunrise, whatever the page tone, like the Windows switch.
-            Capsule().fill(configuration.isOn ? AnyShapeStyle(SeaTheme.primaryGradient) : AnyShapeStyle(.white.opacity(0.16)))
+            Capsule()
+                .fill(configuration.isOn
+                    ? AnyShapeStyle(SeaTheme.primaryGradient)
+                    : AnyShapeStyle(display.reduceTransparency
+                        ? (hovered && enabled ? SeaTheme.opaqueQuiet : SeaTheme.opaqueTrack)
+                        : .white.opacity(hovered && enabled ? 0.22 : 0.16)))
                 .frame(width: 36, height: 20)
                 .overlay(alignment: configuration.isOn ? .trailing : .leading) {
-                    Circle().fill(configuration.isOn ? Color(hex: "171421") : SeaTheme.text)
-                        .frame(width: 16, height: 16).padding(2)
+                    Circle()
+                        .fill(configuration.isOn ? Color(hex: "171421") : SeaTheme.text)
+                        .frame(width: 16, height: 16)
+                        .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
+                        .padding(2)
                 }
                 .overlay {
-                    if display.contrast == .increased {
-                        Capsule().strokeBorder(SeaTheme.text.opacity(0.45), lineWidth: 1)
-                    }
+                    Capsule().strokeBorder(
+                        display.contrast == .increased
+                            ? SeaTheme.text.opacity(0.55)
+                            : (configuration.isOn
+                                ? Color(hex: "FFEBD2").opacity(0.28)
+                                : SeaTheme.text.opacity(0.14)),
+                        lineWidth: display.contrast == .increased ? 1 : 0.65
+                    )
                 }
         }
         .buttonStyle(.plain)
         .opacity(enabled ? 1 : 0.42)
-        .animation(display.reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isOn)
+        .animation(TonoMotion.tactileSpring(reduceMotion: display.reduceMotion), value: configuration.isOn)
+        .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
+        .onHover { hovered = enabled ? $0 : false }
         .accessibilityRepresentation {
             Toggle(isOn: configuration.$isOn) { configuration.label }.toggleStyle(.switch)
         }
@@ -139,31 +197,53 @@ struct SeaChoice: View {
     let options: [String]
     @Environment(\.seaAccent) private var accent
     @SeaDisplayPreferences private var display
+    @State private var hoveredOption: String?
 
     var body: some View {
         if options.count <= 4 {
             HStack(spacing: 2) {
                 ForEach(options, id: \.self) { option in
+                    let isSelected = selection == option
+                    let isHovered = hoveredOption == option
                     Button { selection = option } label: {
-                        Text(LocalizedStringKey(option)).font(.system(size: 13))
-                            .foregroundStyle(selection == option ? SeaTheme.text : SeaTheme.muted)
+                        Text(LocalizedStringKey(option))
+                            .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                            .foregroundStyle(isSelected ? SeaTheme.text : (isHovered ? SeaTheme.text.opacity(0.88) : SeaTheme.muted))
                             .padding(.horizontal, 13).padding(.vertical, 5)
                             .background {
-                                if selection == option {
-                                    Capsule().fill(SeaTheme.warm.opacity(0.19))
+                                if isSelected {
+                                    Capsule()
+                                        .fill(display.reduceTransparency ? SeaTheme.opaqueQuiet : SeaTheme.warm.opacity(0.19))
                                         .overlay {
-                                            Capsule().strokeBorder(LinearGradient(colors: [SeaTheme.warm.opacity(0.24), .clear],
-                                                startPoint: .top, endPoint: .center), lineWidth: 1)
+                                            Capsule().strokeBorder(LinearGradient(
+                                                colors: [SeaTheme.warm.opacity(display.contrast == .increased ? 0.65 : 0.30),
+                                                         SeaTheme.warm.opacity(0.04)],
+                                                startPoint: .top, endPoint: .bottom), lineWidth: 1)
                                         }
+                                } else if isHovered {
+                                    Capsule().fill(.white.opacity(0.06))
                                 }
                             }
                             .contentShape(Capsule())
-                    }.buttonStyle(.plain)
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        hoveredOption = hovering ? option : (hoveredOption == option ? nil : hoveredOption)
+                    }
                 }
             }
             .padding(3)
             .background(display.reduceTransparency ? SeaTheme.opaqueTrack : .white.opacity(0.05), in: Capsule())
-            .overlay { if display.contrast == .increased { Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1) } }
+            .overlay {
+                Capsule().strokeBorder(
+                    display.contrast == .increased
+                        ? AnyShapeStyle(accent.opacity(0.45))
+                        : SeaTheme.specularBorder(contrast: display.contrast, reduceTransparency: display.reduceTransparency, topOpacity: 0.12, bottomOpacity: 0.04),
+                    lineWidth: display.contrast == .increased ? 1 : 0.65
+                )
+            }
+            .animation(TonoMotion.stateChange(reduceMotion: display.reduceMotion), value: selection)
+            .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hoveredOption)
             .accessibilityRepresentation {
                 Picker(label, selection: $selection) {
                     ForEach(options, id: \.self) { Text(LocalizedStringKey($0)).tag($0) }
@@ -192,10 +272,11 @@ struct SeaMenuButton<Items: View>: View {
     @ViewBuilder let items: Items
     @Environment(\.seaAccent) private var accent
     @SeaDisplayPreferences private var display
+    @State private var hovered = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Menu { items } label: { title.font(.system(size: 13)) }
+            Menu { items } label: { title.font(.system(size: 13, weight: .medium)) }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
@@ -206,9 +287,23 @@ struct SeaMenuButton<Items: View>: View {
         .foregroundStyle(SeaTheme.text)
         .padding(.horizontal, 14)
         .frame(minHeight: SeaControlSize.row.height)
-        .background(display.reduceTransparency ? SeaTheme.opaqueQuiet : .white.opacity(0.08), in: Capsule())
-        .overlay { if display.contrast == .increased { Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1) } }
+        .background(
+            display.reduceTransparency
+                ? (hovered ? Color(hex: "343139") : SeaTheme.opaqueQuiet)
+                : .white.opacity(hovered ? 0.12 : 0.08),
+            in: Capsule()
+        )
+        .overlay {
+            Capsule().strokeBorder(
+                display.contrast == .increased
+                    ? AnyShapeStyle(accent.opacity(0.5))
+                    : SeaTheme.specularBorder(contrast: display.contrast, reduceTransparency: display.reduceTransparency, topOpacity: 0.16, bottomOpacity: 0.04),
+                lineWidth: display.contrast == .increased ? 1 : 0.65
+            )
+        }
         .fixedSize()
+        .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
+        .onHover { hovered = $0 }
     }
 }
 
@@ -222,30 +317,54 @@ struct SeaTabs: View {
     var title: (String) -> LocalizedStringKey = { LocalizedStringKey($0) }
     @Environment(\.seaAccent) private var accent
     @SeaDisplayPreferences private var display
+    @State private var hoveredOption: String?
+    @Namespace private var tabNS
 
     var body: some View {
         HStack(spacing: 22) {
             ForEach(options, id: \.self) { option in
                 let selected = selection == option
+                let hovered = hoveredOption == option
                 Button { selection = option } label: {
-                    Text(title(option)).font(.system(size: 13))
-                        .foregroundStyle(selected ? accent : SeaTheme.tertiary)
+                    Text(title(option)).font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(selected ? accent : (hovered ? SeaTheme.muted : SeaTheme.tertiary))
                         .padding(.vertical, 10)
                         .overlay(alignment: .bottom) {
-                            Rectangle().fill(selected ? accent : .clear).frame(height: 2)
+                            if selected {
+                                Capsule()
+                                    .fill(accent)
+                                    .frame(height: 2)
+                                    .modifier(SeaTabUnderlineMatch(namespace: display.reduceMotion ? nil : tabNS))
+                            }
                         }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .onHover { hovering in
+                    hoveredOption = hovering ? option : (hoveredOption == option ? nil : hoveredOption)
+                }
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
             }
         }
-        .animation(display.reduceMotion ? nil : .easeOut(duration: 0.15), value: selection)
+        .animation(TonoMotion.nav(reduceMotion: display.reduceMotion), value: selection)
+        .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hoveredOption)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(.white.opacity(display.contrast == .increased ? 0.3 : 0.06)).frame(height: 1)
+            Rectangle().fill(.white.opacity(display.contrast == .increased ? 0.35 : 0.08)).frame(height: 0.75)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
+    }
+}
+
+private struct SeaTabUnderlineMatch: ViewModifier {
+    var namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace {
+            content.matchedGeometryEffect(id: "seaTabUnderline", in: namespace)
+        } else {
+            content
+        }
     }
 }
 
@@ -266,17 +385,33 @@ private struct SeaFocusedField<Content: View>: View {
 
 struct SeaFieldSurface: ViewModifier {
     var focused: Bool = false
+    var minHeight: CGFloat = 48
     @SeaDisplayPreferences private var display
+
     func body(content: Content) -> some View {
-        content.font(.system(size: 15)).foregroundStyle(SeaTheme.text)
-            .padding(.horizontal, 14).frame(minHeight: 48)
-            .background(display.reduceTransparency ? SeaTheme.opaquePanel : .white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        content.font(.system(size: minHeight < 44 ? 13.5 : 15)).foregroundStyle(SeaTheme.text)
+            .padding(.horizontal, 14).frame(minHeight: minHeight)
+            .background(
+                display.reduceTransparency
+                    ? SeaTheme.opaquePanel
+                    : (focused ? .white.opacity(0.065) : .white.opacity(0.045)),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
             .overlay {
                 // A focused field takes the sunrise ring on every page; the tone
                 // accent stays for links and selection.
-                RoundedRectangle(cornerRadius: 12).strokeBorder(
-                    focused ? SeaTheme.attention : .white.opacity(display.contrast == .increased ? 0.45 : 0.09), lineWidth: focused ? 1.5 : 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(
+                    focused
+                        ? AnyShapeStyle(SeaTheme.attention)
+                        : SeaTheme.specularBorder(contrast: display.contrast, reduceTransparency: display.reduceTransparency, topOpacity: 0.15, bottomOpacity: 0.05),
+                    lineWidth: focused ? 1.5 : (display.contrast == .increased ? 1 : 0.75)
+                )
             }
+            .shadow(
+                color: focused && !display.reduceTransparency ? SeaTheme.attention.opacity(0.14) : .clear,
+                radius: 6, y: 2
+            )
+            .animation(TonoMotion.stateChange(reduceMotion: display.reduceMotion), value: focused)
     }
 }
 
@@ -324,19 +459,21 @@ struct SeaTag: View {
     }
     private var opaqueFill: Color {
         switch kind {
-        case .neutral, .danger: SeaTheme.opaqueQuiet
+        case .neutral: SeaTheme.opaqueQuiet
         case .good: SeaTheme.opaqueGood
         case .attention: SeaTheme.opaqueAttention
+        case .danger: SeaTheme.opaqueDanger
         }
     }
     var body: some View {
-        title.font(.system(size: 12)).monospacedDigit().foregroundStyle(foreground)
+        title.font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(foreground)
             .padding(.horizontal, 10).padding(.vertical, 4)
             .background(display.reduceTransparency ? opaqueFill : fill, in: Capsule())
             .overlay {
-                if display.contrast == .increased {
-                    Capsule().strokeBorder(foreground.opacity(0.45), lineWidth: 1)
-                }
+                Capsule().strokeBorder(
+                    foreground.opacity(display.contrast == .increased ? 0.52 : 0.18),
+                    lineWidth: display.contrast == .increased ? 1 : 0.6
+                )
             }
     }
 }
@@ -369,6 +506,8 @@ private struct SeaChevronShape: Shape {
 
 struct SeaDisclosureStyle: DisclosureGroupStyle {
     @SeaDisplayPreferences private var display
+    @State private var hovered = false
+
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -377,9 +516,16 @@ struct SeaDisclosureStyle: DisclosureGroupStyle {
                 }
             } label: {
                 HStack(spacing: 8) { SeaChevron(expanded: configuration.isExpanded); configuration.label }
+                    .opacity(hovered ? 1 : 0.86)
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
-            if configuration.isExpanded { configuration.content }
+            }
+            .buttonStyle(.plain)
+            .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
+            .onHover { hovered = $0 }
+            if configuration.isExpanded {
+                configuration.content
+                    .transition(display.reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            }
         }
         .accessibilityRepresentation {
             DisclosureGroup(isExpanded: configuration.$isExpanded) {

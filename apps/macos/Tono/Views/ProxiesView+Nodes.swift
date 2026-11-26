@@ -76,7 +76,7 @@ extension ProxiesView {
                     Text(recent.at, format: .dateTime.hour().minute())
                 }
             }
-            .font(.system(size: 10)).foregroundStyle(.secondary)
+            .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
             .padding(.horizontal, 8)
         }
     }
@@ -105,6 +105,7 @@ extension ProxiesView {
         } label: {
             NodeCardSurface(
                 isActive: isActive,
+                isSwitching: isSwitching,
                 isDisabled: isDisabled,
                 activeLineNamespace: activeLineNS
             ) {
@@ -194,7 +195,7 @@ extension ProxiesView {
             }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NodeCardPressButtonStyle(reduceMotion: reduceMotion))
         .disabled(isDisabled)
         .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isActive)
         .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isSwitching)
@@ -328,7 +329,7 @@ extension ProxiesView {
                     .foregroundStyle(.secondary)
             }
             Text("\(count)")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 10, weight: .medium)).monospacedDigit()
                 .foregroundStyle(.tertiary)
         }
     }
@@ -341,7 +342,7 @@ extension ProxiesView {
                 .foregroundStyle(.secondary)
 
             Text("\(count)")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 10, weight: .medium)).monospacedDigit()
                 .foregroundStyle(.tertiary)
         }
     }

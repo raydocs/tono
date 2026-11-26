@@ -51,6 +51,12 @@ struct SidebarView: View {
 
             Spacer()
 
+            Rectangle()
+                .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.30 : (colorScheme == .dark ? 0.07 : 0.08)))
+                .frame(height: 0.75)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+
             // Support 与 Settings 推至底部
             VStack(alignment: .leading, spacing: 7) {
                 navigationItem(for: .support)
@@ -61,10 +67,25 @@ struct SidebarView: View {
         .padding(.horizontal, 6)
         .background {
             if seaAppearance {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.black.opacity(0.24))
-                    .glassEffect(.regular.tint(.black.opacity(0.25)), in: RoundedRectangle(cornerRadius: 20))
-                    .padding(6)
+                let opaque = displayPreferences.reduceTransparency || displayPreferences.contrast == .increased
+                Group {
+                    if opaque {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(SeaTheme.opaquePanel)
+                    } else {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Color.clear)
+                            .glassEffect(.regular.tint(.black.opacity(0.30)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(
+                            SeaTheme.specularBorder(contrast: displayPreferences.contrast, reduceTransparency: displayPreferences.reduceTransparency, topOpacity: 0.14, bottomOpacity: 0.04),
+                            lineWidth: displayPreferences.contrast == .increased ? 1 : 0.75
+                        )
+                }
+                .padding(6)
             }
         }
         .navigationSplitViewColumnWidth(min: 220, ideal: 220, max: 280)
@@ -78,31 +99,32 @@ struct SidebarView: View {
     @ViewBuilder
     private func navigationItem(for page: AppPage) -> some View {
         let isSelected = selectedPage == page
+        let isHovered = hoveredPage == page
         let item = Button {
             selectedPage = page
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: page.icon)
-                    .font(.system(size: 15))
+                    .font(.system(size: 15, weight: isSelected ? .medium : .regular))
                     .frame(width: 22, alignment: .center)
-                    // The brand gradient lives in the selected icon — the
+                    // The brand accent lives in the selected icon — the
                     // only color the row carries; the glass does the rest.
                     .foregroundStyle(
                         isSelected
-                            ? (seaAppearance ? AnyShapeStyle(SeaTheme.text) : AnyShapeStyle(TonoBrand.routeGradient))
-                            : AnyShapeStyle(.primary)
+                            ? (seaAppearance ? AnyShapeStyle(seaAccent) : AnyShapeStyle(TonoBrand.routeGradient))
+                            : (seaAppearance ? AnyShapeStyle(isHovered ? SeaTheme.text : SeaTheme.muted) : AnyShapeStyle(.primary))
                     )
                 Text(seaAppearance && page == .proxies ? LocalizedStringKey("Servers")
                     : (seaAppearance && page == .dashboard ? LocalizedStringKey("sea.nav.home") : page.displayName))
-                    .font(.system(size: 13, weight: seaAppearance ? .medium : (isSelected ? .semibold : .regular)))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(seaAppearance ? (isSelected ? SeaTheme.text : SeaTheme.text.opacity(isHovered ? 0.94 : 0.84)) : .primary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
             .symbolRenderingMode(.monochrome)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
-            .frame(height: seaAppearance ? 32 : 38)
+            .frame(height: seaAppearance ? 34 : 38)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .background {
                 // Liquid glass selection: a lifted glass capsule, not a
@@ -112,23 +134,35 @@ struct SidebarView: View {
                     // (matched geometry); crossing groups it fades instead of
                     // stretching through the spacer.
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.white.opacity(seaAppearance ? 0.10 : (colorScheme == .dark ? 0.13 : 0.78)))
+                        .fill(
+                            seaAppearance
+                                ? (displayPreferences.reduceTransparency ? Color(hex: "2B2834") : .white.opacity(0.11))
+                                : .white.opacity(colorScheme == .dark ? 0.13 : 0.78)
+                        )
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .strokeBorder(
-                                    .white.opacity(seaAppearance ? 0 : (colorScheme == .dark ? 0.22 : 0.9)),
-                                    lineWidth: 0.5
+                                    seaAppearance
+                                        ? SeaTheme.specularBorder(contrast: displayPreferences.contrast, reduceTransparency: displayPreferences.reduceTransparency, topOpacity: 0.18, bottomOpacity: 0.05)
+                                        : AnyShapeStyle(Color.white.opacity(colorScheme == .dark ? 0.22 : 0.9)),
+                                    lineWidth: displayPreferences.contrast == .increased ? 1 : 0.65
                                 )
                         }
-                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.10), radius: 8, y: 3)
+                        .shadow(color: displayPreferences.reduceTransparency ? .clear : .black.opacity(colorScheme == .dark ? 0.24 : 0.10), radius: 8, y: 3)
                         .matchedGeometryEffect(id: indicatorID(for: page), in: navNS)
-                } else if hoveredPage == page {
+                } else if isHovered {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.white.opacity(colorScheme == .dark ? 0.07 : 0.5))
+                        .fill(.white.opacity(displayPreferences.reduceTransparency ? 0.09 : (colorScheme == .dark ? 0.065 : 0.5)))
+                        .overlay {
+                            if displayPreferences.contrast == .increased {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(.white.opacity(0.35), lineWidth: 0.75)
+                            }
+                        }
                 }
             }
             .overlay(alignment: .leading) {
-                if isSelected && !seaAppearance {
+                if isSelected {
                     Capsule()
                         .fill(
                             LinearGradient(
@@ -137,14 +171,14 @@ struct SidebarView: View {
                                 endPoint: .bottom
                             )
                         )
-                        .frame(width: 3)
+                        .frame(width: seaAppearance ? 2.5 : 3)
                         .padding(.vertical, 8)
                         .padding(.leading, 4)
                         .matchedGeometryEffect(id: indicatorID(for: page) + ".line", in: navNS)
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SidebarRowButtonStyle(reduceMotion: reduceMotion))
         .onHover { hovering in
             hoveredPage = hovering ? page : (hoveredPage == page ? nil : hoveredPage)
         }
@@ -167,6 +201,16 @@ struct SidebarView: View {
     private func commandShortcut(for page: AppPage) -> KeyEquivalent? {
         guard let index = mainPages.firstIndex(of: page), index < 9 else { return nil }
         return KeyEquivalent(Character(String(index + 1)))
+    }
+}
+
+private struct SidebarRowButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
+            .animation(TonoMotion.press(reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 

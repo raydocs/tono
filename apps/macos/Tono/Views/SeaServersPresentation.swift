@@ -52,7 +52,11 @@ struct SeaSignalBars: View {
         HStack(alignment: .bottom, spacing: 2) {
             if lit == 0 {
                 // Not measured yet: one hollow ring, so "untested" never reads as "weak".
-                Circle().strokeBorder(SeaTheme.text.opacity(0.3), lineWidth: 1)
+                Circle()
+                    .strokeBorder(
+                        didFail ? SeaTheme.danger.opacity(0.82) : SeaTheme.text.opacity(0.32),
+                        lineWidth: didFail ? 1.25 : 1
+                    )
                     .frame(width: 7, height: 7)
             } else {
                 ForEach(0..<3, id: \.self) { index in
@@ -78,7 +82,7 @@ extension ProxiesView {
     var seaHeaderRow: some View {
         HStack(alignment: .center, spacing: 12) {
             Text("Servers")
-                .font(.system(size: 28, weight: .regular)).tracking(-0.5)
+                .font(.system(size: 28, weight: .medium)).tracking(-0.5)
                 .foregroundStyle(SeaTheme.text).accessibilityAddTraits(.isHeader)
                 .lineLimit(1)
             Spacer(minLength: 12)
@@ -88,16 +92,19 @@ extension ProxiesView {
                 }
             }
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isSearchFocused ? SeaTheme.attention : SeaTheme.muted)
+                    .accessibilityHidden(true)
                 TextField("Search servers", text: $searchText)
                     .textFieldStyle(.plain).focused($isSearchFocused)
                 if !searchText.isEmpty {
-                    Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).accessibilityLabel("Clear search")
+                    SeaSearchClearButton(reduceMotion: reduceMotion) { searchText = "" }
+                        .accessibilityLabel("Clear search")
                 }
             }
-            .modifier(SeaFieldSurface(focused: isSearchFocused))
-            .frame(width: 280)
+            .modifier(SeaFieldSurface(focused: isSearchFocused, minHeight: 40))
+            .frame(width: 260)
             if appState.isConnected {
                 // Measures the selected exit only, never a list-wide sweep.
                 Button { testCurrentExit() } label: {
@@ -164,10 +171,10 @@ extension ProxiesView {
     private func seaServerGroup(_ title: String, nodes: [ProxyNode]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: "\(title) · \(nodes.count)")
-                .font(.system(size: 13)).monospacedDigit()
+                .font(.system(size: 12, weight: .semibold)).tracking(0.3).monospacedDigit()
                 .foregroundStyle(SeaTheme.tertiary).accessibilityAddTraits(.isHeader)
-                .padding(.bottom, 4)
-            LazyVStack(spacing: 0) {
+                .padding(.bottom, 6)
+            LazyVStack(spacing: 2) {
                 ForEach(nodes) { seaServerRow($0) }
             }
         }
@@ -184,12 +191,9 @@ extension ProxiesView {
         return HStack(spacing: 6) {
             if let owner = accountSession.user?.id, owner == ManagedExitCatalogOwnership.currentAccount {
                 let favorite = seaFavoriteNames.contains(ProxyNode.catalogBaseName(for: node.name))
-                Button { appState.toggleRouteFavorite(node.name, owner: owner) } label: {
-                    Image(systemName: favorite ? "star.fill" : "star")
-                        .foregroundStyle(favorite ? SeaTheme.warm : SeaTheme.subtle)
-                        .frame(width: 32, height: 44).contentShape(Rectangle())
+                SeaFavoriteButton(favorite: favorite, reduceMotion: reduceMotion) {
+                    appState.toggleRouteFavorite(node.name, owner: owner)
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel(favorite ? "Remove favorite" : "Favorite")
                 .accessibilityIdentifier("routeFavorite-\(ProxyNode.catalogBaseName(for: node.name))")
             }
@@ -201,11 +205,20 @@ extension ProxiesView {
                 HStack(spacing: 10) {
                     NodeRouteMark(size: 30, city: nodeCityParts(node.displayName).city,
                                   gradient: SeaTheme.primaryGradient, warmTile: true)
-                    Text(nodeRouteTitle(node)).font(.system(size: 15))
+                    Text(nodeRouteTitle(node))
+                        .font(.system(size: 15, weight: selected || switching ? .medium : .regular))
                         .foregroundStyle(SeaTheme.text).lineLimit(1)
+                    if selected && !switching {
+                        SeaTag(title: "ACTIVE", kind: .good)
+                    }
                     Spacer(minLength: 8)
                     if switching {
-                        ProgressView().controlSize(.small)
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text("Switching server…")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(SeaTheme.cool)
+                        }
                     } else {
                         SeaSignalBars(latency: latency, didFail: didFail)
                         Group {
@@ -219,29 +232,32 @@ extension ProxiesView {
                             }
                         }
                         .font(.system(size: 13)).monospacedDigit()
-                        .foregroundStyle(latency > 0 && !didFail ? SeaTheme.muted : SeaTheme.tertiary)
+                        .foregroundStyle(didFail ? SeaTheme.danger : (latency > 0 ? SeaTheme.muted : SeaTheme.tertiary))
                         .animation(TonoMotion.numeric(reduceMotion: reduceMotion), value: latency)
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(disabled)
+            .buttonStyle(SeaServerRowButtonStyle(reduceMotion: reduceMotion)).disabled(disabled)
             .accessibilityLabel(localNodeAccessibilitySummary(node: node, isActive: selected,
                 isSwitching: switching, latency: latency, didFail: didFail))
         }
         .padding(.leading, 4).padding(.trailing, 14)
-        .modifier(SeaWarmRowSurface(selected: selected, reduceMotion: reduceMotion))
+        .modifier(SeaWarmRowSurface(selected: selected, switching: switching, reduceMotion: reduceMotion))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+            Rectangle().fill(.white.opacity(0.06)).frame(height: 0.75)
+                .padding(.leading, 44).padding(.trailing, 14)
         }
         .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: selected)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: switching)
     }
 
     /// One tertiary line with a text Refresh; refresh and policy failures keep
     /// their own rows so the reason stays readable.
     var seaCatalogFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 0.75).padding(.bottom, 4)
             HStack(spacing: 10) {
                 Group {
                     if accountSession.catalogFailureMessage != nil {
@@ -254,7 +270,7 @@ extension ProxiesView {
                 .font(.system(size: 12)).monospacedDigit().lineLimit(1)
                 if let catalogFeedback {
                     Text(verbatim: catalogFeedback)
-                        .font(.system(size: 12))
+                        .font(.system(size: 12)).monospacedDigit()
                         .foregroundStyle(catalogRefreshSucceeded ? SeaTheme.good : SeaTheme.attention)
                         .lineLimit(1)
                         .transition(.opacity)
@@ -275,24 +291,102 @@ extension ProxiesView {
     }
 }
 
+private struct SeaSearchClearButton: View {
+    let reduceMotion: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(hovered ? SeaTheme.text : SeaTheme.muted)
+                .frame(width: 22, height: 22)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
+    }
+}
+
+private struct SeaFavoriteButton: View {
+    let favorite: Bool
+    let reduceMotion: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: favorite ? "star.fill" : "star")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(favorite ? SeaTheme.warm : (hovered ? SeaTheme.text : SeaTheme.subtle))
+                .scaleEffect(!reduceMotion && hovered ? 1.08 : 1)
+                .frame(width: 32, height: 44)
+                .background(.white.opacity(hovered ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
+    }
+}
+
+private struct SeaServerRowButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.992 : 1)
+            .animation(TonoMotion.press(reduceMotion: reduceMotion), value: configuration.isPressed)
+    }
+}
 
 /// Hover and selection on a sea list row: a warm wash with a sunrise edge on
 /// the selected row, matching the Windows rows.
 struct SeaWarmRowSurface: ViewModifier {
     let selected: Bool
+    var switching: Bool = false
     let reduceMotion: Bool
+    @SeaDisplayPreferences private var display
     @State private var hovered = false
 
     static func washOpacity(selected: Bool, hovered: Bool) -> Double {
         selected ? 0.09 : (hovered ? 0.06 : 0)
     }
 
+    private var backgroundStyle: AnyShapeStyle {
+        if display.reduceTransparency {
+            if switching { return AnyShapeStyle(Color(hex: "202331")) }
+            if selected { return AnyShapeStyle(Color(hex: "29211D")) }
+            if hovered { return AnyShapeStyle(Color(hex: "211E25")) }
+            return AnyShapeStyle(Color.clear)
+        }
+        if switching {
+            return AnyShapeStyle(SeaTheme.cool.opacity(0.08))
+        }
+        return AnyShapeStyle(Color(hex: "FFD6A0").opacity(Self.washOpacity(selected: selected, hovered: hovered)))
+    }
+
     func body(content: Content) -> some View {
         content
-            .background(Color(hex: "FFD6A0").opacity(Self.washOpacity(selected: selected, hovered: hovered)),
-                        in: RoundedRectangle(cornerRadius: 10))
+            .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                if switching || selected || (display.contrast == .increased && hovered) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(
+                            switching
+                                ? SeaTheme.cool.opacity(display.contrast == .increased ? 0.55 : 0.24)
+                                : Color(hex: "FFD6A0").opacity(display.contrast == .increased ? 0.55 : 0.16),
+                            lineWidth: display.contrast == .increased ? 1 : 0.65
+                        )
+                }
+            }
             .overlay(alignment: .leading) {
-                if selected {
+                if switching {
+                    RoundedRectangle(cornerRadius: 1).fill(SeaTheme.cool)
+                        .frame(width: 2).padding(.vertical, 8)
+                } else if selected {
                     RoundedRectangle(cornerRadius: 1).fill(Color(hex: "FFB877"))
                         .frame(width: 2).padding(.vertical, 8)
                 }
