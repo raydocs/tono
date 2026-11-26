@@ -375,7 +375,13 @@ nonisolated enum KillSwitchService {
                 details: ["attempt": "1"]
             )
             armIPC.retryPause()
-            return try attempt()
+            do {
+                return try attempt()
+            } catch HelperIPCError.connectFailed {
+                // Attempt 1 already delivered the arm before its reply was lost;
+                // a refused retry cannot downgrade the outcome to "never reached".
+                throw HelperIPCError.emptyResponse
+            }
         }
     }
 

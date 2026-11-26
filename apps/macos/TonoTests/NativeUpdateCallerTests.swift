@@ -487,5 +487,29 @@ final class NativeUpdateCallerTests: XCTestCase {
             LoginView.unavailableStatus(updatePending: false),
             String(localized: "Secure sign-in service is unavailable")
         )
+        XCTAssertTrue(
+            LoginView.shouldLoadAuthMethods(
+                state: .signedOut,
+                authMethods: nil,
+                user: nil,
+                updatePending: false
+            )
+        )
+        XCTAssertFalse(
+            LoginView.shouldLoadAuthMethods(
+                state: .error("pending update"),
+                authMethods: nil,
+                user: nil,
+                updatePending: false
+            )
+        )
+        XCTAssertFalse(
+            LoginView.shouldLoadAuthMethods(
+                state: .signedOut,
+                authMethods: nil,
+                user: nil,
+                updatePending: true
+            )
+        )
     }
 }

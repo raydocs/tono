@@ -608,7 +608,13 @@ struct LoginView: View {
             }
         }
         .task {
-            if session.authMethods == nil && session.user == nil {
+            let updatePending = RuntimeCleanup.nativeUpdatePending || appState.nativeUpdatePending
+            if Self.shouldLoadAuthMethods(
+                state: session.state,
+                authMethods: session.authMethods,
+                user: session.user,
+                updatePending: updatePending
+            ) {
                 await session.loadAuthMethods()
             }
         }
@@ -623,6 +629,15 @@ struct LoginView: View {
             resendTimer?.cancel()
             sentHoldTask?.cancel()
         }
+    }
+
+    nonisolated static func shouldLoadAuthMethods(
+        state: AccountSession.State,
+        authMethods: TonoAuthMethodsResponse?,
+        user: TonoUser?,
+        updatePending: Bool
+    ) -> Bool {
+        state == .signedOut && authMethods == nil && user == nil && !updatePending
     }
 
     nonisolated static func unavailableStatus(updatePending: Bool) -> String {

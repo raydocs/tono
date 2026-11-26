@@ -59,7 +59,9 @@ extension AccountSession {
         }.value
         // The release retired any sign-in-methods read still in flight, and
         // the sign-in screen loads them only when it first appears.
-        if user == nil, authMethods == nil { await loadAuthMethods() }
+        if user == nil, authMethods == nil, !RuntimeCleanup.nativeUpdatePending {
+            await loadAuthMethods()
+        }
     }
 
     func finishInterruptedAccountWorkAfterProtectionRelease() {

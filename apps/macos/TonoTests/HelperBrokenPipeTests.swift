@@ -46,6 +46,7 @@ final class HelperBrokenPipeTests: XCTestCase {
             DispatchQueue.global().async {
                 var request = [UInt8](repeating: 0, count: 1024)
                 _ = Darwin.read(peer, &request, request.count)
+                _ = shutdown(peer, SHUT_WR)
                 close(peer)
             }
         }) { error in

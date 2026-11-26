@@ -297,7 +297,7 @@ nonisolated enum NativeUpdateDownload {
         }
     }
 
-    struct Failure: LocalizedError, CustomNSError, Sendable {
+    nonisolated struct Failure: LocalizedError, CustomNSError, Sendable {
         static let errorDomain = "Tono.NativeUpdate"
         let message: String
         var errorCode: Int { 1 }
