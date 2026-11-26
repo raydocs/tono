@@ -355,6 +355,31 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertNil(AppDelegate.resolve(attached: nil, current: nil, nsAppDelegate: wrapper))
     }
 
+    func testNativeUpdateTerminationFenceIsIndependentOfStalePendingHint() {
+        let previousPending = RuntimeCleanup.nativeUpdatePending
+        let previousRequested = AppDelegate.nativeUpdateTerminationRequested
+        defer {
+            RuntimeCleanup.nativeUpdatePending = previousPending
+            AppDelegate.nativeUpdateTerminationRequested = previousRequested
+        }
+        // A stale launch-time pending hint must never short-circuit ordinary
+        // Quit cleanup, which still needs to query the helper and clear stale gates.
+        RuntimeCleanup.nativeUpdatePending = true
+        AppDelegate.nativeUpdateTerminationRequested = false
+        XCTAssertFalse(AppDelegate.shouldSkipNetworkTerminationCleanup(
+            runtimeStopped: false,
+            nativeUpdateTerminationRequested: AppDelegate.nativeUpdateTerminationRequested
+        ))
+        // Once AppUpdater latches handoff termination after consumption,
+        // fallback NSApp.terminate(nil) skips ordinary PF teardown even when
+        // runtimeStopped was never set via an AppDelegate instance.
+        AppDelegate.nativeUpdateTerminationRequested = true
+        XCTAssertTrue(AppDelegate.shouldSkipNetworkTerminationCleanup(
+            runtimeStopped: false,
+            nativeUpdateTerminationRequested: AppDelegate.nativeUpdateTerminationRequested
+        ))
+    }
+
     func testPendingUpdateHintLeadsWithRestoreInternetWhenRetryIsUnavailableAndUserConnectSurfacesError() {
         let freshConsumed = status(.installationAuthorized, execution: "consumed") // updated at 100, expires at 200
         let restoreFirst = RuntimeCleanup.pendingUpdateRecoveryMessage(for: freshConsumed, now: 150)

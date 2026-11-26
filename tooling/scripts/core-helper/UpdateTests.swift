@@ -213,6 +213,47 @@ func runUpdateSelfTests() -> Bool {
         try check(UpdateExecutor.aiHoldOwed(stateFileExists: { false }, pfActive: { false }, disposition: { throw Unreadable() }),
                   "Unreadable AI disposition must conservatively owe an AI hold")
 
+        try check(
+            (try? KillSwitchManager.effectiveStatusConservative(query: { _ in throw Unreadable() })) == nil,
+            "A failed PF query must remain unreadable for update cleanup"
+        )
+        let activePF = try KillSwitchManager.effectiveStatusConservative { arguments in
+            switch arguments {
+            case ["-s", "info"]: return "Status: Enabled\n"
+            case ["-sr"]: return "anchor \"tono.killswitch\"\n"
+            case ["-sA"]: return "com.apple\ntono.killswitch\n"
+            default: return "block drop out quick all\n"
+            }
+        }
+        try check(activePF, "A readable active PF anchor must be detected")
+        let flushedExternalPF = try KillSwitchManager.effectiveStatusConservative { arguments in
+            switch arguments {
+            case ["-s", "info"]: return "Status: Enabled\n"
+            case ["-sr"]: return "anchor \"tono.killswitch\"\n"
+            case ["-sA"]: return "com.apple\n"
+            default: throw HelperFailure.system("pfctl: Anchor does not exist.")
+            }
+        }
+        try check(!flushedExternalPF, "External PF with absent Tono child anchor must read inactive")
+        let racedAbsentAnchor = try KillSwitchManager.effectiveStatusConservative { arguments in
+            switch arguments {
+            case ["-s", "info"]: return "Status: Enabled\n"
+            case ["-sr"]: return "anchor \"tono.killswitch\"\n"
+            case ["-sA"]: return "tono.killswitch\n"
+            default: throw HelperFailure.system("pfctl: Anchor does not exist.")
+            }
+        }
+        try check(!racedAbsentAnchor, "An anchor-does-not-exist child query must read inactive")
+        let unreadableChildAnchor = try? KillSwitchManager.effectiveStatusConservative { arguments in
+            switch arguments {
+            case ["-s", "info"]: return "Status: Enabled\n"
+            case ["-sr"]: return "anchor \"tono.killswitch\"\n"
+            case ["-sA"]: return "tono.killswitch\n"
+            default: throw HelperFailure.system("pfctl: /dev/pf: Permission denied")
+            }
+        }
+        try check(unreadableChildAnchor == nil, "A real child-anchor pfctl error must stay unreadable")
+
         var events = [String]()
         UpdateExecutor.releaseAfterFailure(
             strictIntentActive: { false },

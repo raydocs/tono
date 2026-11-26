@@ -551,7 +551,10 @@ nonisolated enum HelperProtocolVersion {
     ///   a manually installed signed Tono.app whose sealed releaseSequence is
     ///   at least the attempt's target sequence while root helper/core binaries
     ///   still match the expected hashes.
-    static let current = "4.52.76"
+    /// - 4.52.76 → 4.52.77: failed-update AI-hold accounting treats a non-zero
+    ///   PF status query as unreadable instead of inactive, preserving the hold
+    ///   when PF remains active but cannot be queried.
+    static let current = "4.52.77"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
