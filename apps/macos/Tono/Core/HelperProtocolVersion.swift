@@ -542,7 +542,12 @@ nonisolated enum HelperProtocolVersion {
     ///   non-DNS TCP ports in `sessionDirectEndpoints` and signed all-non-DNS-TCP
     ///   IPv4 grants in `sessionDirectTCPAddresses`, while rejecting protected
     ///   destinations in helper validation.
-    static let current = "4.52.74"
+    /// - 4.52.73 → 4.52.74: update executor ends a hung initiating App after
+    ///   the 30 s wait and logs executor failures.
+    /// - 4.52.74 → 4.52.75: update executor failure release installs the
+    ///   secondary AI hold only when owed (decision 125), never on an
+    ///   Unprotected or explicitly restored Mac.
+    static let current = "4.52.75"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

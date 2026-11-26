@@ -201,7 +201,7 @@ enum InterfaceLanguagePreference {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-c", script, "--", pid, path]
         try? process.run()
-        if let delegate = NSApp.delegate as? AppDelegate {
+        if let delegate = AppDelegate.resolve() {
             delegate.terminateForRelaunch()
         } else {
             NSApp.terminate(nil)

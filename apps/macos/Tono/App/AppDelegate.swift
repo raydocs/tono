@@ -5,9 +5,22 @@ import Darwin
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Live instance created by SwiftUI's `@NSApplicationDelegateAdaptor`.
+    /// `NSApp.delegate` is SwiftUI's private wrapper, so `NSApp.delegate as? AppDelegate`
+    /// evaluates to `nil` at runtime.
+    static weak var current: AppDelegate?
+
     /// Reference to app state for cleanup on termination
     var appState: AppState?
     var accountSession: AccountSession?
+
+    static func resolve(
+        attached: AppDelegate? = nil,
+        current: AppDelegate? = AppDelegate.current,
+        nsAppDelegate: NSApplicationDelegate? = NSApp?.delegate
+    ) -> AppDelegate? {
+        attached ?? current ?? (nsAppDelegate as? AppDelegate)
+    }
     private var runtimeStopped = false
     private var ordinaryQuit = true
     private var signalTerminationStarted = false
@@ -32,6 +45,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.current = self
         // Socket-specific suppression also protects IPC before/without AppKit startup.
         signal(SIGPIPE, SIG_IGN)
 

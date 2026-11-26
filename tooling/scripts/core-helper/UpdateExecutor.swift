@@ -243,15 +243,9 @@ enum UpdateExecutor {
             // Keep all evidence; do not turn an exception into "not installed".
             // A failed rollback used to leave the helper stopped and PF up
             // with no recovery short of another boot (BRICK-M8). Release the
-            // network first. Do not claim the rollback succeeded.
-            KillSwitchManager.releaseInstalledBlock()
-            if let dns = try? ProtectedDNSManager() {
-                try? dns.restore(deferringLossNotice: true)
-            }
-            // Crash/hang release applies the secondary AI layer after PF is
-            // gone; update failure must too, or the next helper launch skips
-            // it once the intent file is deleted (M4-UPDATE-SELECTIVE-OMISSION).
-            SelectiveFailOpenInstaller.applyBestEffort()
+            // network first, applying the secondary AI hold only when owed
+            // (decision 125). Do not claim the rollback succeeded.
+            releaseAfterFailure()
             // Before the replacing write no binary mutation occurred. Mark
             // this consumed attempt blocked and make diagnostics available.
             if let storage = try? UpdateStorage() {
@@ -266,6 +260,65 @@ enum UpdateExecutor {
             }
             // Interrupted replacement/rollback retries recovery, not install.
             return false
+        }
+    }
+
+    /// Decision 125: a failed native update keeps the secondary AI hold only
+    /// when one is owed (broad protection was armed, PF is active or unreadable,
+    /// or an earlier automatic release left `retain-ai` / unreadable state).
+    /// A user who was Unprotected or chose Restore internet gets no new hold.
+    static func aiHoldOwed(
+        stateFileExists: () -> Bool = KillSwitchManager.stateFileExists,
+        pfActive: () throws -> Bool = KillSwitchManager.effectiveStatus,
+        disposition: () throws -> Bool? = { try KillSwitchManager.selectiveRecoveryDisposition() }
+    ) -> Bool {
+        if stateFileExists() { return true }
+        do {
+            if try pfActive() { return true }
+        } catch {
+            return true
+        }
+        do {
+            return try disposition() == true
+        } catch {
+            return true
+        }
+    }
+
+    /// Releases general PF and restores protected DNS after an update failure.
+    /// Applies the secondary AI hold only when one is owed (decision 125); when
+    /// nothing is owed, releases any stray PF/DNS without writing `retain-ai`
+    /// and without installing or removing `/etc/resolver` or blackhole routes.
+    static func releaseAfterFailure(
+        strictIntentActive: () -> Bool = { KillSwitchManager.strictIntentActive },
+        holdOwed: () -> Bool = { aiHoldOwed() },
+        releaseWithAIHold: () -> Void = { KillSwitchManager.releaseInstalledBlock() },
+        releaseBroadOnly: () throws -> Void = { try KillSwitchManager.releasePersistedBlockUnlocked() },
+        restoreDNS: () -> Void = {
+            if let dns = try? ProtectedDNSManager() {
+                try? dns.restore(deferringLossNotice: true)
+            }
+        },
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+    ) {
+        guard !strictIntentActive() else { return }
+        if holdOwed() {
+            releaseWithAIHold()
+            restoreDNS()
+            // Crash/hang release applies the secondary AI layer after PF is
+            // gone; update failure must too, or the next helper launch skips
+            // it once the intent file is deleted (M4-UPDATE-SELECTIVE-OMISSION).
+            applySelectiveLayer()
+        } else {
+            do {
+                try releaseBroadOnly()
+            } catch {
+                let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                FileHandle.standardError.write(Data(
+                    "tono: update failure release could not clear PF: \(detail)\n".utf8
+                ))
+            }
+            restoreDNS()
         }
     }
 

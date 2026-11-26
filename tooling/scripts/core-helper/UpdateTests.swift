@@ -196,6 +196,59 @@ func runUpdateSelfTests() -> Bool {
                   "The executor signalled launchd")
     }
 
+    test("failed-update-installs-ai-hold-only-when-owed") { _ in
+        struct Unreadable: Error {}
+        try check(!UpdateExecutor.aiHoldOwed(stateFileExists: { false }, pfActive: { false }, disposition: { nil }),
+                  "An unprotected Mac must not owe an AI hold")
+        try check(!UpdateExecutor.aiHoldOwed(stateFileExists: { false }, pfActive: { false }, disposition: { false }),
+                  "An explicitly restored Mac must not owe an AI hold")
+        try check(UpdateExecutor.aiHoldOwed(stateFileExists: { true }, pfActive: { false }, disposition: { nil }),
+                  "Armed killswitch state must owe an AI hold")
+        try check(UpdateExecutor.aiHoldOwed(stateFileExists: { false }, pfActive: { true }, disposition: { nil }),
+                  "Active PF must owe an AI hold")
+        try check(UpdateExecutor.aiHoldOwed(stateFileExists: { false }, pfActive: { throw Unreadable() }, disposition: { nil }),
+                  "Unreadable PF must conservatively owe an AI hold")
+        try check(UpdateExecutor.aiHoldOwed(stateFileExists: { false }, pfActive: { false }, disposition: { true }),
+                  "Prior retained AI disposition must remain owed")
+        try check(UpdateExecutor.aiHoldOwed(stateFileExists: { false }, pfActive: { false }, disposition: { throw Unreadable() }),
+                  "Unreadable AI disposition must conservatively owe an AI hold")
+
+        var events = [String]()
+        UpdateExecutor.releaseAfterFailure(
+            strictIntentActive: { false },
+            holdOwed: { false },
+            releaseWithAIHold: { events.append("with-ai") },
+            releaseBroadOnly: { events.append("broad") },
+            restoreDNS: { events.append("dns") },
+            applySelectiveLayer: { events.append("selective") }
+        )
+        try check(events == ["broad", "dns"],
+                  "Unprotected update failure must not install the selective AI layer")
+
+        events = []
+        UpdateExecutor.releaseAfterFailure(
+            strictIntentActive: { false },
+            holdOwed: { true },
+            releaseWithAIHold: { events.append("with-ai") },
+            releaseBroadOnly: { events.append("broad") },
+            restoreDNS: { events.append("dns") },
+            applySelectiveLayer: { events.append("selective") }
+        )
+        try check(events == ["with-ai", "dns", "selective"],
+                  "Protected update failure must keep the selective AI layer")
+
+        events = []
+        UpdateExecutor.releaseAfterFailure(
+            strictIntentActive: { true },
+            holdOwed: { true },
+            releaseWithAIHold: { events.append("with-ai") },
+            releaseBroadOnly: { events.append("broad") },
+            restoreDNS: { events.append("dns") },
+            applySelectiveLayer: { events.append("selective") }
+        )
+        try check(events.isEmpty, "Strict mode must not be released by update failure")
+    }
+
     test("successor-incarnation-components-and-recovery-binding") { directory in
         let store = try UpdateStorage(root: directory)
         var recovery: UpdateContractV1.Protection = .protectedOffline
