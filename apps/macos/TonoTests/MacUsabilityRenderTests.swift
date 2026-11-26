@@ -627,8 +627,9 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isDisconnecting = true
         app.isProtectionBlocked = true
         let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        // Use the same bounded raster-edge contract as the other native sea surfaces.
         try await capture("dashboard-sea-disconnecting-restore-minimum", width: 660, height: 540,
-                          annotate: false, darkAppearance: true,
+                          annotate: false, darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
                           nativeLabels: ["Disconnecting…", "Restore normal internet"]) {
             ZStack { MeshGradientBackground(); DashboardView() }
                 .modifier(SeaPageAppearance()).environment(app).environment(account)
