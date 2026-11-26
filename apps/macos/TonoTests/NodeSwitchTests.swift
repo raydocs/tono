@@ -92,4 +92,108 @@ final class NodeSwitchTests: XCTestCase {
             rulePayload: nil
         )
     }
+
+    @MainActor
+    func testFailedSwitchRollsBackInPlaceWithoutDisconnecting() async throws {
+        let app = AppState()
+        let previous = Fixture.realityNode(name: "Tokyo-1", server: "203.0.113.10", port: 443)
+        let next = Fixture.realityNode(name: "Singapore-2", server: "198.51.100.20", port: 443)
+        app.importedExitNodes = [previous, next]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+
+        var armedEndpointSets: [[ConfigPipeline.DialEndpoint]] = []
+        var appliedOverlays: [String?] = []
+        var events: [String] = []
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { endpoints in
+                armedEndpointSets.append(endpoints)
+                events.append("arm:\(endpoints.map(\.host).joined(separator: ","))")
+            },
+            applyRuntimeConfig: { overlay in
+                appliedOverlays.append(overlay.selectedNodeName)
+                events.append("reload:\(overlay.selectedNodeName ?? "nil")")
+            },
+            waitForTunnel: {
+                events.append("waitForTunnel")
+                return true
+            },
+            verify: { selectedExit in
+                events.append("verify:\(selectedExit?.name ?? "home")")
+                if selectedExit?.name == next.name {
+                    return .failed(.coreExitUnreachable)
+                }
+                return .connected
+            },
+            closeConnections: { exitName in
+                events.append("close:\(exitName ?? "nil")")
+            },
+            rememberNode: { node, name in
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+                events.append("remember:\(name)")
+            },
+            refreshProxy: {
+                events.append("refresh")
+            }
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+
+        XCTAssertTrue(app.isConnected, "failed switch rollback should keep the active session connected")
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+        XCTAssertEqual(app.activeNode?.id, previous.id)
+        XCTAssertEqual(appliedOverlays, [next.name, previous.name])
+        XCTAssertEqual(armedEndpointSets.count, 2)
+        XCTAssertEqual(armedEndpointSets[0].map(\.host), ["203.0.113.10", "198.51.100.20"])
+        XCTAssertEqual(armedEndpointSets[1].map(\.host), ["203.0.113.10"])
+        XCTAssertTrue(events.contains("close:\(next.name)"))
+        XCTAssertNotNil(app.errorMessage)
+    }
+
+    @MainActor
+    func testSwitchWaitsForTunnelBeforeVerifyingAndAbortsToRollbackWhenMissing() async {
+        let app = AppState()
+        let previous = Fixture.realityNode(name: "Tokyo-1", server: "203.0.113.10", port: 443)
+        let next = Fixture.realityNode(name: "Singapore-2", server: "198.51.100.20", port: 443)
+        app.importedExitNodes = [previous, next]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+
+        var tunnelCalls = 0
+        var verifiedExits: [String?] = []
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in },
+            applyRuntimeConfig: { _ in },
+            waitForTunnel: {
+                tunnelCalls += 1
+                return tunnelCalls > 1
+            },
+            verify: { selectedExit in
+                verifiedExits.append(selectedExit?.name)
+                return .connected
+            },
+            closeConnections: { _ in },
+            rememberNode: { node, name in
+                app.selectedNodeId = node?.id ?? ConfigPipeline.homeNodeName
+                app.activeNode = node
+                app.proxyService.activeNodeName = name
+            },
+            refreshProxy: {}
+        )
+
+        app.selectNode(next.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+
+        XCTAssertEqual(tunnelCalls, 2)
+        XCTAssertEqual(verifiedExits, [previous.name])
+        XCTAssertTrue(app.isConnected)
+        XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
+    }
 }

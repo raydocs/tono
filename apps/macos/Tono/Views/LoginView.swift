@@ -524,9 +524,13 @@ struct LoginView: View {
                     if error == nil {
                         ProgressView("Loading secure sign-in options…")
                     } else {
-                        Label("Secure sign-in service is unavailable", systemImage: "network.slash")
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(.secondary)
+                        let updatePending = RuntimeCleanup.nativeUpdatePending || appState.nativeUpdatePending
+                        Label(
+                            Self.unavailableStatus(updatePending: updatePending),
+                            systemImage: updatePending ? "arrow.down.circle" : "network.slash"
+                        )
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
                     }
                     Button("Retry") { Task { await session.retryRestore() } }
                         .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
@@ -619,6 +623,13 @@ struct LoginView: View {
             resendTimer?.cancel()
             sentHoldTask?.cancel()
         }
+    }
+
+    nonisolated static func unavailableStatus(updatePending: Bool) -> String {
+        if updatePending {
+            return String(localized: "Update not completed")
+        }
+        return String(localized: "Secure sign-in service is unavailable")
     }
 
     @ViewBuilder

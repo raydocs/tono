@@ -466,4 +466,26 @@ final class NativeUpdateCallerTests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    func testNativeUpdateFailureConformsToLocalizedErrorAndLoginUnavailableCopy() {
+        let detail = "Update execution already ran, but the update is still marked pending."
+        let error: Error = NativeUpdateDownload.failure(detail)
+        let localized = error as? LocalizedError
+        XCTAssertEqual(localized?.errorDescription, detail)
+        let nsError = error as NSError
+        XCTAssertEqual(nsError.domain, "Tono.NativeUpdate")
+        XCTAssertEqual(nsError.code, 1)
+
+        let userFacingError: Error = NativeUpdateDownload.userFacing(detail, diagnostic: "raw-diagnostic")
+        XCTAssertEqual((userFacingError as? LocalizedError)?.errorDescription, detail)
+
+        XCTAssertEqual(
+            LoginView.unavailableStatus(updatePending: true),
+            String(localized: "Update not completed")
+        )
+        XCTAssertEqual(
+            LoginView.unavailableStatus(updatePending: false),
+            String(localized: "Secure sign-in service is unavailable")
+        )
+    }
 }

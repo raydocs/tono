@@ -8747,6 +8747,16 @@
         }
       }
     },
+    "Could not switch to %@; kept your connection on %@.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到 %1$@ 失败，已保持原有连接（%2$@）。"
+          }
+        }
+      }
+    },
     "Update not completed": {
       "localizations": {
         "zh-Hans": {

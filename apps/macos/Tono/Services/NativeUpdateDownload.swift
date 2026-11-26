@@ -297,8 +297,16 @@ nonisolated enum NativeUpdateDownload {
         }
     }
 
-    static func failure(_ message: String) -> NSError {
-        NSError(domain: "Tono.NativeUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    struct Failure: LocalizedError, CustomNSError, Sendable {
+        static let errorDomain = "Tono.NativeUpdate"
+        let message: String
+        var errorCode: Int { 1 }
+        var errorUserInfo: [String: Any] { [NSLocalizedDescriptionKey: message] }
+        var errorDescription: String? { message }
+    }
+
+    static func failure(_ message: String) -> Failure {
+        Failure(message: message)
     }
 
     /// The alert shows `sentence`, then, when `report` is given, the path
@@ -307,7 +315,7 @@ nonisolated enum NativeUpdateDownload {
     static func userFacing(
         _ sentence: String, diagnostic: String,
         report: (area: ConnectionFailureReport.Area, attempts: [ControlPlaneUnreachable.Attempt])? = nil
-    ) -> NSError {
+    ) -> Failure {
         updateLog.error("native update: \(diagnostic, privacy: .public)")
         guard let report else { return failure(sentence) }
         ConnectionFailureReport.shared.record(report.area, attempts: report.attempts)

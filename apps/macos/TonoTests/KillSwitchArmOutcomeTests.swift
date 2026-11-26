@@ -68,4 +68,44 @@ final class KillSwitchArmOutcomeTests: XCTestCase {
         XCTAssertEqual(preparations, [false], "the restriction prepares the helper, never with the administrator prompt")
         XCTAssertTrue(KillSwitchService.isArmed)
     }
+
+    func testArmRetriesOnceOnTransientEmptyResponseBeforeSucceeding() throws {
+        let savedIPC = KillSwitchService.armIPC
+        KillSwitchService.isArmed = false
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = false
+        }
+        var attempts = 0
+        var pauses = 0
+        KillSwitchService.armIPC.retryPause = { pauses += 1 }
+        KillSwitchService.armIPC.deliver = { _ in
+            attempts += 1
+            if attempts == 1 {
+                throw HelperIPCError.emptyResponse
+            }
+            return KillSwitchService.ArmReply(
+                armed: true,
+                wanted: true,
+                live: true,
+                healed: false,
+                directRejected: [],
+                directResolvedCount: 0,
+                localNetworkPolicy: "block",
+                localNetworkFault: nil
+            )
+        }
+
+        try KillSwitchService.arm(
+            apiHosts: [],
+            tunnelInterfaces: ["utun199"],
+            proxyEndpoints: [],
+            sessionDirectEndpoints: [],
+            helperPrepared: true,
+            reviewedBundleDirect: false
+        )
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(pauses, 1)
+        XCTAssertTrue(KillSwitchService.isArmed)
+    }
 }
