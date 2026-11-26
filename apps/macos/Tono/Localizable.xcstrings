@@ -201,7 +201,7 @@
     "Details": {
       "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "详情" } } }
     },
-    "": {"extractionState": "manual", "shouldTranslate": false},
+    "": {"shouldTranslate": false},
     "Account": {
       "localizations": {
         "zh-Hans": {
@@ -1670,8 +1670,8 @@
         }
       }
     },
-    "--": {"extractionState": "manual", "shouldTranslate": false},
-    "/s": {"extractionState": "manual", "shouldTranslate": false},
+    "--": {"shouldTranslate": false},
+    "/s": {"shouldTranslate": false},
     "5001": {
       "localizations": {
         "zh-Hans": {
@@ -7042,7 +7042,7 @@
         }
       }
     },
-    "Tono": {"extractionState": "manual", "shouldTranslate": false},
+    "Tono": {"shouldTranslate": false},
     "Tono Account": {
       "localizations": {
         "zh-Hans": {
@@ -7874,7 +7874,7 @@
         }
       }
     },
-    "ms": {"extractionState": "manual", "shouldTranslate": false},
+    "ms": {"shouldTranslate": false},
     "of %lld": {
       "localizations": {
         "zh-Hans": {
