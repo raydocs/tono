@@ -59,9 +59,36 @@ extension AccountSession {
         }.value
         // The release retired any sign-in-methods read still in flight, and
         // the sign-in screen loads them only when it first appears.
+        if user == nil, !RuntimeCleanup.nativeUpdatePending,
+           case let .error(message) = state,
+           NativeUpdateDownload.isPendingUpdateRecoveryMessage(message) {
+            state = .signedOut
+        }
         if user == nil, authMethods == nil, !RuntimeCleanup.nativeUpdatePending {
             await loadAuthMethods()
         }
+    }
+
+    /// Re-runs launch restoration once a retired native update clears the gate's
+    /// pending flag, moving synchronously into `.restoring` so SwiftUI never
+    /// flashes `"Secure sign-in service is unavailable"` over the old error.
+    @discardableResult
+    func recoverAfterNativeUpdateRetirement(
+        using restoreAction: (@MainActor () async -> Void)? = nil
+    ) -> Task<Void, Never>? {
+        guard !accountLifecycle.isBusy, case .error = state else { return nil }
+        entitlementDetail = nil
+        blockedWhileReady = false
+        hasStartedRestore = false
+        state = .restoring
+        if let restoreAction {
+            return Task {
+                await accountLifecycle.run {
+                    await restoreAction()
+                }
+            }
+        }
+        return Task { await restore() }
     }
 
     func finishInterruptedAccountWorkAfterProtectionRelease() {

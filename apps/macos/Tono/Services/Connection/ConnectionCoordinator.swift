@@ -59,6 +59,9 @@ final class ConnectionCoordinator {
     var configReloadRequestID = 0
 
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
+    var hasPendingDeferredConnect: Bool { deferredConnect != nil }
+    private(set) var preemptiveReleaseTask: Task<Void, Never>?
+    private var preemptiveReleaseID = 0
 
     /// The helper session that connect, reconnect and teardown tasks belong
     /// to. Each task captures the box current when it is created; a
@@ -72,6 +75,14 @@ final class ConnectionCoordinator {
     func retireCapturedRoutingMode() {
         capturedRoutingMode = nil
         AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession)
+    }
+
+    /// Retires the current helper session and replaces it with a fresh
+    /// non-user-initiated box so subsequent automatic connects cannot
+    /// re-admit an externally or preemptively released machine (R-F3).
+    func resetHelperSession() {
+        helperSession.retire()
+        helperSession = HelperSessionGeneration()
     }
 
     /// Retires every task of the current session for a preemptive Restore
@@ -92,15 +103,31 @@ final class ConnectionCoordinator {
         disconnectRequestID &+= 1
         disconnectQueueReleaseIntent = false
         explicitReleaseDominatesQuit = true
-        helperSession.retire()
-        helperSession = HelperSessionGeneration()
+        resetHelperSession()
     }
 
-    /// The user's own Connect: a session not yet admitted is replaced by one
-    /// that may admit a released machine. Automatic connects keep the box
-    /// they have, which cannot (R-F3).
+    /// Tracks an independent preemptive release without chaining its launch
+    /// behind queued `disconnectSequence` work, so `finishPendingDisconnect()`
+    /// and `connectAfterDisconnect()` await it while it is in flight.
+    @discardableResult
+    func trackPreemptiveRelease(
+        _ operation: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        preemptiveReleaseID &+= 1
+        let releaseID = preemptiveReleaseID
+        let task = Task { [weak self] in
+            await operation()
+            guard let self, self.preemptiveReleaseID == releaseID else { return }
+            self.preemptiveReleaseTask = nil
+        }
+        preemptiveReleaseTask = task
+        return task
+    }
+
+    /// The user's own Connect: retires any previous session box and replaces it
+    /// with a fresh user-initiated one that may admit a released machine.
+    /// Automatic connects keep the box they have, which cannot (R-F3).
     func beginUserConnect() {
-        guard helperSession.value == nil, !helperSession.userInitiated else { return }
         helperSession.retire()
         helperSession = HelperSessionGeneration(userInitiated: true)
     }
@@ -172,11 +199,16 @@ final class ConnectionCoordinator {
     /// explicit Restore finishes removing the narrow layer.
     func finishPendingDisconnect() async {
         var observedRequest: Int
+        var observedPreemptive: Int
         repeat {
             observedRequest = disconnectRequestID
+            observedPreemptive = preemptiveReleaseID
             let pending = disconnectSequence
+            let preemptive = preemptiveReleaseTask
             await pending?.value
+            await preemptive?.value
         } while observedRequest != disconnectRequestID
+            || observedPreemptive != preemptiveReleaseID
     }
 
     /// A Connect click during teardown is still a connection intent, not an
@@ -189,8 +221,10 @@ final class ConnectionCoordinator {
         let requestID = UUID()
         let generation = protectionOperationGeneration
         let pendingDisconnect = disconnectSequence
+        let pendingPreemptive = preemptiveReleaseTask
         let task = Task { [weak self] in
             await pendingDisconnect?.value
+            await pendingPreemptive?.value
             guard let self, !Task.isCancelled,
                   self.protectionOperationGeneration == generation,
                   self.deferredConnect?.id == requestID else { return }

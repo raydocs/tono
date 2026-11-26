@@ -309,6 +309,25 @@ nonisolated enum NativeUpdateDownload {
         Failure(message: message)
     }
 
+    /// Whether `message` came from `RuntimeCleanup.pendingUpdateRecoveryMessage`
+    /// or `Copy.pendingUnfinished`, so a gate that mounts after retirement
+    /// still recognizes and clears a stale pending-update error.
+    @MainActor
+    static func isPendingUpdateRecoveryMessage(_ message: String) -> Bool {
+        let nonRetriablePrefix = RuntimeCleanup.pendingUpdateRecoveryMessage(for: nil)
+        let retriableStatus = HelperManager.UpdateStatus(
+            pending: true,
+            receipt: nil,
+            execution: "staged",
+            disconnectVerified: nil,
+            diagnostic: nil
+        )
+        let retriablePrefix = RuntimeCleanup.pendingUpdateRecoveryMessage(for: retriableStatus)
+        return message.hasPrefix(nonRetriablePrefix)
+            || message.hasPrefix(retriablePrefix)
+            || message == Copy.pendingUnfinished
+    }
+
     /// The alert shows `sentence`, then, when `report` is given, the path
     /// list as labels and failure classes. `diagnostic` is the raw path list,
     /// for the log only.

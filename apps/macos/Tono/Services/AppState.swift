@@ -459,6 +459,18 @@ final class AppState {
     /// Tests replace privileged replacement after the real desired-policy preparation.
     @ObservationIgnored
     var optionalPolicyPreparedRuntimeMutation: ((ConfigPipeline.ManagedDirectRuntimePolicy?) async throws -> Void)?
+    /// Test seam for `applyOptionalDirectPolicyInBackground`'s `/core/sync` IPC
+    /// boundary. Production calls `PrivilegedRuntimeCoordinator.shared.syncCoreConfig`.
+    @ObservationIgnored
+    var optionalPolicySyncCoreConfig: ((_ configDirectory: String, _ configSHA256: String) async throws -> String)?
+    /// Test seam for `restoreInternetPreemptively()`. Production runs
+    /// `HelperManager.requestRelease` and `SystemProxy.clearTonoOwnedProxy`.
+    @ObservationIgnored
+    var preemptiveReleaseOperation: (@Sendable (
+        _ requestID: String,
+        _ expectedGeneration: UInt64?,
+        _ sessionPorts: Set<Int>
+    ) async -> (result: Result<HelperManager.ReleaseOutcome, Error>, tonoProxyRemains: Bool?))?
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
@@ -1159,6 +1171,7 @@ final class AppState {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
               !automaticResumeHeldAfterRestart,
               autoConnectRequested, initialDataLoaded, isTonoReady,
+              !connectionCoordinator.hasPendingDeferredConnect,
               accountConnectRefusal(managedCatalogDigest, managedCatalogRoutingToken) == nil,
               !catalogSelectionRequiresChoice, !isConnected, !isConnecting else { return }
         // connect() silently no-ops while a previous disconnect drains. The
@@ -1838,17 +1851,22 @@ final class AppState {
         return false
     }
 
+    @TaskLocal nonisolated private static var bypassDelayGateForDiagnosticAdvisory = false
+
     func advisoryControllerExitProbe(
         api: CoreControllerClient,
-        selectedExit: ProxyNode?
+        selectedExit: ProxyNode?,
+        ignoreDelayGate: Bool = false
     ) async -> ProbeCheck {
         guard selectedExit != nil else { return .ok }
+        let bypassDelayGate = ignoreDelayGate || Self.bypassDelayGateForDiagnosticAdvisory
         let health = await api.testProxyDelay(
             name: ConfigPipeline.exitGroupName,
             url: ProtectedProbeOrigin.google.url,
-            timeout: 5_000
+            timeout: 5_000,
+            ignoreDelayGate: bypassDelayGate
         )
-        if health.message == SingBoxDelayGate.deferredMessage {
+        if !bypassDelayGate, health.message == SingBoxDelayGate.deferredMessage {
             return .ok
         }
         if let delay = health.delay, delay > 0 {
@@ -1924,7 +1942,9 @@ final class AppState {
             let earlyAdvisoryTask: Task<ProbeCheck, Never>?
             if includeMixed, case .failed = tun, controller == nil,
                controllerTask == nil, let advisoryProbe {
-                earlyAdvisoryTask = advisoryProbe()
+                earlyAdvisoryTask = Self.$bypassDelayGateForDiagnosticAdvisory.withValue(true) {
+                    advisoryProbe()
+                }
             } else {
                 earlyAdvisoryTask = nil
             }
@@ -2090,6 +2110,10 @@ final class AppState {
         replacementStarted ? .teardown : .keepSession
     }
 
+    static func optionalPolicyReplacementStarted(afterSyncError error: Error) -> Bool {
+        syncReplyWasLost(error)
+    }
+
     /// Rebuild authorization from the accepted document before filling its current DNS pins.
     func prepareOptionalDirectPolicy(
         policy: TonoTrafficPolicy,
@@ -2201,12 +2225,30 @@ final class AppState {
                 directPolicy: resolved,
                 installed: loadedRuntimeConfigDigest
             )
+            guard generation == connectionCoordinator.protectionOperationGeneration,
+                  !Task.isCancelled else { return }
+            let runtimeConfigPath: String
+            do {
+                if let syncOverride = optionalPolicySyncCoreConfig {
+                    runtimeConfigPath = try await syncOverride(
+                        coreRuntime.configDirectory.path,
+                        digest
+                    )
+                } else {
+                    runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared
+                        .syncCoreConfig(
+                            configDirectory: coreRuntime.configDirectory.path,
+                            configSHA256: digest
+                        )
+                }
+            } catch {
+                if Self.optionalPolicyReplacementStarted(afterSyncError: error) {
+                    loadedRuntimeConfigDigest = nil
+                    replacementStarted = true
+                }
+                throw error
+            }
             replacementStarted = true
-            let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared
-                .syncCoreConfig(
-                    configDirectory: coreRuntime.configDirectory.path,
-                    configSHA256: digest
-                )
             try await api.reloadConfig(path: runtimeConfigPath)
             // Disconnect cancels this task and then waits for it before it
             // restores DNS and disarms PF, so anything past here is time a user
@@ -2224,6 +2266,7 @@ final class AppState {
             // /core/sync withheld the reviewed-bundle permit while the Core
             // restarted without its utun (#608). It returns only through an
             // arm with the flag once the new tunnel exists.
+            let checkedOwnedTunnel: Bool
             if transitionReviewedPermit
                 || Set(transitionEndpoints) != Set(resolved?.sessionEndpoints ?? [])
                 || Set(transitionTCPAddresses) != Set(resolved?.tcpDirectAddresses ?? []) {
@@ -2232,6 +2275,7 @@ final class AppState {
                         "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
                     )
                 }
+                checkedOwnedTunnel = true
                 try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
                     apiHosts: [],
                     tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
@@ -2244,7 +2288,27 @@ final class AppState {
                 )
                 guard generation == connectionCoordinator.protectionOperationGeneration,
                       !Task.isCancelled else { return }
+            } else {
+                checkedOwnedTunnel = false
             }
+            if !checkedOwnedTunnel {
+                guard await Self.waitForOwnedTunnelInterface() else {
+                    guard generation == connectionCoordinator.protectionOperationGeneration,
+                          !Task.isCancelled else { return }
+                    throw KillSwitchService.Error.commandFailed(
+                        "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
+                    )
+                }
+                guard generation == connectionCoordinator.protectionOperationGeneration,
+                      !Task.isCancelled else { return }
+            }
+            guard await testLocalProtectedDNS() else {
+                guard generation == connectionCoordinator.protectionOperationGeneration,
+                      !Task.isCancelled else { return }
+                throw CoreControllerError.protectionFailed("sing-box replacement failed TUN verification")
+            }
+            guard generation == connectionCoordinator.protectionOperationGeneration,
+                  !Task.isCancelled else { return }
             let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(timeoutSeconds: 8)
             guard generation == connectionCoordinator.protectionOperationGeneration else { return }
             if case .lost = tun {

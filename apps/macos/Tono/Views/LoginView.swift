@@ -3,10 +3,14 @@ import AuthenticationServices
 #endif
 import SwiftUI
 import AppKit
+import Foundation
 
 struct LoginView: View {
     /// The real idle button and deterministic localization evidence share one source key.
     static let sendCodeTitleKey = "Send a sign-in code"
+    /// Test seam replacing `AccountSession.restore()` during update-retirement
+    /// recovery so view tests never contact the privileged helper socket.
+    static var updateRetirementRestoreOverride: (@MainActor () async -> Void)?
     @Bindable var session: AccountSession
     @Environment(AppState.self) private var appState
     @SeaAppearancePreference private var seaAppearance
@@ -616,7 +620,25 @@ struct LoginView: View {
                 updatePending: updatePending
             ) {
                 await session.loadAuthMethods()
+            } else if Self.shouldRetryStalePendingUpdateOnAppear(
+                state: session.state,
+                user: session.user,
+                updatePending: updatePending
+            ) {
+                triggerUpdateRetiredRecovery()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .nativeUpdateRetired)) { notification in
+            guard notification.object == nil || (notification.object as? AppState) === appState else { return }
+            handleNativeUpdatePendingCleared(allowAnySignedOutError: true)
+        }
+        .onChange(of: appState.nativeUpdatePending) { wasPending, isPending in
+            guard wasPending && !isPending else { return }
+            handleNativeUpdatePendingCleared(allowAnySignedOutError: true)
+        }
+        .onChange(of: session.accountLifecycle.isCleaningUp) { _, isCleaningUp in
+            guard !isCleaningUp else { return }
+            handleNativeUpdatePendingCleared(allowAnySignedOutError: false)
         }
         .animation(
             reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85),
@@ -629,6 +651,58 @@ struct LoginView: View {
             resendTimer?.cancel()
             sentHoldTask?.cancel()
         }
+    }
+
+    private func handleNativeUpdatePendingCleared(allowAnySignedOutError: Bool) {
+        let updatePending = RuntimeCleanup.nativeUpdatePending || appState.nativeUpdatePending
+        let shouldRetry = allowAnySignedOutError
+            ? Self.shouldRetryRestoreAfterUpdateRetirement(
+                state: session.state,
+                authMethods: session.authMethods,
+                user: session.user,
+                updatePending: updatePending
+            )
+            : Self.shouldRetryStalePendingUpdateOnAppear(
+                state: session.state,
+                user: session.user,
+                updatePending: updatePending
+            )
+        if shouldRetry {
+            triggerUpdateRetiredRecovery()
+        } else if Self.shouldLoadAuthMethods(
+            state: session.state,
+            authMethods: session.authMethods,
+            user: session.user,
+            updatePending: updatePending
+        ) {
+            Task { await session.loadAuthMethods() }
+        }
+    }
+
+    private func triggerUpdateRetiredRecovery() {
+        session.recoverAfterNativeUpdateRetirement(
+            using: Self.updateRetirementRestoreOverride
+        )
+    }
+
+    static func shouldRetryRestoreAfterUpdateRetirement(
+        state: AccountSession.State,
+        authMethods: TonoAuthMethodsResponse?,
+        user: TonoUser?,
+        updatePending: Bool
+    ) -> Bool {
+        guard !updatePending, case let .error(message) = state else { return false }
+        if user == nil && authMethods == nil { return true }
+        return NativeUpdateDownload.isPendingUpdateRecoveryMessage(message)
+    }
+
+    static func shouldRetryStalePendingUpdateOnAppear(
+        state: AccountSession.State,
+        user: TonoUser?,
+        updatePending: Bool
+    ) -> Bool {
+        guard !updatePending, user == nil, case let .error(message) = state else { return false }
+        return NativeUpdateDownload.isPendingUpdateRecoveryMessage(message)
     }
 
     nonisolated static func shouldLoadAuthMethods(

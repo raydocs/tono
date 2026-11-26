@@ -368,7 +368,13 @@ nonisolated enum KillSwitchService {
                 "killswitch_arm_superseded_retry",
                 details: ["first_attempt": String(message.prefix(200))]
             )
-            return try attempt()
+            do {
+                return try attempt()
+            } catch HelperIPCError.connectFailed {
+                // Attempt 1 already saw a concurrent protection change win; a
+                // refused retry cannot downgrade the outcome to "never reached".
+                throw HelperIPCError.commandFailed(message, code: "KILLSWITCH_ARM_SUPERSEDED")
+            }
         } catch HelperIPCError.emptyResponse {
             LocalTrafficAudit.shared.recordEvent(
                 "killswitch_arm_empty_response_retry",

@@ -205,8 +205,13 @@ actor CoreControllerClient {
     }
 
     /// Test proxy delay. Like Verge: non-2xx → delay=0 (timeout), never throws for test failures.
-    func testProxyDelay(name: String, url: String = "http://www.gstatic.com/generate_204", timeout: Int = 5000) async -> APIDelayResponse {
-        if !SingBoxDelayGate.isProven {
+    func testProxyDelay(
+        name: String,
+        url: String = "http://www.gstatic.com/generate_204",
+        timeout: Int = 5000,
+        ignoreDelayGate: Bool = false
+    ) async -> APIDelayResponse {
+        if !ignoreDelayGate, !SingBoxDelayGate.isProven {
             return APIDelayResponse(delay: nil, message: SingBoxDelayGate.deferredMessage)
         }
         let encodedName = name.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? name

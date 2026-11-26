@@ -150,4 +150,44 @@ final class KillSwitchArmOutcomeTests: XCTestCase {
             "a connectFailed retry after emptyResponse must still keep fail-closed intent"
         )
     }
+
+    func testSupersededRetryConnectFailureKeepsFailClosedIntent() {
+        let savedIPC = KillSwitchService.armIPC
+        let savedHome = KillSwitchService.readAIHomeSession
+        KillSwitchService.isArmed = false
+        KillSwitchService.readAIHomeSession = { false }
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.readAIHomeSession = savedHome
+            KillSwitchService.isArmed = false
+        }
+        var attempts = 0
+        KillSwitchService.armIPC.status = { throw HelperIPCError.connectFailed }
+        KillSwitchService.armIPC.deliver = { _ in
+            attempts += 1
+            if attempts == 1 {
+                throw HelperIPCError.commandFailed(
+                    "Superseded by another protection change.",
+                    code: "KILLSWITCH_ARM_SUPERSEDED"
+                )
+            }
+            throw HelperIPCError.connectFailed
+        }
+
+        XCTAssertThrowsError(
+            try KillSwitchService.arm(
+                apiHosts: [],
+                tunnelInterfaces: ["utun199"],
+                proxyEndpoints: [],
+                sessionDirectEndpoints: [],
+                helperPrepared: true,
+                reviewedBundleDirect: false
+            )
+        )
+        XCTAssertEqual(attempts, 2)
+        XCTAssertTrue(
+            KillSwitchService.isArmed,
+            "a connectFailed retry after KILLSWITCH_ARM_SUPERSEDED must still keep fail-closed intent"
+        )
+    }
 }
