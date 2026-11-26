@@ -746,7 +746,8 @@ final class ProtectedConnectivityTests: XCTestCase {
             XCTAssertEqual(failure.code, .networkEnvironmentOffline)
         } else {
             XCTAssertEqual(failure.code, .coreExitUnreachable)
-            let hy2 = Fixture.hy2Node()
+            var hy2 = Fixture.hy2Node()
+            hy2.certificatePublicKeySHA256 = Data(repeating: 7, count: 32).base64EncodedString()
             let switcher = Hy2AutoSwitch(defaults: UserDefaults(suiteName: "ProtectedConnectivityTests.\(UUID().uuidString)")!)
             switcher.applyCatalogPermission(true, owner: "test-owner", catalog: [reality, hy2])
             for _ in 0..<Hy2AutoSwitch.tcpFailureThreshold {

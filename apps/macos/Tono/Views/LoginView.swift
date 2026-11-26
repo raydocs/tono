@@ -244,8 +244,8 @@ struct LoginView: View {
     private var signInHeading: some View {
         VStack(alignment: .leading, spacing: seaAppearance ? 16 : 20) {
             Text(LocalizedStringKey(showsCodeStep ? "Open your inbox" : "Sign in to Tono"))
-                .font(.system(size: seaAppearance ? 40 : 28, weight: seaAppearance ? .light : .semibold))
-                .tracking(seaAppearance ? -0.8 : 0)
+                .font(.system(size: seaAppearance ? 40 : 28, weight: seaAppearance ? .regular : .semibold))
+                .tracking(seaAppearance ? -0.4 : 0)
                 .accessibilityAddTraits(.isHeader)
             Text(LocalizedStringKey(showsCodeStep
                  ? "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically."

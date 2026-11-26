@@ -414,6 +414,7 @@ extension AppState {
                         releaseNetwork: releaseNetworkIfSwitchFails
                     )
                 } else {
+                    self.networkInfo = previousNetworkInfo
                     errorMessage = error.localizedDescription
                 }
             }

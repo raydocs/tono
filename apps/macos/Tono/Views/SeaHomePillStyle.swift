@@ -35,7 +35,9 @@ private struct SeaHomePill: View {
                     Capsule(style: .circular)
                         .fill(SeaTheme.primaryGradient)
                         .overlay {
-                            Capsule(style: .circular).fill(.white.opacity(sheenOpacity))
+                            if sheenOpacity > 0 {
+                                Capsule(style: .circular).fill(.white.opacity(sheenOpacity))
+                            }
                         }
                 } else if opaque {
                     Capsule(style: .circular)
@@ -47,7 +49,9 @@ private struct SeaHomePill: View {
                         startPoint: .top, endPoint: .bottom))
                         .background(.ultraThinMaterial, in: Capsule(style: .circular))
                         .overlay {
-                            Capsule(style: .circular).fill(.white.opacity(sheenOpacity))
+                            if sheenOpacity > 0 {
+                                Capsule(style: .circular).fill(.white.opacity(sheenOpacity))
+                            }
                         }
                 }
             }
@@ -55,13 +59,8 @@ private struct SeaHomePill: View {
                 Capsule(style: .circular).strokeBorder(LinearGradient(
                     colors: [Color(hex: "FFEBD2").opacity(opaque ? 0.55 : (hovered && enabled ? 0.42 : 0.30)),
                              .white.opacity(opaque ? 0.18 : 0.06)],
-                    startPoint: .top, endPoint: .bottom), lineWidth: opaque ? 1 : 0.85)
+                    startPoint: .top, endPoint: .bottom), lineWidth: 1)
             }
-            .shadow(
-                color: opaque ? .clear : (primary ? SeaTheme.warm.opacity(hovered && enabled ? 0.26 : 0.16) : .black.opacity(0.24)),
-                radius: primary ? (hovered && enabled ? 14 : 10) : 10,
-                y: 4
-            )
             .contentShape(Capsule(style: .circular))
             .opacity(enabled ? 1 : 0.45)
             .scaleEffect(SeaHomePresentation.pressScale(pressed: configuration.isPressed, reduceMotion: reduceMotion))

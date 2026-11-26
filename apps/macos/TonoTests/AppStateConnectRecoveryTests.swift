@@ -41,6 +41,12 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         return app
     }
 
+    private func cancelAndDrainConnect(_ app: AppState) async {
+        let pendingConnect = app.connectionCoordinator.connectTask
+        app.connectionCoordinator.cancelConnectionTasks()
+        await pendingConnect?.value
+    }
+
     func testAutomaticRecoveryKeepsAdmittedModeUntilExplicitSessionEnd() async {
         let saved = RuntimeState()
         let defaults = AppProfile.defaults
@@ -76,7 +82,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.userConnect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
         app.isConnected = true
         defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
@@ -88,14 +94,14 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connect(preservingUnarmedBackoff: true)
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
 
         app.disconnect(releaseKillSwitch: true)
         await app.finishPendingDisconnect()
         app.userConnect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "three-tier")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
         app.isConnected = true
         defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
@@ -105,13 +111,14 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "three-tier")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
 
         app.disconnect(releaseKillSwitch: true)
         await app.finishPendingDisconnect()
         app.userConnect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
+        await cancelAndDrainConnect(app)
     }
 
     func testMissingTUNDuringNodeSwitchDoesNotCountTowardPostSwitchVerdict() async {
@@ -320,7 +327,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertFalse(KillSwitchService.isArmed)
     }
 
-    func testExternalProtectionReleaseResetsStaleHelperSessionWhilePreservingRF3() {
+    func testExternalProtectionReleaseResetsStaleHelperSessionWhilePreservingRF3() async {
         let saved = RuntimeState()
         let defaults = AppProfile.defaults
         let selection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
@@ -367,7 +374,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertFalse(app.connectionCoordinator.helperSession.userInitiated)
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
 
         // Explicit user Connect mints a fresh user-initiated generation.
@@ -382,7 +389,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         ))
 
         // A stale userConnect() while connected must not retire the active session.
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
         app.isConnected = true
         XCTAssertTrue(userSession.adopt(43))
@@ -506,6 +513,9 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertFalse(app.connectionCoordinator.hasPendingDeferredConnect)
         XCTAssertTrue(app.isConnecting)
         XCTAssertTrue(app.connectionCoordinator.helperSession.userInitiated)
+        app.autoConnectRequested = false
+        await cancelAndDrainConnect(app)
+        app.connectionCoordinator.cancelReconnectTasks()
     }
 
     func testOptionalPolicyAnsweredSyncRefusalKeepsWorkingSession() async throws {
@@ -649,7 +659,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertTrue(app.isConnecting)
         XCTAssertEqual(app.config.mixedPort, 34_120)
         XCTAssertEqual(app.config.externalController, "127.0.0.1:34121")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
 
         // Default RuntimeConfig ports (28990 / 127.0.0.1:9090) must not be reused even under strict reconnect.
@@ -658,7 +668,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertFalse(app.config.mixedPort == 28_990 && app.config.externalController == "127.0.0.1:9090")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
 
         // Fresh unprotected strict connect (even with leftover intent) allocates ephemeral ports.
@@ -670,7 +680,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connect()
         XCTAssertTrue(app.isConnecting)
         XCTAssertFalse(app.config.mixedPort == 28_990 && app.config.externalController == "127.0.0.1:9090")
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
 
         // Missing or invalid prior ports still fall back to allocating a valid pair.
@@ -682,7 +692,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertTrue(app.isConnecting)
         XCTAssertGreaterThan(app.config.mixedPort, 0)
         XCTAssertFalse(app.config.externalController.isEmpty)
-        app.connectionCoordinator.cancelConnectionTasks()
+        await cancelAndDrainConnect(app)
         app.isConnecting = false
 
         // Explicit release clears strictRoutingSessionIntent, so switching to stable rotates ports.
@@ -714,6 +724,8 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertTrue(app.isConnecting)
         XCTAssertNotEqual(app.config.mixedPort, 1)
         XCTAssertNotEqual(app.config.externalController, "127.0.0.1:2")
+        await cancelAndDrainConnect(app)
+        app.connectionCoordinator.cancelReconnectTasks()
     }
 
     func testActivationDoesNotTreatNeverArmedProtectionAsAnExternalRelease() async {

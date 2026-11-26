@@ -129,10 +129,10 @@ final class NodeSwitchTests: XCTestCase {
         }
         let app = AppState()
         let previous = Fixture.realityNode(
-            name: "Tokyo-1", id: "tokyo-1", server: "203.0.113.10", port: 443
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
         )
         let next = Fixture.realityNode(
-            name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
         )
         app.proxyRegions = [
             ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
@@ -141,7 +141,7 @@ final class NodeSwitchTests: XCTestCase {
         app.activeNode = previous
         app.proxyService.activeNodeName = previous.name
         app.isConnected = true
-        app.networkInfo = NetworkInfo(ip: "203.0.113.10", org: "AS64512", location: "JP")
+        app.networkInfo = NetworkInfo(ip: "203.0.114.10", org: "AS64512", location: "JP")
         app.lastClassifiedFailure = nil
 
         var armedEndpointSets: [[ConfigPipeline.DialEndpoint]] = []
@@ -195,14 +195,14 @@ final class NodeSwitchTests: XCTestCase {
         XCTAssertTrue(app.isConnected, "failed switch rollback should keep the active session connected")
         XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
         XCTAssertEqual(app.activeNode?.id, previous.id)
-        XCTAssertEqual(app.networkInfo.ip, "203.0.113.10")
+        XCTAssertEqual(app.networkInfo.ip, "203.0.114.10")
         XCTAssertEqual(app.networkInfo.org, "AS64512")
         XCTAssertEqual(app.networkInfo.location, "JP")
         XCTAssertNil(app.lastClassifiedFailure)
         XCTAssertEqual(appliedOverlays, [next.name, previous.name])
         XCTAssertEqual(armedEndpointSets.count, 2)
-        XCTAssertEqual(armedEndpointSets[0].map(\.host), ["203.0.113.10", "198.51.100.20"])
-        XCTAssertEqual(armedEndpointSets[1].map(\.host), ["203.0.113.10"])
+        XCTAssertEqual(armedEndpointSets[0].map(\.host), ["203.0.114.10", "203.0.114.20"])
+        XCTAssertEqual(armedEndpointSets[1].map(\.host), ["203.0.114.10"])
         XCTAssertTrue(events.contains("close:\(next.name)"))
         XCTAssertNotNil(app.errorMessage)
     }
@@ -218,10 +218,10 @@ final class NodeSwitchTests: XCTestCase {
         }
         let app = AppState()
         let previous = Fixture.realityNode(
-            name: "Tokyo-1", id: "tokyo-1", server: "203.0.113.10", port: 443
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
         )
         let next = Fixture.realityNode(
-            name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
         )
         app.proxyRegions = [
             ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
@@ -273,10 +273,10 @@ final class NodeSwitchTests: XCTestCase {
         }
         let app = AppState()
         let previous = Fixture.realityNode(
-            name: "Tokyo-1", id: "tokyo-1", server: "203.0.113.10", port: 443
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
         )
         let next = Fixture.realityNode(
-            name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
         )
         app.proxyRegions = [
             ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
@@ -314,8 +314,8 @@ final class NodeSwitchTests: XCTestCase {
         XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
         XCTAssertEqual(appliedOverlays, [previous.name])
         XCTAssertEqual(armedEndpointSets.count, 2)
-        XCTAssertEqual(armedEndpointSets[0].map(\.host), ["203.0.113.10", "198.51.100.20"])
-        XCTAssertEqual(armedEndpointSets[1].map(\.host), ["203.0.113.10"])
+        XCTAssertEqual(armedEndpointSets[0].map(\.host), ["203.0.114.10", "203.0.114.20"])
+        XCTAssertEqual(armedEndpointSets[1].map(\.host), ["203.0.114.10"])
     }
 
     @MainActor
@@ -349,10 +349,10 @@ final class NodeSwitchTests: XCTestCase {
             else { SingBoxDelayGate.suspend() }
         }
         let previous = Fixture.realityNode(
-            name: "Tokyo-1", id: "tokyo-1", server: "203.0.113.10", port: 443
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
         )
         let next = Fixture.realityNode(
-            name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
         )
         app.proxyRegions = [
             ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
@@ -436,10 +436,10 @@ final class NodeSwitchTests: XCTestCase {
             else { SingBoxDelayGate.suspend() }
         }
         let previous = Fixture.realityNode(
-            name: "Tokyo-1", id: "tokyo-1", server: "203.0.113.10", port: 443
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
         )
         let next = Fixture.realityNode(
-            name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
         )
         app.proxyRegions = [
             ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
@@ -539,10 +539,10 @@ final class NodeSwitchTests: XCTestCase {
             else { SingBoxDelayGate.suspend() }
         }
         let previous = Fixture.realityNode(
-            name: "Tokyo-1", id: "tokyo-1", server: "203.0.113.10", port: 443
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
         )
         let next = Fixture.realityNode(
-            name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
         )
         app.proxyRegions = [
             ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
@@ -634,10 +634,10 @@ final class NodeSwitchTests: XCTestCase {
                 else { SingBoxDelayGate.suspend() }
             }
             let homeProxy = Fixture.realityNode(
-                name: "Tokyo-Home", id: "tokyo-home", server: "203.0.113.10", port: 443
+                name: "Tokyo-Home", id: "tokyo-home", server: "203.0.114.10", port: 443
             )
             let next = Fixture.realityNode(
-                name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+                name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
             )
             app.tonoTransport = transport
             app.proxyRegions = [
@@ -761,10 +761,10 @@ final class NodeSwitchTests: XCTestCase {
             AppProfile.defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
         }
         let previous = Fixture.realityNode(
-            name: "Tokyo-1", id: "tokyo-1", server: "203.0.113.10", port: 443
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
         )
         let next = Fixture.realityNode(
-            name: "Singapore-2", id: "singapore-2", server: "198.51.100.20", port: 443
+            name: "Singapore-2", id: "singapore-2", server: "203.0.114.20", port: 443
         )
         app.proxyRegions = [
             ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, next])
@@ -773,7 +773,7 @@ final class NodeSwitchTests: XCTestCase {
         app.activeNode = previous
         app.proxyService.activeNodeName = previous.name
         app.isConnected = true
-        app.networkInfo = NetworkInfo(ip: "203.0.113.10", org: "AS64512", location: "JP")
+        app.networkInfo = NetworkInfo(ip: "203.0.114.10", org: "AS64512", location: "JP")
 
         var opsCalled = false
         let ops = AppState.NodeSwitchOperations(
@@ -794,7 +794,7 @@ final class NodeSwitchTests: XCTestCase {
         XCTAssertNil(app.connectionCoordinator.nodeSwitchTask)
         XCTAssertEqual(app.proxyService.activeNodeName, previous.name)
         XCTAssertEqual(app.activeNode?.id, previous.id)
-        XCTAssertEqual(app.networkInfo.ip, "203.0.113.10")
+        XCTAssertEqual(app.networkInfo.ip, "203.0.114.10")
         XCTAssertEqual(
             app.errorMessage,
             String(localized: "Disconnect before switching cloud servers in Strict mode.")
@@ -924,5 +924,49 @@ final class NodeSwitchTests: XCTestCase {
             XCTAssertEqual(waitDNSCalls, failAtDNS ? 1 : 0)
             XCTAssertFalse(app.isConnected)
         }
+    }
+
+    @MainActor
+    func testPreTransitionFailureRestoresNetworkInfoWithoutDisconnecting() async {
+        let delayWasProven = SingBoxDelayGate.isProven
+        defer {
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        let app = AppState()
+        let previous = Fixture.realityNode(
+            name: "Tokyo-1", id: "tokyo-1", server: "203.0.114.10", port: 443
+        )
+        let invalid = Fixture.realityNode(
+            name: "Invalid-Port", id: "invalid-port", server: "203.0.114.20", port: 0
+        )
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, invalid])
+        ]
+        app.selectedNodeId = previous.id
+        app.activeNode = previous
+        app.proxyService.activeNodeName = previous.name
+        app.isConnected = true
+        app.isRecoveringProtectedConnection = false
+        app.networkInfo = NetworkInfo(ip: "203.0.114.10", org: "AS64512", location: "JP")
+
+        let ops = AppState.NodeSwitchOperations(
+            armKillSwitch: { _ in XCTFail("invalid node must fail before arming") },
+            applyRuntimeConfig: { _ in XCTFail("invalid node must fail before apply") },
+            waitForTunnel: { true },
+            verify: { _ in .connected(controllerAdvisory: nil) },
+            closeConnections: { _ in },
+            rememberNode: { _, _ in },
+            refreshProxy: {}
+        )
+
+        app.selectNode(invalid.name, operations: ops)
+        await app.connectionCoordinator.nodeSwitchTask?.value
+
+        XCTAssertTrue(app.isConnected)
+        XCTAssertEqual(app.networkInfo.ip, "203.0.114.10")
+        XCTAssertEqual(app.networkInfo.org, "AS64512")
+        XCTAssertEqual(app.networkInfo.location, "JP")
+        XCTAssertNotNil(app.errorMessage)
     }
 }

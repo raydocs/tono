@@ -439,7 +439,7 @@ struct LoginErrorBlock: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             // A quiet inline notice, not a colored slab: clear danger type,
             // crisp hairline border, and progressive technical details.
             HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -469,7 +469,7 @@ struct LoginErrorBlock: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(isDetailsHovered ? .primary : .secondary)
                 .padding(.horizontal, 7)
-                .padding(.vertical, 3.5)
+                .padding(.vertical, 3)
                 .background(.white.opacity(isDetailsHovered ? (colorScheme == .dark ? 0.07 : 0.45) : 0), in: Capsule())
                 .padding(.leading, -7)
                 .contentShape(Rectangle())
@@ -479,7 +479,7 @@ struct LoginErrorBlock: View {
             .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: isDetailsHovered)
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 7) {
                     Rectangle()
                         .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.24 : (colorScheme == .dark ? 0.08 : 0.14)))
                         .frame(height: 0.75)
@@ -487,7 +487,6 @@ struct LoginErrorBlock: View {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(colorScheme == .dark ? SeaTheme.text.opacity(0.86) : .primary.opacity(0.85))
-                        .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -496,7 +495,6 @@ struct LoginErrorBlock: View {
                         Text(LoginErrorCopy.helperAdminExplanation)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineSpacing(1.5)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
