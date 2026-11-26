@@ -14,10 +14,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var appState: AppState?
     var accountSession: AccountSession?
 
+    static func resolve(attached: AppDelegate? = nil) -> AppDelegate? {
+        resolve(attached: attached, current: current, nsAppDelegate: NSApp?.delegate)
+    }
+
     static func resolve(
-        attached: AppDelegate? = nil,
-        current: AppDelegate? = AppDelegate.current,
-        nsAppDelegate: NSApplicationDelegate? = NSApp?.delegate
+        attached: AppDelegate?,
+        current: AppDelegate?,
+        nsAppDelegate: NSApplicationDelegate?
     ) -> AppDelegate? {
         attached ?? current ?? (nsAppDelegate as? AppDelegate)
     }
