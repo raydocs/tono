@@ -1,15 +1,15 @@
 {
-  "version": "0.0.86",
-  "notes": "# Tono 0.0.86\n\nSupports x64 Windows 10 22H2 / Windows 11.\n\n## Changes since 0.0.85\n\n- **Signed TCP direct IPs** (#1856): The signed `traffic-policy` can now carry `tcpDirectAddresses` (non-DNS IPv4 TCP destinations) and v5 `tcpEndpoints`. The Windows service admits and routes them direct, so a policy update can add or change them without a client rebuild.",
-  "pub_date": "2026-11-25T12:41:02.000Z",
+  "version": "0.0.88",
+  "notes": "# Tono 0.0.88\n\nSupports x64 Windows 10 22H2 / Windows 11.\n\n## Changes since 0.0.87\n\n- **Desktop version parity**: Aligns the Windows desktop version with macOS 0.0.88 (build 89); no Windows runtime changes since 0.0.87.",
+  "pub_date": "2026-11-26T08:28:57.000Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZll0bVV5NFMwS3hiTnN6L3haTmxtZWJTNmVEajRiVkIyUUduSm9ldEs2Skd0Ni9ZSWhiTmJxdFVHcFNsRjh6SnU1MHlzSVdiMXpta0pzR3d0WCtsaXcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjEwNDAyCWZpbGU6VG9ub18wLjAuODZfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NgpoRit1bkFwZVl3ZFI4cFU2M3F6S1UrNmFDVkdKU0V6V0xsaEExOG5BbDVlQTdmQ1NVQnU0VFBhTlIxTHJ0Q1lSQS9nZC9yR2pQSDNUcjVFRlFPRTRDZz09Cg==",
-      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.86_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZmJwUTBGZUhOTlhjMU0yZ056dUVTdDh6amN6ajRXVlZxQUIybGtOTi9IOXJmNXZHQnR4b0Q4ZXZMK08zMzVBSEx5V0dTSlFLWm1jdS8zU1ZZU0JkYVFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjgxNjg4CWZpbGU6VG9ub18wLjAuODhfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44OApsN0FQOUJrMS9hMkx1U0RPa21rSDZjS3V5cFR4ZncxWG9Celhic3RwM0ZQOXp3TDZLY000ckJUZDU0YVVWZjJNaEhTL0V0YmNkSkQzeGJ2cUdHL29CQT09Cg==",
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.88_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZll0bVV5NFMwS3hiTnN6L3haTmxtZWJTNmVEajRiVkIyUUduSm9ldEs2Skd0Ni9ZSWhiTmJxdFVHcFNsRjh6SnU1MHlzSVdiMXpta0pzR3d0WCtsaXcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjEwNDAyCWZpbGU6VG9ub18wLjAuODZfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44NgpoRit1bkFwZVl3ZFI4cFU2M3F6S1UrNmFDVkdKU0V6V0xsaEExOG5BbDVlQTdmQ1NVQnU0VFBhTlIxTHJ0Q1lSQS9nZC9yR2pQSDNUcjVFRlFPRTRDZz09Cg==",
-      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.86_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZmJwUTBGZUhOTlhjMU0yZ056dUVTdDh6amN6ajRXVlZxQUIybGtOTi9IOXJmNXZHQnR4b0Q4ZXZMK08zMzVBSEx5V0dTSlFLWm1jdS8zU1ZZU0JkYVFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjgxNjg4CWZpbGU6VG9ub18wLjAuODhfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMC44OApsN0FQOUJrMS9hMkx1U0RPa21rSDZjS3V5cFR4ZncxWG9Celhic3RwM0ZQOXp3TDZLY000ckJUZDU0YVVWZjJNaEhTL0V0YmNkSkQzeGJ2cUdHL29CQT09Cg==",
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.88_x64-setup.exe"
     }
   }
 }

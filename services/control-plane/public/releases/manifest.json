@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-11-25T12:50:51Z",
+ "generatedAt": "2026-11-26T08:39:48Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
@@ -18,16 +18,16 @@
   "repository": "Published from Tono’s own repository. Everything before 0.0.66 and 0.0.33 was released from a fork of another project, and the Windows updater asked a host blocked from mainland China, so a PC that could not connect was told no update existed."
  },
  "releaseSet": {
-  "id": "2026-11-25-macos-build87-windows-0.0.86",
+  "id": "2026-11-26-macos-build89-windows-0.0.88",
   "status": "both-lines-published-and-reachable",
-  "reason": "macOS Build 87 is the newest item in the Sparkle feed and Windows 0.0.86 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
+  "reason": "macOS Build 89 is the newest item in the Sparkle feed and Windows 0.0.88 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
  },
  "platforms": {
   "macos": {
    "current": {
-    "releaseId": "macos-0.0.86-build87",
-    "version": "0.0.86",
-    "build": 87,
+    "releaseId": "macos-0.0.88-build89",
+    "version": "0.0.88",
+    "build": 89,
     "architecture": "arm64",
     "minimumOS": "26.3",
     "availability": "sparkle-published",
@@ -40,53 +40,53 @@
     },
     "provenance": {
      "releaseLine": "release/macos",
-     "sourceCommit": "036db12598343dfff13da8a2fda721a38b055996",
-     "immutableTagCommit": "036db12598343dfff13da8a2fda721a38b055996",
+     "sourceCommit": "ced5c8abe66cde7aae3466b84175c36e9600d7d4",
+     "immutableTagCommit": "ced5c8abe66cde7aae3466b84175c36e9600d7d4",
      "tagStatus": "exact"
     },
-    "helperContract": "4.52.73",
+    "helperContract": "4.52.78",
     "knownLimitations": [
      "仅 Apple Silicon，需 macOS 26.3 或更高",
      "IPv6 全程关闭：TUN 与 fake-ip 只走 IPv4，AAAA 拨号由 Kill Switch 丢弃后客户端改试 IPv4"
     ],
     "artifact": {
-     "name": "Tono-0.0.86-build87-arm64.zip",
-     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.86-build87-arm64.zip",
-     "size": 19111333,
-     "sha256": "56a3d83ef01b7cbbc1d4017e9eb0268c16e8b84e1d28644ea0e6f70f7d7df77b",
-     "sparkleEdSignature": "CdaM8cfh/1S7DBsDLYtRD6BOBswQD3EAsHA5Ifzh9w2GYGQYwDWNVDaCaa7i2q8jGlt6IywLrceFx+l95CIVDw=="
+     "name": "Tono-0.0.88-build89-arm64.zip",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.88-build89-arm64.zip",
+     "size": 19272126,
+     "sha256": "a55bb9518ce8b112c8b3ccf8c842d32ae1061f9e86d0692beacdcf4354f31925",
+     "sparkleEdSignature": "mv47uzJ4gdxQvYmvUM0pV1Xlc7RGiXwdiQXz89jcUwKHQaSbqAf9EjMu9Rcuq57v6Iizl6K3uiSjLDOTxJ7IAA=="
     },
     "diskImage": {
-     "name": "Tono-0.0.86-build87-arm64.dmg",
-     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.86-build87-arm64.dmg",
-     "size": 21396493,
-     "sha256": "e975d85cf2f068ef409cea837f0b2c85548504deb9e563b88710f5673c44524c"
+     "name": "Tono-0.0.88-build89-arm64.dmg",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.88-build89-arm64.dmg",
+     "size": 21580468,
+     "sha256": "111c28db148c0641c1aa99baa65fcfa7d528d769addac1c50995cd4d7fdfed85"
     },
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.86-build87"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.88-build89"
    }
   },
   "windows": {
    "current": {
-    "releaseId": "windows-0.0.86",
-    "version": "0.0.86",
+    "releaseId": "windows-0.0.88",
+    "version": "0.0.88",
     "architecture": "x86_64",
     "installer": "nsis",
     "availability": "published-stable",
     "update": {
      "mechanism": "tauri-updater-v2",
      "automaticUpdaterEnabled": true,
-     "channelVersion": "0.0.86"
+     "channelVersion": "0.0.88"
     },
-    "commit": "036db12598343dfff13da8a2fda721a38b055996",
+    "commit": "ced5c8abe66cde7aae3466b84175c36e9600d7d4",
     "releaseLine": "release/windows",
     "serviceProtocolRevision": 24,
     "minimumServiceRevision": 14,
     "recommended": true,
     "artifact": {
-     "name": "Tono_0.0.86_x64-setup.exe",
-     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.86_x64-setup.exe",
-     "size": 40717009,
-     "sha256": "8316d5e39365e488f919cee06ab0efdcb914753471c16d6e501838581bbbb8b1",
+     "name": "Tono_0.0.88_x64-setup.exe",
+     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.88_x64-setup.exe",
+     "size": 40728432,
+     "sha256": "f637aeaa39677ad7565c233d6a05429331c1bb55f261c63d828da34b1830c892",
      "authenticodeSigned": false,
      "authenticodeStatus": "not-signed"
     },
@@ -94,11 +94,42 @@
      "安装包未附 Authenticode 证书，全新安装时 Windows SmartScreen 会告警",
      "0.0.32–0.0.34 旧版不可直接覆盖升级：需先在网络恢复后正常卸载旧版并重启确认网络正常，再安装本版"
     ],
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.86"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.88"
    }
   }
  },
  "archive": [
+  {
+   "releaseId": "macos-0.0.88-build89",
+   "platform": "macos",
+   "version": "0.0.88",
+   "build": 89,
+   "publishedAt": "2026-11-26T08:36:28Z",
+   "status": "published-sparkle-current",
+   "sourceCommit": "ced5c8abe66cde7aae3466b84175c36e9600d7d4",
+   "tagCommit": "ced5c8abe66cde7aae3466b84175c36e9600d7d4",
+   "summary": [
+    "修复切换失败与连接验证体验痛点，升级 Helper 至 `4.52.78`，并优化 macOS Tahoe 界面视觉层级与交互反馈。",
+    "节点切换回滚与连通性分类修复（#1868）：切换节点失败时优先原位回滚至原节点不断开现有保护；补充 utun 接口与本地 DNS 就绪校验；在 TUN 失败诊断期间绕过延迟门控，避免不可达节点被误判为链路不可用；Strict（严格）模式下已连接时阻止在线切换或重载并恢复清晰中文提示",
+    "Helper 与网络恢复加固（#1866、#1867、#1868）：Helper 协议升级至 `4.52.78`，支持启动中断期间经校验后的回滚同步；区分空 anchor 与不可读 PF 状态、独立更新退出栅栏并清理抢占式恢复后的重复操作按钮；增加 Helper IPC 空响应受控重试；修复更新退役与外部释放后的 `helperSession` 及卡在登录页的挂起更新报错",
+    "界面与交互优化（#1868）：优化主界面、节点页、菜单栏、侧边栏与登录页的液态玻璃边框对比度、按钮悬停/弹性触感、数字等宽排版、节点切换中指示器及降透明度/高对比度无障碍回退"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.88-build89"
+  },
+  {
+   "releaseId": "windows-0.0.88",
+   "platform": "windows",
+   "version": "0.0.88",
+   "publishedAt": "2026-11-26T08:35:44Z",
+   "status": "published-stable-channel-current",
+   "sourceCommit": "ced5c8abe66cde7aae3466b84175c36e9600d7d4",
+   "tagCommit": "ced5c8abe66cde7aae3466b84175c36e9600d7d4",
+   "summary": [
+    "桌面版本号与 macOS 0.0.88（Build 89）同步。",
+    "桌面版本号对齐：与 macOS 0.0.88（Build 89）保持同步，Windows 客户端运行时较 0.0.87 无改动"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.88"
+  },
   {
    "releaseId": "macos-0.0.86-build87",
    "platform": "macos",
