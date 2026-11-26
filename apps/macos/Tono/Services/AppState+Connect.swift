@@ -922,7 +922,7 @@ extension AppState {
         }
     }
 
-    private func finishPreemptiveRelease(
+    func finishPreemptiveRelease(
         _ result: Result<HelperManager.ReleaseOutcome, Error>,
         updateWasPending: Bool,
         tonoProxyRemains: Bool?
@@ -958,8 +958,15 @@ extension AppState {
             ]
         )
         let pfClean = outcome.components.contains { $0.name == "pf" && $0.readback == "restored" }
+        let aiClean = outcome.components.contains { $0.name == "ai" && $0.readback == "restored" }
+        let aiResidual = outcome.components.contains { $0.name == "ai" && $0.readback == "residual" }
         let coreClean = outcome.components.contains { $0.name == "core" && $0.readback == "restored" }
         if pfClean { KillSwitchService.isArmed = false }
+        if aiClean {
+            selectiveAIRecoveryPending = false
+        } else if aiResidual {
+            selectiveAIRecoveryPending = true
+        }
         if coreClean { RuntimeCleanup.clearCoreStarted() }
         if updateWasPending { RuntimeCleanup.nativeUpdateBlocksConnect = true }
         switch outcome.outcome {
@@ -967,6 +974,7 @@ extension AppState {
             AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
             isProtectionBlocked = false
             isProtectionUnconfirmed = false
+            selectiveAIRecoveryPending = false
             protectedDNSService = nil
             recoveryCause = nil
             RuntimeCleanup.clearConnectBootSession()
@@ -1503,6 +1511,7 @@ extension AppState {
         let capturedUplink = NetworkUplinkSnapshot.current()
         lastUplinkSnapshot = capturedUplink.isConcrete ? capturedUplink : nil
         isProtectionBlocked = false
+        selectiveAIRecoveryPending = false
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed || domesticOnly
         if domesticOnly { errorMessage = Self.domesticOnlyNotice }

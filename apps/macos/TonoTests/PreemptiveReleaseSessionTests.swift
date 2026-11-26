@@ -54,4 +54,93 @@ final class PreemptiveReleaseSessionTests: XCTestCase {
         XCTAssertEqual(combined.outcome, "partial")
         XCTAssertTrue(combined.components.contains { $0.name == "proxy" && $0.readback == "residual" })
     }
+
+    /// On Macs with the separate release service (`tono-release`), Restore
+    /// internet completes in `finishPreemptiveRelease` instead of the queued
+    /// teardown path. A restored AI component must clear the stale yellow
+    /// selective-AI-recovery notice; residual/busy/superseded outcomes keep it.
+    @MainActor
+    func testPreemptiveReleaseUpdatesSelectiveAIRecoveryPendingFromReadback() {
+        let armed = KillSwitchService.isArmed
+        defer { KillSwitchService.isArmed = armed }
+        KillSwitchService.isArmed = false
+
+        let app = AppState()
+        app.selectiveAIRecoveryPending = true
+        let restored = HelperManager.ReleaseOutcome(
+            outcome: "restored", generation: 11,
+            components: [
+                .init(name: "pf", readback: "restored", risk: "settled", detail: nil),
+                .init(name: "ai", readback: "restored", risk: "settled", detail: nil),
+                .init(name: "dns", readback: "restored", risk: "settled", detail: nil),
+                .init(name: "core", readback: "restored", risk: "settled", detail: nil),
+            ],
+            stuck: [], finished: true, detail: nil
+        )
+        app.finishPreemptiveRelease(.success(restored), updateWasPending: false, tonoProxyRemains: false)
+        XCTAssertFalse(app.selectiveAIRecoveryPending)
+        XCTAssertNil(app.gateProtectionNotice)
+
+        // A partial outcome where AI is already restored clears the AI notice
+        // even though another component (e.g. system proxy) keeps protection blocked.
+        app.selectiveAIRecoveryPending = true
+        app.finishPreemptiveRelease(.success(restored), updateWasPending: false, tonoProxyRemains: true)
+        XCTAssertFalse(app.selectiveAIRecoveryPending)
+        XCTAssertTrue(app.isProtectionBlocked)
+
+        // A residual AI component keeps (or raises) the AI notice.
+        app.selectiveAIRecoveryPending = false
+        let residualAI = HelperManager.ReleaseOutcome(
+            outcome: "partial", generation: 12,
+            components: [
+                .init(name: "pf", readback: "restored", risk: "settled", detail: nil),
+                .init(name: "ai", readback: "residual", risk: "settled", detail: "AI service hold is retained."),
+            ],
+            stuck: [], finished: true, detail: nil
+        )
+        app.finishPreemptiveRelease(.success(residualAI), updateWasPending: false, tonoProxyRemains: false)
+        XCTAssertTrue(app.selectiveAIRecoveryPending)
+
+        // Busy / superseded outcomes prove nothing and leave the notice intact.
+        let busy = HelperManager.ReleaseOutcome(
+            outcome: "busy", generation: 12, components: [], stuck: [], finished: true, detail: nil
+        )
+        app.finishPreemptiveRelease(.success(busy), updateWasPending: false, tonoProxyRemains: false)
+        XCTAssertTrue(app.selectiveAIRecoveryPending)
+    }
+
+    /// DashboardView must not stack two identical "Restore normal internet"
+    /// buttons when the attention row, disconnect row, or primary action
+    /// already offers Restore internet.
+    @MainActor
+    func testSelectiveAIRecoveryInlineButtonOnlyShowsWhenNoOtherRestoreActionIsVisible() {
+        XCTAssertTrue(DashboardView.showsInlineSelectiveAIRecoveryButton(
+            seaAttentionActions: false, isConnecting: false, isDisconnecting: false,
+            isProtectionBlocked: false, isProtectionUnconfirmed: false, isProtectionBlockUnreadable: false
+        ))
+        XCTAssertFalse(DashboardView.showsInlineSelectiveAIRecoveryButton(
+            seaAttentionActions: true, isConnecting: false, isDisconnecting: false,
+            isProtectionBlocked: false, isProtectionUnconfirmed: false, isProtectionBlockUnreadable: false
+        ))
+        XCTAssertFalse(DashboardView.showsInlineSelectiveAIRecoveryButton(
+            seaAttentionActions: false, isConnecting: true, isDisconnecting: false,
+            isProtectionBlocked: false, isProtectionUnconfirmed: false, isProtectionBlockUnreadable: false
+        ))
+        XCTAssertFalse(DashboardView.showsInlineSelectiveAIRecoveryButton(
+            seaAttentionActions: false, isConnecting: false, isDisconnecting: true,
+            isProtectionBlocked: false, isProtectionUnconfirmed: false, isProtectionBlockUnreadable: false
+        ))
+        XCTAssertFalse(DashboardView.showsInlineSelectiveAIRecoveryButton(
+            seaAttentionActions: false, isConnecting: false, isDisconnecting: false,
+            isProtectionBlocked: true, isProtectionUnconfirmed: false, isProtectionBlockUnreadable: false
+        ))
+        XCTAssertFalse(DashboardView.showsInlineSelectiveAIRecoveryButton(
+            seaAttentionActions: false, isConnecting: false, isDisconnecting: false,
+            isProtectionBlocked: false, isProtectionUnconfirmed: true, isProtectionBlockUnreadable: false
+        ))
+        XCTAssertFalse(DashboardView.showsInlineSelectiveAIRecoveryButton(
+            seaAttentionActions: false, isConnecting: false, isDisconnecting: false,
+            isProtectionBlocked: false, isProtectionUnconfirmed: false, isProtectionBlockUnreadable: true
+        ))
+    }
 }

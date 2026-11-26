@@ -177,8 +177,17 @@ struct DashboardView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("AI recovery rules may still be active. Restore internet to remove them.")
                                 .font(.callout).foregroundStyle(SeaTheme.warm)
-                            Button("Restore normal internet") { appState.restoreInternet() }
-                                .buttonStyle(SeaHomePillStyle(primary: false))
+                            if Self.showsInlineSelectiveAIRecoveryButton(
+                                seaAttentionActions: seaAttentionActions,
+                                isConnecting: appState.isConnecting,
+                                isDisconnecting: appState.isDisconnecting,
+                                isProtectionBlocked: appState.isProtectionBlocked,
+                                isProtectionUnconfirmed: appState.isProtectionUnconfirmed,
+                                isProtectionBlockUnreadable: appState.isProtectionBlockUnreadable
+                            ) {
+                                Button("Restore normal internet") { appState.restoreInternet() }
+                                    .buttonStyle(SeaHomePillStyle(primary: false))
+                            }
                         }
                         .accessibilityIdentifier("selectiveAIRecoveryNotice")
                     }
@@ -283,6 +292,22 @@ struct DashboardView: View {
             .disabled(appState.isDisconnecting || (!quiet && appState.lastConnectionFailure != nil && !appState.isTonoReady))
             .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
                                                 isDisconnecting: appState.isDisconnecting))
+    }
+
+    static func showsInlineSelectiveAIRecoveryButton(
+        seaAttentionActions: Bool,
+        isConnecting: Bool,
+        isDisconnecting: Bool,
+        isProtectionBlocked: Bool,
+        isProtectionUnconfirmed: Bool,
+        isProtectionBlockUnreadable: Bool
+    ) -> Bool {
+        !seaAttentionActions
+            && !isConnecting
+            && !isDisconnecting
+            && !isProtectionBlocked
+            && !isProtectionUnconfirmed
+            && !isProtectionBlockUnreadable
     }
 
     private var seaAttentionActions: Bool {
