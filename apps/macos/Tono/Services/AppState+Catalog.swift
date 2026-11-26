@@ -603,6 +603,10 @@ extension AppState {
             }
             if order == .same {
                 guard persisted.sha256 == cache.sha256 else {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_policy_same_revision_rejected",
+                        details: ["revision": String(cache.revision), "reason": "persisted_digest_conflict"]
+                    )
                     throw TonoAPIClient.APIError.invalidResponse
                 }
                 switch ManagedTrafficPolicySignature.sameRevisionTransition(
@@ -618,6 +622,10 @@ extension AppState {
                     )
                     return
                 case .replacementAttempt:
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_policy_same_revision_rejected",
+                        details: ["revision": String(cache.revision), "reason": "persisted_signature_replacement"]
+                    )
                     throw TonoAPIClient.APIError.invalidResponse
                 }
             }
@@ -625,6 +633,10 @@ extension AppState {
         if orderAgainstInstalled() == .stale { return }
         if orderAgainstInstalled() == .same {
             guard managedTrafficPolicyDigest == cache.sha256 else {
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_direct_policy_same_revision_rejected",
+                    details: ["revision": String(cache.revision), "reason": "installed_digest_conflict"]
+                )
                 throw TonoAPIClient.APIError.invalidResponse
             }
             switch ManagedTrafficPolicySignature.sameRevisionTransition(
@@ -642,6 +654,10 @@ extension AppState {
                 )
                 return
             case .replacementAttempt:
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_direct_policy_same_revision_rejected",
+                    details: ["revision": String(cache.revision), "reason": "installed_signature_replacement"]
+                )
                 throw TonoAPIClient.APIError.invalidResponse
             }
         }

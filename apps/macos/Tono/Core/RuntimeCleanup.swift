@@ -219,7 +219,6 @@ enum RuntimeCleanup {
         if let pending = pendingUpdate, pending.pending {
             nativeUpdatePending = true
             nativeUpdateBlocksConnect = true
-            let resumeSentence = String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt.")
             let adopted: HelperManager.UpdateStatus
             do {
                 adopted = try await nativeUpdate("reconcile")
@@ -232,14 +231,16 @@ enum RuntimeCleanup {
                     phase: pendingUpdate?.receipt.map { String(describing: $0.phase) },
                     blocked: pendingUpdate?.receipt?.blockedReason != nil,
                     disconnectRequested: pendingUpdate?.disconnectRequested)
-                throw NativeUpdateDownload.failure(resumeSentence + "\n" + error.localizedDescription)
+                throw NativeUpdateDownload.failure(
+                    Self.pendingUpdateRecoveryMessage(for: pendingUpdate) + "\n" + error.localizedDescription
+                )
             }
             guard let receipt = adopted.receipt, receipt.blockedReason == nil,
                   receipt.phase == .installedIdentityVerified || receipt.phase == .recoveryVerified else {
                 ConnectionFailureReport.shared.recordPendingUpdate(
                     execution: adopted.execution, phase: adopted.receipt.map { String(describing: $0.phase) },
                     blocked: adopted.receipt?.blockedReason != nil, disconnectRequested: adopted.disconnectRequested)
-                throw NativeUpdateDownload.failure(resumeSentence)
+                throw NativeUpdateDownload.failure(Self.pendingUpdateRecoveryMessage(for: adopted))
             }
             nativeUpdateRecovery = receipt.requiredRecovery
             KillSwitchService.isArmed = receipt.requiredRecovery != .unprotected
@@ -262,6 +263,20 @@ enum RuntimeCleanup {
             return false // Protected Offline must not silently become Connected.
         }
         return try await recoverStaleRuntime()
+    }
+
+    /// Recovery hint shown when a pending update cannot be adopted by this copy
+    /// of Tono. When `Disconnect and Retry` is not yet offered (e.g. a recent
+    /// `consumed` attempt, `replacing`, `rollingBack`, or unblocked `replaced`),
+    /// lead with `Restore internet`, which restores connectivity and unlocks retry.
+    static func pendingUpdateRecoveryMessage(
+        for status: HelperManager.UpdateStatus?,
+        now: UInt64 = UInt64(Date().timeIntervalSince1970)
+    ) -> String {
+        if AppUpdater.disconnectRetriable(status, now: now) {
+            return String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt.")
+        }
+        return String(localized: "The pending update cannot be resumed by this copy of Tono. First click Restore internet, then choose Check for Updates and Disconnect and Retry to end this update attempt.")
     }
 
     /// The native-update query is the first helper call at launch. When the

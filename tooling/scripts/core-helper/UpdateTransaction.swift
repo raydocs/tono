@@ -331,6 +331,29 @@ final class UpdateTransaction {
         // erase a consumed attempt. This is not cancellation or commit.
     }
 
+    /// Whether the currently installed components satisfy retirement proof.
+    /// Normally the exact expected triplet matches (captured original for
+    /// pre-replacement/rolled-back attempts; target for `.replaced`). A user
+    /// who manually dragged a validly signed newer `/Applications/Tono.app`
+    /// while stuck on a pending attempt changes only the App executable while
+    /// root helper and Core binaries stay intact: accept that replacement only
+    /// when `installedComponents()` verified all three Developer ID signatures,
+    /// both root binaries still match `expected`, and the installed App's
+    /// sealed `releaseSequence` is at least the attempt's target sequence
+    /// (never permitting a downgrade or unsigned replacement).
+    private func retirementComponentsMatch(
+        installed: UpdateContractV1.Components,
+        expected: UpdateContractV1.Components,
+        manifest: UpdateContractV1.ReleaseManifest
+    ) throws -> Bool {
+        if installed == expected { return true }
+        guard installed.coreSha256 == expected.coreSha256,
+              installed.privilegedSha256 == expected.privilegedSha256 else {
+            return false
+        }
+        return try effects.installedFloor() >= manifest.releaseSequence
+    }
+
     func retireUnconsumed(peer: TonoAuthenticatedPeer) throws {
         var ledger = try storage.load()
         try effects.authenticate(peer)
@@ -338,9 +361,14 @@ final class UpdateTransaction {
               attempt.execution == .reserved || attempt.execution == .staged,
               attempt.receipt.owner == Self.owner(peer),
               attempt.receipt.installedLocationSha256 == Self.location,
-              attempt.originalComponents == (try effects.installedComponents()),
+              let original = attempt.originalComponents,
               attempt.disconnectRequested, attempt.disconnectVerified,
               try effects.observe() == .unprotected else {
+            throw HelperFailure.invalid("Only an unconsumed attempt with verified explicit Disconnect can be retired.")
+        }
+        let manifest = try UpdateContractV1.ReleaseManifest.decode(attempt.manifest)
+        let installed = try effects.installedComponents()
+        guard try retirementComponentsMatch(installed: installed, expected: original, manifest: manifest) else {
             throw HelperFailure.invalid("Only an unconsumed attempt with verified explicit Disconnect can be retired.")
         }
         // Expiry/blocked state does not prevent cleanup, but grants no new
@@ -394,15 +422,20 @@ final class UpdateTransaction {
               try effects.observe() == .unprotected else {
             throw HelperFailure.invalid("Only a resolved update attempt with verified explicit Disconnect can be retired.")
         }
+        let manifest = try UpdateContractV1.ReleaseManifest.decode(attempt.manifest)
+        let installed = try effects.installedComponents()
         if attempt.execution == .replaced {
-            let manifest = try UpdateContractV1.ReleaseManifest.decode(attempt.manifest)
-            guard try effects.installedComponents() == manifest.target(.macosArm64).components else {
+            let target = try manifest.target(.macosArm64).components
+            guard try retirementComponentsMatch(installed: installed, expected: target, manifest: manifest) else {
                 throw HelperFailure.invalid("Replaced installation components differ; evidence retained.")
             }
         } else {
             // A consumed attempt never entered replacement and a rolled-back
-            // one restored its capture; both must still hash to the original.
-            guard attempt.originalComponents == (try effects.installedComponents()) else {
+            // one restored its capture; accept either the captured original or
+            // a validly signed manual App replacement at or above the target
+            // sequence while root binaries remain unchanged.
+            guard let original = attempt.originalComponents,
+                  try retirementComponentsMatch(installed: installed, expected: original, manifest: manifest) else {
                 throw HelperFailure.invalid("Installed components differ from the captured original; evidence retained.")
             }
         }

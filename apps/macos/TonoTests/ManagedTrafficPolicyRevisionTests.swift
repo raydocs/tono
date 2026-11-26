@@ -88,4 +88,29 @@ final class ManagedTrafficPolicyRevisionTests: XCTestCase {
         XCTAssertEqual(legacy?.count, 32)
         XCTAssertNotEqual(primary, legacy)
     }
+
+    func testValidationRejectionReasonClassifiesEnvelopeFailures() {
+        let json = #"{"version":1,"domains":[],"mediaEndpoints":[]}"#
+        let digest = Data(SHA256.hash(data: Data(json.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+        XCTAssertNil(ManagedTrafficPolicyProcessor.validationRejectionReason(
+            ManagedTrafficPolicyCache(revision: 1, json: json, sha256: digest, updatedAt: nil, signature: nil)
+        ))
+        XCTAssertEqual(ManagedTrafficPolicyProcessor.validationRejectionReason(
+            ManagedTrafficPolicyCache(revision: -1, json: json, sha256: digest, updatedAt: nil, signature: nil)
+        ), "invalid_revision")
+        XCTAssertEqual(ManagedTrafficPolicyProcessor.validationRejectionReason(
+            ManagedTrafficPolicyCache(revision: 1, json: json, sha256: "wrong", updatedAt: nil, signature: nil)
+        ), "digest_mismatch")
+        let badJson = "not-json"
+        let badDigest = Data(SHA256.hash(data: Data(badJson.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+        XCTAssertEqual(ManagedTrafficPolicyProcessor.validationRejectionReason(
+            ManagedTrafficPolicyCache(revision: 1, json: badJson, sha256: badDigest, updatedAt: nil, signature: nil)
+        ), "decode_failed")
+    }
 }

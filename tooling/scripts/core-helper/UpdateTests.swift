@@ -631,6 +631,53 @@ func runUpdateSelfTests() -> Bool {
                   "Resolved retirement erased failure evidence or fabricated a proof phase")
         try engine.gate(method: "POST", path: "/core/start", peer: successor)
     }
+    test("resolved-retirement-accepts-newer-signed-app-drag-and-refuses-downgrade-or-core-mismatch") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .protectedOffline
+        var installed = components
+        var floor: UInt64 = 5
+        var io = effects()
+        io.observe = { observed }
+        io.installedComponents = { installed }
+        io.installedFloor = { floor }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try engine.disconnect(peer: owner)
+        observed = .unprotected
+
+        let draggedNewerApp = UpdateContractV1.Components(
+            appSha256: String(repeating: "e", count: 64),
+            coreSha256: components.coreSha256,
+            privilegedSha256: components.privilegedSha256
+        )
+        // Downgrade (sealed sequence below target 14) must be refused.
+        installed = draggedNewerApp
+        floor = 13
+        try refuses { try engine.retire(peer: owner) }
+
+        // Half-replaced root core/helper must be refused even when App sequence >= target.
+        floor = 15
+        installed = UpdateContractV1.Components(
+            appSha256: draggedNewerApp.appSha256,
+            coreSha256: String(repeating: "9", count: 64),
+            privilegedSha256: components.privilegedSha256
+        )
+        try refuses { try engine.retire(peer: owner) }
+        installed = UpdateContractV1.Components(
+            appSha256: draggedNewerApp.appSha256,
+            coreSha256: components.coreSha256,
+            privilegedSha256: String(repeating: "8", count: 64)
+        )
+        try refuses { try engine.retire(peer: owner) }
+
+        // Validly signed newer App with intact root binaries retires cleanly.
+        installed = draggedNewerApp
+        try engine.retire(peer: owner)
+        let ledger = try store.load()
+        try check(ledger.attempt == nil && ledger.highWater == 14,
+                  "Manual newer-App retirement must clear the pending slot without lowering high-water")
+    }
     test("resolved-retirement-keeps-cleanup-retry-before-new-admission") { directory in
         let store = try UpdateStorage(root: directory)
         var observed: UpdateContractV1.Protection = .protectedOffline

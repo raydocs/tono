@@ -6,14 +6,37 @@ actor ManagedTrafficPolicyProcessor {
     private var persistedDigest: String?
     private var persistedRevisionAuthenticated = false
 
+    /// Closed-vocabulary reason why a policy envelope failed basic validation
+    /// before signature checking, or `nil` when structurally valid.
+    nonisolated static func validationRejectionReason(
+        _ cache: ManagedTrafficPolicyCache
+    ) -> String? {
+        guard cache.revision >= 0 else { return "invalid_revision" }
+        guard cache.json.utf8.count <= 64 * 1024 else { return "oversized" }
+        guard cache.sha256 == Self.digest(cache.json) else { return "digest_mismatch" }
+        guard let data = cache.json.data(using: .utf8),
+              let policy = try? JSONDecoder().decode(TonoTrafficPolicy.self, from: data) else {
+            return "decode_failed"
+        }
+        guard policy.version >= 1 else { return "invalid_version" }
+        return nil
+    }
+
     func validate(
         _ cache: ManagedTrafficPolicyCache,
         protectedAddresses: Set<String>
     ) throws -> TonoTrafficPolicy {
-        guard cache.revision >= 0,
-              cache.json.utf8.count <= 64 * 1024,
-              cache.sha256 == Self.digest(cache.json),
-              let data = cache.json.data(using: .utf8),
+        if let reason = Self.validationRejectionReason(cache) {
+            LocalTrafficAudit.shared.recordEvent(
+                "managed_direct_policy_validation_rejected",
+                details: [
+                    "revision": String(cache.revision),
+                    "reason": reason,
+                ]
+            )
+            throw TonoAPIClient.APIError.invalidResponse
+        }
+        guard let data = cache.json.data(using: .utf8),
               let policy = try? JSONDecoder().decode(
                 TonoTrafficPolicy.self,
                 from: data
@@ -255,6 +278,10 @@ actor ManagedTrafficPolicyProcessor {
             if order == .stale { return }
             if order == .same,
                persisted.sha256 != cache.sha256 {
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_direct_policy_same_revision_rejected",
+                    details: ["revision": String(cache.revision), "reason": "persisted_digest_conflict"]
+                )
                 throw TonoAPIClient.APIError.invalidResponse
             }
             if order == .same {
@@ -271,6 +298,10 @@ actor ManagedTrafficPolicyProcessor {
                     // established for these exact bytes.
                     return
                 case .replacementAttempt:
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_policy_same_revision_rejected",
+                        details: ["revision": String(cache.revision), "reason": "persisted_signature_replacement"]
+                    )
                     throw TonoAPIClient.APIError.invalidResponse
                 }
             }
