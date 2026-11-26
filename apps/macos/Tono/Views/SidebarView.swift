@@ -2,9 +2,10 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(\.seaAccent) private var seaAccent
+    @Environment(\.appUpdater) private var appUpdater: AppUpdater?
     @SeaAppearancePreference private var seaAppearance
     @Binding var selectedPage: AppPage
-    @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
+    @AppStorage(SettingsKey.logsEnabled, store: AppProfile.defaults) private var logsEnabled = true
     @SeaDisplayPreferences private var displayPreferences
     private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @Environment(\.colorScheme) private var colorScheme
@@ -51,6 +52,10 @@ struct SidebarView: View {
 
             Spacer()
 
+            if let appUpdater {
+                SidebarUpdatePill(updater: appUpdater)
+            }
+
             Rectangle()
                 .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.30 : (colorScheme == .dark ? 0.07 : 0.08)))
                 .frame(height: 0.75)
@@ -88,7 +93,7 @@ struct SidebarView: View {
                 .padding(6)
             }
         }
-        .navigationSplitViewColumnWidth(min: 220, ideal: 220, max: 280)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         .onChange(of: logsEnabled) { _, newValue in
             if !newValue && selectedPage == .logs {
                 selectedPage = .dashboard
@@ -179,6 +184,8 @@ struct SidebarView: View {
             }
         }
         .buttonStyle(SidebarRowButtonStyle(reduceMotion: reduceMotion))
+        .pointerStyle(.link)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .onHover { hovering in
             hoveredPage = hovering ? page : (hoveredPage == page ? nil : hoveredPage)
         }
@@ -218,4 +225,5 @@ private struct SidebarRowButtonStyle: ButtonStyle {
     @Previewable @State var page: AppPage = .dashboard
     SidebarView(selectedPage: $page)
         .frame(width: 220, height: 600)
+        .environment(\.appUpdater, AppUpdater(enabled: false))
 }

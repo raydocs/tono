@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum SeaServerPresentation {
@@ -14,22 +15,21 @@ enum SeaServerPresentation {
         return catalogNodeRegionCode(flag: flag, name: name) ?? otherRegionsCode
     }
 
-    static func regionLabel(_ code: String) -> String {
+    static func regionLabel(_ code: String, locale: Locale = .current) -> String {
         if code == udpBackupRegionCode { return String(localized: "Backup UDP") }
         if code == otherRegionsCode { return String(localized: "Other regions") }
-        let language = Bundle.main.preferredLocalizations.first ?? "en"
-        return Locale(identifier: language).localizedString(forRegionCode: code) ?? code
+        return locale.localizedString(forRegionCode: code) ?? code
     }
 
     /// Countries by name, then the backup channel, then "Other regions" last.
-    static func sortedRegions(_ codes: [String]) -> [String] {
+    static func sortedRegions(_ codes: [String], locale: Locale = .current) -> [String] {
         func rank(_ code: String) -> Int {
             code == otherRegionsCode ? 2 : code == udpBackupRegionCode ? 1 : 0
         }
         return codes.sorted { a, b in
             rank(a) != rank(b)
                 ? rank(a) < rank(b)
-                : regionLabel(a).localizedStandardCompare(regionLabel(b)) == .orderedAscending
+                : regionLabel(a, locale: locale).localizedStandardCompare(regionLabel(b, locale: locale)) == .orderedAscending
         }
     }
 }
@@ -98,6 +98,14 @@ extension ProxiesView {
                     .accessibilityHidden(true)
                 TextField("Search servers", text: $searchText)
                     .textFieldStyle(.plain).focused($isSearchFocused)
+                    .onKeyPress(.escape) {
+                        if !searchText.isEmpty {
+                            searchText = ""
+                        } else {
+                            isSearchFocused = false
+                        }
+                        return .handled
+                    }
                 if !searchText.isEmpty {
                     SeaSearchClearButton(reduceMotion: reduceMotion) { searchText = "" }
                         .accessibilityLabel("Clear search")
@@ -124,48 +132,23 @@ extension ProxiesView {
 
     /// Text tabs: All, regions by name, Favorites.
     var seaNodeToolbar: some View {
-        let all = "All", favorites = "Favorites"
-        let labels = Dictionary(uniqueKeysWithValues: regionOptions.map { ($0, SeaServerPresentation.regionLabel($0)) })
-        let selection = Binding<String>(
-            get: {
-                if seaFavoritesOnly { return favorites }
-                return regionFilter.flatMap { labels[$0] } ?? all
-            },
-            set: { value in
-                withAnimation(TonoMotion.stateChange(reduceMotion: reduceMotion)) {
-                    seaFavoritesOnly = value == favorites
-                    regionFilter = labels.first(where: { $0.value == value })?.key
-                }
-            }
+        SeaNodeToolbarTabs(
+            regionOptions: regionOptions,
+            regionFilter: $regionFilter,
+            seaFavoritesOnly: $seaFavoritesOnly,
+            reduceMotion: reduceMotion
         )
-        return ScrollView(.horizontal, showsIndicators: false) {
-            SeaTabs(label: "Server filter", selection: selection,
-                    options: [all] + regionOptions.compactMap { labels[$0] } + [favorites])
-        }
     }
 
     var seaNodesSection: some View {
-        let nodes = filteredNodes(from: cloudNodes)
-        let favorites = SeaServerPresentation.favorites(in: nodes, names: seaFavoriteNames)
-        let listTitle = regionFilter.map(SeaServerPresentation.regionLabel) ?? String(localized: "All servers")
-        return VStack(alignment: .leading, spacing: 20) {
-            if !favorites.isEmpty {
-                seaServerGroup(String(localized: "Favorites"), nodes: favorites)
-            }
-            if !seaFavoritesOnly, !nodes.isEmpty {
-                seaServerGroup(listTitle, nodes: nodes)
-            }
-            if nodes.isEmpty || (seaFavoritesOnly && favorites.isEmpty) {
-                ContentUnavailableView(
-                    seaFavoritesOnly ? "No favorite servers" : (cloudNodes.isEmpty ? "No Cloud Servers" : "No Matching Servers"),
-                    systemImage: seaFavoritesOnly ? "star" : "magnifyingglass",
-                    description: Text(cloudNodes.isEmpty
-                        ? "Sign in and wait for the protected server catalog to synchronize."
-                        : "Try a different search or region filter.")
-                )
-                .frame(maxWidth: .infinity, minHeight: 180)
-            }
-        }
+        SeaNodesSectionView(
+            nodes: filteredNodes(from: cloudNodes),
+            cloudNodesEmpty: cloudNodes.isEmpty,
+            favoriteNames: seaFavoriteNames,
+            regionFilter: regionFilter,
+            seaFavoritesOnly: seaFavoritesOnly,
+            rowContent: { node in AnyView(seaServerRow(node)) }
+        )
     }
 
     private func seaServerGroup(_ title: String, nodes: [ProxyNode]) -> some View {
@@ -240,6 +223,7 @@ extension ProxiesView {
                 .contentShape(Rectangle())
             }
             .buttonStyle(SeaServerRowButtonStyle(reduceMotion: reduceMotion)).disabled(disabled)
+            .pointerStyle(disabled ? .default : .link)
             .accessibilityLabel(localNodeAccessibilitySummary(node: node, isActive: selected,
                 isSwitching: switching, latency: latency, didFail: didFail))
         }
@@ -249,43 +233,162 @@ extension ProxiesView {
             Rectangle().fill(.white.opacity(0.06)).frame(height: 0.75)
                 .padding(.leading, 44).padding(.trailing, 14)
         }
+        .contextMenu {
+            Button(appState.isConnected ? String(localized: "Switch to server") : String(localized: "Select server")) {
+                appState.selectNode(node.name)
+            }
+            .disabled(disabled)
+            if let owner = accountSession.user?.id, owner == ManagedExitCatalogOwnership.currentAccount {
+                let favorite = seaFavoriteNames.contains(ProxyNode.catalogBaseName(for: node.name))
+                Button(favorite ? String(localized: "Remove favorite") : String(localized: "Favorite")) {
+                    appState.toggleRouteFavorite(node.name, owner: owner)
+                }
+            }
+            Divider()
+            Button("Copy server name") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(nodeRouteTitle(node), forType: .string)
+                ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
+            }
+            if selected && appState.isConnected {
+                Button("Test current exit") { testCurrentExit() }
+            }
+        }
         .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: selected)
         .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: switching)
     }
 
-    /// One tertiary line with a text Refresh; refresh and policy failures keep
-    /// their own rows so the reason stays readable.
+    /// One tertiary line with a text Refresh; wraps cleanly when narrow.
     var seaCatalogFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
             Rectangle().fill(.white.opacity(0.07)).frame(height: 0.75).padding(.bottom, 4)
-            HStack(spacing: 10) {
-                Group {
-                    if accountSession.catalogFailureMessage != nil {
-                        Text(verbatim: "\(catalogStatusTitle) · \(catalogStatusDetail)")
-                            .foregroundStyle(SeaTheme.attention)
-                    } else {
-                        Text(verbatim: catalogStatusDetail).foregroundStyle(SeaTheme.tertiary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    seaCatalogStatusSummary
+                    seaCatalogFeedbackText
+                    Spacer(minLength: 8)
+                    seaCatalogRefreshButton
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    seaCatalogStatusSummary
+                    HStack(spacing: 10) {
+                        seaCatalogFeedbackText
+                        Spacer(minLength: 8)
+                        seaCatalogRefreshButton
                     }
                 }
-                .font(.system(size: 12)).monospacedDigit().lineLimit(1)
-                if let catalogFeedback {
-                    Text(verbatim: catalogFeedback)
-                        .font(.system(size: 12)).monospacedDigit()
-                        .foregroundStyle(catalogRefreshSucceeded ? SeaTheme.good : SeaTheme.attention)
-                        .lineLimit(1)
-                        .transition(.opacity)
-                }
-                Spacer(minLength: 8)
-                Button(isRefreshingCatalog ? "Refreshing…" : "Refresh") { refreshCatalog() }
-                    .buttonStyle(SeaButtonStyle(variant: .text, size: .row))
-                    .font(.system(size: 13))
-                    .disabled(isRefreshingCatalog || accountSession.state != .ready)
             }
             if let reason = accountSession.catalogFailureMessage {
                 catalogIssueRow(label: String(localized: "Server catalog refresh failed"), reason: reason)
             }
             if let reason = accountSession.trafficPolicyFailureMessage {
                 catalogIssueRow(label: String(localized: "Traffic policy refresh failed"), reason: reason)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var seaCatalogStatusSummary: some View {
+        Group {
+            if accountSession.catalogFailureMessage != nil {
+                Text(verbatim: "\(catalogStatusTitle) · \(catalogStatusDetail)")
+                    .foregroundStyle(SeaTheme.attention)
+            } else {
+                Text(verbatim: catalogStatusDetail).foregroundStyle(SeaTheme.tertiary)
+            }
+        }
+        .font(.system(size: 12)).monospacedDigit()
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var seaCatalogFeedbackText: some View {
+        if let catalogFeedback {
+            Text(verbatim: catalogFeedback)
+                .font(.system(size: 12)).monospacedDigit()
+                .foregroundStyle(catalogRefreshSucceeded ? SeaTheme.good : SeaTheme.attention)
+                .lineLimit(1)
+                .transition(.opacity)
+        }
+    }
+
+    private var seaCatalogRefreshButton: some View {
+        Button(isRefreshingCatalog ? "Refreshing…" : "Refresh") { refreshCatalog() }
+            .buttonStyle(SeaButtonStyle(variant: .text, size: .row))
+            .disabled(isRefreshingCatalog || accountSession.state != .ready)
+    }
+}
+
+private struct SeaNodeToolbarTabs: View {
+    @Environment(\.locale) private var locale
+    let regionOptions: [String]
+    @Binding var regionFilter: String?
+    @Binding var seaFavoritesOnly: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        let all = "All", favorites = "Favorites"
+        let sorted = SeaServerPresentation.sortedRegions(regionOptions, locale: locale)
+        let labels = Dictionary(uniqueKeysWithValues: sorted.map { ($0, SeaServerPresentation.regionLabel($0, locale: locale)) })
+        let selection = Binding<String>(
+            get: {
+                if seaFavoritesOnly { return favorites }
+                return regionFilter.flatMap { labels[$0] } ?? all
+            },
+            set: { value in
+                withAnimation(TonoMotion.stateChange(reduceMotion: reduceMotion)) {
+                    seaFavoritesOnly = value == favorites
+                    regionFilter = labels.first(where: { $0.value == value })?.key
+                }
+            }
+        )
+        ScrollView(.horizontal, showsIndicators: false) {
+            SeaTabs(label: "Server filter", selection: selection,
+                    options: [all] + sorted.compactMap { labels[$0] } + [favorites])
+        }
+    }
+}
+
+private struct SeaNodesSectionView: View {
+    @Environment(\.locale) private var locale
+    let nodes: [ProxyNode]
+    let cloudNodesEmpty: Bool
+    let favoriteNames: Set<String>
+    let regionFilter: String?
+    let seaFavoritesOnly: Bool
+    let rowContent: (ProxyNode) -> AnyView
+
+    var body: some View {
+        let favorites = SeaServerPresentation.favorites(in: nodes, names: favoriteNames)
+        let listTitle = regionFilter.map { SeaServerPresentation.regionLabel($0, locale: locale) } ?? String(localized: "All servers")
+        VStack(alignment: .leading, spacing: 20) {
+            if !favorites.isEmpty {
+                group(String(localized: "Favorites"), nodes: favorites)
+            }
+            if !seaFavoritesOnly, !nodes.isEmpty {
+                group(listTitle, nodes: nodes)
+            }
+            if nodes.isEmpty || (seaFavoritesOnly && favorites.isEmpty) {
+                ContentUnavailableView(
+                    seaFavoritesOnly ? "No favorite servers" : (cloudNodesEmpty ? "No Cloud Servers" : "No Matching Servers"),
+                    systemImage: seaFavoritesOnly ? "star" : "magnifyingglass",
+                    description: Text(cloudNodesEmpty
+                        ? "Sign in and wait for the protected server catalog to synchronize."
+                        : "Try a different search or region filter.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            }
+        }
+    }
+
+    private func group(_ title: String, nodes: [ProxyNode]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: "\(title) · \(nodes.count)")
+                .font(.system(size: 12, weight: .semibold)).tracking(0.3).monospacedDigit()
+                .foregroundStyle(SeaTheme.tertiary).accessibilityAddTraits(.isHeader)
+                .padding(.bottom, 6)
+            LazyVStack(spacing: 2) {
+                ForEach(nodes) { rowContent($0) }
             }
         }
     }
@@ -305,6 +408,7 @@ private struct SeaSearchClearButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .onHover { hovered = $0 }
         .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
     }
@@ -327,6 +431,7 @@ private struct SeaFavoriteButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .onHover { hovered = $0 }
         .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
     }

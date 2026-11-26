@@ -19,16 +19,17 @@ struct SupportHealthSection: View {
                     .font(.system(size: 12)).foregroundStyle(.secondary)
             }
             if seaEnabled {
-                HStack(spacing: 10) {
-                    Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
-                        .buttonStyle(SeaButtonStyle(variant: .primary))
-                        .disabled(checking)
-                        .accessibilityIdentifier("localHealthCheck")
-                    Button(reportCopied ? String(localized: "Copied") : String(localized: "Copy for support"), action: copyReport)
-                        .buttonStyle(SeaButtonStyle(variant: .quiet))
-                    Button("Upload diagnostics") { previewReport() }
-                        .buttonStyle(SeaButtonStyle(variant: .quiet))
-                        .disabled(!canPreviewReport)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        seaHealthActionButtons
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            seaCheckButton
+                            seaCopyButton
+                        }
+                        seaUploadButton
+                    }
                 }
             } else {
                 Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
@@ -74,28 +75,60 @@ struct SupportHealthSection: View {
             }
         }
         .sheet(isPresented: $showingReport, onDismiss: { account?.discardSupportReport() }) {
-            if let account, let draft = account.supportReportDraft {
-                SupportReportConfirmationView(
-                    draft: draft, receipt: account.supportReportReceipt,
-                    sending: account.uploadingSupportReportID != nil,
-                    error: account.supportReportError,
-                    canSend: draft.health.generation == appState.connectionCoordinator.protectionOperationGeneration,
-                    confirm: {
-                        Task {
-                            await account.confirmSupportReport(
-                                id: draft.id, generation: appState.connectionCoordinator.protectionOperationGeneration
-                            )
-                        }
-                    }, close: { showingReport = false }
-                )
-            } else {
-                VStack(spacing: 16) {
-                    Text("The account changed. Close this preview and check again.")
-                    Button("Close") { showingReport = false }
-                        .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
-                }.padding(24)
+            Group {
+                if let account, let draft = account.supportReportDraft {
+                    SupportReportConfirmationView(
+                        draft: draft, receipt: account.supportReportReceipt,
+                        sending: account.uploadingSupportReportID != nil,
+                        error: account.supportReportError,
+                        canSend: draft.health.generation == appState.connectionCoordinator.protectionOperationGeneration,
+                        confirm: {
+                            Task {
+                                await account.confirmSupportReport(
+                                    id: draft.id, generation: appState.connectionCoordinator.protectionOperationGeneration
+                                )
+                            }
+                        }, close: { showingReport = false }
+                    )
+                } else {
+                    VStack(spacing: 16) {
+                        Text("The account changed. Close this preview and check again.")
+                        Button("Close") { showingReport = false }
+                            .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
+                            .keyboardShortcut(.cancelAction)
+                    }.padding(24)
+                }
             }
+            .background {
+                if seaEnabled { SeaSecondaryScene() }
+            }
+            .preferredColorScheme(seaEnabled ? .dark : nil)
         }
+    }
+
+    private var seaCheckButton: some View {
+        Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
+            .buttonStyle(SeaButtonStyle(variant: .primary))
+            .disabled(checking)
+            .accessibilityIdentifier("localHealthCheck")
+    }
+
+    private var seaCopyButton: some View {
+        Button(reportCopied ? String(localized: "Copied") : String(localized: "Copy for support"), action: copyReport)
+            .buttonStyle(SeaButtonStyle(variant: .quiet))
+    }
+
+    private var seaUploadButton: some View {
+        Button("Upload diagnostics") { previewReport() }
+            .buttonStyle(SeaButtonStyle(variant: .quiet))
+            .disabled(!canPreviewReport)
+    }
+
+    @ViewBuilder
+    private var seaHealthActionButtons: some View {
+        seaCheckButton
+        seaCopyButton
+        seaUploadButton
     }
 
     private var canPreviewReport: Bool {
@@ -127,11 +160,24 @@ struct SupportHealthSection: View {
 struct LocalHealthResults: View {
     @SeaAppearancePreference private var seaEnabled
     let check: LocalHealthCheck
+
+    private static func localizedUIState(_ raw: String) -> String {
+        switch raw {
+        case "connected": return String(localized: "Connected")
+        case "connecting": return String(localized: "Connecting…")
+        case "disconnecting": return String(localized: "Disconnecting…")
+        case "protectedOffline": return String(localized: "Protected Offline")
+        case "standby": return String(localized: "Standby")
+        case "notConnected": return String(localized: "Not Connected")
+        default: return raw
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(check.observedAt, format: .dateTime.hour().minute().second())
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-            Text("Connection snapshot: \(check.request.report.uiState)")
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+            Text("Connection snapshot: \(Self.localizedUIState(check.request.report.uiState))")
                 .font(.system(size: seaEnabled ? 12 : 11, design: seaEnabled ? .default : .monospaced))
             if let category = check.request.report.error {
                 Text("Last failure category: \(category)")
@@ -212,6 +258,7 @@ struct SupportReportConfirmationView: View {
             HStack {
                 Button("Close", action: close)
                     .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 if receipt == nil {
                     Button(sending ? String(localized: "Sending…") : String(localized: "Send this report"), action: confirm)

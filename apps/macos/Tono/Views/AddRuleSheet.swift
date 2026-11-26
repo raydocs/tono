@@ -2,6 +2,8 @@ import SwiftUI
 
 struct AddRuleSheet: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.colorScheme) private var colorScheme
+    @SeaDisplayPreferences private var displayPreferences
     @Binding var isPresented: Bool
     var onAdd: ((RuleItem) -> Void)?
 
@@ -9,6 +11,7 @@ struct AddRuleSheet: View {
     @State private var value = ""
     @State private var selectedPolicy = "Proxy"
     @State private var selectedTarget = "Proxy"
+    @State private var validationError: LocalizedStringKey?
 
     private let ruleTypes = [
         "DOMAIN-SUFFIX",
@@ -20,7 +23,7 @@ struct AddRuleSheet: View {
         "MATCH"
     ]
 
-    private let policies: [(value: String, label: String, color: String)] = [
+    private let policies: [(value: String, label: LocalizedStringKey, color: String)] = [
         ("Proxy", "Proxy", "4B6EFF"),
         ("Direct", "Direct", "30D158"),
         ("Reject", "Reject", "FF6E52")
@@ -102,6 +105,12 @@ struct AddRuleSheet: View {
                                 .textFieldStyle(.plain)
                         }
                     }
+
+                    if let validationError {
+                        Text(validationError)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 // Footer
@@ -124,7 +133,9 @@ struct AddRuleSheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular.tint(.white.opacity(0.06)), in: Capsule())
+                    .keyboardShortcut(.cancelAction)
+                    .pointerStyle(.link)
+                    .modifier(AddRuleGlassCapsule(enabled: !displayPreferences.reduceTransparency, dark: colorScheme == .dark, opacity: 0.06))
 
                     Button {
                         addRule()
@@ -145,16 +156,30 @@ struct AddRuleSheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .shadow(color: TonoBrand.accent.opacity(0.25), radius: 8, y: 3)
+                    .keyboardShortcut(.defaultAction)
+                    .pointerStyle(.link)
+                    .shadow(color: displayPreferences.reduceTransparency ? .clear : TonoBrand.accent.opacity(0.25), radius: 8, y: 3)
                 }
             }
             .padding(28)
             .frame(width: 420)
             .fixedSize(horizontal: false, vertical: true)
-            .glassEffect(.regular.tint(.white.opacity(0.15)), in: RoundedRectangle(cornerRadius: 20))
+            .background {
+                if displayPreferences.reduceTransparency || displayPreferences.contrast == .increased {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .windowBackgroundColor))
+                }
+            }
+            .overlay {
+                if displayPreferences.contrast == .increased {
+                    RoundedRectangle(cornerRadius: 20)
+                        .strokeBorder(.white.opacity(colorScheme == .dark ? 0.35 : 0.5), lineWidth: 1)
+                }
+            }
+            .modifier(AddRuleModalGlass(enabled: !displayPreferences.reduceTransparency && displayPreferences.contrast != .increased))
             .contentShape(Rectangle())
             .onTapGesture { }
-            .shadow(color: .black.opacity(0.12), radius: 30, y: 10)
+            .shadow(color: displayPreferences.reduceTransparency ? .clear : .black.opacity(0.12), radius: 30, y: 10)
             .opacity(isPresented ? 1 : 0)
         }
         .onChange(of: selectedPolicy) { _, newValue in
@@ -162,15 +187,23 @@ struct AddRuleSheet: View {
                 selectedTarget = "Proxy"
             }
         }
+        .onChange(of: value) { _, _ in
+            validationError = nil
+        }
     }
 
     private func close() {
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(TonoMotion.easeOut(0.2, reduceMotion: displayPreferences.reduceMotion)) {
             isPresented = false
         }
     }
 
     private func addRule() {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if selectedType != "MATCH" && trimmedValue.isEmpty {
+            validationError = "Value is required"
+            return
+        }
         let policy: RulePolicy = switch selectedPolicy {
         case "Direct": .direct
         case "Reject": .reject
@@ -179,7 +212,7 @@ struct AddRuleSheet: View {
         let newRule = RuleItem(
             id: "r\(UUID().uuidString.prefix(6))",
             type: selectedType,
-            value: value,
+            value: selectedType == "MATCH" && trimmedValue.isEmpty ? "MATCH" : trimmedValue,
             policy: policy,
             policyName: policy == .proxy && selectedTarget != "Proxy" ? selectedTarget : nil
         )
@@ -240,7 +273,7 @@ struct AddRuleSheet: View {
                 Circle()
                     .fill(Color(hex: policies.first(where: { $0.value == selectedPolicy })?.color ?? "4B6EFF"))
                     .frame(width: 8, height: 8)
-                Text(selectedPolicy)
+                Text(LocalizedStringKey(selectedPolicy))
                     .font(.system(size: 13))
                     .foregroundStyle(.primary)
                 Spacer()
@@ -249,11 +282,20 @@ struct AddRuleSheet: View {
                     .foregroundStyle(.secondary)
             }
             .padding(10)
-            .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.5), lineWidth: 0.5))
+            .background(
+                displayPreferences.reduceTransparency
+                    ? AnyShapeStyle(colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                    : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.07 : 0.35)),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.white.opacity(displayPreferences.contrast == .increased ? 0.45 : (colorScheme == .dark ? 0.14 : 0.5)), lineWidth: displayPreferences.contrast == .increased ? 1 : 0.5)
+            )
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
     }
 
     // MARK: - Glass Input Container
@@ -264,8 +306,16 @@ struct AddRuleSheet: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.5), lineWidth: 0.5))
+        .background(
+            displayPreferences.reduceTransparency
+                ? AnyShapeStyle(colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.07 : 0.35)),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.white.opacity(displayPreferences.contrast == .increased ? 0.45 : (colorScheme == .dark ? 0.14 : 0.5)), lineWidth: displayPreferences.contrast == .increased ? 1 : 0.5)
+        )
     }
 
     // MARK: - Custom Picker
@@ -295,11 +345,20 @@ struct AddRuleSheet: View {
                     .foregroundStyle(.secondary)
             }
             .padding(10)
-            .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.5), lineWidth: 0.5))
+            .background(
+                displayPreferences.reduceTransparency
+                    ? AnyShapeStyle(colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                    : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.07 : 0.35)),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.white.opacity(displayPreferences.contrast == .increased ? 0.45 : (colorScheme == .dark ? 0.14 : 0.5)), lineWidth: displayPreferences.contrast == .increased ? 1 : 0.5)
+            )
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
     }
 
     // MARK: - Form Field
@@ -311,6 +370,32 @@ struct AddRuleSheet: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             content()
+        }
+    }
+}
+
+private struct AddRuleGlassCapsule: ViewModifier {
+    let enabled: Bool
+    let dark: Bool
+    let opacity: Double
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(.regular.tint(.white.opacity(opacity)), in: Capsule())
+        } else {
+            content.background(dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor), in: Capsule())
+        }
+    }
+}
+
+private struct AddRuleModalGlass: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(.regular.tint(.white.opacity(0.15)), in: RoundedRectangle(cornerRadius: 20))
+        } else {
+            content
         }
     }
 }

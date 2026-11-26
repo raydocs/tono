@@ -7,7 +7,8 @@ struct SupportView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
-    @AppStorage(SettingsKey.remoteDiagnosticsEnabled)
+    @SeaDisplayPreferences private var displayPreferences
+    @AppStorage(SettingsKey.remoteDiagnosticsEnabled, store: AppProfile.defaults)
     private var remoteDiagnosticsEnabled = false
     @AppStorage(
         SettingsKey.networkLogUploadEnabled,
@@ -160,12 +161,16 @@ struct SupportView: View {
                 Task { await refreshProbe() }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11))
+                    if isProbing {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11))
+                    }
                     Text(String(localized: "Refresh"))
-                        .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
+                        .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
                 }
-                .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
+                .modifier(SupportLegacyForeground(active: !seaEnabled, color: Color.primary))
                 .padding(.horizontal, seaEnabled ? 0 : 12)
                 .padding(.vertical, seaEnabled ? 0 : 6)
                 .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
@@ -177,7 +182,7 @@ struct SupportView: View {
                 )
                 .contentShape(Capsule())
             }
-            .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
+            .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .plain))
             .fixedSize()
             .disabled(isProbing)
         }
@@ -260,7 +265,7 @@ struct SupportView: View {
                 }
             } label: {
                 Text(String(localized: "Open WebRTC check"))
-                    .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
+                    .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
             }
             .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
             .controlSize(.small)
@@ -324,7 +329,7 @@ struct SupportView: View {
                     ForEach(issues) { issue in
                         VStack(alignment: .leading, spacing: 3) {
                             Text("\(issue.key)=\(issue.value)")
-                                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
+                                .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(.red)
                                 .textSelection(.enabled)
                             Text(issue.source)
@@ -338,8 +343,19 @@ struct SupportView: View {
                         }
                     }
                 }
-                .padding(8)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .padding(10)
+                .background(
+                    displayPreferences.reduceTransparency
+                        ? AnyShapeStyle(seaEnabled || colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                        : AnyShapeStyle(Color.primary.opacity(0.04)),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+                .overlay {
+                    if displayPreferences.contrast == .increased {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                    }
+                }
 
                 Text(String(localized: "Clear uppercase and lowercase proxy variables in a new shell: unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy"))
                     .font(.system(size: 11))
@@ -359,13 +375,24 @@ struct SupportView: View {
                         .foregroundStyle(.orange)
                     ForEach(errors, id: \.self) { error in
                         Text(error)
-                            .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
                 }
-                .padding(8)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .padding(10)
+                .background(
+                    displayPreferences.reduceTransparency
+                        ? AnyShapeStyle(seaEnabled || colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                        : AnyShapeStyle(Color.primary.opacity(0.04)),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+                .overlay {
+                    if displayPreferences.contrast == .increased {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                    }
+                }
             }
         }
     }
@@ -606,7 +633,7 @@ struct SupportView: View {
 
             ScrollView {
                 Text(report)
-                    .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -615,9 +642,17 @@ struct SupportView: View {
             .scrollIndicators(.visible)
             .frame(maxHeight: 220)
             .background(
-                .white.opacity(colorScheme == .dark ? 0.06 : 0.35),
+                displayPreferences.reduceTransparency
+                    ? AnyShapeStyle(seaEnabled || colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                    : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.06 : 0.35)),
                 in: RoundedRectangle(cornerRadius: 12)
             )
+            .overlay {
+                if displayPreferences.contrast == .increased {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                }
+            }
 
             copyButton(
                 title: String(localized: "Copy report"),
@@ -665,16 +700,24 @@ struct SupportView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(Self.recoveryCommand)
-                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    .white.opacity(colorScheme == .dark ? 0.06 : 0.35),
+                    displayPreferences.reduceTransparency
+                        ? AnyShapeStyle(seaEnabled || colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                        : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.06 : 0.35)),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
+                .overlay {
+                    if displayPreferences.contrast == .increased {
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                    }
+                }
 
             copyButton(
                 title: String(localized: "Copy recovery command"),
@@ -698,7 +741,7 @@ struct SupportView: View {
                 .foregroundStyle(.primary)
 
             Text(path)
-                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -706,8 +749,8 @@ struct SupportView: View {
             HStack(spacing: 14) {
                 Button(String(localized: "Show in Finder"), action: reveal)
                     .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
+                    .font(seaEnabled ? nil : .system(size: 11, weight: .semibold))
+                    .modifier(SupportLegacyForeground(active: !seaEnabled, color: TonoBrand.accent))
 
                 Button(
                     copiedTarget == copyTarget
@@ -717,8 +760,8 @@ struct SupportView: View {
                     copy(path, target: copyTarget)
                 }
                 .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
+                .font(seaEnabled ? nil : .system(size: 11, weight: .semibold))
+                .modifier(SupportLegacyForeground(active: !seaEnabled, color: TonoBrand.accent))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -736,9 +779,9 @@ struct SupportView: View {
                 Image(systemName: copiedTarget == target ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 11))
                 Text(copiedTarget == target ? String(localized: "Copied") : title)
-                    .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
+                    .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
             }
-            .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
+            .modifier(SupportLegacyForeground(active: !seaEnabled, color: Color.primary))
             .padding(.horizontal, seaEnabled ? 0 : 12)
             .padding(.vertical, seaEnabled ? 0 : 6)
             .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
@@ -756,7 +799,7 @@ struct SupportView: View {
 
     private var supportDivider: some View {
         Divider()
-            .opacity(0.3)
+            .opacity(displayPreferences.contrast == .increased ? 0.45 : 0.3)
             .padding(.vertical, 2)
     }
 
@@ -1011,7 +1054,7 @@ private struct SupportRow: View {
                     .foregroundStyle(SeaTheme.muted)
                     .frame(width: 150, alignment: .leading)
                 Text(value)
-                    .font(.system(size: 13)).monospacedDigit()
+                    .font(.system(size: 13, design: monospaced ? .monospaced : .default)).monospacedDigit()
                     .foregroundStyle(SeaTheme.text)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1031,6 +1074,19 @@ private struct SupportRow: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        }
+    }
+}
+
+private struct SupportLegacyForeground: ViewModifier {
+    let active: Bool
+    let color: Color
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if active {
+            content.foregroundStyle(color)
+        } else {
+            content
         }
     }
 }

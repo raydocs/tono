@@ -815,7 +815,15 @@
     "refused": "Tono did not install this update. Ask a family member for help before trying again.",
     "notCompleted": "The update did not finish. You can try again. If it keeps failing, ask a family member for help.",
     "technicalDetails": "Technical details",
-    "checkUnknown": "Tono could not check for updates. Try again in a little while."
+    "checkUnknown": "Tono could not check for updates. Try again in a little while.",
+    "protectionNote": "Signed update verified by Tono Service. Your network protection stays active until restart.",
+    "pillAvailable": "Update available: v{{version}}",
+    "pillDownloading": "Downloading v{{version}} ({{progress}}%)",
+    "sidebarTitle": "Update v{{version}}",
+    "sidebarHint": "Review and install",
+    "downloading": "Downloading update…",
+    "downloadingShort": "Downloading {{progress}}%",
+    "preparing": "Preparing…"
   },
   "cities": {
     "losAngeles": "Los Angeles",

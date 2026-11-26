@@ -16,7 +16,8 @@ struct LoginView: View {
     @SeaAppearancePreference private var seaAppearance
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults) private var seaMotionMode = "Auto"
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @State private var email = ""
     @State private var emailCode = ""
     @State private var deviceName = Host.current().localizedName ?? "Mac"
@@ -139,6 +140,7 @@ struct LoginView: View {
 
     private var seaSignIn: some View {
         GeometryReader { proxy in
+            let compactHeight = proxy.size.height < 640
             ZStack {
                 SeaScene(phase: appState.gateProtectionNotice == nil ? .night : .blocked,
                          motionEnabled: SeaAppearance.animates(seaMotionMode, reduceMotion: reduceMotion))
@@ -154,16 +156,16 @@ struct LoginView: View {
                             Text("Tono").font(.title3.weight(.semibold))
                         }
                         .foregroundStyle(SeaTheme.text)
-                        .padding(.bottom, 40)
+                        .padding(.bottom, compactHeight ? 24 : 40)
                         signInHeading
-                            .padding(.bottom, 40)
+                            .padding(.bottom, compactHeight ? 24 : 40)
                         signInForm
                         GateProtectionSection(session: session, disabled: locked, seaStandalone: true)
                             .padding(.top, 24)
                     }
                     .frame(maxWidth: 400, alignment: .leading)
                     .padding(.horizontal, 40)
-                    .padding(.vertical, 64)
+                    .padding(.vertical, compactHeight ? 28 : 64)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: proxy.size.height, alignment: .center)
                 }
@@ -347,7 +349,8 @@ struct LoginView: View {
                                         }
                                     }
                                     .modifier(SeaActionStyle(variant: .quiet, legacy: .gateSecondary))
-                                    .frame(width: 74)
+                                    .frame(minWidth: 74)
+                                    .fixedSize()
                                     .disabled(locked)
                                 }
                             }
@@ -727,7 +730,7 @@ struct LoginView: View {
             Button {
                 Task { await sendEmailCode() }
             } label: {
-                busyLabel(resendButtonTitle)
+                busyLabel(verbatim: resendButtonTitle)
             }
             .buttonStyle(GateAdaptiveButtonStyle(
                 prominent: error == nil && session.emailChallenge == nil
@@ -827,10 +830,20 @@ struct LoginView: View {
     }
 
     @ViewBuilder
-    private func busyLabel(_ title: String) -> some View {
+    private func busyLabel(_ title: LocalizedStringKey) -> some View {
         HStack {
             if busy { ProgressView().controlSize(.small) }
             Text(title)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func busyLabel(verbatim title: String) -> some View {
+        HStack {
+            if busy { ProgressView().controlSize(.small) }
+            Text(verbatim: title)
+                .monospacedDigit()
         }
         .frame(maxWidth: .infinity)
     }
@@ -882,7 +895,8 @@ Core failed to start: The installed network helper no longer accepts this copy o
 /// without mutating AccountSession (state is service-owned).
 struct LoginErrorPreviewCard: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @State private var showErrorDetails = true
     let message: String
 

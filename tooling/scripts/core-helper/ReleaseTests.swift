@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CryptoKit
 
 /// `--release-self-test`, run as root on hosted macOS CI. One check per
 /// behavior; each prints what failed.
@@ -309,6 +310,78 @@ func runReleaseSelfTests() -> Bool {
               "strict restart and failed replacement retain block; fenced explicit release retires intent")
     } catch {
         check(false, "strict restart and failed replacement retain block; fenced explicit release retires intent")
+    }
+
+    // Re-derivation of StrictRuntimeProof from an admitted root-owned snapshot
+    // succeeds for matching (digest, generation) and rejects mismatches.
+    if let interface = KillSwitchManager.physicalEgressInterfaces().first {
+        do {
+            let graph = try ThreeTierRoutingContract.graph(
+                home: "Tono-Home-Residential",
+                physicalInterface: interface,
+                fakeRange: "198.18.176.0/20"
+            )
+            var runtime = try JSONSerialization.jsonObject(with: Data(coreLifecycleTestJSON.utf8)) as! [String: Any]
+            runtime["route"] = graph["route"]
+            runtime["dns"] = graph["dns"]
+            runtime["outbounds"] = [
+                ["type": "vless", "tag": "Fixture Cloud", "server": "9.9.9.9", "server_port": 8443,
+                 "uuid": "11111111-1111-4111-8111-111111111111"],
+                ["type": "selector", "tag": "Tono-Exit", "outbounds": ["Fixture Cloud"], "default": "Fixture Cloud"],
+                ["type": "socks", "tag": "Tono-Home-Residential", "server": "203.0.114.60", "server_port": 11080,
+                 "version": "5", "username": "fixture-user", "password": "fixture-password", "network": "tcp", "detour": "Tono-Exit"],
+                graph["direct_outbound"] as! [String: Any],
+            ]
+            let snapshotBytes = try JSONSerialization.data(withJSONObject: runtime)
+            let snapshotDigest = SHA256.hash(data: snapshotBytes).map { String(format: "%02x", $0) }.joined()
+            let snapshotPath = directory + "/strict-rebind-snapshot.json"
+            try snapshotBytes.write(to: URL(fileURLWithPath: snapshotPath))
+            chown(snapshotPath, 0, 0)
+            chmod(snapshotPath, 0o600)
+
+            try authority.save(secured)
+            try authority.bindRuntime(
+                generation: 20,
+                digest: snapshotDigest,
+                runtimeMode: "three-tier",
+                requestedMode: "three-tier"
+            )
+            let rebound = try CoreManager.rebindStrictProofIfAdmitted(
+                digest: snapshotDigest,
+                generation: 20,
+                strictIntentActive: true,
+                authority: authority,
+                snapshotPath: snapshotPath,
+                requireRootSnapshot: true
+            )
+            var badDigestRejected = false
+            do {
+                _ = try CoreManager.rebindStrictProofIfAdmitted(
+                    digest: String(repeating: "a", count: 64),
+                    generation: 20,
+                    strictIntentActive: true,
+                    authority: authority,
+                    snapshotPath: snapshotPath,
+                    requireRootSnapshot: true
+                )
+            } catch { badDigestRejected = true }
+            var badGenerationRejected = false
+            do {
+                _ = try CoreManager.rebindStrictProofIfAdmitted(
+                    digest: snapshotDigest,
+                    generation: 21,
+                    strictIntentActive: true,
+                    authority: authority,
+                    snapshotPath: snapshotPath,
+                    requireRootSnapshot: true
+                )
+            } catch { badGenerationRejected = true }
+            check(rebound?.digest == snapshotDigest && rebound?.generation == 20
+                    && badDigestRejected && badGenerationRejected,
+                  "admitted strict snapshot re-derivation accepts matching digest/generation and rejects mismatches")
+        } catch {
+            check(false, "admitted strict snapshot re-derivation accepts matching digest/generation and rejects mismatches")
+        }
     }
 
     // AI Home is fail-closed for AI only: its bind records no strict intent,

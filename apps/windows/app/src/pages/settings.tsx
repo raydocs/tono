@@ -1,9 +1,7 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { DialogRef } from '@/components/base'
-import { UpdateViewer } from '@/components/setting/mods/update-viewer'
 import { useTonoStatus } from '@/hooks/use-tono'
 import {
   useTonoPreferences,
@@ -36,19 +34,21 @@ import {
   describeTonoActionError,
   type TonoActionErrorDescription,
 } from '@/services/tono'
-import { updateCheckNoticeKey } from '@/services/update-copy'
-import {
-  OPEN_UPDATE_STORAGE_KEY,
-  OPEN_UPDATE_WINDOW_EVENT,
-} from '@/services/update-prompt'
 import { TONO_UPDATES_CONFIGURED } from '@/services/update'
+import { updateCheckNoticeKey } from '@/services/update-copy'
+import { OPEN_UPDATE_WINDOW_EVENT } from '@/services/update-prompt'
 import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { AppearanceCard } from '@/tono-ui/AppearanceCard'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { PrivacyDescription } from '@/tono-ui/PrivacyDescription'
 import { SeaButton, SeaSegmented, SeaTag, SeaToggle } from '@/tono-ui/SeaControls'
-import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
+import {
+  TONO_COLORS,
+  TONO_MONO_STACK,
+  tonoAccent,
+  tonoText,
+} from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { TonoToggle } from '@/tono-ui/TonoToggle'
@@ -825,20 +825,11 @@ const AboutCard = () => {
       showNotice.error('settings.sections.tono.auditLog.copyFailed')
     }
   })
-  const updateRef = useRef<DialogRef>(null)
-  const { checkUpdate, loading } = useUpdate()
+  const { updateInfo, checkUpdate, loading } = useUpdate()
 
-  useEffect(() => {
-    const openIfAsked = () => {
-      if (sessionStorage.getItem(OPEN_UPDATE_STORAGE_KEY) !== '1') return
-      sessionStorage.removeItem(OPEN_UPDATE_STORAGE_KEY)
-      updateRef.current?.open()
-    }
-    openIfAsked()
-    window.addEventListener(OPEN_UPDATE_WINDOW_EVENT, openIfAsked)
-    return () =>
-      window.removeEventListener(OPEN_UPDATE_WINDOW_EVENT, openIfAsked)
-  }, [])
+  const openUpdateViewer = () => {
+    window.dispatchEvent(new CustomEvent(OPEN_UPDATE_WINDOW_EVENT))
+  }
 
   const onCheckUpdate = useLockFn(async () => {
     if (!TONO_UPDATES_CONFIGURED) {
@@ -854,7 +845,7 @@ const AboutCard = () => {
             : String(result.error)
         showNotice.error(updateCheckNoticeKey(raw))
       } else if (result.data) {
-        updateRef.current?.open()
+        openUpdateViewer()
       } else {
         showNotice.success('tono.settings.about.latestVersion')
       }
@@ -866,16 +857,38 @@ const AboutCard = () => {
 
   if (newAppearance)
     return (
-      <>
-        <UpdateViewer ref={updateRef} />
-        <GlassCard>
-          <h2>{t('tono.settings.about.title')}</h2>
-          <div className="sea-settings-about-head">
-            <TonoLogo connected={false} size={44} variant="sun" />
-            <div>
-              <span>Tono v{version}</span>
-              <p>{t('tono.settings.about.tagline')}</p>
-            </div>
+      <GlassCard>
+        <h2>{t('tono.settings.about.title')}</h2>
+        <div className="sea-settings-about-head">
+          <TonoLogo connected={false} size={44} variant="sun" />
+          <div>
+            <span>Tono v{version}</span>
+            <p>{t('tono.settings.about.tagline')}</p>
+          </div>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 10,
+              flexShrink: 0,
+              flexWrap: 'wrap',
+            }}
+          >
+            {updateInfo && (
+              <button
+                type="button"
+                className="sea-settings-update-pill"
+                aria-label={t('tono.update.pillAvailable', {
+                  version: updateInfo.version,
+                })}
+                onClick={openUpdateViewer}
+              >
+                <span className="sea-settings-update-dot" aria-hidden="true" />
+                <span style={{ fontFamily: TONO_MONO_STACK }}>
+                  v{updateInfo.version}
+                </span>
+              </button>
+            )}
             <button
               type="button"
               className="sea-button"
@@ -886,47 +899,83 @@ const AboutCard = () => {
             >
               {t('tono.settings.about.checkUpdates')}
             </button>
-          </div>
-          <p className="sea-settings-about-copy">
-            {t('tono.settings.about.description')}
-          </p>
-          <p className="sea-settings-about-copy">
-            {t('tono.settings.about.unsigned')}
-          </p>
-          <AuditPathRow logPath={auditLogInfo?.path} onCopy={handleCopyPath} />
-        </GlassCard>
-      </>
+          </span>
+        </div>
+        <p className="sea-settings-about-copy">
+          {t('tono.settings.about.description')}
+        </p>
+        <p className="sea-settings-about-copy">
+          {t('tono.settings.about.unsigned')}
+        </p>
+        <AuditPathRow logPath={auditLogInfo?.path} onCopy={handleCopyPath} />
+      </GlassCard>
     )
 
   return (
-    <>
-      <UpdateViewer ref={updateRef} />
-      <GlassCard
+    <GlassCard
+      style={{
+        background: `linear-gradient(135deg, ${TONO_COLORS.accent}1A 0%, ${TONO_COLORS.protectedOffline}1A 100%), ${
+          dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'
+        }`,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        textAlign: 'center',
+        gap: 10,
+        justifyContent: 'center',
+      }}
+    >
+      <TonoLogo connected compact={false} size={56} />
+      <span style={{ fontSize: 15, fontWeight: 600, color: text.primary }}>
+        Tono v{version}
+      </span>
+      <span style={{ fontSize: 12, fontWeight: 500, color: text.secondary }}>
+        {t('tono.settings.about.tagline')}
+      </span>
+      <span style={{ fontSize: 11, color: text.tertiary, maxWidth: 260 }}>
+        {t('tono.settings.about.description')}
+      </span>
+      <span style={{ fontSize: 11, color: text.tertiary, maxWidth: 280 }}>
+        {t('tono.settings.about.unsigned')}
+      </span>
+      <span
         style={{
-          background: `linear-gradient(135deg, ${TONO_COLORS.accent}1A 0%, ${TONO_COLORS.protectedOffline}1A 100%), ${
-            dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'
-          }`,
-          display: 'flex',
-          flexDirection: 'column',
+          display: 'inline-flex',
           alignItems: 'center',
-          textAlign: 'center',
-          gap: 10,
           justifyContent: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
         }}
       >
-        <TonoLogo connected compact={false} size={56} />
-        <span style={{ fontSize: 15, fontWeight: 600, color: text.primary }}>
-          Tono v{version}
-        </span>
-        <span style={{ fontSize: 12, fontWeight: 500, color: text.secondary }}>
-          {t('tono.settings.about.tagline')}
-        </span>
-        <span style={{ fontSize: 11, color: text.tertiary, maxWidth: 260 }}>
-          {t('tono.settings.about.description')}
-        </span>
-        <span style={{ fontSize: 11, color: text.tertiary, maxWidth: 280 }}>
-          {t('tono.settings.about.unsigned')}
-        </span>
+        {updateInfo && (
+          <button
+            type="button"
+            className="tono-link"
+            aria-label={t('tono.update.pillAvailable', {
+              version: updateInfo.version,
+            })}
+            onClick={openUpdateViewer}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '3px 9px',
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 600,
+              fontFamily: TONO_MONO_STACK,
+              color: tonoAccent(dark),
+              background: dark
+                ? 'rgba(171, 158, 255, 0.14)'
+                : 'rgba(116, 87, 245, 0.1)',
+              border: `1px solid ${
+                dark ? 'rgba(171, 158, 255, 0.28)' : 'rgba(116, 87, 245, 0.22)'
+              }`,
+            }}
+          >
+            v{updateInfo.version}
+          </button>
+        )}
         <button
           type="button"
           className="tono-link"
@@ -935,8 +984,8 @@ const AboutCard = () => {
         >
           {t('tono.settings.about.checkUpdates')}
         </button>
-      </GlassCard>
-    </>
+      </span>
+    </GlassCard>
   )
 }
 

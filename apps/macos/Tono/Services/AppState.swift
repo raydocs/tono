@@ -121,6 +121,7 @@ final class AppState {
     var nativeUpdateStatus: () async throws -> HelperManager.UpdateStatus = {
         try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("status")
     }
+    @ObservationIgnored var nativeUpdateStrictRelease: (@MainActor () async throws -> Void)?
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?
@@ -242,6 +243,25 @@ final class AppState {
     }
     var isOwnedTonoMode: Bool {
         tonoTransport != nil || cloudOnlyTransportReady
+    }
+    var strictRoutingSessionActive: Bool {
+        coreRuntime.routingMode == "three-tier"
+            || connectionCoordinator.capturedRoutingMode == "three-tier"
+            || AppProfile.defaults.string(forKey: SettingsKey.routingSession) == "three-tier"
+            || AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+    }
+    var effectiveRoutingMode: String {
+        if strictRoutingSessionActive { return "three-tier" }
+        if coreRuntime.routingMode != "stable" { return coreRuntime.routingMode }
+        if let captured = connectionCoordinator.capturedRoutingMode,
+           SettingsKey.desktopRoutingModeOptions.contains(captured) {
+            return captured
+        }
+        if let session = AppProfile.defaults.string(forKey: SettingsKey.routingSession),
+           SettingsKey.desktopRoutingModeOptions.contains(session) {
+            return session
+        }
+        return coreRuntime.routingMode
     }
 
     // Proxies
@@ -511,7 +531,15 @@ final class AppState {
     // MARK: - Init
 
     init() {
-        config.secret = Self.controllerSecret()
+        if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+            || DesktopRoutingModeAdmission.persistedSession() == "three-tier",
+           let strict = StrictSessionPersistence.load() {
+            config.secret = strict.secret
+            config.mixedPort = strict.mixedPort
+            config.externalController = "127.0.0.1:\(strict.controllerPort)"
+        } else {
+            config.secret = Self.controllerSecret()
+        }
         RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
             self?.adoptLaunchProtection(protection)
         }
@@ -981,7 +1009,9 @@ final class AppState {
                                 pending: reason + " "
                                     + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
                                 released: reason + " "
-                                    + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+                                    + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready."),
+                                strictMessage: reason + " "
+                                    + String(localized: "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.")
                             )
                         }
                     }
@@ -1163,7 +1193,9 @@ final class AppState {
             pending: reason + " "
                 + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
             released: reason + " "
-                + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+                + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready."),
+            strictMessage: reason + " "
+                + String(localized: "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.")
         )
     }
 
@@ -2063,6 +2095,11 @@ final class AppState {
 
     func scheduleBackgroundOptionalPolicy() {
         guard isConnected, !isDisconnecting else { return }
+        guard effectiveRoutingMode != "ai-home", effectiveRoutingMode != "three-tier" else {
+            pendingOptionalPolicyReload = false
+            pendingDirectPolicyReload = nil
+            return
+        }
         let policy = managedTrafficPolicy
         let revision = managedTrafficPolicyRevision
         // A full accepted document supersedes pins derived from earlier
@@ -2141,6 +2178,7 @@ final class AppState {
 
     private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy, revision: Int) async {
         guard isConnected, !isDisconnecting, !Task.isCancelled,
+              effectiveRoutingMode != "ai-home", effectiveRoutingMode != "three-tier",
               let api = coreController else { return }
         let generation = connectionCoordinator.protectionOperationGeneration
         let base = activeDirectPolicy
@@ -2377,7 +2415,7 @@ final class AppState {
             // the secondary AI hold instead of holding bootstrap. A ready hook
             // must not be disarmed. Strict still holds and retries.
             let disposition = ExhaustedFailureNetwork.afterFailure(
-                strictKillSwitchExplicit: false,
+                strictKillSwitchExplicit: strictRoutingSessionActive,
                 selectiveAiBlockReady: false
             )
             switch disposition {

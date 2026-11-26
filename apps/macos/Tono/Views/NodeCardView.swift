@@ -540,7 +540,8 @@ struct NodeLatencyBadge: View {
 
 struct NodeCardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     let node: ProxyNode
     let isSelected: Bool
     let onTap: () -> Void
@@ -564,7 +565,7 @@ struct NodeCardView: View {
 
                                 if let codename = nodeCityParts(node.displayName).codename {
                                     Text(codename)
-                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                         .padding(.horizontal, 6)
@@ -574,7 +575,7 @@ struct NodeCardView: View {
 
                                 if isSelected {
                                     Text("ACTIVE")
-                                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                                        .font(.system(size: 10, weight: .bold, design: .rounded))
                                         .kerning(0.7)
                                         .foregroundStyle(TonoStatus.positive)
                                         .padding(.horizontal, 6)
@@ -619,14 +620,17 @@ struct NodeCardView: View {
             }
         }
         .buttonStyle(NodeCardPressButtonStyle(reduceMotion: reduceMotion))
+        .pointerStyle(.link)
         .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isSelected)
         .accessibilityLabel(accessibilitySummary)
     }
 
     private var accessibilitySummary: String {
+        let regionCode = nodeRegionCode(flag: node.flag, name: node.name)
+        let regionName = SeaServerPresentation.regionLabel(regionCode)
         var parts = [
-            node.displayName,
-            nodeRegionCode(flag: node.flag, name: node.name),
+            nodeRouteTitle(node),
+            regionName,
             node.protocolType,
         ]
         if node.latency > 0 { parts.append(String(localized: "\(node.latency) milliseconds")) }
@@ -637,7 +641,7 @@ struct NodeCardView: View {
     @ViewBuilder
     private func nodeMetaChip(_ title: String, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
-            .font(.system(size: 9, weight: .semibold, design: .rounded))
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)

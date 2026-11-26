@@ -3,6 +3,7 @@ import SwiftUI
 struct AddNodeSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
+    @SeaDisplayPreferences private var displayPreferences
     @Binding var isPresented: Bool
     var onAdd: ((ProxyNode) -> Void)?
     var editingNode: ProxyNode?
@@ -141,10 +142,9 @@ struct AddNodeSheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(
-                        .regular.tint(.white.opacity(colorScheme == .dark ? 0.06 : 0.32)),
-                        in: Capsule()
-                    )
+                    .keyboardShortcut(.cancelAction)
+                    .pointerStyle(.link)
+                    .modifier(AddNodeGlassCapsule(enabled: !displayPreferences.reduceTransparency, dark: colorScheme == .dark))
 
                     Button {
                         addNode()
@@ -165,19 +165,30 @@ struct AddNodeSheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .shadow(color: TonoBrand.accent.opacity(0.25), radius: 8, y: 3)
+                    .keyboardShortcut(.defaultAction)
+                    .pointerStyle(.link)
+                    .shadow(color: displayPreferences.reduceTransparency ? .clear : TonoBrand.accent.opacity(0.25), radius: 8, y: 3)
                 }
             }
             .padding(28)
             .frame(width: 440)
             .fixedSize(horizontal: false, vertical: true)
-            .glassEffect(
-                .regular.tint(.white.opacity(colorScheme == .dark ? 0.15 : 0.45)),
-                in: RoundedRectangle(cornerRadius: 20)
-            )
+            .background {
+                if displayPreferences.reduceTransparency || displayPreferences.contrast == .increased {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .windowBackgroundColor))
+                }
+            }
+            .overlay {
+                if displayPreferences.contrast == .increased {
+                    RoundedRectangle(cornerRadius: 20)
+                        .strokeBorder(.white.opacity(colorScheme == .dark ? 0.35 : 0.5), lineWidth: 1)
+                }
+            }
+            .modifier(AddNodeModalGlass(enabled: !displayPreferences.reduceTransparency && displayPreferences.contrast != .increased, dark: colorScheme == .dark))
             .contentShape(Rectangle())
             .onTapGesture { }  // Prevent tap-through to backdrop
-            .shadow(color: .black.opacity(0.12), radius: 30, y: 10)
+            .shadow(color: displayPreferences.reduceTransparency ? .clear : .black.opacity(0.12), radius: 30, y: 10)
             .opacity(isPresented ? 1 : 0)
             .onAppear {
                 if let node = editingNode {
@@ -193,7 +204,7 @@ struct AddNodeSheet: View {
     }
 
     private func close() {
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(TonoMotion.easeOut(0.2, reduceMotion: displayPreferences.reduceMotion)) {
             isPresented = false
         }
     }
@@ -255,12 +266,14 @@ struct AddNodeSheet: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            .white.opacity(colorScheme == .dark ? 0.07 : 0.35),
+            displayPreferences.reduceTransparency
+                ? AnyShapeStyle(colorScheme == .dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor))
+                : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.07 : 0.35)),
             in: RoundedRectangle(cornerRadius: 10)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.5), lineWidth: 0.5)
+                .strokeBorder(.white.opacity(displayPreferences.contrast == .increased ? 0.45 : (colorScheme == .dark ? 0.12 : 0.5)), lineWidth: displayPreferences.contrast == .increased ? 1 : 0.5)
         )
     }
 
@@ -273,6 +286,32 @@ struct AddNodeSheet: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             content()
+        }
+    }
+}
+
+private struct AddNodeGlassCapsule: ViewModifier {
+    let enabled: Bool
+    let dark: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(.regular.tint(.white.opacity(dark ? 0.06 : 0.32)), in: Capsule())
+        } else {
+            content.background(dark ? SeaTheme.opaqueQuiet : Color(nsColor: .controlBackgroundColor), in: Capsule())
+        }
+    }
+}
+
+private struct AddNodeModalGlass: ViewModifier {
+    let enabled: Bool
+    let dark: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(.regular.tint(.white.opacity(dark ? 0.15 : 0.45)), in: RoundedRectangle(cornerRadius: 20))
+        } else {
+            content
         }
     }
 }

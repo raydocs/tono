@@ -815,7 +815,15 @@
     "refused": "这次更新没有装上。请先请家人帮忙，再试一次。",
     "notCompleted": "更新没有完成。可以再试一次。如果一直失败，请家人帮忙。",
     "technicalDetails": "技术详情",
-    "checkUnknown": "暂时检查不了更新。请过一会儿再试。"
+    "checkUnknown": "暂时检查不了更新。请过一会儿再试。",
+    "protectionNote": "更新包由 Tono 服务校验签名，重启前网络保护始终保持开启。",
+    "pillAvailable": "发现新版本：v{{version}}",
+    "pillDownloading": "正在下载 v{{version}}（{{progress}}%）",
+    "sidebarTitle": "新版本 v{{version}}",
+    "sidebarHint": "查看并安装",
+    "downloading": "正在下载更新…",
+    "downloadingShort": "下载中 {{progress}}%",
+    "preparing": "正在准备…"
   },
   "cities": {
     "losAngeles": "洛杉矶",

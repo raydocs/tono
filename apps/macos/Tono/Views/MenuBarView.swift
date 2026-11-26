@@ -9,12 +9,14 @@ struct MenuBarView: View {
 
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
+    @Environment(\.appUpdater) private var appUpdater: AppUpdater?
     @Environment(\.openWindow) private var openWindow
     @SeaDisplayPreferences private var displayPreferences
     private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @State private var routeProposal: RouteRecommendation?
     @State private var showingRouteConfirmation = false
     @State private var staleRouteProposal = false
+    @State private var lastAnnouncedStatusKey: String?
     /// Measured content height: the panel is as tall as what it shows, and
     /// scrolls only past the screen-bounded maximum.
     @State private var contentHeight: CGFloat = 0
@@ -27,6 +29,14 @@ struct MenuBarView: View {
                 RecoveryNotice(appState: appState)
                     .padding(.horizontal, 16)
                     .padding(.bottom, appState.recoveryFeedback == nil ? 0 : 10)
+                if let errorMessage = appState.errorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(seaAppearance ? SeaTheme.attention : Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
+                }
                 primaryAction
                 if appState.isProtectionBlocked || appState.isProtectionUnconfirmed
                     || (KillSwitchService.isArmed && accountSession.state != .ready) {
@@ -34,8 +44,14 @@ struct MenuBarView: View {
                 }
                 if seaAppearance {
                     seaQuickRoutes
+                    if let appUpdater {
+                        MenuBarUpdateRow(updater: appUpdater)
+                    }
                     seaFooter
                 } else {
+                    if let appUpdater {
+                        MenuBarUpdateRow(updater: appUpdater)
+                    }
                     menuDivider
                     openTonoButton
                     quitButton
@@ -53,6 +69,28 @@ struct MenuBarView: View {
         }
         .modifier(SeaPageAppearance())
         .environment(\.seaAccent, seaPhase == .day ? SeaTheme.warm : SeaTheme.cool)
+        .onAppear {
+            if lastAnnouncedStatusKey == nil {
+                lastAnnouncedStatusKey = SeaStatusWords.key(
+                    kind: status.kind,
+                    connected: appState.isConnected,
+                    protectionBlocked: appState.isProtectionBlocked,
+                    unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
+                    disconnecting: appState.isDisconnecting
+                )
+            }
+        }
+        .onChange(of: SeaStatusWords.key(
+            kind: status.kind,
+            connected: appState.isConnected,
+            protectionBlocked: appState.isProtectionBlocked,
+            unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
+            disconnecting: appState.isDisconnecting
+        )) { _, newKey in
+            guard let previous = lastAnnouncedStatusKey, previous != newKey else { return }
+            lastAnnouncedStatusKey = newKey
+            AccessibilityNotification.Announcement(String(localized: String.LocalizationValue(newKey))).post()
+        }
         .confirmationDialog(String(localized: "Connect using this route?"), isPresented: $showingRouteConfirmation, titleVisibility: .visible) {
             Button("Connect") {
                 guard let routeProposal, routeProposal.owner == accountSession.user?.id,
@@ -295,6 +333,7 @@ struct MenuBarView: View {
                 .contentShape(Rectangle())
         }
         .modifier(SeaActionStyle(variant: .text, size: .row))
+        .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
         .padding(.horizontal, 16)
         .padding(.vertical, seaAppearance ? 0 : 6)
     }
@@ -343,17 +382,19 @@ struct MenuBarView: View {
                         .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.28 : 0.07))
                         .frame(height: 0.75)
                         .padding(.bottom, 6)
+                    let strictLocked = appState.isConnected && appState.strictRoutingSessionActive
                     ForEach(routes) { node in
                         let isSwitching = appState.switchingNodeId == node.id || appState.switchingNodeId == node.name
+                        let rowTitle = nodeRouteTitle(node)
                         SeaMenuQuickRouteRow(
                             node: node,
                             isSwitching: isSwitching,
-                            enabled: canAct && appState.switchingNodeId == nil,
+                            enabled: canAct && appState.switchingNodeId == nil && !strictLocked,
                             display: displayPreferences
                         ) {
                             guard accountSession.user?.id == owner,
                                   owner == ManagedExitCatalogOwnership.currentAccount,
-                                  canAct, appState.switchingNodeId == nil else { return }
+                                  canAct, appState.switchingNodeId == nil, !strictLocked else { return }
                             switch SeaMenuPresentation.action(for: node, recommendation: recommendation) {
                             case .reviewRecommendation(let proposal):
                                 routeProposal = proposal
@@ -363,7 +404,18 @@ struct MenuBarView: View {
                                 appState.selectNode(name)
                             }
                         }
-                        .accessibilityLabel(String(localized: "Connect using \(nodeRouteTitle(node))"))
+                        .accessibilityLabel(
+                            appState.isConnected
+                                ? String(localized: "Switch to \(rowTitle)")
+                                : String(localized: "Connect using \(rowTitle)")
+                        )
+                    }
+                    if strictLocked {
+                        Text("Disconnect before switching servers in Strict mode.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(SeaTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
                     }
                     if staleRouteProposal {
                         Text("The account, catalog, route preference, or connection changed. Review a fresh recommendation.")
@@ -410,6 +462,7 @@ struct MenuBarView: View {
                 .contentShape(Rectangle())
         }
         .modifier(SeaActionStyle(variant: .text, size: .row))
+        .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
         .padding(.horizontal, 16)
         .padding(.vertical, seaAppearance ? 0 : 6)
     }
@@ -470,6 +523,7 @@ struct MenuBarView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(SeaMenuRowButtonStyle(reduceMotion: display.reduceMotion))
+            .pointerStyle(enabled ? .link : .default)
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.45)
             .onHover { hovered = enabled ? $0 : false }
@@ -510,6 +564,7 @@ struct MenuBarView: View {
                 .animation(TonoMotion.press(reduceMotion: display.reduceMotion), value: configuration.isPressed)
                 .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
                 .onHover { hovered = $0 }
+                .pointerStyle(.link)
         }
     }
 

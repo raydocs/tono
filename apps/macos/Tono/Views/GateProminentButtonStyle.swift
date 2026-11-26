@@ -15,7 +15,7 @@ import SwiftUI
 /// shadow so banner and progress-card actions stay inline.
 struct GateProminentButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
     @Environment(\.controlSize) private var controlSize
 
     func makeBody(configuration: Configuration) -> some View {
@@ -23,7 +23,7 @@ struct GateProminentButtonStyle: ButtonStyle {
             configuration: configuration,
             compact: controlSize == .mini || controlSize == .small,
             isEnabled: isEnabled,
-            reduceMotion: reduceMotion
+            displayPreferences: displayPreferences
         ) {
             EmptyView()
         }
@@ -43,14 +43,14 @@ struct ProgressPillButtonStyle: ButtonStyle {
     var phase: ProgressPillPhase = .idle
     var seaPrimary = true
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
 
     @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
         if seaAppearance {
             SeaButtonStyle(variant: seaPrimary ? .primary : .quiet).makeBody(configuration: configuration)
                 .overlay {
-                    if phase == .sending && !reduceMotion {
+                    if phase == .sending && !displayPreferences.reduceMotion {
                         ProgressPillSweep().clipShape(Capsule()).allowsHitTesting(false)
                     }
                 }
@@ -59,9 +59,9 @@ struct ProgressPillButtonStyle: ButtonStyle {
                 configuration: configuration,
                 compact: false,
                 isEnabled: isEnabled,
-                reduceMotion: reduceMotion
+                displayPreferences: displayPreferences
             ) {
-                if phase == .sending && !reduceMotion {
+                if phase == .sending && !displayPreferences.reduceMotion {
                     ProgressPillSweep()
                 }
             }
@@ -76,10 +76,12 @@ private struct ActionSurface<Extra: View>: View {
     let configuration: ButtonStyle.Configuration
     let compact: Bool
     let isEnabled: Bool
-    let reduceMotion: Bool
+    let displayPreferences: SeaDisplayOptions
     @ViewBuilder let extra: () -> Extra
     @State private var isHovered = false
 
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
+    private var opaque: Bool { displayPreferences.reduceTransparency || displayPreferences.contrast == .increased }
     private var pressed: Bool { configuration.isPressed }
 
     private var shape: RoundedRectangle {
@@ -89,12 +91,12 @@ private struct ActionSurface<Extra: View>: View {
     /// The highlight layer: none at rest, a touch on hover, clear on press.
     private var sheen: Double {
         if pressed { return 0.14 }
-        if isHovered { return 0.06 }
+        if isHovered && isEnabled { return 0.06 }
         return 0
     }
 
     private var shadowOpacity: Double {
-        if compact { return 0 }
+        if compact || opaque || !isEnabled { return 0 }
         if pressed { return 0.18 }
         if isHovered { return 0.42 }
         return 0.30
@@ -115,6 +117,14 @@ private struct ActionSurface<Extra: View>: View {
                 }
                 .clipShape(shape)
             }
+            .overlay {
+                if displayPreferences.contrast == .increased {
+                    shape.strokeBorder(
+                        (seaAppearance ? SeaTheme.ink : Color.white).opacity(0.55),
+                        lineWidth: 1
+                    )
+                }
+            }
             .shadow(
                 color: (seaAppearance ? SeaTheme.warm : TonoBrand.actionShadow).opacity(shadowOpacity),
                 radius: pressed ? 6 : (isHovered ? 16 : 12),
@@ -131,9 +141,12 @@ private struct ActionSurface<Extra: View>: View {
             )
             .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: isHovered)
             .onHover { hovering in
-                guard isEnabled else { return }
-                isHovered = hovering
+                isHovered = isEnabled && hovering
             }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { isHovered = false }
+            }
+            .pointerStyle(isEnabled ? .link : .default)
             .contentShape(shape)
             .tint(seaAppearance ? SeaTheme.ink : .white)
     }

@@ -721,4 +721,61 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertTrue(retiredPosted)
         XCTAssertFalse(KillSwitchService.isArmed)
     }
+
+    func testStrictRetireDisconnectedNativeUpdateRunsStrictReleaseBeforeDisconnectAndRetire() async throws {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let recovery = RuntimeCleanup.nativeUpdateRecovery
+        let strictIntent = AppProfile.defaults.object(forKey: "strictRoutingSessionIntent")
+        let routingSession = AppProfile.defaults.object(forKey: SettingsKey.routingSession)
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            RuntimeCleanup.nativeUpdateRecovery = recovery
+            AppProfile.defaults.set(strictIntent, forKey: "strictRoutingSessionIntent")
+            AppProfile.defaults.set(routingSession, forKey: SettingsKey.routingSession)
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        AppProfile.defaults.set(true, forKey: "strictRoutingSessionIntent")
+        AppProfile.defaults.set("three-tier", forKey: SettingsKey.routingSession)
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = true
+        RuntimeCleanup.nativeUpdateRecovery = .protectedOffline
+        RuntimeCleanup.markCoreStarted(tunEnabled: true)
+
+        let app = AppState()
+        app.isProtectionBlocked = true
+        var calls: [String] = []
+        try await app.retireDisconnectedNativeUpdate(
+            nativeUpdate: { operation in
+                calls.append(operation)
+                switch operation {
+                case "status":
+                    return self.status(.preparing, execution: "staged")
+                case "disconnect":
+                    return .init(pending: true, receipt: nil, execution: nil, disconnectVerified: true, diagnostic: nil)
+                case "retire":
+                    return .init(pending: false, receipt: nil, execution: nil, disconnectVerified: true, diagnostic: nil)
+                default:
+                    XCTFail("Unexpected update operation: \(operation)")
+                    throw Failure.preparation
+                }
+            },
+            strictRelease: {
+                calls.append("strictRelease")
+            }
+        )
+
+        XCTAssertEqual(calls, ["status", "strictRelease", "disconnect", "retire"])
+        XCTAssertFalse(app.strictRoutingSessionActive)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertFalse(app.nativeUpdatePending)
+    }
 }

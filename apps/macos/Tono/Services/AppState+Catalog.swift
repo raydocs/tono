@@ -158,6 +158,12 @@ extension AppState {
                 name: "TONO CLOUD",
                 nodes: nodes
             )]
+        let switchTargetWasRemoved = allowRuntimeTransition
+            && isConnected
+            && switchingNodeId != nil
+            && previousSwitchTarget.map { target in
+                !nodes.contains { proxyTarget($0.name, matches: target.name) }
+            } == true
         proxyRegions = managedRegions + customRegions
         if allowRuntimeTransition, isConnected, switchTargetChanged, let previousSelection,
            previousSelection != ConfigPipeline.homeNodeName,
@@ -171,6 +177,19 @@ extension AppState {
             // Parsing assigns fresh IDs even when an unrelated city changes.
             // Keep the in-flight target identifiable for the next install.
             switchingNodeId = id
+        } else if switchTargetWasRemoved, !selectedCloudNodeWasRemoved {
+            LocalTrafficAudit.shared.recordEvent(
+                "node_switch_target_removed",
+                details: [
+                    "removed_target": previousSwitchTarget?.name ?? "unknown",
+                    "revision": String(catalog.revision),
+                ]
+            )
+            connectionCoordinator.nodeSwitchTask?.cancel()
+            pendingFullConfigReload = true
+            errorMessage = String(
+                localized: "The cloud server you were switching to was removed from the catalog. Keeping your current connection."
+            )
         }
         managedCatalogRevision = catalog.revision
         managedCatalogDigest = catalog.sha256
@@ -203,7 +222,9 @@ extension AppState {
                 // choice ends it with PF held and nothing scheduled: a
                 // survivor is what it retries next, and with none left the
                 // settlement restores the original network.
-                if defaultCloudExitNode() != nil {
+                if strictRoutingSessionActive {
+                    settleRemovedCatalogExit(wasConnected: false)
+                } else if defaultCloudExitNode() != nil {
                     applyDefaultProxySelection(persist: true)
                     catalogSelectionRequiresChoice = false
                     errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
@@ -358,9 +379,27 @@ extension AppState {
     /// the secondary AI hold. Explicit strict protection keeps its own branch.
     func settleRemovedCatalogExit(wasConnected: Bool) {
         let replacement = defaultCloudExitNode()
+        if strictRoutingSessionActive {
+            catalogSelectionRequiresChoice = true
+            autoConnectRequested = false
+            protectedReconnectPausedForUserAction = true
+            protectedReconnectPauseLiftsOnNetworkChange = false
+            connectionCoordinator.cancelReconnectTasks()
+            isProtectedReconnectScheduled = false
+            protectedReconnectNextAttemptAt = nil
+            if replacement == nil {
+                applyDefaultProxySelection(persist: true)
+            }
+            disconnect(releaseKillSwitch: false)
+            isProtectionBlocked = true
+            errorMessage = String(
+                localized: "The selected cloud server was removed. Strict mode is still blocking traffic. Click Restore internet before choosing another cloud server."
+            )
+            return
+        }
         let action = CatalogRemovedExitAction.decide(
             replacementName: replacement?.name,
-            strictKillSwitchExplicit: false,
+            strictKillSwitchExplicit: strictRoutingSessionActive,
             selectiveAiBlockReady: false
         )
         switch action {
@@ -728,6 +767,9 @@ extension AppState {
 
         guard allowRuntimeTransition, behaviorChanged,
               isConnected || isConnecting else { return }
+        guard effectiveRoutingMode != "ai-home", effectiveRoutingMode != "three-tier" else {
+            return
+        }
         // Keep the session and apply on it. Tearing down into bootstrap cut
         // the machine for a policy write. A connect still in flight already
         // stores this policy and applies it from onCoreStarted. Failure of
@@ -965,6 +1007,7 @@ extension AppState {
             async -> ConfigPipeline.ManagedDirectRuntimePolicy?)? = nil
     ) async {
         guard isConnected, isOwnedTonoMode,
+              effectiveRoutingMode != "ai-home", effectiveRoutingMode != "three-tier",
               switchingNodeId == nil,
               connectionCoordinator.configReloadTask == nil,
               let api = coreController,

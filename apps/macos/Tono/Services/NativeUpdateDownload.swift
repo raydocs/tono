@@ -204,10 +204,19 @@ nonisolated enum NativeUpdateDownload {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
-    static func package(for offer: Offer) async throws -> URL {
+    static func package(
+        for offer: Offer,
+        paths: [PackagePath]? = nil,
+        onProgress: (@Sendable (_ received: Int64, _ total: Int64) -> Void)? = nil
+    ) async throws -> URL {
         let target = try offer.manifest.target(.macosArm64)
         let url = offer.directory.appendingPathComponent("package.macos-arm64.zip")
-        return try await package(at: url, size: Int64(target.artifactSizeBytes))
+        return try await package(
+            at: url,
+            size: Int64(target.artifactSizeBytes),
+            relays: paths,
+            onProgress: onProgress
+        )
     }
 
     /// The package GET. Direct first; when it fails before any response
@@ -217,19 +226,24 @@ nonisolated enum NativeUpdateDownload {
     /// exact file against the signed manifest before installing.
     static func package(
         at url: URL, size: Int64, relays: [PackagePath]? = nil,
-        armedWithoutTunnel: Bool = KillSwitchService.isArmedWithoutTunnel
+        armedWithoutTunnel: Bool = KillSwitchService.isArmedWithoutTunnel,
+        onProgress: (@Sendable (_ received: Int64, _ total: Int64) -> Void)? = nil
     ) async throws -> URL {
         if armedWithoutTunnel {
             // Decision 086: the relays are the only path PF admits here.
             return try await relayedPackage(
-                url, size: size, after: skippedWhileArmedWithoutTunnel, over: relays ?? packageRelays(for: url)
+                url, size: size, after: skippedWhileArmedWithoutTunnel,
+                over: relays ?? packageRelays(for: url),
+                onProgress: onProgress
             )
         }
         do {
-            return try await NativePackageDownload(url: url, size: size).download()
+            return try await NativePackageDownload(url: url, size: size, onProgress: onProgress).download()
         } catch let undelivered as NativePackageDownload.Undelivered {
             return try await relayedPackage(
-                url, size: size, after: undelivered.error, over: relays ?? packageRelays(for: url)
+                url, size: size, after: undelivered.error,
+                over: relays ?? packageRelays(for: url),
+                onProgress: onProgress
             )
         }
     }
@@ -257,7 +271,8 @@ nonisolated enum NativeUpdateDownload {
     /// status line arrives it is the answer and is never sent again. On any
     /// failure the file and its directory are removed.
     private static func relayedPackage(
-        _ url: URL, size: Int64, after directError: any Error, over paths: [PackagePath]
+        _ url: URL, size: Int64, after directError: any Error, over paths: [PackagePath],
+        onProgress: (@Sendable (_ received: Int64, _ total: Int64) -> Void)? = nil
     ) async throws -> URL {
         guard !paths.isEmpty, !isCancellation(directError) else { throw directError }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-update-" + UUID().uuidString)
@@ -276,7 +291,7 @@ nonisolated enum NativeUpdateDownload {
             for path in paths {
                 try Task.checkCancellation()
                 try file.truncate(atOffset: 0)
-                let sink = PackageResponseSink(size: size, file: file, destination: destination)
+                let sink = PackageResponseSink(size: size, file: file, destination: destination, onProgress: onProgress)
                 do {
                     try await path.stream(url, sink)
                 } catch {
@@ -355,27 +370,90 @@ nonisolated private final class NativePackageDownload: NSObject, URLSessionDownl
         let error: any Error
     }
 
+    private static let progressThresholdBytes: Int64 = 65_536
+
     private let url: URL
     private let size: Int64
+    private let onProgress: (@Sendable (_ received: Int64, _ total: Int64) -> Void)?
     private let lock = NSLock()
     private var continuation: CheckedContinuation<URL, Error>?
     private var result: Result<URL, Error>?
+    private var activeTask: URLSessionDownloadTask?
+    private var cancelled = false
+    private var oversized = false
+    private var lastReportedBytes: Int64 = 0
 
-    init(url: URL, size: Int64) { self.url = url; self.size = size }
+    init(
+        url: URL,
+        size: Int64,
+        onProgress: (@Sendable (_ received: Int64, _ total: Int64) -> Void)? = nil
+    ) {
+        self.url = url
+        self.size = size
+        self.onProgress = onProgress
+    }
 
     func download() async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForResource = 900
-            let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-            session.downloadTask(with: url).resume()
+        try Task.checkCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                if cancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                self.continuation = continuation
+                let config = URLSessionConfiguration.ephemeral
+                config.timeoutIntervalForResource = 900
+                let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+                let task = session.downloadTask(with: url)
+                self.activeTask = task
+                lock.unlock()
+                task.resume()
+            }
+        } onCancel: {
+            self.cancel()
         }
+    }
+
+    private func cancel() {
+        lock.lock()
+        cancelled = true
+        let task = activeTask
+        activeTask = nil
+        let savedURL = try? result?.get()
+        result = nil
+        lock.unlock()
+        if let savedURL {
+            try? FileManager.default.removeItem(at: savedURL.deletingLastPathComponent())
+        }
+        task?.cancel()
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        if totalBytesWritten > size || totalBytesExpectedToWrite > size { downloadTask.cancel() }
+        _ = bytesWritten
+        if totalBytesWritten > size || totalBytesExpectedToWrite > size {
+            lock.lock()
+            oversized = true
+            lock.unlock()
+            downloadTask.cancel()
+            return
+        }
+        guard let onProgress else { return }
+        let received = min(max(0, totalBytesWritten), size)
+        var shouldReport = false
+        lock.lock()
+        if !cancelled && received > lastReportedBytes
+            && (received == size || received - lastReportedBytes >= Self.progressThresholdBytes) {
+            lastReportedBytes = received
+            shouldReport = true
+        }
+        lock.unlock()
+        if shouldReport {
+            onProgress(received, size)
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -401,15 +479,34 @@ nonisolated private final class NativePackageDownload: NSObject, URLSessionDownl
                 return destination
             } catch { try? FileManager.default.removeItem(at: directory); throw error }
         }
-        lock.lock(); result = saved; lock.unlock()
+        var orphanDirectory: URL?
+        lock.lock()
+        if cancelled {
+            if case let .success(url) = saved {
+                orphanDirectory = url.deletingLastPathComponent()
+            }
+        } else {
+            result = saved
+        }
+        lock.unlock()
+        if let orphanDirectory {
+            try? FileManager.default.removeItem(at: orphanDirectory)
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         lock.lock()
+        let wasCancelled = cancelled
+        let wasOversized = oversized
         let completion = continuation
         continuation = nil
+        activeTask = nil
         let value: Result<URL, Error>
-        if let result {
+        if wasCancelled {
+            value = .failure(CancellationError())
+        } else if wasOversized {
+            value = .failure(NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageMismatch))
+        } else if let result {
             value = result
         } else if let error, task.response == nil {
             // No response arrived: the GET may go to the relays.
@@ -439,10 +536,13 @@ nonisolated struct PackagePath: Sendable {
 /// (the release Worker always sends it, from the R2 object); any other answer,
 /// and a body past that size, is an error. A redirect is such an answer.
 nonisolated final class PackageResponseSink: @unchecked Sendable {
+    private static let progressThresholdBytes: Int64 = 65_536
+
     let size: Int64
     /// Where the body is written. The caller owns it and removes it on failure.
     let destination: URL
     private let file: FileHandle
+    private let onProgress: (@Sendable (_ received: Int64, _ total: Int64) -> Void)?
     private let lock = NSLock()
     // Guarded by `lock`.
     /// Any status line, interim (1xx) included, has arrived. Sticky.
@@ -450,11 +550,18 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
     private var headRead = false
     private var pending = Data()
     private var written: Int64 = 0
+    private var lastReportedBytes: Int64 = 0
 
-    init(size: Int64, file: FileHandle, destination: URL) {
+    init(
+        size: Int64,
+        file: FileHandle,
+        destination: URL,
+        onProgress: (@Sendable (_ received: Int64, _ total: Int64) -> Void)? = nil
+    ) {
         self.size = size
         self.file = file
         self.destination = destination
+        self.onProgress = onProgress
     }
 
     /// A status line arrived, interim (1xx) included: the server saw the
@@ -473,15 +580,22 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
     /// Takes the next piece of the response. True once the whole package is
     /// on disk; a thrown error ends the transfer.
     func receive(_ data: Data) throws -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard headRead else {
-            pending.append(data)
-            return try readHead()
+        var progressUpdate: (Int64, Int64)?
+        let complete: Bool = try {
+            lock.lock(); defer { lock.unlock() }
+            guard headRead else {
+                pending.append(data)
+                return try readHead(progressUpdate: &progressUpdate)
+            }
+            return try write(data, progressUpdate: &progressUpdate)
+        }()
+        if let progressUpdate {
+            onProgress?(progressUpdate.0, progressUpdate.1)
         }
-        return try write(data)
+        return complete
     }
 
-    private func readHead() throws -> Bool {
+    private func readHead(progressUpdate: inout (Int64, Int64)?) throws -> Bool {
         let invalid = NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageMismatch)
         while true {
             let bytes = [UInt8](pending)
@@ -514,16 +628,22 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
             }
             headRead = true
             pending = Data()
-            return try write(rest)
+            return try write(rest, progressUpdate: &progressUpdate)
         }
     }
 
-    private func write(_ data: Data) throws -> Bool {
+    private func write(_ data: Data, progressUpdate: inout (Int64, Int64)?) throws -> Bool {
         guard Int64(data.count) <= size - written else {
             throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.packageMismatch)
         }
         if !data.isEmpty { try file.write(contentsOf: data) }
         written += Int64(data.count)
+        if onProgress != nil,
+           written > lastReportedBytes,
+           written == size || written - lastReportedBytes >= Self.progressThresholdBytes {
+            lastReportedBytes = written
+            progressUpdate = (written, size)
+        }
         return written == size
     }
 }

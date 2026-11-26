@@ -152,6 +152,11 @@ final class SocketServer {
     /// and how many in a row have failed.
     private var orphanedTunnelProbe: OrphanedTunnelProbe?
     private var consecutiveOrphanedTunnelFailures = 0
+    /// Startup grace window between `/session/bind-runtime` and `/core/start`
+    /// while strict intent holds a fail-closed bootstrap/emergency block.
+    static let strictBindStartGraceSeconds: UInt64 = 30
+    private var strictProofBoundAtNs: UInt64?
+    private var strictCoreObservedRunning = false
 
     /// The process identity behind a peer socket, as read from the kernel —
     /// never app-supplied.
@@ -437,16 +442,49 @@ final class SocketServer {
         }
     }
 
+    /// Whether the watchdog should clear `strictProof` and reinstall the
+    /// emergency block. Keeps the proof inside the bind-to-start grace window,
+    /// expires immediately if Core stopped after being observed running, and
+    /// expires once the grace window elapses or no binding timestamp exists.
+    static func shouldExpireStrictProof(
+        coreRunning: Bool,
+        coreObservedRunning: Bool,
+        boundAtNs: UInt64?,
+        nowNs: UInt64,
+        graceSeconds: UInt64 = strictBindStartGraceSeconds
+    ) -> Bool {
+        if coreRunning { return false }
+        if coreObservedRunning { return true }
+        if let boundAtNs, nowNs >= boundAtNs {
+            let (graceNs, overflow) = graceSeconds.multipliedReportingOverflow(by: 1_000_000_000)
+            if overflow || (nowNs - boundAtNs) < graceNs {
+                return false
+            }
+        }
+        return true
+    }
+
     /// While the Core is running, keep the in-session block (a live connect
     /// must not leak). When the Core stays down, release instead of
     /// reinstalling that block. The threshold skips the short gap between
     /// arm and the Core process appearing.
     private func observeCoreForWatchdog() {
         if KillSwitchManager.strictIntentActive {
-            if core.status().running {
+            let coreRunning = core.status().running
+            if coreRunning {
+                strictCoreObservedRunning = true
+                strictProofBoundAtNs = nil
                 killSwitch.superviseProtection()
-            } else {
+            } else if Self.shouldExpireStrictProof(
+                coreRunning: false,
+                coreObservedRunning: strictCoreObservedRunning,
+                boundAtNs: strictProofBoundAtNs,
+                nowNs: ProtectionCheckSchedule.monotonicNow(),
+                graceSeconds: Self.strictBindStartGraceSeconds
+            ) {
                 killSwitch.strictProof = nil
+                strictProofBoundAtNs = nil
+                strictCoreObservedRunning = false
                 try? KillSwitchManager.installEmergencyBlock(allowedUID: killSwitch.allowedUID)
             }
             return
@@ -844,8 +882,11 @@ final class SocketServer {
                       ["stable", "three-tier", "ai-home"].contains(mode) else {
                     throw HelperFailure.invalid("Invalid runtime binding.")
                 }
-                killSwitch.strictProof = try core.bindRuntime(configDirectory: directory,
+                let proof = try core.bindRuntime(configDirectory: directory,
                     digest: digest, generation: request.generation, mode: mode)
+                killSwitch.strictProof = proof
+                strictCoreObservedRunning = false
+                strictProofBoundAtNs = proof != nil ? ProtectionCheckSchedule.monotonicNow() : nil
                 if KillSwitchManager.strictIntentActive {
                     try KillSwitchManager.installEmergencyBlock(allowedUID: killSwitch.allowedUID)
                     killSwitch.lastLoadedPassRules = nil
@@ -897,6 +938,18 @@ final class SocketServer {
                       let digest = object["configSHA256"] as? String else {
                     throw HelperFailure.invalid("Invalid start request.")
                 }
+                if KillSwitchManager.strictIntentActive,
+                   killSwitch.strictProof == nil
+                       || killSwitch.strictProof?.digest != digest
+                       || killSwitch.strictProof?.generation != request.generation {
+                    guard let proof = try core.rebindStrictProofIfAdmitted(
+                        digest: digest,
+                        generation: request.generation
+                    ) else {
+                        throw HelperFailure.invalid("Strict runtime proof is unavailable.")
+                    }
+                    killSwitch.strictProof = proof
+                }
                 try core.start(
                     configDirectory: directory,
                     configSHA256: digest,
@@ -904,6 +957,8 @@ final class SocketServer {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
                     }
                 )
+                strictCoreObservedRunning = true
+                strictProofBoundAtNs = nil
                 recordSessionOwner(owner)
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("POST", "/core/sync"):
@@ -913,8 +968,11 @@ final class SocketServer {
                       let digest = object["configSHA256"] as? String else {
                     throw HelperFailure.invalid("Invalid sync request.")
                 }
-                killSwitch.strictProof = try core.bindRuntime(configDirectory: directory,
+                let proof = try core.bindRuntime(configDirectory: directory,
                     digest: digest, generation: request.generation, mode: nil)
+                killSwitch.strictProof = proof
+                strictCoreObservedRunning = false
+                strictProofBoundAtNs = proof != nil ? ProtectionCheckSchedule.monotonicNow() : nil
                 let path = try core.sync(
                     configDirectory: directory,
                     configSHA256: digest,
@@ -925,11 +983,17 @@ final class SocketServer {
                     // fails the sync with the old Core still running.
                     beforeStop: { try killSwitch.withholdReviewedBundlePermit() }
                 )
+                if proof != nil {
+                    strictCoreObservedRunning = true
+                    strictProofBoundAtNs = nil
+                }
                 sendResponse(client, status: 200, object: ["ok": true, "configPath": path])
             case ("DELETE", "/core/stop"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 if KillSwitchManager.strictIntentActive {
                     killSwitch.strictProof = nil
+                    strictProofBoundAtNs = nil
+                    strictCoreObservedRunning = false
                     try KillSwitchManager.installEmergencyBlock(allowedUID: killSwitch.allowedUID)
                 }
                 // The Core's utun goes away with it (#608). Best effort: the
@@ -1000,6 +1064,9 @@ final class SocketServer {
                 let response = try transitionGate.whileAwake {
                     try killSwitch.disarm(preserveAIHold: request.path == "/killswitch/release")
                 }
+                killSwitch.strictProof = nil
+                strictProofBoundAtNs = nil
+                strictCoreObservedRunning = false
                 clearSessionOwner()
                 sendResponse(client, status: 200, object: response)
             case ("GET", "/dns/status"):

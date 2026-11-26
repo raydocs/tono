@@ -93,6 +93,63 @@ private actor RuntimeConfigWriter {
     }
 }
 
+nonisolated enum StrictSessionPersistence {
+    static let secretKey = "strictSessionControllerSecret"
+    static let mixedPortKey = "strictSessionMixedPort"
+    static let controllerPortKey = "strictSessionControllerPort"
+    static let runtimeDigestKey = "strictSessionRuntimeDigest"
+
+    struct Credentials: Equatable {
+        let secret: String
+        let mixedPort: Int
+        let controllerPort: Int
+        let runtimeDigest: String?
+    }
+
+    static func save(
+        secret: String,
+        mixedPort: Int,
+        controllerPort: Int,
+        runtimeDigest: String?,
+        defaults: UserDefaults = AppProfile.defaults
+    ) {
+        defaults.set(secret, forKey: secretKey)
+        defaults.set(mixedPort, forKey: mixedPortKey)
+        defaults.set(controllerPort, forKey: controllerPortKey)
+        if let runtimeDigest, !runtimeDigest.isEmpty {
+            defaults.set(runtimeDigest, forKey: runtimeDigestKey)
+        }
+    }
+
+    static func load(defaults: UserDefaults = AppProfile.defaults) -> Credentials? {
+        guard let secret = defaults.string(forKey: secretKey), !secret.isEmpty else {
+            return nil
+        }
+        let mixedPort = defaults.integer(forKey: mixedPortKey)
+        let controllerPort = defaults.integer(forKey: controllerPortKey)
+        guard (1024...65535).contains(mixedPort),
+              (1024...65535).contains(controllerPort),
+              mixedPort != controllerPort,
+              !(mixedPort == 28_990 && controllerPort == 9090) else {
+            return nil
+        }
+        let digest = defaults.string(forKey: runtimeDigestKey)
+        return Credentials(
+            secret: secret,
+            mixedPort: mixedPort,
+            controllerPort: controllerPort,
+            runtimeDigest: digest?.isEmpty == false ? digest : nil
+        )
+    }
+
+    static func clear(defaults: UserDefaults = AppProfile.defaults) {
+        defaults.removeObject(forKey: secretKey)
+        defaults.removeObject(forKey: mixedPortKey)
+        defaults.removeObject(forKey: controllerPortKey)
+        defaults.removeObject(forKey: runtimeDigestKey)
+    }
+}
+
 // MARK: - Fake-IP rotation
 
 /// Which slot of the fake-IP pool the next runtime document takes (#1258).
@@ -104,6 +161,12 @@ private actor RuntimeConfigWriter {
 /// pool.
 nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
     static let defaultsKey = "singBoxFakeIPSlot"
+    static let rememberedDefaultsKey = "singBoxFakeIPRendered"
+
+    private struct RememberedSlot: Codable {
+        let digest: String
+        let slot: Int
+    }
 
     private let lock = NSLock()
     private let defaults: UserDefaults?
@@ -119,6 +182,16 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
         self.defaults = defaults
         let stored = (defaults?.object(forKey: Self.defaultsKey) as? Int).flatMap { $0 >= 0 ? $0 : nil }
         next = stored ?? Int.random(in: 0..<ConfigPipeline.singBoxFakeIPSlots)
+        if let data = defaults?.data(forKey: Self.rememberedDefaultsKey),
+           let saved = try? JSONDecoder().decode([RememberedSlot].self, from: data) {
+            rendered = saved.compactMap { entry in
+                guard !entry.digest.isEmpty, entry.slot >= 0 else { return nil }
+                return (digest: entry.digest, slot: entry.slot)
+            }
+            if rendered.count > Self.remembered {
+                rendered.removeFirst(rendered.count - Self.remembered)
+            }
+        }
     }
 
     /// `render` returns the document for a slot. A document takes the next
@@ -133,7 +206,8 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         var installedSlot: Int?
-        if let index = rendered.lastIndex(where: { $0.digest == installedDigest }) {
+        if let installedDigest,
+           let index = rendered.lastIndex(where: { $0.digest == installedDigest }) {
             // Named again, so it outlives the documents that were not installed.
             let installed = rendered.remove(at: index)
             rendered.append(installed)
@@ -141,7 +215,10 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
         }
         if keeping, let installedSlot {
             let document = try render(installedSlot)
-            if Self.digest(document) == installedDigest { return document }
+            if Self.digest(document) == installedDigest {
+                persistRememberedLocked()
+                return document
+            }
         }
         let slot = Self.slot(next, avoiding: installedSlot)
         let document = try render(slot)
@@ -151,7 +228,27 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
         defaults?.set(next, forKey: Self.defaultsKey)
         rendered.append((Self.digest(document), slot))
         if rendered.count > Self.remembered { rendered.removeFirst() }
+        persistRememberedLocked()
         return document
+    }
+
+    func clearRememberedInstalled() {
+        lock.lock()
+        defer { lock.unlock() }
+        rendered.removeAll()
+        Self.clearRememberedInstalled(in: defaults)
+    }
+
+    static func clearRememberedInstalled(in defaults: UserDefaults?) {
+        defaults?.removeObject(forKey: rememberedDefaultsKey)
+    }
+
+    private func persistRememberedLocked() {
+        guard let defaults else { return }
+        let payload = rendered.map { RememberedSlot(digest: $0.digest, slot: $0.slot) }
+        if let data = try? JSONEncoder().encode(payload) {
+            defaults.set(data, forKey: Self.rememberedDefaultsKey)
+        }
     }
 
     private static func slot(_ slot: Int, avoiding installed: Int?) -> Int {
@@ -221,6 +318,15 @@ final class CoreRuntimeManager {
         routingMode = mode
         routingInterface = physicalInterface
         AppProfile.defaults.set(mode, forKey: SettingsKey.routingSession)
+    }
+
+    func retireRoutingMode() {
+        routingMode = "stable"
+        routingInterface = nil
+    }
+
+    func clearRememberedInstalledFakeIP() {
+        fakeIPRotation.clearRememberedInstalled()
     }
 
     /// Config directory for the owned sing-box runtime.

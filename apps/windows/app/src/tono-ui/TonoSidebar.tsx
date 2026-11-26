@@ -6,7 +6,8 @@ import { navItems } from '@/pages/_navigation'
 import { useThemeMode } from '@/services/states'
 import { version as appVersion } from '@root/package.json'
 
-import { tonoAccent, tonoText } from './theme'
+import { tonoAccent, TONO_MONO_STACK, tonoText } from './theme'
+import { TonoIcon } from './TonoIcon'
 import { TonoLogo } from './TonoLogo'
 
 /**
@@ -96,13 +97,26 @@ const TonoNavGroup = ({
   )
 }
 
-export const TonoSidebar = () => {
+export const TonoSidebar = ({
+  updateVersion,
+  updateProgress,
+  onOpenUpdate,
+}: {
+  updateVersion?: string | null
+  updateProgress?: number | null
+  onOpenUpdate?: () => void
+}) => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
+  const accent = tonoAccent(dark)
   const location = useLocation()
   const navigate = useNavigate()
   const navigation = useNavigation()
+  const clampedProgress =
+    updateProgress !== null && updateProgress !== undefined
+      ? Math.min(100, Math.max(0, Math.round(updateProgress)))
+      : null
 
   const itemByPath = (path: string) =>
     navItems.find((item) => item.path === path)
@@ -209,6 +223,99 @@ export const TonoSidebar = () => {
       />
 
       <div className="tono-nav__spacer" />
+
+      {updateVersion && (
+        <button
+          type="button"
+          className="tono-sidebar__update"
+          onClick={onOpenUpdate}
+          title={t('tono.update.pillAvailable', { version: updateVersion })}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            margin: '0 6px 10px',
+            padding: '9px 10px',
+            borderRadius: 'var(--tono-radius-lg)',
+            border: `1px solid ${dark ? 'rgba(171, 158, 255, 0.28)' : 'rgba(116, 87, 245, 0.22)'}`,
+            background: dark
+              ? 'rgba(171, 158, 255, 0.12)'
+              : 'rgba(116, 87, 245, 0.08)',
+            color: text.primary,
+            textAlign: 'left',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              minWidth: 0,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: accent,
+                boxShadow: `0 0 8px ${accent}`,
+                flexShrink: 0,
+              }}
+            />
+            <TonoIcon name="download" size={13} style={{ color: accent }} />
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontFamily: TONO_MONO_STACK,
+              }}
+            >
+              {clampedProgress !== null
+                ? t('tono.update.downloadingShort', {
+                    progress: clampedProgress,
+                  })
+                : t('tono.update.sidebarTitle', { version: updateVersion })}
+            </span>
+          </span>
+          {clampedProgress !== null ? (
+            <span
+              aria-hidden="true"
+              style={{
+                display: 'block',
+                width: '100%',
+                height: 3,
+                borderRadius: 999,
+                background: dark
+                  ? 'rgba(255,255,255,0.12)'
+                  : 'rgba(20,22,30,0.1)',
+                overflow: 'hidden',
+              }}
+            >
+              <span
+                style={{
+                  display: 'block',
+                  height: '100%',
+                  width: `${clampedProgress}%`,
+                  borderRadius: 999,
+                  background: accent,
+                  transition: 'width 160ms ease-out',
+                }}
+              />
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, color: text.secondary }}>
+              {t('tono.update.sidebarHint')}
+            </span>
+          )}
+        </button>
+      )}
 
       <div
         className="tono-sidebar__divider"
