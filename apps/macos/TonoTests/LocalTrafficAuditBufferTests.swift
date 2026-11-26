@@ -55,13 +55,13 @@ final class LocalTrafficAuditBufferTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let audit = LocalTrafficAudit(logFileURL: directory.appendingPathComponent("audit.jsonl"))
-        let wasEnabled = UserDefaults.standard.object(forKey: SettingsKey.localTrafficAuditEnabled)
-        UserDefaults.standard.set(true, forKey: SettingsKey.localTrafficAuditEnabled)
+        let wasEnabled = AppProfile.defaults.object(forKey: SettingsKey.localTrafficAuditEnabled)
+        AppProfile.defaults.set(true, forKey: SettingsKey.localTrafficAuditEnabled)
         defer {
             if let wasEnabled {
-                UserDefaults.standard.set(wasEnabled, forKey: SettingsKey.localTrafficAuditEnabled)
+                AppProfile.defaults.set(wasEnabled, forKey: SettingsKey.localTrafficAuditEnabled)
             } else {
-                UserDefaults.standard.removeObject(forKey: SettingsKey.localTrafficAuditEnabled)
+                AppProfile.defaults.removeObject(forKey: SettingsKey.localTrafficAuditEnabled)
             }
         }
 

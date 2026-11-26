@@ -23,6 +23,15 @@ nonisolated enum AppProfile {
     }
 
     nonisolated(unsafe) static let defaults: UserDefaults = {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            let suite = "com.raydocs.tono.xctest.\(ProcessInfo.processInfo.processIdentifier)"
+            UserDefaults.standard.removePersistentDomain(forName: suite)
+            if let defaults = UserDefaults(suiteName: suite) {
+                return defaults
+            }
+        }
+        #endif
         guard isDev,
               let defaults = UserDefaults(suiteName: "com.raydocs.tono.dev") else {
             return .standard

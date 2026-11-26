@@ -37,6 +37,18 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertNoThrow(try DesktopRoutingModeAdmission.requireAvailable("stable"))
     }
 
+    func testXCTestWorkersIsolateAppProfileDefaultsFromStandardDomain() {
+        XCTAssertFalse(
+            AppProfile.defaults === UserDefaults.standard,
+            "Parallel XCTest workers must not share UserDefaults.standard via AppProfile.defaults"
+        )
+        let probeKey = "tono.test.isolation.\(UUID().uuidString)"
+        defer { AppProfile.defaults.removeObject(forKey: probeKey) }
+        AppProfile.defaults.set("isolated", forKey: probeKey)
+        XCTAssertEqual(AppProfile.defaults.string(forKey: probeKey), "isolated")
+        XCTAssertNil(UserDefaults.standard.object(forKey: probeKey))
+    }
+
     func testPersistedJSONStillUsesClashYAMLKeysAfterTheTypeRename() throws {
         let data = try JSONEncoder().encode(RuntimeConfig())
         let decoded = try JSONDecoder().decode(RuntimeConfig.self, from: data)
