@@ -16,6 +16,7 @@ struct DashboardView: View {
     @State private var showsSeaDetails = false
     @State private var showsSeaSteps = false
     @State private var isTrafficCardHovered = false
+    @State private var lastAnnouncedStateKey: String?
     /// When the pill last flipped into connecting. A click that lands within
     /// `cancelGraceInterval` of that moment is ignored: the pill is now the
     /// Cancel control while connecting, so without this a double-click on
@@ -27,7 +28,6 @@ struct DashboardView: View {
         Group {
             if showsSeaAppearance { seaDashboard } else { legacyDashboard }
         }
-        .modifier(SeaPageAppearance())
         .task { await appState.refreshSelectiveAIRecovery() }
         .background {
             if showsSeaAppearance && !sceneInWindow {
@@ -50,12 +50,26 @@ struct DashboardView: View {
                 appState.networkInfo = NetworkInfo()
             }
         }
+        .onChange(of: voiceOverAnnouncementKey) { _, newKey in
+            guard let previous = lastAnnouncedStateKey, previous != newKey else { return }
+            lastAnnouncedStateKey = newKey
+            let headline = String(localized: String.LocalizationValue(seaStatusKey))
+            let announcement = seaSummary.isEmpty ? headline : "\(headline). \(seaSummary)"
+            AccessibilityNotification.Announcement(announcement).post()
+        }
         .onAppear {
             if appState.isConnecting, connectingSince == nil {
                 connectingSince = Date()
             }
+            if lastAnnouncedStateKey == nil {
+                lastAnnouncedStateKey = voiceOverAnnouncementKey
+            }
             appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         }
+    }
+
+    private var voiceOverAnnouncementKey: String {
+        "\(seaStatusKey)|\(appState.isRecoveringProtectedConnection)|\(appState.lastConnectionFailure != nil)"
     }
 
     private var legacyDashboard: some View {
@@ -200,6 +214,7 @@ struct DashboardView: View {
                             ) {
                                 Button("Restore normal internet") { appState.restoreInternet() }
                                     .buttonStyle(SeaHomePillStyle(primary: false))
+                                    .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
                             }
                         }
                         .padding(.horizontal, 14)
@@ -220,6 +235,7 @@ struct DashboardView: View {
                             seaRetryAction
                             Button("Restore normal internet") { appState.restoreInternet() }
                                 .buttonStyle(SeaHomePillStyle(primary: false))
+                                .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
                                 .modifier(SeaHomeActionShortcut(ownsShortcut: appState.isProtectionBlocked
                                     || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable))
                         } else {
@@ -230,6 +246,7 @@ struct DashboardView: View {
                     if appState.isDisconnecting {
                         Button("Restore normal internet") { appState.restoreInternet() }
                             .buttonStyle(SeaHomePillStyle(primary: false))
+                            .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
                             .accessibilityIdentifier("seaDisconnectingRestoreInternet")
                     }
                     RecoveryNotice(appState: appState)
@@ -246,10 +263,16 @@ struct DashboardView: View {
                     }
                     Spacer(minLength: 24)
                     HStack(alignment: .bottom) {
-                        if appState.isConnected && appState.trafficFeedLive {
-                            Text("↓ \(TonoByteFormat.rate(appState.trafficStats.downloadSpeed)) · ↑ \(TonoByteFormat.rate(appState.trafficStats.uploadSpeed)) · \(String(localized: "This connection")) \(TonoByteFormat.bytes(appState.trafficStats.totalUpload + appState.trafficStats.totalDownload))")
-                                .font(.system(size: 13)).monospacedDigit()
-                                .foregroundStyle(SeaTheme.muted)
+                        if appState.isConnected {
+                            if appState.trafficFeedLive {
+                                Text("↓ \(TonoByteFormat.rate(appState.trafficStats.downloadSpeed)) · ↑ \(TonoByteFormat.rate(appState.trafficStats.uploadSpeed)) · \(String(localized: "This connection")) \(TonoByteFormat.bytes(appState.trafficStats.totalUpload + appState.trafficStats.totalDownload))")
+                                    .font(.system(size: 13)).monospacedDigit()
+                                    .foregroundStyle(SeaTheme.muted)
+                            } else {
+                                Text("Reading traffic…")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(SeaTheme.tertiary)
+                            }
                         }
                         Spacer(minLength: 12)
                         SeaDetailsTriggerButton(reduceMotion: reduceMotion) { showsSeaDetails = true }
@@ -306,7 +329,11 @@ struct DashboardView: View {
             : appState.lastConnectionFailure != nil ? String(localized: "Retry now") : String(localized: "Connect")
         Button(title, action: seaToggleConnection)
             .buttonStyle(SeaHomePillStyle(primary: !quiet))
-            .disabled(appState.isDisconnecting || (!quiet && appState.lastConnectionFailure != nil && !appState.isTonoReady))
+            .disabled(
+                appState.isDisconnecting
+                    || appState.connectionCoordinator.preemptiveReleaseTask != nil
+                    || (!quiet && appState.lastConnectionFailure != nil && !appState.isTonoReady)
+            )
             .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
                                                 isDisconnecting: appState.isDisconnecting))
     }
@@ -394,13 +421,16 @@ struct DashboardView: View {
                         let runtime = appState.proxyService.node(named: name)
                         SeaHomeLatencyReading(sample: appState.proxyService.lastExitSample,
                             name: name, failed: runtime?.lastTestFailed == true)
+                            .layoutPriority(1)
                     } else { Text("No server selected") }
                 }
                 SeaChevron(expanded: true)
+                    .layoutPriority(1)
             }
             .font(.system(size: 13, weight: .medium)).foregroundStyle(SeaTheme.text)
         }
-        .buttonStyle(SeaHomePillStyle(primary: false)).frame(maxWidth: 300, alignment: .leading)
+        .buttonStyle(SeaHomePillStyle(primary: false)).frame(maxWidth: 420, alignment: .leading)
+        .pointerStyle(.link)
         .accessibilityHint("Choose another route")
     }
 
@@ -704,7 +734,7 @@ struct DashboardView: View {
     private func infoItem(label: LocalizedStringKey, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .textCase(.uppercase)
             Text(value)
@@ -958,7 +988,7 @@ private struct ConnectionProgressCard: View {
                         Text("STEP \(elapsedSeconds(since: stageStartedAt, now: now))s")
                     }
                 }
-                .font(.system(size: 10, weight: .semibold, design: seaAppearance ? .default : .monospaced)).monospacedDigit()
+                .font(.system(size: 11, weight: .semibold, design: seaAppearance ? .default : .monospaced)).monospacedDigit()
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -1151,6 +1181,7 @@ private struct ConnectionProgressCard: View {
                     }
                     .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                     .controlSize(.small)
+                    .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
                 }
             } else if appState.isProtectionBlocked {
                 if !primaryActionInHeader {
@@ -1170,6 +1201,7 @@ private struct ConnectionProgressCard: View {
                     }
                     .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                     .controlSize(.small)
+                    .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
                 }
 
                 if ReleasedConnectFailureActions.shouldOfferRouteWhileBlocked(
@@ -1309,6 +1341,7 @@ private struct SeaDetailsTriggerButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .onHover { hovered = $0 }
         .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
     }
@@ -1330,6 +1363,7 @@ private struct SeaCardCopyButton: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .onHover { hovered = $0 }
         .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
     }

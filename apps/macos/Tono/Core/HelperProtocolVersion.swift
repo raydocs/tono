@@ -559,7 +559,12 @@ nonisolated enum HelperProtocolVersion {
     ///   subsequent validated rollback `/core/sync` can relaunch instead of being
     ///   refused as stopped; launch success, explicit `/core/stop`, and
     ///   `/core/start` clear it.
-    static let current = "4.52.78"
+    /// - 4.52.78 → 4.52.79: `SocketServer` preserves `strictProof` across a 30 s
+    ///   grace window between `/session/bind-runtime` and `/core/start` while
+    ///   still expiring immediately if Core stops after running, and `/core/start`
+    ///   re-derives `StrictRuntimeProof` from the admitted root snapshot when
+    ///   strict intent is active and `strictProof` is missing.
+    static let current = "4.52.79"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

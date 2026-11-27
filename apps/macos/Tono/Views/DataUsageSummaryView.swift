@@ -5,6 +5,9 @@ import SwiftUI
 /// honest "today" or "this month" to show here.
 public struct DataUsageSummaryView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.seaAccent) private var seaAccent
+    @SeaAppearancePreference private var seaEnabled
+    @SeaDisplayPreferences private var displayPreferences
 
     public struct PeriodUsage: Equatable, Sendable {
         public var upload: Int64
@@ -73,27 +76,29 @@ public struct DataUsageSummaryView: View {
             if let title {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(seaEnabled ? SeaTheme.text : .primary)
             }
 
             gridLayout
 
             Text("Resets when you disconnect.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(seaEnabled ? SeaTheme.muted : .secondary)
         }
 
         if isCard {
             content
                 .padding(14)
                 .background(
-                    .white.opacity(colorScheme == .dark ? 0.06 : 0.62),
+                    displayPreferences.reduceTransparency
+                        ? AnyShapeStyle(seaEnabled || colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .controlBackgroundColor))
+                        : AnyShapeStyle(.white.opacity(seaEnabled ? 0.055 : (colorScheme == .dark ? 0.06 : 0.62))),
                     in: RoundedRectangle(cornerRadius: 14)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14).strokeBorder(
-                        .white.opacity(colorScheme == .dark ? 0.10 : 0.75),
-                        lineWidth: 0.5
+                        .white.opacity(displayPreferences.contrast == .increased ? 0.45 : (seaEnabled || colorScheme == .dark ? 0.10 : 0.75)),
+                        lineWidth: displayPreferences.contrast == .increased ? 1 : 0.5
                     )
                 )
         } else {
@@ -114,7 +119,7 @@ public struct DataUsageSummaryView: View {
 
                 Text(Self.formatBytes(session.upload))
                     .font(.system(size: 12, weight: .regular)).monospacedDigit()
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(seaEnabled ? SeaTheme.text : .primary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
@@ -129,25 +134,26 @@ public struct DataUsageSummaryView: View {
 
                 Text(Self.formatBytes(session.download))
                     .font(.system(size: 12, weight: .regular)).monospacedDigit()
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(seaEnabled ? SeaTheme.text : .primary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
             Divider()
+                .opacity(seaEnabled ? 0.25 : 1)
                 .gridCellColumns(2)
 
             GridRow {
                 HStack(spacing: 6) {
                     Image(systemName: "sum")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(TonoBrand.accent)
+                        .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
                     Text("Total")
                         .font(.system(size: 12, weight: .semibold))
                 }
 
                 Text(Self.formatBytes(session.total))
                     .font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }

@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { invoke } from '@tauri-apps/api/core'
-import { emit } from '@tauri-apps/api/event'
 import {
   act,
   cleanup,
@@ -64,7 +63,6 @@ vi.mock('@/hooks/use-traffic-data', () => ({
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/event', () => ({ emit: vi.fn() }))
 vi.mock('@/hooks/use-update', () => ({
   useUpdate: () => ({ updateInfo: mocks.updateOffer }),
 }))
@@ -543,6 +541,5 @@ it('shows a new version in the tray with Update now and Later', async () => {
   }
   render(<TrayPanel />, { wrapper: freshSWR })
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-  expect(invoke).toHaveBeenCalledWith('tray_flyout_open_dashboard')
-  expect(emit).toHaveBeenCalledWith('tono://show-update')
+  expect(invoke).toHaveBeenCalledWith('tray_flyout_open_update')
 })

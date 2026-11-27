@@ -11,6 +11,21 @@ import AppKit
 @MainActor
 private enum ClientAppIconCache {
     private static var cache: [String: NSImage?] = [:]
+    private static var bundleIDCache: [String: String?] = [:]
+
+    static func bundleIdentifier(for processName: String) -> String? {
+        if let cached = bundleIDCache[processName] { return cached }
+        let bundleID = NSWorkspace.shared.runningApplications.first { app in
+            let executable = app.executableURL?.lastPathComponent
+            return executable == processName
+                || app.localizedName == processName
+                || (processName == "Claude Code" && (executable == "Claude" || app.localizedName == "Claude"))
+                || (processName == "Grok" && (app.localizedName == "Grok Bot" || executable?.hasPrefix("grok-") == true))
+                || (processName == "Google Chrome" && (app.localizedName == "Google Chrome" || executable?.hasPrefix("Google Chrome") == true))
+        }?.bundleIdentifier
+        bundleIDCache[processName] = bundleID
+        return bundleID
+    }
 
     static func icon(for processName: String) -> NSImage? {
         if let cached = cache[processName] { return cached }
@@ -204,12 +219,23 @@ struct ActivityView: View {
     @State private var section: Section = .apps
     @State private var connectionQuery = ""
     @State private var isTestingLatency = false
-    @State private var trafficHistory = TrafficHistory()
-    @State private var explainingApp: String?
+    @State private var explainingScope: ExplainingScope?
     @State private var expandedApp: String?
     @State private var showingSessionHelp = false
     @SeaDisplayPreferences private var display
     private var displayReduceMotion: Bool { display.reduceMotion }
+
+    private enum ExplainingScope: Identifiable {
+        case app(String)
+        case entry(ConnectionEntry)
+
+        var id: String {
+            switch self {
+            case .app(let appID): return "app:\(appID)"
+            case .entry(let entry): return "entry:\(entry.id)"
+            }
+        }
+    }
 
     private enum Section: String, CaseIterable {
         case apps = "Apps"
@@ -218,25 +244,35 @@ struct ActivityView: View {
 
     private let filters = ["All", "Proxied", "Home", "Direct", "Rejected"]
 
+    private func routeFilterLabel(_ filter: String) -> LocalizedStringKey {
+        LocalizedStringKey(seaEnabled && filter == "Proxied" ? "Exit" : filter)
+    }
+
+    private func connectionMatchesQuery(_ entry: ConnectionEntry, query: String) -> Bool {
+        if query.isEmpty { return true }
+        let bundleID = entry.processName.flatMap { ClientAppIconCache.bundleIdentifier(for: $0) } ?? ""
+        return [
+            entry.domain,
+            entry.processName ?? "",
+            bundleID,
+            entry.destination,
+            entry.nodeName,
+            entry.route,
+            entry.network,
+            entry.protocolName,
+            // Windows searches the matched rule too; without it the same
+            // query returns different results on the two clients.
+            entry.rule,
+        ].contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+
     private var filteredConnections: [ConnectionEntry] {
-        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         return appState.connections.filter { entry in
             if selectedFilter != "All", entry.type.rawValue != selectedFilter {
                 return false
             }
-            if query.isEmpty { return true }
-            return [
-                entry.domain,
-                entry.processName ?? "",
-                entry.destination,
-                entry.nodeName,
-                entry.route,
-                entry.network,
-                entry.protocolName,
-                // Windows searches the matched rule too; without it the same
-                // query returns different results on the two clients.
-                entry.rule,
-            ].contains { $0.lowercased().contains(query) }
+            return connectionMatchesQuery(entry, query: query)
         }
     }
 
@@ -259,21 +295,31 @@ struct ActivityView: View {
         .padding(.vertical, 16)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .sheet(isPresented: Binding(get: { explainingApp != nil }, set: { if !$0 { explainingApp = nil } })) {
-            VStack(alignment: .trailing, spacing: 0) {
-                ActivityRoutingDetails(entries: appState.connections.filter {
-                    ($0.processName ?? AppTrafficLedger.unattributed) == explainingApp
-                })
-                Button("Close") { explainingApp = nil }
-                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic)).padding(16)
+        .background {
+            Button("Filter connections") {
+                connectionSearchFocused = true
             }
+            .keyboardShortcut("f", modifiers: .command)
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
-        .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
-            guard appState.trafficFeedLive else { return }
-            trafficHistory.record(
-                up: appState.trafficStats.uploadSpeed,
-                down: appState.trafficStats.downloadSpeed
-            )
+        .sheet(item: $explainingScope) { scope in
+            let entries: [ConnectionEntry] = switch scope {
+            case .app(let appID):
+                appState.connections.filter {
+                    ($0.processName ?? AppTrafficLedger.unattributed) == appID
+                }
+            case .entry(let entry):
+                [entry]
+            }
+            VStack(alignment: .trailing, spacing: 0) {
+                ActivityRoutingDetails(entries: entries)
+                Button("Close") { explainingScope = nil }
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
+                    .keyboardShortcut(.cancelAction)
+                    .padding(16)
+            }
         }
     }
 
@@ -327,9 +373,32 @@ struct ActivityView: View {
             } else {
                 HStack(spacing: 16) {
                     HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(connectionSearchFocused ? SeaTheme.attention : SeaTheme.muted)
+                            .accessibilityHidden(true)
                         TextField("Filter by app, domain, or destination", text: $connectionQuery)
-                            .textFieldStyle(.plain).focused($connectionSearchFocused)
+                            .textFieldStyle(.plain)
+                            .focused($connectionSearchFocused)
+                            .onKeyPress(.escape) {
+                                if !connectionQuery.isEmpty {
+                                    connectionQuery = ""
+                                } else {
+                                    connectionSearchFocused = false
+                                }
+                                return .handled
+                            }
+                        if !connectionQuery.isEmpty {
+                            Button {
+                                connectionQuery = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(SeaTheme.muted)
+                            }
+                            .buttonStyle(.plain)
+                            .pointerStyle(.link)
+                            .accessibilityLabel("Clear search")
+                        }
                     }
                     .modifier(SeaFieldSurface(focused: connectionSearchFocused))
                     .frame(maxWidth: 360)
@@ -339,7 +408,7 @@ struct ActivityView: View {
                 .padding(.bottom, 8)
                 ScrollView(.horizontal, showsIndicators: false) {
                     SeaTabs(label: "Route", selection: $selectedFilter, options: filters,
-                            title: { LocalizedStringKey($0 == "Proxied" ? "Exit" : $0) })
+                            title: { routeFilterLabel($0) })
                 }
                 .padding(.bottom, 14)
                 seaSummary
@@ -371,7 +440,7 @@ struct ActivityView: View {
             ForEach(filters.dropFirst(), id: \.self) { filter in
                 HStack(spacing: 5) {
                     Capsule().fill(seaColor(for: filter)).frame(width: 8, height: 4)
-                    Text(LocalizedStringKey(filter == "Proxied" ? "Exit" : filter))
+                    Text(routeFilterLabel(filter))
                 }
             }
         }
@@ -381,69 +450,107 @@ struct ActivityView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// One line: the exit as Home names it, the counts, the live rate, and
-    /// the session total behind a "?".
+    /// One line when wide enough, wrapping cleanly into two rows at 660 pt.
     private var seaSummary: some View {
-        HStack(spacing: 8) {
-            let exit = appState.proxyService.activeNodeName.map { nodeRouteTitle(for: $0) }
-                ?? String(localized: "No exit selected")
-            Text(verbatim: "\(exit) · \(seaLatencyText)")
-                .foregroundStyle(selectedExitNode?.lastTestFailed == true ? SeaTheme.danger : SeaTheme.muted)
-                .lineLimit(1)
-            latencyRefreshButton
-            if appState.connectionsFeedLive {
-                Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
-                Text("\(seaVisibleApps.count) apps").monospacedDigit()
-                Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
-                Text("\(appState.connections.count) current connections").monospacedDigit()
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                seaSummaryExitAndMetrics
+                Spacer(minLength: 8)
+                seaSectionSwitcher
             }
-            if appState.trafficFeedLive {
-                Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
-                Text(verbatim: "↓ \(activityBytes(appState.trafficStats.downloadSpeed))/s  ↑ \(activityBytes(appState.trafficStats.uploadSpeed))/s")
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-            Button { showingSessionHelp.toggle() } label: {
-                Image(systemName: "questionmark.circle").foregroundStyle(SeaTheme.tertiary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Traffic by route · this session")
-            .popover(isPresented: $showingSessionHelp, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Traffic by route · this session").foregroundStyle(SeaTheme.muted)
-                    RouteSplitBar(split: appState.appTrafficLedger.overall, height: 7)
-                    Text(activityBytes(appState.appTrafficLedger.overall.total))
-                        .font(.system(size: 15)).monospacedDigit()
-                    Text("Session bytes include closed connections; they are not current traffic.")
-                        .foregroundStyle(SeaTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if appState.connectionsDisplayLimited {
-                        Text("Route counts show the newest \(ConnectionActivityPresentation.maxDisplayed) connections only.")
-                            .foregroundStyle(SeaTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    seaSummaryExitLabel
+                    latencyRefreshButton
+                    Spacer(minLength: 8)
+                    seaSectionSwitcher
                 }
-                .font(.system(size: 12))
-                .padding(16)
-                .frame(width: 300, alignment: .leading)
+                HStack(spacing: 8) {
+                    seaSummaryCountsAndRates
+                }
             }
-            Spacer(minLength: 8)
-            SeaChoice(label: "Activity", selection: Binding(
-                get: { section.rawValue },
-                set: { value in
-                    withAnimation(TonoMotion.stateChange(reduceMotion: displayReduceMotion)) {
-                        section = Section(rawValue: value) ?? .apps
-                    }
-                }),
-                options: Section.allCases.map(\.rawValue))
         }
         .font(.system(size: 13))
         .foregroundStyle(SeaTheme.muted)
     }
 
+    @ViewBuilder
+    private var seaSummaryExitLabel: some View {
+        let exit = appState.proxyService.activeNodeName.map { nodeRouteTitle(for: $0) }
+            ?? String(localized: "No exit selected")
+        Text(verbatim: "\(exit) · \(seaLatencyText)")
+            .foregroundStyle(selectedExitNode?.lastTestFailed == true ? SeaTheme.danger : SeaTheme.muted)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var seaSummaryCountsAndRates: some View {
+        if appState.connectionsFeedLive {
+            Text("\(seaVisibleApps.count) apps").monospacedDigit()
+            Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
+            Text("\(appState.connections.count) current connections").monospacedDigit()
+        }
+        if appState.trafficFeedLive {
+            if appState.connectionsFeedLive {
+                Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
+            }
+            Text(verbatim: "↓ \(activityBytes(appState.trafficStats.downloadSpeed))/s  ↑ \(activityBytes(appState.trafficStats.uploadSpeed))/s")
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        Button { showingSessionHelp.toggle() } label: {
+            Image(systemName: "questionmark.circle").foregroundStyle(SeaTheme.tertiary)
+                .frame(minWidth: 22, minHeight: 22)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .accessibilityLabel("Traffic by route · this session")
+        .popover(isPresented: $showingSessionHelp, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Traffic by route · this session").foregroundStyle(SeaTheme.muted)
+                RouteSplitBar(split: appState.appTrafficLedger.overall, height: 7)
+                Text(activityBytes(appState.appTrafficLedger.overall.total))
+                    .font(.system(size: 15)).monospacedDigit()
+                Text("Session bytes include closed connections; they are not current traffic.")
+                    .foregroundStyle(SeaTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if appState.connectionsDisplayLimited {
+                    Text("Route counts show the newest \(ConnectionActivityPresentation.maxDisplayed) connections only.")
+                        .foregroundStyle(SeaTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(.system(size: 12))
+            .padding(16)
+            .frame(width: 300, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var seaSummaryExitAndMetrics: some View {
+        seaSummaryExitLabel
+        latencyRefreshButton
+        if appState.connectionsFeedLive || appState.trafficFeedLive {
+            Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
+        }
+        seaSummaryCountsAndRates
+    }
+
+    private var seaSectionSwitcher: some View {
+        SeaChoice(label: "Activity", selection: Binding(
+            get: { section.rawValue },
+            set: { value in
+                withAnimation(TonoMotion.stateChange(reduceMotion: displayReduceMotion)) {
+                    section = Section(rawValue: value) ?? .apps
+                }
+            }),
+            options: Section.allCases.map(\.rawValue))
+    }
+
     /// Apps narrowed by the same search and route tab as the connections.
     private var seaVisibleApps: [AppTrafficLedger.AppTotals] {
-        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         return appState.appTrafficLedger.apps.filter { app in
             let split = app.split
             let matchesRoute: Bool
@@ -455,7 +562,21 @@ struct ActivityView: View {
             default: matchesRoute = true
             }
             guard matchesRoute else { return false }
-            return query.isEmpty || app.id.lowercased().contains(query)
+            if query.isEmpty { return true }
+            if app.id.localizedCaseInsensitiveContains(query) { return true }
+            if app.id == AppTrafficLedger.unattributed,
+               String(localized: "Unattributed").localizedCaseInsensitiveContains(query) {
+                return true
+            }
+            if let bundleID = ClientAppIconCache.bundleIdentifier(for: app.id),
+               bundleID.localizedCaseInsensitiveContains(query) {
+                return true
+            }
+            return appState.connections.contains { entry in
+                (entry.processName ?? AppTrafficLedger.unattributed) == app.id
+                    && (selectedFilter == "All" || entry.type.rawValue == selectedFilter)
+                    && connectionMatchesQuery(entry, query: query)
+            }
         }
     }
 
@@ -552,7 +673,7 @@ struct ActivityView: View {
                     let count = appState.connections.filter { $0.type.rawValue == filter }.count
                     HStack(spacing: 4) {
                         Circle().fill(seaColor(for: filter)).frame(width: 6, height: 6)
-                        Text(LocalizedStringKey(filter))
+                        Text(routeFilterLabel(filter))
                         Text("\(count)").monospacedDigit()
                     }
                     .font(.system(size: 10))
@@ -741,6 +862,9 @@ struct ActivityView: View {
             }
         }
         .buttonStyle(.plain)
+        .frame(minWidth: 24, minHeight: 24)
+        .contentShape(Circle())
+        .pointerStyle(appState.isConnected ? .link : .default)
         .disabled(isTestingLatency || !appState.isConnected)
         .help(String(localized: "Re-test the selected exit"))
     }
@@ -790,8 +914,27 @@ struct ActivityView: View {
                         text: $connectionQuery
                     )
                     .textFieldStyle(.plain).focused($connectionSearchFocused)
+                    .onKeyPress(.escape) {
+                        if !connectionQuery.isEmpty {
+                            connectionQuery = ""
+                        } else {
+                            connectionSearchFocused = false
+                        }
+                        return .handled
+                    }
                     .font(.system(size: seaEnabled ? 15 : 12))
                     .frame(width: 200)
+                    if !connectionQuery.isEmpty {
+                        Button {
+                            connectionQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                    }
                 }
                 if seaEnabled {
                     searchField.modifier(SeaFieldSurface(focused: connectionSearchFocused))
@@ -818,28 +961,31 @@ struct ActivityView: View {
                 ForEach(seaEnabled ? seaVisibleApps : appState.appTrafficLedger.apps) { app in
                     if seaEnabled {
                         VStack(alignment: .leading, spacing: 0) {
-                            Button {
+                            SeaAppDisclosureButton(
+                                app: app,
+                                peak: appState.appTrafficLedger.apps.first?.total ?? 1,
+                                expanded: expandedApp == app.id,
+                                display: display
+                            ) {
                                 expandedApp = expandedApp == app.id ? nil : app.id
-                            } label: {
-                                HStack {
-                                    AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
-                                    SeaChevron(expanded: expandedApp == app.id)
-                                        .foregroundStyle(SeaTheme.muted)
+                            }
+                            .accessibilityLabel("\(app.id), \(activityBytes(app.total)) this session, \(app.liveConnections) current connections")
+                            .contextMenu {
+                                Button("Full route explanation") {
+                                    explainingScope = .app(app.id)
                                 }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("\(app.id), \(activityBytes(app.total)) this session, \(app.liveConnections) current connections")
                             if expandedApp == app.id {
                                 seaExpandedConnections(for: app)
                                     .transition(displayReduceMotion ? .identity : TonoMotion.surfaceTransition)
                             }
                         }
                         .overlay(alignment: .bottom) {
-                            Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                            Rectangle().fill(.white.opacity(display.contrast == .increased ? 0.25 : 0.06)).frame(height: 1)
                         }
                         .animation(TonoMotion.stateChange(reduceMotion: displayReduceMotion), value: expandedApp)
                     } else {
-                        Button { explainingApp = app.id } label: {
+                        Button { explainingScope = .app(app.id) } label: {
                             AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
                         }
                         .buttonStyle(.plain)
@@ -861,7 +1007,16 @@ struct ActivityView: View {
     }
 
     private func seaExpandedConnections(for app: AppTrafficLedger.AppTotals) -> some View {
-        let current = SeaActivityPresentation.currentConnections(appState.connections, for: app.id)
+        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current: [ConnectionEntry] = if selectedFilter == "All" && query.isEmpty {
+            SeaActivityPresentation.currentConnections(appState.connections, for: app.id)
+        } else {
+            Array(appState.connections.lazy.filter { entry in
+                (entry.processName ?? AppTrafficLedger.unattributed) == app.id
+                    && (selectedFilter == "All" || entry.type.rawValue == selectedFilter)
+                    && connectionMatchesQuery(entry, query: query)
+            }.prefix(SeaActivityPresentation.expandedConnectionLimit))
+        }
         return VStack(alignment: .leading, spacing: 8) {
             Text(appState.connectionsFeedLive
                  ? String(localized: "\(app.liveConnections) current connections · up to 20 shown")
@@ -869,7 +1024,9 @@ struct ActivityView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(SeaTheme.muted)
             if appState.connectionsFeedLive, current.isEmpty {
-                Text("No current connections. Session totals can include closed flows.")
+                Text(selectedFilter != "All" || !query.isEmpty
+                     ? "No connections match these filters."
+                     : "No current connections. Session totals can include closed flows.")
                     .font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
             }
             if appState.connectionsFeedLive {
@@ -878,16 +1035,16 @@ struct ActivityView: View {
                         Circle().fill(SeaRouteTint.color(for: entry.type)).frame(width: 6, height: 6)
                         Text(entry.domain).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 4)
-                        Text(LocalizedStringKey(entry.type.rawValue))
+                        Text(routeFilterLabel(entry.type.rawValue))
                             .foregroundStyle(SeaRouteTint.color(for: entry.type))
-                        Button("Why this route?") { explainingApp = app.id }
+                        Button("Why this route?") { explainingScope = .entry(entry) }
                             .buttonStyle(SeaButtonStyle(variant: .text, size: .row))
                     }
                     .font(.system(size: 11))
                     .foregroundStyle(SeaTheme.text)
                 }
             }
-            Button("Full route explanation") { explainingApp = app.id }
+            Button("Full route explanation") { explainingScope = .app(app.id) }
                 .buttonStyle(SeaButtonStyle(variant: .text, size: .row))
                 .font(.system(size: 11))
         }
@@ -1044,6 +1201,37 @@ struct ActivityView: View {
 
 // MARK: - App Traffic Row
 
+private struct SeaAppDisclosureButton: View {
+    let app: AppTrafficLedger.AppTotals
+    let peak: Int64
+    let expanded: Bool
+    let display: SeaDisplayOptions
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                AppTrafficRow(app: app, peak: peak)
+                SeaChevron(expanded: expanded)
+                    .foregroundStyle(hovered ? SeaTheme.text : SeaTheme.muted)
+                    .padding(.trailing, 10)
+            }
+            .background(
+                display.reduceTransparency
+                    ? (hovered ? SeaTheme.opaqueQuiet : Color.clear)
+                    : .white.opacity(hovered ? 0.04 : 0),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .onHover { hovered = $0 }
+        .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
+    }
+}
+
 private struct AppTrafficRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(AppState.self) private var appState
@@ -1131,10 +1319,29 @@ private struct AppTrafficRow: View {
 private struct LogEntryRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @SeaAppearancePreference private var seaEnabled
+    @SeaDisplayPreferences private var display
+    @FocusState private var isCloseFocused: Bool
     let entry: ConnectionEntry
     var onClose: (() -> Void)?
     @State private var isHovered = false
     @State private var explainsRoute = false
+
+    private var localizedNodeName: String {
+        switch entry.nodeName {
+        case "DIRECT", "Direct":
+            return String(localized: "Direct")
+        case "REJECT", "REJECT-DROP", "Rejected":
+            return String(localized: "Rejected")
+        case ConfigPipeline.exitGroupName:
+            return String(localized: seaEnabled ? "Exit" : "Proxied")
+        case ConfigPipeline.homeResidentialProxyName, ConfigPipeline.claudeHomeGroupName:
+            return String(localized: "Home")
+        case ConfigPipeline.directProxyName, ConfigPipeline.webDirectProxyName:
+            return String(localized: "Direct")
+        default:
+            return nodeRouteTitle(for: entry.nodeName)
+        }
+    }
 
     // Same palette as RouteTint so the per-connection dots agree with the
     // header split bar and legend on this page.
@@ -1239,19 +1446,19 @@ private struct LogEntryRow: View {
                 HStack(spacing: 6) {
                     Text(entry.nodeFlag)
                         .font(.system(size: 14))
-                    Text(ProxyNode.displayName(for: entry.nodeName))
+                    Text(localizedNodeName)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                .frame(width: 160, alignment: .leading)
-                .help(entry.route.isEmpty ? entry.nodeName : entry.route)
+                .frame(minWidth: 100, maxWidth: 150, alignment: .leading)
+                .help(entry.route.isEmpty ? localizedNodeName : entry.route)
 
                 // Per-flow latency is not in the `/connections` snapshot.
                 // A permanent "--" looked like every row had timed out.
                 if let ms = entry.latency {
                     Text("\(ms)ms")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(Color(hex: latencyStyle.fg))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -1290,29 +1497,59 @@ private struct LogEntryRow: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isHovered || isCloseFocused ? .primary : .secondary)
                         .frame(width: 24, height: 24)
+                        .background(.white.opacity(isCloseFocused ? 0.12 : 0), in: Circle())
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .opacity(isHovered ? 1 : 0)
+                .focused($isCloseFocused)
+                .pointerStyle(.link)
+                .opacity(isHovered || isCloseFocused ? 1 : 0.45)
+                .accessibilityLabel(String(localized: "Close connection"))
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
         .background(
-            isHovered
-                ? .white.opacity(colorScheme == .dark ? 0.15 : 0.9)
-                : .white.opacity(colorScheme == .dark ? 0.08 : 0.4),
+            display.reduceTransparency
+                ? AnyShapeStyle(colorScheme == .dark || seaEnabled
+                    ? (isHovered ? SeaTheme.opaqueQuiet : SeaTheme.opaquePanel)
+                    : Color(nsColor: .controlBackgroundColor))
+                : AnyShapeStyle(isHovered
+                    ? .white.opacity(colorScheme == .dark ? 0.15 : 0.9)
+                    : .white.opacity(colorScheme == .dark ? 0.08 : 0.4)),
             in: RoundedRectangle(cornerRadius: 18)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.7), lineWidth: 1)
+                .strokeBorder(
+                    .white.opacity(display.contrast == .increased ? 0.45 : (colorScheme == .dark ? 0.12 : 0.7)),
+                    lineWidth: display.contrast == .increased ? 1 : 1
+                )
         )
         .contentShape(Rectangle())
+        .contextMenu {
+            Button("Why this route?") { explainsRoute = true }
+            Button("Copy domain") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(entry.domain, forType: .string)
+                ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
+            }
+            if !entry.destination.isEmpty {
+                Button("Copy destination") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(entry.destination, forType: .string)
+                    ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
+                }
+            }
+            if let onClose {
+                Divider()
+                Button("Close connection", role: .destructive, action: onClose)
+            }
+        }
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(TonoMotion.hover(reduceMotion: display.reduceMotion)) {
                 isHovered = hovering
             }
         }

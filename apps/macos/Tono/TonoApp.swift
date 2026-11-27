@@ -158,8 +158,8 @@ struct TonoApp: App {
                 // Without this, NavigationSplitView reports ~200px minimum
                 // which causes the window to open at sidebar-only width.
                 Color.clear
-                    .frame(minWidth: 860, idealWidth: 920, maxWidth: 1280,
-                           minHeight: 540, idealHeight: 600, maxHeight: 720)
+                    .frame(minWidth: 860, idealWidth: 920, maxWidth: .infinity,
+                           minHeight: 540, idealHeight: 600, maxHeight: .infinity)
 
                 if InterfaceLanguagePreference.hasChosen {
                     if WelcomeLaunchGate.showsIntro(
@@ -182,6 +182,7 @@ struct TonoApp: App {
                     LanguageSetupView()
                 }
             }
+            .environment(\.appUpdater, updater)
             .background(WindowConfigurator { visible in
                 appState.setMainWindowVisible(visible)
             })
@@ -211,17 +212,100 @@ struct TonoApp: App {
             .preferredColorScheme(Self.preferredScheme)
             .environment(\.locale, appLocale)
             .tonoToastHost()
+            .sheet(isPresented: $updater.isPanelPresented) {
+                UpdatePanelSheet(updater: updater)
+                    .environment(appState)
+                    .environment(\.locale, appLocale)
+                    .defaultAppStorage(AppProfile.defaults)
+            }
             .onOpenURL { url in
                 handleIncomingURL(url)
             }
         }
         .defaultSize(width: 920, height: 600)
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
         .restorationBehavior(.disabled)
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updater)
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    appState.selectedPage = .settings
+                }
+                .keyboardShortcut(",", modifiers: .command)
+                .disabled(accountSession.state != .ready || updater.isPanelPresented)
+            }
+            CommandGroup(after: .sidebar) {
+                Button("Support") {
+                    appState.selectedPage = .support
+                }
+                .keyboardShortcut("5", modifiers: .command)
+                .disabled(accountSession.state != .ready || updater.isPanelPresented)
+            }
+            CommandMenu("Connection") {
+                Button(appState.isConnected ? String(localized: "Disconnect") : String(localized: "Connect")) {
+                    guard !shouldSuppressConnectionCommands else { return }
+                    if appState.isConnected {
+                        appState.disconnect(releaseKillSwitch: true)
+                    } else {
+                        appState.userConnect()
+                    }
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(
+                    updater.isPanelPresented
+                        || accountSession.state != .ready
+                        || !appState.isTonoReady
+                        || appState.isConnecting
+                        || appState.isDisconnecting
+                        || appState.isProtectionBlocked
+                        || appState.isProtectionUnconfirmed
+                        || appState.isProtectionBlockUnreadable
+                )
+
+                Button(appState.isConnecting ? String(localized: "Cancel connection") : String(localized: "Restore internet")) {
+                    guard !shouldSuppressConnectionCommands else { return }
+                    if accountSession.state == .ready {
+                        appState.restoreInternet()
+                    } else {
+                        Task { await accountSession.restoreDirectInternet() }
+                    }
+                }
+                .keyboardShortcut(".", modifiers: .command)
+                .disabled(
+                    updater.isPanelPresented
+                        || appState.connectionCoordinator.preemptiveReleaseTask != nil
+                        || (!appState.isConnecting
+                            && !appState.isProtectionBlocked
+                            && !appState.isProtectionUnconfirmed
+                            && !appState.isProtectionBlockUnreadable
+                            && !KillSwitchService.isArmed)
+                )
+
+                Divider()
+
+                Button("Test current exit") {
+                    guard !shouldSuppressConnectionCommands else { return }
+                    Task { await appState.testSelectedExitLatency() }
+                }
+                .keyboardShortcut("t", modifiers: .command)
+                .disabled(
+                    updater.isPanelPresented
+                        || accountSession.state != .ready
+                        || !appState.isConnected
+                        || appState.isConnecting
+                        || appState.isDisconnecting
+                        || appState.switchingNodeId != nil
+                )
+
+                Button("Refresh servers") {
+                    guard !shouldSuppressConnectionCommands else { return }
+                    Task { await accountSession.refreshManagedCatalog() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(updater.isPanelPresented || accountSession.state != .ready)
             }
         }
 
@@ -231,6 +315,7 @@ struct TonoApp: App {
                 .environment(appState)
                 .environment(accountSession)
                 .environmentObject(updater)
+                .environment(\.appUpdater, updater)
                 .defaultAppStorage(AppProfile.defaults)
                 .preferredColorScheme(Self.preferredScheme)
                 .environment(\.locale, appLocale)
@@ -243,6 +328,27 @@ struct TonoApp: App {
                 .environment(\.locale, appLocale)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    static func shouldSuppressWindowCommand(
+        updatePanelPresented: Bool,
+        isTextEditing: Bool,
+        hasActiveModalOrSheet: Bool
+    ) -> Bool {
+        updatePanelPresented || isTextEditing || hasActiveModalOrSheet
+    }
+
+    private var shouldSuppressConnectionCommands: Bool {
+        let keyWindow = NSApp.keyWindow
+        let isTextEditing = keyWindow?.firstResponder is NSTextView
+        let hasModalOrSheet = NSApp.modalWindow != nil
+            || keyWindow?.attachedSheet != nil
+            || keyWindow?.isSheet == true
+        return Self.shouldSuppressWindowCommand(
+            updatePanelPresented: updater.isPanelPresented,
+            isTextEditing: isTextEditing,
+            hasActiveModalOrSheet: hasModalOrSheet
+        )
     }
 
     /// Legacy install links are deliberately rejected: cloud catalog state is

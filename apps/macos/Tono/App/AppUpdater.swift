@@ -1,18 +1,156 @@
-import SwiftUI
-import Combine
 import AppKit
+import Combine
+import Foundation
+import SwiftUI
+
+private struct AppUpdaterKey: EnvironmentKey {
+    static let defaultValue: AppUpdater? = nil
+}
+
+extension EnvironmentValues {
+    var appUpdater: AppUpdater? {
+        get { self[AppUpdaterKey.self] }
+        set { self[AppUpdaterKey.self] = newValue }
+    }
+}
 
 /// Discovery/UI only. Root owns signature verification, the private consumed
 /// input, replacement and commit. There is intentionally no legacy installer.
 @MainActor
 final class AppUpdater: ObservableObject {
+    enum UpdatePhase: Equatable {
+        case idle
+        case checking
+        case upToDate
+        case available(version: String, packageSize: Int64)
+        case downloading(version: String, received: Int64, total: Int64)
+        case preparing(version: String)
+        case installing(version: String)
+        case failed(version: String?, message: String, detail: String?, retryable: Bool)
+    }
+
+    @MainActor
+    struct Operations {
+        var pendingUpdate: () async throws -> HelperManager.UpdateStatus? = {
+            try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
+        }
+        var discover: () async throws -> NativeUpdateDownload.Offer? = {
+            try await NativeUpdateDownload.discover()
+        }
+        var verifyOffer: (Data, Data) async throws -> Bool = { manifest, signature in
+            try await PrivilegedRuntimeCoordinator.shared.verifyUpdateOffer(
+                manifest: manifest,
+                signature: signature
+            )
+        }
+        var downloadPackage: (
+            NativeUpdateDownload.Offer,
+            @escaping @Sendable (_ received: Int64, _ total: Int64) -> Void
+        ) async throws -> URL = { offer, onProgress in
+            try await NativeUpdateDownload.package(for: offer, onProgress: onProgress)
+        }
+        var installUpdate: (AppState, Data, Data, URL) async throws -> Void = { appState, manifest, signature, package in
+            try await appState.installNativeUpdate(manifest: manifest, signature: signature, package: package)
+        }
+        var retireDisconnected: (AppState) async throws -> Void = { appState in
+            try await appState.retireDisconnectedNativeUpdate()
+        }
+        var terminateForUpdate: (AppDelegate?) -> Void = { appDelegate in
+            AppDelegate.nativeUpdateTerminationRequested = true
+            if let delegate = AppDelegate.resolve(attached: appDelegate) {
+                delegate.terminateForNativeUpdate()
+            } else {
+                NSApp.terminate(nil)
+            }
+        }
+
+        static let live = Operations()
+    }
+
     @Published private(set) var canCheckForUpdates = false
+    @Published private(set) var phase: UpdatePhase = .idle {
+        didSet { refreshCanCheckForUpdates() }
+    }
+    @Published var isPanelPresented = false
+
+    private let enabled: Bool
+    private let currentVersionProvider: () -> String
+    private let operations: Operations
     private weak var appState: AppState?
     private weak var appDelegate: AppDelegate?
+    private var availableOffer: NativeUpdateDownload.Offer?
     private var automaticCheck: Task<Void, Never>?
+    private var activeCheckTask: Task<Void, Never>?
+    private var activeInstallTask: Task<Void, Never>?
+    private var activeDownloadID: UUID?
+    private var currentCheckUserInitiated = false
 
-    init(enabled: Bool) {
-        canCheckForUpdates = enabled
+    var currentCheckTask: Task<Void, Never>? { activeCheckTask }
+    var currentInstallTask: Task<Void, Never>? { activeInstallTask }
+
+    convenience init(enabled: Bool) {
+        self.init(enabled: enabled, operations: .live)
+    }
+
+    init(
+        enabled: Bool,
+        currentVersionProvider: @escaping () -> String = {
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            return (version?.isEmpty == false ? version : nil) ?? "0.0.0"
+        },
+        operations: Operations = .live
+    ) {
+        self.enabled = enabled
+        self.currentVersionProvider = currentVersionProvider
+        self.operations = operations
+        self.canCheckForUpdates = enabled
+    }
+
+    var showsBanner: Bool {
+        guard enabled else { return false }
+        switch phase {
+        case .available, .downloading, .preparing, .installing, .failed:
+            return true
+        case .idle, .checking, .upToDate:
+            return false
+        }
+    }
+
+    var currentVersion: String {
+        currentVersionProvider()
+    }
+
+    var downloadFraction: Double? {
+        Self.downloadFraction(for: phase)
+    }
+
+    var hasCachedOffer: Bool {
+        availableOffer != nil
+    }
+
+    var isInstalling: Bool {
+        if case .installing = phase { return true }
+        return false
+    }
+
+    private var isBusyPhase: Bool {
+        switch phase {
+        case .checking, .downloading, .preparing, .installing:
+            return true
+        case .idle, .upToDate, .available, .failed:
+            return false
+        }
+    }
+
+    private func refreshCanCheckForUpdates() {
+        canCheckForUpdates = enabled && !isBusyPhase
+    }
+
+    nonisolated static func downloadFraction(for phase: UpdatePhase) -> Double? {
+        guard case let .downloading(_, received, total) = phase, total > 0 else {
+            return nil
+        }
+        return min(1.0, max(0.0, Double(received) / Double(total)))
     }
 
     func attach(appState: AppState, appDelegate: AppDelegate? = nil) {
@@ -20,103 +158,325 @@ final class AppUpdater: ObservableObject {
         if let appDelegate {
             self.appDelegate = appDelegate
         }
-        guard canCheckForUpdates, automaticCheck == nil else { return }
+        guard enabled, automaticCheck == nil else { return }
         automaticCheck = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(30))
+            try? await Task.sleep(for: .seconds(12))
             while !Task.isCancelled {
-                await self?.check(userInitiated: false)
+                await self?.runBackgroundCheckIfIdle()
                 try? await Task.sleep(for: .seconds(21_600))
             }
         }
     }
 
-    func checkForUpdates() {
-        Task { await check(userInitiated: true) }
+    func cancelAutomaticCheck() {
+        automaticCheck?.cancel()
+        automaticCheck = nil
     }
 
-    private func check(userInitiated: Bool) async {
-        guard canCheckForUpdates, let appState else { return }
-        canCheckForUpdates = false
-        var retryRequested = false
-        // Set once the user chose Install and Restart: from then on a failure
-        // answers that choice, even when a background check offered it.
-        var offerAccepted = false
-        defer {
-            canCheckForUpdates = true
-            if retryRequested { Task { await check(userInitiated: true) } }
+    func presentPanel() {
+        guard enabled else { return }
+        isPanelPresented = true
+    }
+
+    func dismissPanel() {
+        guard !isInstalling else { return }
+        isPanelPresented = false
+    }
+
+    func openOrCheckForUpdates() {
+        guard enabled else { return }
+        isPanelPresented = true
+        switch phase {
+        case .available, .downloading, .preparing, .installing:
+            return
+        case .checking:
+            currentCheckUserInitiated = true
+            return
+        case let .failed(_, _, _, retryable):
+            if availableOffer != nil || retryable {
+                return
+            }
+            startCheck(userInitiated: true)
+        case .idle, .upToDate:
+            startCheck(userInitiated: true)
+        }
+    }
+
+    func checkForUpdates() {
+        openOrCheckForUpdates()
+    }
+
+    func recheckForUpdates() {
+        guard enabled, !isBusyPhase else { return }
+        isPanelPresented = true
+        startCheck(userInitiated: true)
+    }
+
+    func installAvailableUpdate() {
+        guard enabled, !isBusyPhase, let appState, let offer = availableOffer else { return }
+        let version = offer.manifest.appVersion
+        let expectedSize = Self.packageSize(for: offer)
+        let attemptID = UUID()
+        activeDownloadID = attemptID
+        phase = .downloading(version: version, received: 0, total: expectedSize)
+
+        activeInstallTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.activeDownloadID == attemptID {
+                    self.activeDownloadID = nil
+                    self.activeInstallTask = nil
+                }
+            }
+            var downloadedPackage: URL?
+            defer {
+                if let downloadedPackage {
+                    try? FileManager.default.removeItem(at: downloadedPackage.deletingLastPathComponent())
+                }
+            }
+            do {
+                let package = try await self.operations.downloadPackage(offer) { [weak self] received, total in
+                    Task { @MainActor [weak self] in
+                        guard let self,
+                              self.activeDownloadID == attemptID,
+                              case .downloading = self.phase else { return }
+                        self.phase = .downloading(version: version, received: received, total: total)
+                    }
+                }
+                downloadedPackage = package
+                try Task.checkCancellation()
+                guard self.activeDownloadID == attemptID else { return }
+
+                self.phase = .preparing(version: version)
+                await Task.yield()
+                try Task.checkCancellation()
+                guard self.activeDownloadID == attemptID else { return }
+
+                self.phase = .installing(version: version)
+                try await self.operations.installUpdate(appState, offer.bytes, offer.signature, package)
+                self.operations.terminateForUpdate(self.appDelegate)
+            } catch {
+                if Task.isCancelled || self.activeDownloadID != attemptID || Self.isCancellation(error) {
+                    if let offer = self.availableOffer {
+                        self.phase = .available(version: offer.manifest.appVersion, packageSize: Self.packageSize(for: offer))
+                    } else {
+                        self.phase = .idle
+                    }
+                    return
+                }
+                appState.errorMessage = error.localizedDescription
+                let pending = try? await self.operations.pendingUpdate()
+                appState.updateIncomplete = pending?.pending ?? appState.nativeUpdatePending
+                let retryable = Self.disconnectRetriable(pending)
+                let (message, detail) = Self.splitFailure(error)
+                self.phase = .failed(
+                    version: version,
+                    message: message,
+                    detail: detail ?? pending?.diagnostic,
+                    retryable: retryable
+                )
+            }
+        }
+    }
+
+    func cancelDownload() {
+        switch phase {
+        case .downloading, .preparing:
+            break
+        default:
+            return
+        }
+        activeDownloadID = nil
+        activeInstallTask?.cancel()
+        activeInstallTask = nil
+        if let offer = availableOffer {
+            phase = .available(version: offer.manifest.appVersion, packageSize: Self.packageSize(for: offer))
+        } else if case let .downloading(version, _, total) = phase {
+            phase = .available(version: version, packageSize: max(0, total))
+        } else {
+            phase = .idle
+        }
+    }
+
+    func retryAfterDisconnect() {
+        guard enabled, !isBusyPhase, let appState else { return }
+        let previousVersion: String?
+        if case let .failed(version, _, _, _) = phase {
+            previousVersion = version
+        } else {
+            previousVersion = availableOffer?.manifest.appVersion
+        }
+        phase = .checking
+        activeCheckTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.activeCheckTask = nil }
+            do {
+                try await self.operations.retireDisconnected(appState)
+                await self.performCheck(userInitiated: true)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+                let pending = try? await self.operations.pendingUpdate()
+                appState.updateIncomplete = pending?.pending ?? appState.nativeUpdatePending
+                let retryable = Self.disconnectRetriable(pending)
+                let (message, detail) = Self.splitFailure(error)
+                self.phase = .failed(
+                    version: previousVersion,
+                    message: message,
+                    detail: detail ?? pending?.diagnostic,
+                    retryable: retryable
+                )
+            }
+        }
+    }
+
+    private func runBackgroundCheckIfIdle() async {
+        guard enabled, !isBusyPhase else { return }
+        await performCheck(userInitiated: false)
+    }
+
+    private func startCheck(userInitiated: Bool) {
+        guard enabled, appState != nil else { return }
+        guard activeCheckTask == nil else {
+            if userInitiated {
+                currentCheckUserInitiated = true
+                phase = .checking
+            }
+            return
+        }
+        if userInitiated {
+            currentCheckUserInitiated = true
+        }
+        if userInitiated || availableOffer == nil {
+            phase = .checking
+        }
+        activeCheckTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.activeCheckTask = nil }
+            await self.performCheck(userInitiated: userInitiated)
+        }
+    }
+
+    private func performCheck(userInitiated: Bool) async {
+        guard enabled, let appState else { return }
+        if userInitiated {
+            currentCheckUserInitiated = true
+        }
+        defer { currentCheckUserInitiated = false }
+        let previousCachedOffer = availableOffer
+        if currentCheckUserInitiated || previousCachedOffer == nil {
+            phase = .checking
         }
         do {
-            if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
+            if let pending = try await operations.pendingUpdate(), pending.pending {
+                appState.nativeUpdatePending = true
+                appState.updateIncomplete = true
                 let sentence = NativeUpdateDownload.Copy.pendingUnfinished
-                if let diagnostic = pending.diagnostic, !diagnostic.isEmpty {
-                    throw NativeUpdateDownload.userFacing(sentence, diagnostic: diagnostic)
+                let retryable = Self.disconnectRetriable(pending)
+                if Self.reportsFailure(
+                    userInitiated: currentCheckUserInitiated,
+                    offerAccepted: false,
+                    updatePending: appState.nativeUpdatePending
+                ) {
+                    appState.errorMessage = sentence
+                    phase = .failed(
+                        version: previousCachedOffer?.manifest.appVersion,
+                        message: sentence,
+                        detail: pending.diagnostic,
+                        retryable: retryable
+                    )
+                } else {
+                    restoreSilentCheckPhase(cachedOffer: previousCachedOffer)
                 }
-                throw NativeUpdateDownload.failure(sentence)
+                return
             }
-            guard let offer = try await NativeUpdateDownload.discover() else {
+
+            guard let offer = try await operations.discover() else {
                 // Nothing is published on the update channel (the release
                 // host's 404): no update, not a failure. Background checks
                 // stay silent and keep their six-hour cadence.
-                if userInitiated {
-                    let alert = NSAlert()
-                    alert.messageText = String(localized: "No update available")
-                    alert.informativeText = String(localized: "No signed Tono release is published for this channel yet.")
-                    alert.runModal()
-                }
+                availableOffer = nil
+                phase = currentCheckUserInitiated ? .upToDate : .idle
                 return
             }
-            let available = try await PrivilegedRuntimeCoordinator.shared.verifyUpdateOffer(
-                manifest: offer.bytes, signature: offer.signature
-            )
+
+            let available = try await operations.verifyOffer(offer.bytes, offer.signature)
             guard available else {
-                if userInitiated {
-                    let alert = NSAlert()
-                    alert.messageText = String(localized: "You're up to date")
-                    alert.informativeText = String(localized: "The signed release is not newer than this installation.")
-                    alert.runModal()
-                }
+                availableOffer = nil
+                phase = currentCheckUserInitiated ? .upToDate : .idle
                 return
             }
-            guard Self.offerAlert(version: offer.manifest.appVersion).runModal() == .alertFirstButtonReturn else { return }
-            offerAccepted = true
-            let package = try await NativeUpdateDownload.package(for: offer)
-            defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
-            try await appState.installNativeUpdate(manifest: offer.bytes, signature: offer.signature, package: package)
-            // The result is a helper-owned consumed receipt, not an App-owned
-            // InstallStarted stamp. The executor waits for this process to exit.
-            // Latch handoff termination before calling AppKit so even the
-            // delegate-less fallback skips ordinary PF teardown.
-            AppDelegate.nativeUpdateTerminationRequested = true
-            if let delegate = AppDelegate.resolve(attached: appDelegate) {
-                delegate.terminateForNativeUpdate()
-            } else {
-                NSApp.terminate(nil)
-            }
+
+            availableOffer = offer
+            phase = .available(version: offer.manifest.appVersion, packageSize: Self.packageSize(for: offer))
         } catch {
+            if Task.isCancelled {
+                restoreSilentCheckPhase(cachedOffer: previousCachedOffer)
+                return
+            }
             // Missing metadata (other than an unpublished channel, above) is
-            // an error, never "up to date". Background
-            // discovery does not raise a modal or perform a fallback install.
+            // an error, never "up to date". Background discovery does not raise
+            // a failure UI when nothing is pending.
             if Self.reportsFailure(
-                userInitiated: userInitiated,
-                offerAccepted: offerAccepted,
+                userInitiated: currentCheckUserInitiated,
+                offerAccepted: false,
                 updatePending: appState.nativeUpdatePending
             ) {
                 appState.errorMessage = error.localizedDescription
-                let pending = try? await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
+                let pending = try? await operations.pendingUpdate()
                 appState.updateIncomplete = pending?.pending ?? appState.nativeUpdatePending
                 let retryable = Self.disconnectRetriable(pending)
-                let alert = Self.failureAlert(detail: error.localizedDescription, retryable: retryable)
-                if alert.runModal() == .alertSecondButtonReturn && retryable {
-                    do {
-                        try await appState.retireDisconnectedNativeUpdate()
-                        retryRequested = true
-                    } catch {
-                        appState.errorMessage = error.localizedDescription
-                        Self.failureAlert(detail: error.localizedDescription).runModal()
-                    }
-                }
+                let (message, detail) = Self.splitFailure(error)
+                phase = .failed(
+                    version: previousCachedOffer?.manifest.appVersion,
+                    message: message,
+                    detail: detail ?? pending?.diagnostic,
+                    retryable: retryable
+                )
+            } else {
+                restoreSilentCheckPhase(cachedOffer: previousCachedOffer)
             }
         }
+    }
+
+    private func restoreSilentCheckPhase(cachedOffer: NativeUpdateDownload.Offer?) {
+        if let cachedOffer {
+            phase = .available(
+                version: cachedOffer.manifest.appVersion,
+                packageSize: Self.packageSize(for: cachedOffer)
+            )
+        } else {
+            phase = .idle
+        }
+    }
+
+    private nonisolated static func packageSize(for offer: NativeUpdateDownload.Offer) -> Int64 {
+        guard let target = try? offer.manifest.target(.macosArm64) else { return 0 }
+        return Int64(target.artifactSizeBytes)
+    }
+
+    private nonisolated static func isCancellation(_ error: any Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    nonisolated static func splitFailure(_ error: any Error) -> (message: String, detail: String?) {
+        let description = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = description
+            .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
+            .map(String.init)
+        if lines.count == 2 {
+            let detail = lines[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            return (lines[0], detail.isEmpty ? nil : detail)
+        }
+        if error is NativeUpdateDownload.Failure {
+            let msg = description.isEmpty ? String(localized: "Update not completed") : description
+            return (msg, nil)
+        }
+        let nsError = error as NSError
+        let codeInfo = "\(nsError.domain) (\(nsError.code))"
+        if description.isEmpty {
+            return (String(localized: "Update not completed"), codeInfo)
+        }
+        return (description, "\(codeInfo): \(description)")
     }
 
     /// Whether a failed check tells the user. A background check stays quiet

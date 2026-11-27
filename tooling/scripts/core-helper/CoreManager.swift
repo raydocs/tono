@@ -217,6 +217,72 @@ final class CoreManager {
         return proof
     }
 
+    /// Re-derive the ephemeral strict PF proof from the admitted root snapshot
+    /// when strict intent is active (e.g. if the watchdog expired the proof or
+    /// the daemon restarted before `/core/start`).
+    func rebindStrictProofIfAdmitted(digest: String, generation: UInt64?) throws -> StrictRuntimeProof? {
+        try Self.rebindStrictProofIfAdmitted(
+            digest: digest,
+            generation: generation,
+            strictIntentActive: KillSwitchManager.strictIntentActive,
+            authority: ReleaseAuthority(),
+            snapshotPath: runtimeConfigPath,
+            requireRootSnapshot: selfTestEnvironment == nil
+        )
+    }
+
+    static func rebindStrictProofIfAdmitted(
+        digest: String,
+        generation: UInt64?,
+        strictIntentActive: Bool,
+        authority: ReleaseAuthority,
+        snapshotPath: String,
+        requireRootSnapshot: Bool = true
+    ) throws -> StrictRuntimeProof? {
+        guard strictIntentActive else { return nil }
+        guard digest.range(
+            of: #"^[0-9a-f]{64}$"#,
+            options: .regularExpression
+        ).map({ $0 == digest.startIndex..<digest.endIndex }) == true else {
+            throw HelperFailure.invalid("Runtime input digest is invalid.")
+        }
+        let record: ReleaseAuthority.Record
+        do {
+            record = try authority.load()
+        } catch {
+            throw HelperFailure.invalid("Admitted strict release record is unavailable.")
+        }
+        guard record.mode == .secured,
+              let admittedDigest = record.strictRuntimeDigest,
+              admittedDigest == digest,
+              let generation,
+              record.generation == generation else {
+            throw HelperFailure.invalid("Runtime does not match the admitted strict session.")
+        }
+        let data: Data
+        do {
+            data = try KillSwitchManager.secureRead(
+                snapshotPath,
+                maximumBytes: 8 * 1024 * 1024,
+                requireRootOwnership: requireRootSnapshot
+            )
+        } catch let failure as HelperFailure {
+            throw HelperFailure.invalid(failure.message)
+        } catch {
+            throw HelperFailure.invalid("Admitted strict runtime snapshot is unavailable.")
+        }
+        let actualSHA256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard actualSHA256 == digest else {
+            throw HelperFailure.invalid("Admitted strict runtime snapshot digest mismatch.")
+        }
+        guard let text = String(data: data, encoding: .utf8),
+              ownedRuntimeConfigIsSafe(text),
+              let object = Self.foldedRuntime(data) else {
+            throw HelperFailure.invalid("Admitted strict runtime snapshot is invalid.")
+        }
+        return try StrictRuntimeProof(object, generation: generation, digest: digest)
+    }
+
     /// Parsing is bounded and runs against the root snapshot, never the
     /// user-writable input. Do not expose raw parser output containing secrets.
     private func checkConfiguration() throws {

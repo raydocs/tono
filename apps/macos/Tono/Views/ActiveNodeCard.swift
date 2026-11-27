@@ -3,7 +3,8 @@ import SwiftUI
 struct ActiveNodeCard: View {
     @SeaAppearancePreference private var seaAppearance
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     let nodeName: String
     var groupName: String?
     var latency: Int = 0
@@ -55,6 +56,7 @@ struct ActiveNodeCard: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .onHover { isSwitchHovered = $0 }
                 .animation(
                     TonoMotion.easeOut(0.15, reduceMotion: reduceMotion),
@@ -95,7 +97,7 @@ struct ActiveNodeCard: View {
                              ? LatencyLevel.spokenTitle(for: latency, kind: .exit)
                             : String(localized: "Not tested")
                     )
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(tint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -104,20 +106,24 @@ struct ActiveNodeCard: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(
-                    .white.opacity(isCardHovered ? (colorScheme == .dark ? 0.14 : 0.36) : (colorScheme == .dark ? 0.08 : 0.24)),
+                    displayPreferences.reduceTransparency
+                        ? AnyShapeStyle(colorScheme == .dark ? (isCardHovered ? SeaTheme.opaqueQuiet : SeaTheme.opaquePanel) : Color(nsColor: .controlBackgroundColor))
+                        : AnyShapeStyle(.white.opacity(isCardHovered ? (colorScheme == .dark ? 0.14 : 0.36) : (colorScheme == .dark ? 0.08 : 0.24))),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(
-                            (isCardHovered ? (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.4) : .white.opacity(colorScheme == .dark ? 0.14 : 0.45)),
+                            displayPreferences.contrast == .increased
+                                ? (isCardHovered ? (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.75) : .white.opacity(colorScheme == .dark ? 0.38 : 0.55))
+                                : (isCardHovered ? (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.4) : .white.opacity(colorScheme == .dark ? 0.14 : 0.45)),
                             lineWidth: 1
                         )
                 }
-                .glassEffect(in: RoundedRectangle(cornerRadius: 10))
                 .contentShape(RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .onHover { isCardHovered = $0 }
             .animation(
                 TonoMotion.easeOut(0.15, reduceMotion: reduceMotion),
@@ -164,6 +170,7 @@ struct ActiveNodeCard: View {
                             .foregroundStyle((seaAppearance ? SeaTheme.cool : TonoBrand.accent))
                     }
                     .buttonStyle(.plain)
+                    .pointerStyle(.link)
                     .popover(isPresented: $showsRulesPopover) {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(String(localized: "Claude / AI Residential Protection Scope"))
@@ -198,19 +205,33 @@ struct ActiveNodeCard: View {
                 .padding(.bottom, 12)
             }
         }
-        .frame(width: 480)
-        .background(
-            .white.opacity(colorScheme == .dark ? 0.06 : 0.12),
-            in: RoundedRectangle(cornerRadius: 12)
-        )
+        .frame(maxWidth: 480)
+        .background {
+            if displayPreferences.reduceTransparency || displayPreferences.contrast == .increased {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .windowBackgroundColor))
+            }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    .white.opacity(colorScheme == .dark ? 0.12 : 0.4),
+                    .white.opacity(displayPreferences.contrast == .increased ? 0.42 : (colorScheme == .dark ? 0.12 : 0.4)),
                     lineWidth: 1
                 )
         }
-        .glassEffect(in: RoundedRectangle(cornerRadius: 12))
+        .modifier(ActiveNodeCardGlassEffect(enabled: !displayPreferences.reduceTransparency && displayPreferences.contrast != .increased))
+    }
+}
+
+private struct ActiveNodeCardGlassEffect: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            content
+        }
     }
 }
 

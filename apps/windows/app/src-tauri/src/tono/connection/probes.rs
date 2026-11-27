@@ -139,6 +139,7 @@ pub(super) const ADVISORY_EXIT_PROBE_DEFER: Duration = Duration::from_millis(150
 pub(super) async fn verify_post_lock(
     state: &Arc<TonoState>,
     app: &AppHandle,
+    session_mode: crate::tono::state::DesktopSessionMode,
     secret: &str,
     controller_port: u16,
     mixed_port: u16,
@@ -154,25 +155,31 @@ pub(super) async fn verify_post_lock(
     // join: a failed connect then does not pay the 8 s advisory budget serially
     // after the data-plane budget.
     set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
-    let (outcomes, session_mode) = {
+    let outcomes = {
         let inner = state.lock().await;
-        let outcomes = if inner.connect_generation == generation {
+        if inner.connect_generation == generation {
             inner.attempt_history.current.as_ref().map(|attempt| attempt.probe_outcomes.clone())
         } else {
             None
-        };
-        (outcomes, inner.session_mode)
+        }
     };
     set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
     let mut last = String::from("post-lock verification did not run");
     for round in 0..POST_LOCK_VERIFY_ROUNDS {
-        if round > 0 && state.lock().await.connect_generation != generation {
-            return Err(StageFailure::Stale);
-        }
         let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
+        let measured_node = {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation {
+                return Err(StageFailure::Stale);
+            }
+            if final_round {
+                inner.selected_node.clone()
+            } else {
+                None
+            }
+        };
         let tun_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "tun", outcomes: outcomes.clone() });
         let proxy_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: round + 1, path: "loopback", outcomes: outcomes.clone() });
-        let measured_node = if final_round { state.lock().await.selected_node.clone() } else { None };
         let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder {
             round: round + 1,
             path: "controller",
@@ -212,12 +219,7 @@ pub(super) async fn verify_post_lock(
                 }
                 match result {
                     Ok(delay) => {
-                        if delay > 0 {
-                            if let Some(node) = measured_node.as_deref() {
-                                let mut inner = state.lock().await;
-                                inner.record_exit_delay(node, delay);
-                            }
-                        }
+                        record_verified_advisory_delay(state, generation, measured_node.as_deref(), delay).await?;
                         Ok(())
                     }
                     Err(error) => Err(error),
@@ -276,6 +278,25 @@ pub(super) async fn verify_post_lock(
             .await?;
     }
     Err(StageFailure::error(last))
+}
+
+pub(super) async fn record_verified_advisory_delay(
+    state: &Arc<TonoState>,
+    generation: u64,
+    measured_node: Option<&str>,
+    delay: u64,
+) -> Result<(), StageFailure> {
+    if delay == 0 {
+        return Ok(());
+    }
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return Err(StageFailure::Stale);
+    }
+    if let Some(node) = measured_node {
+        inner.record_exit_delay(node, delay);
+    }
+    Ok(())
 }
 
 pub(super) async fn spawn_deferred_exit_delay_probe(
@@ -392,6 +413,17 @@ pub(super) fn classify_exhausted_data_plane(
         };
         return format!("{data_plane}; loopback proxy: {proxy}");
     }
+    // Owned-graph Windows DNS / Claude anti-leak check failed before any TUN probe ran;
+    // stamp TONO_CONNECT_DNS before appending loopback diagnostics so a timeout/TLS proxy
+    // failure never overrides the DNS classification.
+    if data_plane.starts_with(FAKE_IP_VERIFICATION_FAILED_PREFIX) {
+        let proxy = match proxy_cross_check {
+            Ok(()) => "passed".to_string(),
+            Err(error) => error,
+        };
+        let stamped = tono_core::stamp_connect_failure(&data_plane);
+        return format!("{stamped}; loopback proxy: {proxy}");
+    }
     let (code, _) = tono_core::classify_exhausted_data_plane(
         controller_probe.clone(),
         data_plane.clone(),
@@ -400,7 +432,7 @@ pub(super) fn classify_exhausted_data_plane(
     );
     let body = match (controller_probe, proxy_cross_check) {
         (Ok(()), Ok(())) => format!(
-            "{TUN_DATA_PLANE_BROKEN_PREFIX}: selected node and Mihomo proxy egress passed, but the Windows TUN data plane failed: {data_plane}"
+            "{TUN_DATA_PLANE_BROKEN_PREFIX}: selected node and loopback proxy egress passed, but the Windows TUN data plane failed: {data_plane}"
         ),
         (Err(controller), Ok(())) => format!(
             "{TUN_DATA_PLANE_BROKEN_PREFIX}: loopback proxy egress passed despite controller warning ({controller}), but the Windows TUN data plane failed: {data_plane}"
@@ -542,15 +574,17 @@ pub(super) fn tun_dns_proves_fake_ip(tun: Result<std::net::Ipv4Addr, &str>) -> b
     tun.ok().is_some_and(|ip| is_fake_ip(IpAddr::V4(ip)))
 }
 
+pub(super) const FAKE_IP_VERIFICATION_FAILED_PREFIX: &str = "fake-ip verification failed:";
+
 pub(super) fn fake_ip_verification_error(last: &str) -> String {
     let tun_dead = last.contains("TUN DNS:") || last.contains("loopback DNS:");
     let os_bypassed = last.contains("no fake-ip in") || last.contains("exceeded");
     if os_bypassed && !tun_dead {
         format!(
-            "fake-ip verification failed: {last}. Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1. Turn Encrypted DNS off in Settings → Network & internet → Ethernet/Wi-Fi → DNS, then reconnect."
+            "{FAKE_IP_VERIFICATION_FAILED_PREFIX} {last}. Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1. Turn Encrypted DNS off in Settings → Network & internet → Ethernet/Wi-Fi → DNS, then reconnect."
         )
     } else {
-        format!("fake-ip verification failed: {last}")
+        format!("{FAKE_IP_VERIFICATION_FAILED_PREFIX} {last}")
     }
 }
 

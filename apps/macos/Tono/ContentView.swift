@@ -78,7 +78,7 @@ struct ContentView: View {
                             .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                         }
                     }
-                    .frame(minWidth: 660, minHeight: 500)
+                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
                     .animation(
                         TonoMotion.easeOut(0.18, reduceMotion: reduceMotion),
                         value: appState.errorMessage != nil
@@ -88,6 +88,7 @@ struct ContentView: View {
                         value: appState.selectedPage
                     )
                 }
+                .frame(minWidth: 620, minHeight: 500)
                 .animation(
                     TonoMotion.banner(reduceMotion: reduceMotion),
                     value: appState.isProtectionBlocked
@@ -151,6 +152,7 @@ private struct ProtectedOfflineBanner: View {
             }
             .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
             .controlSize(.small)
+            .disabled(appState.connectionCoordinator.preemptiveReleaseTask != nil)
             if !progressCardOwnsRetryAndRoute {
                 Button("Choose another route") {
                     appState.selectedPage = .proxies
@@ -172,10 +174,14 @@ private struct ProtectedOfflineBanner: View {
 }
 
 private struct ErrorBanner: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaAppearance
+    @SeaDisplayPreferences private var displayPreferences
     let message: String
     let dismiss: () -> Void
 
     var body: some View {
+        let opaque = displayPreferences.reduceTransparency || displayPreferences.contrast == .increased
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
@@ -194,16 +200,41 @@ private struct ErrorBanner: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .frame(maxWidth: 480, alignment: .leading)
-        .glassEffect(
-            .regular.tint(.orange.opacity(0.08)),
-            in: RoundedRectangle(cornerRadius: 14)
-        )
-        .shadow(color: .black.opacity(0.12), radius: 16, y: 7)
+        .background {
+            if opaque {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(seaAppearance || colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .windowBackgroundColor))
+            }
+        }
+        .overlay {
+            if displayPreferences.contrast == .increased {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(TonoStatus.blocked.opacity(0.65), lineWidth: 1)
+            }
+        }
+        .modifier(ErrorBannerGlassEffect(enabled: !opaque))
+        .shadow(color: opaque ? .clear : .black.opacity(0.12), radius: 16, y: 7)
+    }
+}
+
+private struct ErrorBannerGlassEffect: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(
+                .regular.tint(.orange.opacity(0.08)),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+        } else {
+            content
+        }
     }
 }
 

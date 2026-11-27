@@ -127,8 +127,15 @@ extension AppState {
             }
             return
         }
-        if isConnected, coreRuntime.routingMode == "three-tier" {
+        if isConnected, strictRoutingSessionActive {
             errorMessage = String(localized: "Disconnect before switching cloud servers in Strict mode.")
+            return
+        }
+        if !isConnected, strictRoutingSessionActive,
+           isProtectionBlocked || isProtectionUnconfirmed || KillSwitchService.isArmed,
+           let current = currentProxySelectionTarget(),
+           !proxyTarget(current, matches: nodeName) {
+            errorMessage = String(localized: "Click Restore internet before switching cloud servers in Strict mode.")
             return
         }
         // A17: a pick is the user's own block. Manual hy2 stays hy2, and the
@@ -345,10 +352,19 @@ extension AppState {
                 }
                 SingBoxDelayGate.prove()
                 await ops.closeConnections(previousName)
+                try checkSwitchCurrent()
+                guard nodeName == ConfigPipeline.homeNodeName
+                        || self.localProxyNode(matching: nodeName) != nil else {
+                    throw CancellationError()
+                }
                 guard await self.connectionCoordinator.finishNodeSwitch(
                     generation: switchGeneration,
                     converge: { try await ops.armKillSwitch(nextEndpoints) },
-                    commit: { ops.rememberNode(desiredNode, nodeName) },
+                    commit: {
+                        guard nodeName == ConfigPipeline.homeNodeName
+                                || self.localProxyNode(matching: nodeName) != nil else { return }
+                        ops.rememberNode(desiredNode, nodeName)
+                    },
                     recover: { error in
                         recoveryHandledSelection = true
                         self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
@@ -387,6 +403,9 @@ extension AppState {
                     await self.fetchNetworkInfo()
                 }
             } catch is CancellationError {
+                if self.isConnected, !self.isDisconnecting, self.networkInfo.ip == "--" {
+                    self.networkInfo = previousNetworkInfo
+                }
                 return
             } catch {
                 // URLSession reports cancellation as URLError.cancelled rather
@@ -439,7 +458,7 @@ extension AppState {
             rememberSwitchedNode(node, name: name)
         }
         let release = (releaseNetwork || catalogRemovalPending) && ExhaustedFailureNetwork.afterFailure(
-            strictKillSwitchExplicit: false,
+            strictKillSwitchExplicit: strictRoutingSessionActive,
             selectiveAiBlockReady: false
         ).releasesSystemNetwork
         disconnect(releaseKillSwitch: release, automaticFailureRelease: release)
@@ -662,7 +681,11 @@ extension AppState {
             ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
         operations: ConfigReloadOperations = ConfigReloadOperations()
     ) {
-        if isConnected, coreRuntime.routingMode == "three-tier" {
+        if isConnected, strictRoutingSessionActive {
+            return
+        }
+        if pendingDirectPolicy != nil,
+           effectiveRoutingMode == "ai-home" || effectiveRoutingMode == "three-tier" {
             return
         }
         // Do not cancel a mutation after PF or Mihomo may already have accepted

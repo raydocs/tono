@@ -72,9 +72,11 @@ struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
     @EnvironmentObject private var updater: AppUpdater
+    @Environment(\.appUpdater) private var appUpdater: AppUpdater?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
+    @SeaDisplayPreferences private var displayPreferences
 
     @State private var loginItems: LoginItemPreference
     @Environment(\.scenePhase) private var scenePhase
@@ -82,14 +84,14 @@ struct SettingsView: View {
     private var selectedLanguage = InterfaceLanguagePreference.simplifiedChinese
     @AppStorage(SettingsKey.desktopRoutingMode, store: AppProfile.defaults)
     private var desktopRoutingMode = "ai-home"
-    @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
-    @AppStorage(SettingsKey.localTrafficAuditEnabled)
+    @AppStorage(SettingsKey.logsEnabled, store: AppProfile.defaults) private var logsEnabled = true
+    @AppStorage(SettingsKey.localTrafficAuditEnabled, store: AppProfile.defaults)
     private var localTrafficAuditEnabled = true
-    @AppStorage(SettingsKey.remoteDiagnosticsEnabled)
+    @AppStorage(SettingsKey.remoteDiagnosticsEnabled, store: AppProfile.defaults)
     private var remoteDiagnosticsEnabled = false
-    @AppStorage(SettingsKey.crashReportingEnabled)
+    @AppStorage(SettingsKey.crashReportingEnabled, store: AppProfile.defaults)
     private var crashReportingEnabled = true
-    @AppStorage(SettingsKey.claudeTrafficResearchEnabled)
+    @AppStorage(SettingsKey.claudeTrafficResearchEnabled, store: AppProfile.defaults)
     private var claudeTrafficResearchEnabled = false
     @AppStorage(
         SettingsKey.aggregatedAppRoutingResearchEnabled,
@@ -111,10 +113,11 @@ struct SettingsView: View {
         SettingsKey.allowLocalNetworkDevices,
         store: AppProfile.defaults
     ) private var allowLocalNetworkDevices = SettingsKey.allowLocalNetworkDevicesDefault
-    @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
+    @AppStorage(SettingsKey.themeMode, store: AppProfile.defaults) private var themeMode = "Adaptive"
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
     @State private var researchProgramsExpanded = false
+    @State private var auditPathCopied = false
 
     private let languages = InterfaceLanguagePreference.options
     private let themes = ["Light", "Dark", "Adaptive"]
@@ -149,8 +152,6 @@ struct SettingsView: View {
                         privacyCard
                         SettingsCard(icon: "wrench.and.screwdriver", title: "Advanced") {
                             logsPageRow
-                            settingDivider
-                            auditLogRow
                         }
                         aboutCard
                     } else {
@@ -306,18 +307,12 @@ struct SettingsView: View {
         appState.localNetworkDevicesSettingChanged(enabled)
     }
 
-    private var auditLogRow: some View {
-        SettingRow(label: "Audit Log") {
-            Button("Copy path") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(LocalTrafficAudit.shared.logFileURL.path, forType: .string)
-            }
-            .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
-        }
-    }
-
     private var logsPageRow: some View {
-        SettingToggleRow(label: "Show Logs page", isOn: $logsEnabled)
+        SettingToggleRow(
+            label: "Show Logs page",
+            subtitle: "Show the runtime logs tab in the sidebar.",
+            isOn: $logsEnabled
+        )
     }
 
     private var appearanceRows: some View {
@@ -400,18 +395,11 @@ struct SettingsView: View {
 
             settingDivider
 
-            HStack {
-                Text("Updates")
-                    .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .medium))
-                Spacer()
-                Button("Check for Updates") {
-                    updater.checkForUpdates()
-                }
-                .modifier(SeaActionStyle(variant: .text, size: .row))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
-                .disabled(!updater.canCheckForUpdates)
-            }
+            SettingsUpdateRow(
+                updater: appUpdater ?? updater,
+                seaEnabled: seaEnabled,
+                seaAccent: seaAccent
+            )
         }
     }
 
@@ -531,14 +519,34 @@ struct SettingsView: View {
 
             settingDivider
 
-            SettingRow(label: "Audit Log") {
-                Button("Show in Finder") {
-                    let url = LocalTrafficAudit.shared.prepareForReveal()
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
+            VStack(alignment: .leading, spacing: 6) {
+                SettingRow(label: "Audit Log") {
+                    HStack(spacing: 12) {
+                        Button(auditPathCopied ? String(localized: "Copied") : String(localized: "Copy path")) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(LocalTrafficAudit.shared.logFileURL.path, forType: .string)
+                            auditPathCopied = true
+                            ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
+                            Task {
+                                try? await Task.sleep(for: .seconds(2))
+                                auditPathCopied = false
+                            }
+                        }
+                        .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
+
+                        Button("Show in Finder") {
+                            let url = LocalTrafficAudit.shared.prepareForReveal()
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                        }
+                        .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
+                    }
                 }
-                .modifier(SeaActionStyle(variant: .text, size: .row))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
+                Text(LocalTrafficAudit.shared.logFileURL.path)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(seaEnabled ? SeaTheme.tertiary : Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
             }
 
             settingDivider
@@ -623,8 +631,13 @@ struct SettingsView: View {
 
     private var settingDivider: some View {
         Group {
-            if seaEnabled { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
-            else { Divider().opacity(0.3).padding(.vertical, 2) }
+            if seaEnabled {
+                Rectangle()
+                    .fill(.white.opacity(displayPreferences.contrast == .increased ? 0.30 : 0.06))
+                    .frame(height: 1)
+            } else {
+                Divider().opacity(0.3).padding(.vertical, 2)
+            }
         }
     }
 
@@ -813,6 +826,7 @@ private struct SettingToggleRow: View {
             if seaEnabled, let subtitle, seaSummary != nil {
                 Button("Learn more") { showingDetails = true }
                     .modifier(SeaActionStyle(variant: .text, size: .row))
+                    .accessibilityLabel("Learn more about \(String(localized: String.LocalizationValue(label)))")
                     .popover(isPresented: $showingDetails) {
                         Text(LocalizedStringKey(subtitle))
                             .font(.system(size: 12))

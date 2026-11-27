@@ -89,7 +89,9 @@ extension AppState {
                                 pending: refusal + " "
                                     + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
                                 released: refusal + " "
-                                    + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+                                    + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready."),
+                                strictMessage: refusal + " "
+                                    + String(localized: "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.")
                             )
                         }
                     }
@@ -158,9 +160,13 @@ extension AppState {
                 let sessionPorts: (mixed: Int, controller: Int)
                 let strictReconnectActive = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
                     && capturedRoutingMode == "three-tier"
-                    && (self.isProtectedReconnectScheduled || self.isProtectionBlocked || KillSwitchService.isArmed)
-                    && !(self.config.mixedPort == 28_990 && self.config.externalController == "127.0.0.1:9090")
+                    && (self.isProtectedReconnectScheduled
+                        || self.isProtectionBlocked
+                        || self.isProtectionUnconfirmed
+                        || KillSwitchService.isArmed)
+                let persistedStrict = strictReconnectActive ? StrictSessionPersistence.load() : nil
                 if strictReconnectActive,
+                   !(self.config.mixedPort == 28_990 && self.config.externalController == "127.0.0.1:9090"),
                    self.config.mixedPort > 0,
                    !self.config.externalController.isEmpty,
                    let controllerPort = self.config.externalController
@@ -168,6 +174,14 @@ extension AppState {
                        .flatMap({ Int($0) }),
                    controllerPort > 0 {
                     sessionPorts = (self.config.mixedPort, controllerPort)
+                    if let persistedStrict {
+                        self.config.secret = persistedStrict.secret
+                    }
+                } else if let persistedStrict {
+                    sessionPorts = (persistedStrict.mixedPort, persistedStrict.controllerPort)
+                    self.config.mixedPort = persistedStrict.mixedPort
+                    self.config.externalController = "127.0.0.1:\(persistedStrict.controllerPort)"
+                    self.config.secret = persistedStrict.secret
                 } else {
                     sessionPorts = SessionRuntimePorts.allocatePair()
                     self.config.mixedPort = sessionPorts.mixed
@@ -231,6 +245,7 @@ extension AppState {
                     "connect_watchdog_fired",
                     details: ["stage": String(describing: self.connectionStage)]
                 )
+                self.restoreSelectionAfterHy2AutoDial()
                 let stalledMessage = String(
                     localized: "The connection attempt stalled and was stopped."
                 )
@@ -347,10 +362,16 @@ extension AppState {
                 // YAML generation only touches the app-support directory. Overlap
                 // it with helper install and the first PF arm — those go through
                 // the privileged actor and cannot run beside each other.
+                let isStrictMode = capturedRoutingMode == "three-tier"
+                let strictInstalledDigest = isStrictMode
+                    ? (self.loadedRuntimeConfigDigest ?? StrictSessionPersistence.load()?.runtimeDigest)
+                    : nil
                 async let runtimeDigest = coreRuntime.writeRuntimeConfig(
                     overlay: overlay,
                     customNodes: runtimeNodes,
-                    directPolicy: activeDirectPolicy
+                    directPolicy: activeDirectPolicy,
+                    installed: strictInstalledDigest,
+                    keepsInstalled: isStrictMode
                 )
                 // Always arm before TUN comes up so a crash mid-connect cannot
                 // leak the real IP. The actor keeps this blocking PF/helper work
@@ -375,7 +396,17 @@ extension AppState {
                     configDirectory: coreRuntime.configDirectory.path,
                     digest: digest, mode: capturedRoutingMode
                 )
-                AppProfile.defaults.set(capturedRoutingMode == "three-tier", forKey: "strictRoutingSessionIntent")
+                AppProfile.defaults.set(isStrictMode, forKey: "strictRoutingSessionIntent")
+                if isStrictMode {
+                    StrictSessionPersistence.save(
+                        secret: overlay.secret,
+                        mixedPort: overlay.mixedPort,
+                        controllerPort: apiPort,
+                        runtimeDigest: digest
+                    )
+                } else {
+                    StrictSessionPersistence.clear()
+                }
                 let protectedDNSState =
                     await PrivilegedRuntimeCoordinator.shared.protectedDNSStatus()
                 // System resolution is allowed only on a clean, unprotected
@@ -668,6 +699,7 @@ extension AppState {
                 // It still leaves a typed event: a connectBegin with no outcome
                 // row is indistinguishable from a crash in connection_events.
                 if Task.isCancelled {
+                    self.restoreSelectionAfterHy2AutoDial()
                     ConnectionTelemetryBuffer.shared.recordConnectCancel(
                         stage: self.connectionStage.rawValue,
                         elapsedMs: max(0, Int(Date().timeIntervalSince(attemptStartedAt) * 1_000)),
@@ -742,14 +774,22 @@ extension AppState {
                     // H21-O-F7: a tunnel/exit-class failure while another VPN's
                     // interface is up names that VPN. Read-only getifaddrs; only
                     // the sentence (and the repeat signature built from it) changes.
-                    let failureMessage = coreErrors.contains(where: Hy2IdleSupport.isQuicIdle)
-                        ? Hy2IdleSupport.userMessage
-                        : OtherVPNDetection.attributedMessage(
+                    let strictImmutable = Self.isStrictRuntimeImmutableError(error)
+                    let failureMessage: String
+                    if strictImmutable {
+                        failureMessage = String(
+                            localized: "Strict mode locked the previous network route (for example, your network interface or server changed). Click Restore internet before reconnecting."
+                        )
+                    } else if coreErrors.contains(where: Hy2IdleSupport.isQuicIdle) {
+                        failureMessage = Hy2IdleSupport.userMessage
+                    } else {
+                        failureMessage = OtherVPNDetection.attributedMessage(
                             for: self.lastClassifiedFailure,
                             interfaces: OtherVPNDetection.currentInterfaces()
                         ) ?? ConnectionFailurePresentation.userFacingMessage(
                             classified: self.lastClassifiedFailure
                         )
+                    }
                     // Deterministic failures repeat verbatim; a fourth try of
                     // three identical same-stage outcomes will not differ.
                     // Environmental failures (no network service while Wi-Fi
@@ -789,12 +829,23 @@ extension AppState {
                     )
                     self.connectionStageStartedAt = nil
                     self.connectionCoordinator.connectWatchdogTask?.cancel()
-                    if KillSwitchService.isArmed {
+                    if KillSwitchService.isArmed || (strictImmutable && self.strictRoutingSessionActive) {
+                        if strictImmutable {
+                            KillSwitchService.isArmed = true
+                        }
                         let needsUser = Self.failureRequiresUserAction(error)
-                        let detail = needsUser
-                            ? failureMessage + " "
-                                + String(localized: "This needs your action, so Tono will not reconnect by itself. The original network is back.")
-                            : failureMessage
+                        let detail: String
+                        if strictImmutable {
+                            detail = failureMessage
+                        } else if needsUser {
+                            detail = self.strictRoutingSessionActive
+                                ? failureMessage + " "
+                                    + String(localized: "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.")
+                                : failureMessage + " "
+                                    + String(localized: "This needs your action, so Tono will not reconnect by itself. The original network is back.")
+                        } else {
+                            detail = failureMessage
+                        }
                         await self.applyExhaustedArmedFailure(
                             message: detail,
                             resumeWhenReachable: !needsUser
@@ -852,6 +903,8 @@ extension AppState {
     /// must not let a single failure in a future session trip the "repeated
     /// three times" pause. Shared by every path that releases the barrier.
     func resetReleasedSessionHistory() {
+        coreRuntime.clearRememberedInstalledFakeIP()
+        StrictSessionPersistence.clear()
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
         consecutiveProtectionRepairCount = 0
@@ -1008,6 +1061,9 @@ extension AppState {
         switch outcome.outcome {
         case "restored":
             AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
+            coreRuntime.retireRoutingMode()
+            coreRuntime.clearRememberedInstalledFakeIP()
+            StrictSessionPersistence.clear()
             isProtectionBlocked = false
             isProtectionUnconfirmed = false
             selectiveAIRecoveryPending = false
@@ -1084,6 +1140,7 @@ extension AppState {
             || self.isConnected
             || self.isConnecting
             || KillSwitchService.isArmed
+        self.restoreSelectionAfterHy2AutoDial()
         // An explicit release can spend up to 180 seconds on the administrator
         // repair prompt. Keep the UI protected/offline until core stop, DNS
         // restoration, and PF disarm have all committed.
@@ -1389,7 +1446,8 @@ extension AppState {
                         // session must not publish Protected Offline over an
                         // open host (R1-F2). Every armed path keeps the
                         // claim, and an incomplete release stays fail-closed.
-                        if !releaseKillSwitch, !KillSwitchService.isArmed {
+                        if !releaseKillSwitch, !KillSwitchService.isArmed,
+                           self?.strictRoutingSessionActive != true {
                             transitionLeavesProtectionBlocked = false
                         } else {
                             transitionLeavesProtectionBlocked = true
@@ -1460,6 +1518,11 @@ extension AppState {
                     }
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
                         AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
+                        if releaseDisposition == .explicit {
+                            self.coreRuntime.retireRoutingMode()
+                            self.coreRuntime.clearRememberedInstalledFakeIP()
+                            StrictSessionPersistence.clear()
+                        }
                         self.protectedDNSService = nil
                         self.recoveryCause = nil
                         RuntimeCleanup.clearConnectBootSession()
@@ -1597,7 +1660,9 @@ extension AppState {
         }
         // Nor may a retired attempt register monitors no teardown waits for.
         guard attemptIsCurrent() else { return false }
-        scheduleBackgroundOptionalPolicy()
+        if effectiveRoutingMode != "ai-home", effectiveRoutingMode != "three-tier" {
+            scheduleBackgroundOptionalPolicy()
+        }
         startCoreMonitor()
         if managedCatalogReloadPending {
             applyManagedCatalogToRuntime()
@@ -2083,15 +2148,27 @@ extension AppState {
                     generation: observedGeneration,
                     detail: browserDNS.diagnosticDetail
                 )
-                // No reconnect is scheduled here — only the user can change
-                // the browser setting — so a preserve teardown left the host
-                // offline: core stopped, PF held bootstrap-only, system DNS
-                // still pointed at the dead resolver, until the helper's
-                // core-down watchdog released PF about 30 s later. macOS has
-                // no strict kill switch to hold; take that same open end
-                // state without the offline window.
-                self.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
-                self.errorMessage = browserDNS.failureMessage
+                if self.strictRoutingSessionActive {
+                    self.protectedReconnectPausedForUserAction = true
+                    self.protectedReconnectPauseLiftsOnNetworkChange = false
+                    self.connectionCoordinator.cancelReconnectTasks()
+                    self.isProtectedReconnectScheduled = false
+                    self.protectedReconnectNextAttemptAt = nil
+                    self.disconnect(releaseKillSwitch: false)
+                    self.isProtectionBlocked = true
+                    self.errorMessage = browserDNS.failureMessage + " "
+                        + String(localized: "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.")
+                } else {
+                    // No reconnect is scheduled here — only the user can change
+                    // the browser setting — so a preserve teardown left the host
+                    // offline: core stopped, PF held bootstrap-only, system DNS
+                    // still pointed at the dead resolver, until the helper's
+                    // core-down watchdog released PF about 30 s later. macOS has
+                    // no strict kill switch to hold; take that same open end
+                    // state without the offline window.
+                    self.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+                    self.errorMessage = browserDNS.failureMessage
+                }
                 return .stopMonitoring
             }
         }
@@ -2174,7 +2251,9 @@ extension AppState {
         // reverse.
         let pinsAreLoadBearing =
             self.activeDirectPolicy?.pinsAreLoadBearing ?? false
-        if pinsAreLoadBearing, state.healthCycle.isMultiple(of: 30) {
+        if pinsAreLoadBearing, state.healthCycle.isMultiple(of: 30),
+           self.effectiveRoutingMode != "ai-home",
+           self.effectiveRoutingMode != "three-tier" {
             await self.refreshManagedDirectPins()
             guard !Task.isCancelled, self.isConnected else { return .stopMonitoring }
         }
@@ -2849,6 +2928,19 @@ extension AppState {
     /// errors deliberately stay retryable. Another account's helper stays
     /// refused until that account or an administrator acts, and a browser
     /// Secure DNS conflict until the user changes the browser.
+    static func isStrictRuntimeImmutableError(_ error: Error) -> Bool {
+        let text: String
+        if case HelperIPCError.commandFailed(let message, _) = error {
+            text = message
+        } else {
+            text = error.localizedDescription
+        }
+        let lowered = text.lowercased()
+        return lowered.contains("strict runtime is immutable")
+            || lowered.contains("strict session downgrade")
+            || lowered.contains("runtime does not match the admitted strict session")
+    }
+
     static func failureRequiresUserAction(_ error: Error) -> Bool {
         switch error {
         case KillSwitchService.Error.userDenied,
@@ -2865,6 +2957,8 @@ extension AppState {
         // Another program's resolver or proxy keeps the port until the user
         // quits it; every retry would fail the same way.
         case _ where CorePortConflict.matches(error):
+            true
+        case _ where isStrictRuntimeImmutableError(error):
             true
         default:
             false
@@ -2889,7 +2983,7 @@ extension AppState {
             return
         }
         let releases = ExhaustedFailureNetwork.afterFailure(
-            strictKillSwitchExplicit: AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+            strictKillSwitchExplicit: strictRoutingSessionActive
         )
             .releasesSystemNetwork
         let preferred = selectedExitNode()?.name ?? ConfigPipeline.homeNodeName
@@ -2953,8 +3047,9 @@ extension AppState {
             if !resumeWhenReachable {
                 protectedReconnectPausedForUserAction = true
                 protectedReconnectPauseLiftsOnNetworkChange = false
+            } else {
+                scheduleProtectedReconnect()
             }
-            scheduleProtectedReconnect()
         }
     }
 
@@ -3228,7 +3323,8 @@ extension AppState {
         noteProtectionLoss(NetworkLossReport.connectReleased)
         releaseAfterPausedFailure(
             pending: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked."),
-            released: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+            released: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready."),
+            strictMessage: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.")
         )
         return true
     }
@@ -3238,7 +3334,27 @@ extension AppState {
     /// in place. Show `pending` until then; publish `released` only when the
     /// teardown settled on an open host. A failed release keeps its own
     /// "Kill Switch remains active" text, and a newer operation wins.
-    func releaseAfterPausedFailure(pending: String, released: String) {
+    func releaseAfterPausedFailure(
+        pending: String,
+        released: String,
+        strictMessage: String? = nil
+    ) {
+        failureReleaseNoticeTask?.cancel()
+        failureReleaseNoticeTask = nil
+        if strictRoutingSessionActive {
+            protectedReconnectPausedForUserAction = true
+            protectedReconnectPauseLiftsOnNetworkChange = false
+            connectionCoordinator.cancelReconnectTasks()
+            isProtectedReconnectScheduled = false
+            protectedReconnectNextAttemptAt = nil
+            if isConnected || isConnecting || coreRuntime.isRunning {
+                disconnect(releaseKillSwitch: false)
+            }
+            isProtectionBlocked = true
+            errorMessage = strictMessage
+                ?? String(localized: "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.")
+            return
+        }
         disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
         errorMessage = pending
         let generation = connectionCoordinator.protectionOperationGeneration
@@ -3288,6 +3404,8 @@ extension AppState {
             pending: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.")
                 + detail,
             released: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. This Mac is back on its normal internet and AI services stay blocked. Turn that rule off, then connect again.")
+                + detail,
+            strictMessage: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Strict mode is still blocking traffic. Click Restore internet to resume normal internet access, or turn that rule off and retry.")
                 + detail
         )
     }

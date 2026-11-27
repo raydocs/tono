@@ -42,9 +42,9 @@ extension ProxiesView {
                             // and users concluded testing was broken when the
                             // other cards stayed unmeasured.
                             Text("Test current exit")
-                            .font(.system(size: showsSeaAppearance ? 15 : 12, weight: showsSeaAppearance ? .medium : .semibold))
+                            .font(showsSeaAppearance ? nil : .system(size: 12, weight: .semibold))
                         }
-                        .foregroundStyle(showsSeaAppearance ? SeaTheme.text : Color.primary)
+                        .modifier(ProxiesChromeLegacyForeground(active: !showsSeaAppearance, color: .primary))
                         .padding(.horizontal, showsSeaAppearance ? 0 : 16)
                         .padding(.vertical, showsSeaAppearance ? 0 : 8)
                         .contentShape(Capsule())
@@ -85,7 +85,7 @@ extension ProxiesView {
                     Text(catalogStatusTitle)
                         .font(.system(size: 12, weight: .semibold))
                     Text(catalogStatusDetail)
-                        .font(.system(size: 10)).monospacedDigit()
+                        .font(.system(size: 11)).monospacedDigit()
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -94,7 +94,7 @@ extension ProxiesView {
 
                 if let catalogFeedback {
                     Text(catalogFeedback)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(catalogRefreshSucceeded ? Color.green : Color.orange)
                         .lineLimit(1)
                         .transition(.opacity)
@@ -112,7 +112,7 @@ extension ProxiesView {
                                 .font(.system(size: 10, weight: .semibold))
                         }
                         Text(isRefreshingCatalog ? "Refreshing…" : "Refresh")
-                            .font(.system(size: showsSeaAppearance ? 15 : 11, weight: showsSeaAppearance ? .medium : .semibold))
+                            .font(showsSeaAppearance ? nil : .system(size: 11, weight: .semibold))
                     }
                     .padding(.horizontal, showsSeaAppearance ? 0 : 10)
                     .padding(.vertical, showsSeaAppearance ? 0 : 7)
@@ -159,6 +159,14 @@ extension ProxiesView {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .focused($isSearchFocused)
+                    .onKeyPress(.escape) {
+                        if !searchText.isEmpty {
+                            searchText = ""
+                        } else {
+                            isSearchFocused = false
+                        }
+                        return .handled
+                    }
 
                 if !searchText.isEmpty {
                     Button {
@@ -203,10 +211,10 @@ extension ProxiesView {
                 .foregroundStyle(Color.orange)
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(reason)
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -283,6 +291,16 @@ private struct ProxiesLegacyGlass: ViewModifier {
 
     @ViewBuilder func body(content: Content) -> some View {
         if enabled { content.glassEffect(.regular.tint(.white.opacity(0.08)), in: Capsule()) }
+        else { content }
+    }
+}
+
+private struct ProxiesChromeLegacyForeground: ViewModifier {
+    let active: Bool
+    let color: Color
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if active { content.foregroundStyle(color) }
         else { content }
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CryptoKit
 
 extension SocketServer {
     static func runOrphanedBootstrapSelectiveReleaseSelfTest() -> Bool {
@@ -17,6 +18,203 @@ extension SocketServer {
             )
         } catch { return false }
         return events == ["disarm", "apply-ai-hold"]
+    }
+
+    static func runStrictStartupProofGraceSelfTests() -> Bool {
+        var failures: [String] = []
+        func check(_ name: String, _ condition: Bool) {
+            if !condition { failures.append(name) }
+        }
+        let second: UInt64 = 1_000_000_000
+        let boundAt: UInt64 = 100 * second
+        let grace = strictBindStartGraceSeconds
+        check("grace-is-30s", grace == 30)
+        // Inside 30s bind -> start window: proof stays alive while Core has not yet appeared.
+        check("keeps-at-bind", !shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: false,
+            boundAtNs: boundAt, nowNs: boundAt, graceSeconds: grace
+        ))
+        check("keeps-at-10s-tick", !shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: false,
+            boundAtNs: boundAt, nowNs: boundAt + 10 * second, graceSeconds: grace
+        ))
+        check("keeps-just-before-expiry", !shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: false,
+            boundAtNs: boundAt, nowNs: boundAt + 30 * second - 1, graceSeconds: grace
+        ))
+        // After 30s without Core ever starting: proof expires.
+        check("expires-at-grace-boundary", shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: false,
+            boundAtNs: boundAt, nowNs: boundAt + 30 * second, graceSeconds: grace
+        ))
+        check("expires-after-grace", shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: false,
+            boundAtNs: boundAt, nowNs: boundAt + 40 * second, graceSeconds: grace
+        ))
+        check("expires-without-bind-timestamp", shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: false,
+            boundAtNs: nil, nowNs: boundAt, graceSeconds: grace
+        ))
+        check("expires-if-clock-before-bind", shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: false,
+            boundAtNs: boundAt, nowNs: boundAt - 1, graceSeconds: grace
+        ))
+        // Core observed running then stopped (crash): expires immediately even inside 30s.
+        check("expires-immediately-after-crash", shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: true,
+            boundAtNs: boundAt, nowNs: boundAt + 1, graceSeconds: grace
+        ))
+        check("expires-immediately-after-crash-without-boundAt", shouldExpireStrictProof(
+            coreRunning: false, coreObservedRunning: true,
+            boundAtNs: nil, nowNs: boundAt, graceSeconds: grace
+        ))
+        // Running Core never expires the proof.
+        check("never-expires-while-running", !shouldExpireStrictProof(
+            coreRunning: true, coreObservedRunning: true,
+            boundAtNs: boundAt, nowNs: boundAt + 999 * second, graceSeconds: grace
+        ))
+        if !failures.isEmpty {
+            FileHandle.standardError.write(Data(
+                "self-test: strict startup proof grace failed: \(failures.joined(separator: ", "))\n".utf8
+            ))
+        }
+        return failures.isEmpty
+    }
+
+    static func runStrictProofRebindSelfTests() -> Bool {
+        var failures: [String] = []
+        func check(_ name: String, _ condition: Bool) {
+            if !condition { failures.append(name) }
+        }
+        guard let interface = KillSwitchManager.physicalEgressInterfaces().first else {
+            FileHandle.standardError.write(Data("self-test: no physical egress interface for strict proof test\n".utf8))
+            return false
+        }
+        var template = Array((FileManager.default.temporaryDirectory.path + "/tono-strict-rebind-test.XXXXXX").utf8CString)
+        guard mkdtemp(&template) != nil else { return false }
+        let root = String(cString: template)
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let authDir = root + "/auth"
+        let snapshotPath = root + "/config.json"
+
+        do {
+            let graph = try ThreeTierRoutingContract.graph(
+                home: "Tono-Home-Residential",
+                physicalInterface: interface,
+                fakeRange: "198.18.176.0/20"
+            )
+            var runtime = try JSONSerialization.jsonObject(with: Data(coreLifecycleTestJSON.utf8)) as! [String: Any]
+            runtime["route"] = graph["route"]
+            runtime["dns"] = graph["dns"]
+            runtime["outbounds"] = [
+                ["type": "vless", "tag": "Fixture Cloud", "server": "9.9.9.9", "server_port": 8443,
+                 "uuid": "11111111-1111-4111-8111-111111111111"],
+                ["type": "selector", "tag": "Tono-Exit", "outbounds": ["Fixture Cloud"], "default": "Fixture Cloud"],
+                ["type": "socks", "tag": "Tono-Home-Residential", "server": "203.0.114.60", "server_port": 11080,
+                 "version": "5", "username": "fixture-user", "password": "fixture-password", "network": "tcp", "detour": "Tono-Exit"],
+                graph["direct_outbound"] as! [String: Any],
+            ]
+            let data = try JSONSerialization.data(withJSONObject: runtime)
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            try data.write(to: URL(fileURLWithPath: snapshotPath))
+            chmod(snapshotPath, 0o600)
+
+            try FileManager.default.createDirectory(atPath: authDir, withIntermediateDirectories: true)
+            chmod(authDir, 0o700)
+            let authority = ReleaseAuthority(directory: authDir, owner: geteuid())
+            func writeRecord(_ record: ReleaseAuthority.Record) throws {
+                let encoded = try JSONEncoder().encode(record)
+                try encoded.write(to: URL(fileURLWithPath: authority.recordPath))
+                chmod(authority.recordPath, 0o600)
+            }
+            var secured = ReleaseAuthority.Record()
+            secured.mode = .secured
+            secured.generation = 20
+            secured.strictRuntimeDigest = digest
+            try writeRecord(secured)
+
+            // Direct StrictRuntimeProof construction accepts valid graph and rejects hy2.
+            if let folded = CoreManager.foldedRuntime(data) {
+                let directProof = try? StrictRuntimeProof(folded, generation: 20, digest: digest)
+                check("direct-proof-valid", directProof?.generation == 20 && directProof?.digest == digest
+                    && directProof?.interface == interface
+                    && directProof?.exits == [.init(address: "9.9.9.9", transport: "tcp", port: 8443)])
+                var hy2Runtime = folded
+                if var outbounds = hy2Runtime["outbounds"] as? [[String: Any]], !outbounds.isEmpty {
+                    outbounds[0]["type"] = "hysteria2"
+                    hy2Runtime["outbounds"] = outbounds
+                }
+                check("direct-proof-rejects-hy2", (try? StrictRuntimeProof(hy2Runtime, generation: 20, digest: digest)) == nil)
+            } else {
+                check("direct-proof-valid", false)
+            }
+
+            // Re-derivation succeeds for matching (digest, generation).
+            let rebound = try CoreManager.rebindStrictProofIfAdmitted(
+                digest: digest,
+                generation: 20,
+                strictIntentActive: true,
+                authority: authority,
+                snapshotPath: snapshotPath,
+                requireRootSnapshot: false
+            )
+            check("rebind-valid-succeeds", rebound?.generation == 20 && rebound?.digest == digest
+                && rebound?.interface == interface
+                && rebound?.exits == [.init(address: "9.9.9.9", transport: "tcp", port: 8443)])
+
+            // Inactive strict intent returns nil without error.
+            let inactive = try CoreManager.rebindStrictProofIfAdmitted(
+                digest: digest,
+                generation: 20,
+                strictIntentActive: false,
+                authority: authority,
+                snapshotPath: snapshotPath,
+                requireRootSnapshot: false
+            )
+            check("inactive-strict-returns-nil", inactive == nil)
+
+            func expectRejected(_ name: String, digest testDigest: String, generation testGeneration: UInt64?) {
+                do {
+                    _ = try CoreManager.rebindStrictProofIfAdmitted(
+                        digest: testDigest,
+                        generation: testGeneration,
+                        strictIntentActive: true,
+                        authority: authority,
+                        snapshotPath: snapshotPath,
+                        requireRootSnapshot: false
+                    )
+                    failures.append(name)
+                } catch HelperFailure.invalid {
+                    check(name, true)
+                } catch {
+                    failures.append(name)
+                }
+            }
+
+            expectRejected("mismatched-digest-rejected", digest: String(repeating: "a", count: 64), generation: 20)
+            expectRejected("mismatched-generation-rejected", digest: digest, generation: 21)
+            expectRejected("nil-generation-rejected", digest: digest, generation: nil)
+
+            // Tampered snapshot on disk is rejected even with matching authority record.
+            try Data("{}".utf8).write(to: URL(fileURLWithPath: snapshotPath))
+            expectRejected("tampered-snapshot-rejected", digest: digest, generation: 20)
+            try data.write(to: URL(fileURLWithPath: snapshotPath))
+
+            // Released authority record is rejected.
+            var released = try authority.load()
+            released.mode = .released
+            try writeRecord(released)
+            expectRejected("released-authority-rejected", digest: digest, generation: 20)
+        } catch {
+            failures.append("unexpected-error-\(error)")
+        }
+
+        if !failures.isEmpty {
+            FileHandle.standardError.write(Data(
+                "self-test: strict proof rebind failed: \(failures.joined(separator: ", "))\n".utf8
+            ))
+        }
+        return failures.isEmpty
     }
 }
 
@@ -918,7 +1116,10 @@ extension KillSwitchManager {
 
     static func runSelfTests() -> Bool {
         let strictLAN = [runStrictLANLiveSelfTest(), runStrictLANCoreDeathSelfTest(), runStrictLANDNSSelfTest()]
-        guard strictLAN.allSatisfy({ $0 }), runCoreSyncRecoverySelfTests() else { return false }
+        guard strictLAN.allSatisfy({ $0 }),
+              runCoreSyncRecoverySelfTests(),
+              SocketServer.runStrictStartupProofGraceSelfTests(),
+              SocketServer.runStrictProofRebindSelfTests() else { return false }
         do {
             guard canonicalPublicAddress("8.8.8.8") == "8.8.8.8",
                   canonicalPublicAddress("2606:4700:4700::1111") != nil,

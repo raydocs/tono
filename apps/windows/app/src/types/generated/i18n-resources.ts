@@ -1855,12 +1855,20 @@ export interface TranslationResources {
       }
       update: {
         checkUnknown: string
+        downloading: string
+        downloadingShort: string
         later: string
         needsAttention: string
         network: string
         notCompleted: string
         notNewer: string
+        pillAvailable: string
+        pillDownloading: string
+        preparing: string
+        protectionNote: string
         refused: string
+        sidebarHint: string
+        sidebarTitle: string
         signatureRefused: string
         technicalDetails: string
         trayAvailable: string

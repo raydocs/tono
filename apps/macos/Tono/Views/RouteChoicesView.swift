@@ -72,6 +72,7 @@ struct RouteChoicesView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .accessibilityLabel("About recommendations")
                 .popover(isPresented: $showingHelp, arrowEdge: .bottom) {
                     seaHelp(region: region, regions: regions, regionSelection: regionSelection, recommendation: recommendation)
@@ -79,6 +80,20 @@ struct RouteChoicesView: View {
                 if recommendation == nil {
                     Text("No recommendation right now.")
                         .font(.system(size: 13)).foregroundStyle(SeaTheme.muted)
+                }
+                Spacer(minLength: 8)
+                SeaMenuButton(
+                    title: Text(verbatim: region.map { regions.contains($0) ? $0 : String(localized: "Saved region unavailable") }
+                                ?? String(localized: "Any region")),
+                    accessibilityLabel: Text("Fixed recommendation region")
+                ) {
+                    Button("Any region") { regionSelection.wrappedValue = "" }
+                    ForEach(regions, id: \.self) { option in
+                        Button { regionSelection.wrappedValue = option } label: { Text(verbatim: option) }
+                    }
+                    if let region, !regions.contains(region) {
+                        Button("Saved region unavailable") { regionSelection.wrappedValue = region }
+                    }
                 }
             }
             if let recommendation {

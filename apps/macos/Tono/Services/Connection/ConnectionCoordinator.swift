@@ -75,6 +75,8 @@ final class ConnectionCoordinator {
     func retireCapturedRoutingMode() {
         capturedRoutingMode = nil
         AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession)
+        SingBoxFakeIPRotation.clearRememberedInstalled(in: AppProfile.defaults)
+        StrictSessionPersistence.clear()
     }
 
     /// Retires the current helper session and replaces it with a fresh
@@ -96,6 +98,7 @@ final class ConnectionCoordinator {
         cancelReconnectTasks()
         nodeSwitchTask?.cancel()
         nodeSwitchTask = nil
+        configReloadRequestID &+= 1
         configReloadTask?.cancel()
         configReloadTask = nil
         coreMonitorTask?.cancel()
@@ -253,7 +256,7 @@ final class ConnectionCoordinator {
             recover(error)
             return false
         }
-        guard protectionOperationGeneration == generation else { return false }
+        guard !Task.isCancelled, protectionOperationGeneration == generation else { return false }
         commit()
         return true
     }

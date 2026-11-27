@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   nativeInstall: vi.fn(),
   cancel: vi.fn(),
   error: vi.fn(),
+  openUrl: vi.fn(),
 }))
 vi.mock('@/hooks/use-update', () => ({
   useUpdate: () => ({
@@ -39,6 +40,9 @@ vi.mock('@/services/update', () => ({
 vi.mock('@/services/notice-service', () => ({
   showNotice: { error: mocks.error },
 }))
+vi.mock('@tauri-apps/plugin-shell', () => ({
+  open: mocks.openUrl,
+}))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
@@ -46,7 +50,8 @@ vi.mock('react-markdown', () => ({
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 vi.mock('rehype-raw', () => ({ default: () => {} }))
-import { UpdateStateProvider } from '@/services/states'
+import { UpdateStateProvider, useUpdateProgress } from '@/services/states'
+import { version as appVersion } from '@root/package.json'
 
 import { UpdateViewer } from './update-viewer'
 
@@ -56,14 +61,24 @@ beforeEach(() => {
   mocks.body = 'Release notes'
 })
 
+function ProgressMirror() {
+  const progress = useUpdateProgress()
+  return (
+    <span data-testid="progress-mirror">
+      {progress === null ? 'idle' : `${progress}%`}
+    </span>
+  )
+}
+
 function clickUpdate() {
   const ref = createRef<{ open: () => void; close: () => void }>()
   render(
     <UpdateStateProvider>
+      <ProgressMirror />
       <UpdateViewer ref={ref} />
     </UpdateStateProvider>,
   )
-  act(() => ref.current!.open())
+  act(() => ref.current?.open())
   fireEvent.click(
     screen.getByRole('button', {
       name: 'settings.modals.update.actions.update',
@@ -126,7 +141,7 @@ describe('Windows Service-owned update caller', () => {
         name: 'settings.modals.update.actions.later',
       }),
     )
-    act(() => ref.current!.open())
+    act(() => ref.current?.open())
     expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(
       'tono.update.refused',
     )
@@ -179,9 +194,9 @@ describe('Windows Service-owned update caller', () => {
     )
     await act(async () => refuse(error))
     await waitFor(() =>
-      expect(screen.getByRole('alert').querySelector('p')?.textContent).not.toBe(
-        'tono.update.network',
-      ),
+      expect(
+        screen.getByRole('alert').querySelector('p')?.textContent,
+      ).not.toBe('tono.update.network'),
     )
     expect(
       screen.queryByRole('button', {
@@ -211,12 +226,70 @@ describe('Windows Service-owned update caller', () => {
         ),
       ),
     )
-    act(() => ref.current!.open())
+    act(() => ref.current?.open())
     expect(screen.queryByRole('alert')).toBeNull()
     expect(
       screen.getByRole('button', {
         name: 'settings.modals.update.actions.update',
       }),
     ).toBeDefined()
+  })
+
+  it('collapses empty release notes, renders lazy markdown when present, and streams MB + shared progress', async () => {
+    mocks.body = '   '
+    const ref = createRef<{ open: () => void; close: () => void }>()
+    const { container, rerender } = render(
+      <UpdateStateProvider>
+        <ProgressMirror />
+        <UpdateViewer ref={ref} />
+      </UpdateStateProvider>,
+    )
+    act(() => ref.current?.open())
+
+    expect(screen.getByText(`v${appVersion} → v1.2.3`)).toBeDefined()
+    expect(screen.getByText('tono.update.protectionNote')).toBeDefined()
+    expect(
+      screen.getByText('settings.modals.update.messages.available'),
+    ).toBeDefined()
+    expect(container.querySelector('.tono-update-notes')).toBeNull()
+
+    mocks.body = 'Release highlights'
+    rerender(
+      <UpdateStateProvider>
+        <ProgressMirror />
+        <UpdateViewer ref={ref} />
+      </UpdateStateProvider>,
+    )
+    expect(await screen.findByText('Release highlights')).toBeDefined()
+    expect(container.querySelector('.tono-update-notes')).not.toBeNull()
+
+    let stop!: (error: Error) => void
+    mocks.nativeInstall.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        stop = reject
+      }),
+    )
+    mocks.cancel.mockResolvedValue(true)
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'settings.modals.update.actions.update',
+      }),
+    )
+    const progress = mocks.nativeInstall.mock.calls[0][1]
+    const mb = 1024 * 1024
+    act(() => {
+      progress({ event: 'Started', data: { contentLength: 40 * mb } })
+      progress({ event: 'Progress', data: { chunkLength: 10 * mb } })
+    })
+    expect(screen.getByText('10.0 MB / 40.0 MB · 25%')).toBeDefined()
+    expect(screen.getByTestId('progress-mirror').textContent).toBe('25%')
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(mocks.cancel).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await act(async () =>
+      stop(new Error('TONO_UPDATE_CANCELLED: update download cancelled')),
+    )
+    expect(screen.getByTestId('progress-mirror').textContent).toBe('idle')
   })
 })

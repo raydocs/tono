@@ -8,6 +8,8 @@ import AppKit
 struct AccountBlockedView: View {
     @Bindable var session: AccountSession
     @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaAppearance
+    @SeaDisplayPreferences private var displayPreferences
     /// The recheck keeps this screen on screen while it runs, so the button
     /// carries its own progress rather than reading a session state that this
     /// screen can never be shown in.
@@ -76,7 +78,7 @@ struct AccountBlockedView: View {
 
             // Renewing a plan needs a browser, and this screen is reachable
             // with protection armed and no exit running.
-            GateProtectionSection(session: session, disabled: rechecking)
+            GateProtectionSection(session: session, disabled: rechecking, seaStandalone: seaAppearance)
         }
         .padding(.horizontal, 20)
         .frame(width: 360)
@@ -96,12 +98,17 @@ struct AccountBlockedView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
-            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            displayPreferences.reduceTransparency
+                ? AnyShapeStyle(colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .controlBackgroundColor))
+                : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.05 : 0.5)),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.10 : 0.5), lineWidth: 0.6)
+                .strokeBorder(
+                    .white.opacity(displayPreferences.contrast == .increased ? 0.42 : (colorScheme == .dark ? 0.10 : 0.5)),
+                    lineWidth: displayPreferences.contrast == .increased ? 1 : 0.6
+                )
         }
     }
 }

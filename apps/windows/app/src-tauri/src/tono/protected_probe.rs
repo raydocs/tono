@@ -241,9 +241,32 @@ pub fn classify_reqwest(error: &reqwest::Error) -> ProbeCategory {
     }
 }
 
+/// Format an error and up to five nested `Error::source()` causes into a single
+/// arrow-separated diagnostic string, collapsing duplicate adjacent messages.
+pub fn describe_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let detail = cause.to_string();
+        if !detail.is_empty() && parts.last().is_none_or(|last| last != &detail) {
+            parts.push(detail);
+        }
+        if parts.len() == 5 {
+            break;
+        }
+        source = cause.source();
+    }
+    parts.join(" -> ")
+}
+
 fn redact(detail: impl Into<String>) -> String {
-    let text = detail.into();
-    text.chars().take(200).collect()
+    let text = crate::tono::audit::redact(&detail.into());
+    let trimmed = text.trim();
+    let mut capped: String = trimmed.chars().take(240).collect();
+    if trimmed.chars().count() > 240 {
+        capped.push('…');
+    }
+    capped
 }
 
 fn failed(
@@ -384,7 +407,7 @@ async fn probe_one(
             origin,
             classify_reqwest(&error),
             started,
-            error.to_string(),
+            describe_error_chain(&error),
             None,
         )),
     }
@@ -528,5 +551,67 @@ mod tests {
         assert_eq!(ProbeCategory::Timeout.as_str(), "timeout");
         assert_eq!(ProbeCategory::Dns.as_str(), "dns");
         assert_eq!(ProbeCategory::Tls.as_str(), "tls");
+    }
+
+    #[test]
+    fn describe_error_chain_preserves_nested_causes_and_deduplicates() {
+        #[derive(Debug)]
+        struct TestError {
+            message: &'static str,
+            cause: Option<Box<TestError>>,
+        }
+
+        impl std::fmt::Display for TestError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.message)
+            }
+        }
+
+        impl std::error::Error for TestError {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.cause
+                    .as_deref()
+                    .map(|cause| cause as &(dyn std::error::Error + 'static))
+            }
+        }
+
+        let err = TestError {
+            message: "error sending request for url (https://www.gstatic.com/generate_204)",
+            cause: Some(Box::new(TestError {
+                message: "client error (Connect)",
+                cause: Some(Box::new(TestError {
+                    message: "client error (Connect)",
+                    cause: Some(Box::new(TestError {
+                        message: "os error 10054",
+                        cause: None,
+                    })),
+                })),
+            })),
+        };
+        assert_eq!(
+            describe_error_chain(&err),
+            "error sending request for url (https://www.gstatic.com/generate_204) -> client error (Connect) -> os error 10054"
+        );
+
+        let deep = TestError {
+            message: "c1",
+            cause: Some(Box::new(TestError {
+                message: "c2",
+                cause: Some(Box::new(TestError {
+                    message: "c3",
+                    cause: Some(Box::new(TestError {
+                        message: "c4",
+                        cause: Some(Box::new(TestError {
+                            message: "c5",
+                            cause: Some(Box::new(TestError {
+                                message: "c6",
+                                cause: None,
+                            })),
+                        })),
+                    })),
+                })),
+            })),
+        };
+        assert_eq!(describe_error_chain(&deep), "c1 -> c2 -> c3 -> c4 -> c5");
     }
 }

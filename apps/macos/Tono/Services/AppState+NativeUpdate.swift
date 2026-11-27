@@ -63,6 +63,7 @@ extension AppState {
         }
         pendingRemovedCatalogExit = false
         pendingDirectPolicyReload = nil
+        restoreSelectionAfterHy2AutoDial()
         isConnected = false
         isConnecting = false
         isProtectedReconnectScheduled = false
@@ -114,8 +115,19 @@ extension AppState {
             let preserving = !nativeUpdateExplicitReleaseRequested
             if preserving { dispatchedAutomatic = true } else { nativeUpdateExplicitReleaseRequested = false }
             do {
-                let result = try await (preserving
-                    ? nativeUpdateReleaseAfterFailure() : nativeUpdateDisconnect())
+                let result: HelperManager.UpdateStatus
+                if !preserving, strictRoutingSessionActive {
+                    try await performStrictNativeUpdateRelease()
+                    result = try await nativeUpdateDisconnect()
+                } else {
+                    do {
+                        result = try await (preserving
+                            ? nativeUpdateReleaseAfterFailure() : nativeUpdateDisconnect())
+                    } catch where !preserving && Self.isStrictUpdateDisconnectRefusal(error) {
+                        try await performStrictNativeUpdateRelease()
+                        result = try await nativeUpdateDisconnect()
+                    }
+                }
                 guard !Task.isCancelled,
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
                 settled = true
@@ -123,6 +135,11 @@ extension AppState {
                 launchProtectionSequence &+= 1
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
+                if !preserving {
+                    AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
+                    connectionCoordinator.retireCapturedRoutingMode()
+                    coreRuntime.retireRoutingMode()
+                }
                 resetReleasedSessionHistory()
                 RuntimeCleanup.clearCoreStarted()
             } catch {
@@ -205,7 +222,8 @@ extension AppState {
     func retireDisconnectedNativeUpdate(
         nativeUpdate: (String) async throws -> HelperManager.UpdateStatus = {
             try await PrivilegedRuntimeCoordinator.shared.nativeUpdate($0)
-        }
+        },
+        strictRelease: (@MainActor () async throws -> Void)? = nil
     ) async throws {
         let pending = try await nativeUpdate("status")
         guard pending.pending, AppUpdater.disconnectRetriable(pending) else {
@@ -213,13 +231,31 @@ extension AppState {
         }
         nativeUpdatePending = true
         await suspendForNativeUpdate()
-        let released = try await nativeUpdate("disconnect")
+        let performStrictRelease = strictRelease ?? { [weak self] in
+            guard let self else { return }
+            try await self.performStrictNativeUpdateRelease()
+        }
+        let released: HelperManager.UpdateStatus
+        if strictRoutingSessionActive {
+            try await performStrictRelease()
+            released = try await nativeUpdate("disconnect")
+        } else {
+            do {
+                released = try await nativeUpdate("disconnect")
+            } catch where Self.isStrictUpdateDisconnectRefusal(error) {
+                try await performStrictRelease()
+                released = try await nativeUpdate("disconnect")
+            }
+        }
         guard released.disconnectVerified == true else { throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.disconnectUnconfirmed) }
         // An evidence archive failure cannot undo verified PF release.
         // Publish it before retirement so the UI cannot retain protection.
         launchProtectionSequence &+= 1
         KillSwitchService.isArmed = false
         isProtectionBlocked = false
+        AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
+        connectionCoordinator.retireCapturedRoutingMode()
+        coreRuntime.retireRoutingMode()
         resetReleasedSessionHistory()
         let retired = try await nativeUpdate("retire")
         guard !retired.pending else { throw NativeUpdateDownload.failure(NativeUpdateDownload.Copy.retirementUnconfirmed) }
@@ -231,6 +267,47 @@ extension AppState {
         errorMessage = nil
         RuntimeCleanup.clearCoreStarted()
         NotificationCenter.default.post(name: .nativeUpdateRetired, object: self)
+    }
+
+    static func isStrictUpdateDisconnectRefusal(_ error: Error) -> Bool {
+        let text: String
+        if case HelperIPCError.commandFailed(let message, _) = error {
+            text = message
+        } else {
+            text = error.localizedDescription
+        }
+        let lowered = text.lowercased()
+        return lowered.contains("strict protection")
+            || lowered.contains("explicit restore internet")
+    }
+
+    func performStrictNativeUpdateRelease() async throws {
+        if let override = nativeUpdateStrictRelease {
+            try await override()
+            return
+        }
+        guard HelperManager.releaseServiceInstalled else { return }
+        let expectedGeneration = HelperSessionGeneration.current?.value
+            ?? connectionCoordinator.helperSession.value
+        let requestID = UUID().uuidString
+        let sessionPorts: Set<Int> = config.mixedPort > 0 ? [config.mixedPort] : []
+        let outcome = try await Task.detached(priority: .userInitiated) {
+            let answer = try HelperManager.requestRelease(
+                requestID: requestID,
+                expectedGeneration: expectedGeneration ?? HelperManager.releaseStatusGeneration()
+            )
+            var tonoProxyRemains: Bool? = false
+            if answer.outcome != "superseded", answer.outcome != "busy" {
+                tonoProxyRemains = await SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts, within: 10)
+            }
+            return answer.includingSystemProxy(tonoProxyRemains: tonoProxyRemains)
+        }.value
+        guard outcome.outcome == "restored" else {
+            throw NativeUpdateDownload.failure(
+                String(localized: "Strict protection remains active. Restore internet could not be confirmed; retry Restore internet.")
+            )
+        }
+        connectionCoordinator.resetHelperSession()
     }
 }
 

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 extension ProxiesView {
@@ -68,6 +69,7 @@ extension ProxiesView {
                           systemImage: favorite ? "star.fill" : "star")
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .accessibilityIdentifier("routeFavorite-\(ProxyNode.catalogBaseName(for: node.name))")
                 if let recent = appState.routePreferences.recentSuccesses(owner: owner, catalog: appState.managedCatalogNodes)
                     .first(where: { $0.name == node.name }) {
@@ -196,9 +198,33 @@ extension ProxiesView {
             }
         }
         .buttonStyle(NodeCardPressButtonStyle(reduceMotion: reduceMotion))
+        .pointerStyle(isDisabled ? .default : .link)
         .disabled(isDisabled)
         .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isActive)
         .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isSwitching)
+        .contextMenu {
+            Button(appState.isConnected ? String(localized: "Switch to server") : String(localized: "Select server")) {
+                appState.selectNode(node.name)
+            }
+            .disabled(isDisabled)
+            if let owner = accountSession.user?.id,
+               owner == ManagedExitCatalogOwnership.currentAccount {
+                let favorite = appState.routePreferences.favorites(owner: owner, catalog: appState.managedCatalogNodes)
+                    .contains(ProxyNode.catalogBaseName(for: node.name))
+                Button(favorite ? String(localized: "Remove favorite") : String(localized: "Favorite")) {
+                    appState.toggleRouteFavorite(node.name, owner: owner)
+                }
+            }
+            Divider()
+            Button("Copy server name") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(nodeRouteTitle(node), forType: .string)
+                ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
+            }
+            if isActive && appState.isConnected {
+                Button("Test current exit") { testCurrentExit() }
+            }
+        }
         .accessibilityLabel(localNodeAccessibilitySummary(
             node: node,
             isActive: isActive,
@@ -215,9 +241,11 @@ extension ProxiesView {
         latency: Int,
         didFail: Bool
     ) -> String {
+        let regionCode = nodeListRegionCode(flag: node.flag, name: node.name)
+        let regionName = SeaServerPresentation.regionLabel(regionCode)
         var parts = [
-            node.displayName,
-            nodeRegionCode(flag: node.flag, name: node.name),
+            nodeRouteTitle(node),
+            regionName,
             node.protocolType,
         ]
         if latency > 0 { parts.append(String(localized: "\(latency) milliseconds")) }

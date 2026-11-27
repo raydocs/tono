@@ -13,15 +13,18 @@ require "shellwords"
 require "tmpdir"
 require "yaml"
 
-XRAY_VERSION = "v26.11.9"
+# Xray >= v26.9.8 enforces X25519MLKEM768 in REALITY ClientHello, which breaks
+# Tono's pinned sing-box (SagerNet/sing-box#4520) and legacy mihomo clients.
+# Keep Xray pinned to v26.3.27 until all client cores support it.
+XRAY_VERSION = "v26.3.27"
 XRAY_ASSETS = {
   "x86_64" => {
     name: "Xray-linux-64.zip",
-    sha256: "b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82",
+    sha256: "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
   },
   "aarch64" => {
     name: "Xray-linux-arm64-v8a.zip",
-    sha256: "64ed6858982a7f5eb85d88b811089063bd4f17561f4c8f44e0f1dc8e6f6430be",
+    sha256: "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
   },
 }.freeze
 # Official hysteria app/v2.14.0. SHA-256 digests verified against apernet/hysteria

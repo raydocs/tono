@@ -5,6 +5,7 @@ import { NavLink } from 'react-router'
 import type { TonoStatus } from '@/services/tono'
 
 import { seaPresentation } from './sea-presentation'
+import { TONO_MONO_STACK } from './theme'
 import { TonoIcon } from './TonoIcon'
 import { TonoLogo } from './TonoLogo'
 
@@ -22,6 +23,9 @@ export const SeaChrome = ({
   status,
   sidebar,
   controls,
+  updateVersion,
+  updateProgress,
+  onOpenUpdate,
   onDoubleClick,
 }: {
   appearance: boolean
@@ -30,11 +34,27 @@ export const SeaChrome = ({
   status?: TonoStatus
   sidebar: ReactNode
   controls: ReactNode
+  updateVersion?: string | null
+  updateProgress?: number | null
+  onOpenUpdate?: () => void
   onDoubleClick: () => void
 }) => {
   const { t } = useTranslation()
   if (!appearance) return login ? null : sidebar
   const { tone, titleKey } = seaPresentation(status)
+  const clampedProgress =
+    updateProgress !== null && updateProgress !== undefined
+      ? Math.min(100, Math.max(0, Math.round(updateProgress)))
+      : null
+  const updateLabel = updateVersion
+    ? clampedProgress !== null
+      ? t('tono.update.pillDownloading', {
+          version: updateVersion,
+          progress: clampedProgress,
+        })
+      : t('tono.update.pillAvailable', { version: updateVersion })
+    : undefined
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: This is the native titlebar double-click affordance; window buttons remain keyboard-accessible.
     <header
@@ -61,6 +81,27 @@ export const SeaChrome = ({
               </NavLink>
             ))}
           </nav>
+          {updateVersion && (
+            <button
+              type="button"
+              className="tono-sea-update-pill"
+              data-downloading={clampedProgress !== null ? 'true' : undefined}
+              aria-label={updateLabel}
+              title={updateLabel}
+              onClick={onOpenUpdate}
+            >
+              <span className="tono-sea-update-dot" aria-hidden="true" />
+              <TonoIcon name="download" size={13} />
+              <span
+                className="tono-sea-update-label"
+                style={{ fontFamily: TONO_MONO_STACK }}
+              >
+                {clampedProgress !== null
+                  ? `${clampedProgress}%`
+                  : `v${updateVersion}`}
+              </span>
+            </button>
+          )}
           {!home && (
             <NavLink
               to="/"

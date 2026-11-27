@@ -109,6 +109,7 @@ private struct SeaStyledButton: View {
             .animation(TonoMotion.tactileSpring(reduceMotion: display.reduceMotion), value: configuration.isPressed)
             .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
             .onHover { hovered = enabled ? $0 : false }
+            .pointerStyle(enabled ? .link : .default)
     }
 }
 
@@ -185,6 +186,7 @@ private struct SeaToggleSwitch: View {
         .animation(TonoMotion.tactileSpring(reduceMotion: display.reduceMotion), value: configuration.isOn)
         .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
         .onHover { hovered = enabled ? $0 : false }
+        .pointerStyle(enabled ? .link : .default)
         .accessibilityRepresentation {
             Toggle(isOn: configuration.$isOn) { configuration.label }.toggleStyle(.switch)
         }
@@ -227,6 +229,7 @@ struct SeaChoice: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .pointerStyle(.link)
                     .onHover { hovering in
                         hoveredOption = hovering ? option : (hoveredOption == option ? nil : hoveredOption)
                     }
@@ -275,33 +278,39 @@ struct SeaMenuButton<Items: View>: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Menu { items } label: { title.font(.system(size: 13, weight: .medium)) }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel(accessibilityLabel)
-                .accessibilityValue(accessibilityValue ?? title)
-            SeaChevron(expanded: true).allowsHitTesting(false)
-        }
-        .foregroundStyle(SeaTheme.text)
-        .padding(.horizontal, 14)
-        .frame(minHeight: SeaControlSize.row.height)
-        .background(
-            display.reduceTransparency
-                ? (hovered ? Color(hex: "343139") : SeaTheme.opaqueQuiet)
-                : .white.opacity(hovered ? 0.12 : 0.08),
-            in: Capsule()
-        )
-        .overlay {
-            Capsule().strokeBorder(
-                display.contrast == .increased
-                    ? AnyShapeStyle(accent.opacity(0.5))
-                    : SeaTheme.specularBorder(contrast: display.contrast, reduceTransparency: display.reduceTransparency, topOpacity: 0.16, bottomOpacity: 0.04),
-                lineWidth: display.contrast == .increased ? 1 : 0.65
+        Menu {
+            items
+        } label: {
+            HStack(spacing: 8) {
+                title.font(.system(size: 13, weight: .medium))
+                SeaChevron(expanded: true)
+            }
+            .foregroundStyle(SeaTheme.text)
+            .padding(.horizontal, 14)
+            .frame(minHeight: SeaControlSize.row.height)
+            .background(
+                display.reduceTransparency
+                    ? (hovered ? Color(hex: "343139") : SeaTheme.opaqueQuiet)
+                    : .white.opacity(hovered ? 0.12 : 0.08),
+                in: Capsule()
             )
+            .overlay {
+                Capsule().strokeBorder(
+                    display.contrast == .increased
+                        ? AnyShapeStyle(accent.opacity(0.5))
+                        : SeaTheme.specularBorder(contrast: display.contrast, reduceTransparency: display.reduceTransparency, topOpacity: 0.16, bottomOpacity: 0.04),
+                    lineWidth: display.contrast == .increased ? 1 : 0.65
+                )
+            }
+            .contentShape(Capsule())
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
+        .pointerStyle(.link)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue ?? title)
         .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
         .onHover { hovered = $0 }
     }
@@ -340,6 +349,7 @@ struct SeaTabs: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .onHover { hovering in
                     hoveredOption = hovering ? option : (hoveredOption == option ? nil : hoveredOption)
                 }
@@ -520,6 +530,7 @@ struct SeaDisclosureStyle: DisclosureGroupStyle {
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .animation(TonoMotion.hover(reduceMotion: display.reduceMotion), value: hovered)
             .onHover { hovered = $0 }
             if configuration.isExpanded {

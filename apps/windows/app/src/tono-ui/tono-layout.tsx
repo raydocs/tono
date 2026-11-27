@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 
+import type { DialogRef } from '@/components/base'
 import { BaseErrorBoundary } from '@/components/base/base-error-boundary'
 import { NoticeManager } from '@/components/layout/notice-manager'
 import {
   WindowControls,
   WindowResizeHandles,
 } from '@/components/layout/window-controller'
+import { UpdateViewer } from '@/components/setting/mods/update-viewer'
 import { useI18n } from '@/hooks/use-i18n'
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
@@ -22,14 +24,22 @@ import {
 } from '@/pages/_layout/hooks'
 import { TonoAuthGuard } from '@/pages/_layout/tono-auth-guard'
 import { handleNoticeMessage } from '@/pages/_layout/utils'
-import { useThemeMode } from '@/services/states'
-import { UpdatePromptListener } from '@/services/update-prompt'
+import {
+  useThemeMode,
+  useUpdateProgress,
+  useUpdateState,
+} from '@/services/states'
 import {
   connectRejectionNeedsServerChoice,
   isSupersededConnectRejection,
   tonoConnect,
   tonoDisconnect,
 } from '@/services/tono'
+import {
+  OPEN_UPDATE_STORAGE_KEY,
+  OPEN_UPDATE_WINDOW_EVENT,
+  UpdatePromptListener,
+} from '@/services/update-prompt'
 import getSystem from '@/utils/get-system'
 
 import { useAppearancePreferences } from './appearance-preferences'
@@ -220,7 +230,36 @@ const TonoLayout = () => {
   )
 
   useLayoutEvents(handleNotice)
-  useUpdate(true)
+  const { updateInfo } = useUpdate(true)
+  const updateState = useUpdateState()
+  const updateProgress = useUpdateProgress()
+  const activeUpdateProgress = updateState ? updateProgress : null
+  const updateRef = useRef<DialogRef>(null)
+
+  const openUpdateViewer = useCallback(() => {
+    try {
+      sessionStorage.removeItem(OPEN_UPDATE_STORAGE_KEY)
+    } catch {
+      // Ignore storage failures in restricted webviews.
+    }
+    updateRef.current?.open()
+  }, [])
+
+  useEffect(() => {
+    if (isTrayRoute) return undefined
+    const openIfAsked = () => {
+      try {
+        if (sessionStorage.getItem(OPEN_UPDATE_STORAGE_KEY) !== '1') return
+      } catch {
+        return
+      }
+      openUpdateViewer()
+    }
+    openIfAsked()
+    window.addEventListener(OPEN_UPDATE_WINDOW_EVENT, openUpdateViewer)
+    return () =>
+      window.removeEventListener(OPEN_UPDATE_WINDOW_EVENT, openUpdateViewer)
+  }, [isTrayRoute, openUpdateViewer])
 
   useEffect(() => {
     if (isLoginRoute || isTrayRoute) return undefined
@@ -341,7 +380,16 @@ const TonoLayout = () => {
                     login={isLoginRoute}
                     home={isDashboardRoute}
                     status={status}
-                    sidebar={<TonoSidebar />}
+                    updateVersion={updateInfo?.version ?? null}
+                    updateProgress={activeUpdateProgress}
+                    onOpenUpdate={openUpdateViewer}
+                    sidebar={
+                      <TonoSidebar
+                        updateVersion={updateInfo?.version ?? null}
+                        updateProgress={activeUpdateProgress}
+                        onOpenUpdate={openUpdateViewer}
+                      />
+                    }
                     controls={<WindowControls ref={windowControlsRef} />}
                     onDoubleClick={toggleMaximize}
                   />
@@ -403,6 +451,7 @@ const TonoLayout = () => {
             </TonoAuthGuard>
           </TonoToastProvider>
         </SeaBackdrop>
+        {!isTrayRoute && <UpdateViewer ref={updateRef} />}
       </div>
     </ThemeProvider>
   )

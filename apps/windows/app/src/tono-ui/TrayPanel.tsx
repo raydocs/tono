@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core'
-import { emit } from '@tauri-apps/api/event'
 import { useLockFn } from 'ahooks'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -35,7 +34,6 @@ import { useQuery } from '@/services/query-client'
 import { connectIfIdleAfterSelection } from '@/services/server-selection'
 import { useThemeMode } from '@/services/states'
 import { snoozeUpdate, updateSnoozed } from '@/services/update-copy'
-import { SHOW_UPDATE_EVENT } from '@/services/update-prompt'
 import {
   formatTonoActionError,
   idleSelectShouldConnect,
@@ -126,8 +124,7 @@ export const TrayPanel = () => {
         setLaterSha(updateOffer.manifestSha256)
       }}
       onUpdateNow={() => {
-        void invoke('tray_flyout_open_dashboard')
-        void emit(SHOW_UPDATE_EVENT)
+        void invoke('tray_flyout_open_update')
       }}
     />
   ) : null

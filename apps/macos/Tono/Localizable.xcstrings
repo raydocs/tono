@@ -201,7 +201,7 @@
     "Details": {
       "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "详情" } } }
     },
-    "": {},
+    "": {"shouldTranslate": false},
     "Account": {
       "localizations": {
         "zh-Hans": {
@@ -1670,8 +1670,8 @@
         }
       }
     },
-    "--": {},
-    "/s": {},
+    "--": {"shouldTranslate": false},
+    "/s": {"shouldTranslate": false},
     "5001": {
       "localizations": {
         "zh-Hans": {
@@ -7042,7 +7042,7 @@
         }
       }
     },
-    "Tono": {},
+    "Tono": {"shouldTranslate": false},
     "Tono Account": {
       "localizations": {
         "zh-Hans": {
@@ -7590,8 +7590,8 @@
         }
       }
     },
-    "VLESS + TLS": {},
-    "VLESS UUID": {},
+    "VLESS + TLS": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "VLESS + TLS"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "VLESS + TLS"}}}},
+    "VLESS UUID": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "VLESS UUID"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "VLESS UUID"}}}},
     "VLESS UUID is required": {
       "localizations": {
         "zh-Hans": {
@@ -7874,7 +7874,7 @@
         }
       }
     },
-    "ms": {},
+    "ms": {"shouldTranslate": false},
     "of %lld": {
       "localizations": {
         "zh-Hans": {
@@ -9200,7 +9200,56 @@
           }
         }
       }
-    }
+    },
+    "Verify email code": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Verify email code"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "验证邮箱验证码"}}}},
+    "Sign in with Google": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Sign in with Google"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "使用 Google 登录"}}}},
+    "View data usage summary": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "View data usage summary"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "查看流量使用摘要"}}}},
+    "Direct internet is available. Support code TONO_CONNECT_RELEASED.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Direct internet is available. Support code TONO_CONNECT_RELEASED."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "普通网络已恢复可用。支持代码 TONO_CONNECT_RELEASED。"}}}},
+    "Update %@": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Update %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "更新 %@"}}}},
+    "Update available": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Update available"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "有可用更新"}}}},
+    "Downloading %@": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Downloading %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在下载 %@"}}}},
+    "Downloading update…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Downloading update…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在下载更新…"}}}},
+    "Verifying & preparing…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Verifying & preparing…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在验证并准备…"}}}},
+    "Installing & restarting…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Installing & restarting…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在安装并重启…"}}}},
+    "Checking for updates…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Checking for updates…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在检查更新…"}}}},
+    "Tono is up to date": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tono is up to date"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "Tono 已是最新版本"}}}},
+    "Update needs attention": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Update needs attention"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "更新需要注意"}}}},
+    "Update & Restart": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Update & Restart"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "更新并重启"}}}},
+    "Retry Download": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Retry Download"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "重试下载"}}}},
+    "View Update": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "View Update"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "查看更新"}}}},
+    "Signed update verified by Tono Helper. Your network protection stays active until restart.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Signed update verified by Tono Helper. Your network protection stays active until restart."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "签名更新已由 Tono Helper 验证。重启前你的网络保护将保持开启。"}}}},
+    "Current version %@": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Current version %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "当前版本 %@"}}}},
+    "Verify": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Verify"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "验证"}}}},
+    "Restart": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Restart"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "重启"}}}},
+    "Release notes": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Release notes"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "版本说明"}}}},
+    "The cloud server you were switching to was removed from the catalog. Keeping your current connection.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "The cloud server you were switching to was removed from the catalog. Keeping your current connection."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "你要切换的云端节点已从目录中移除，将保持当前连接。"}}}},
+    "The selected cloud server was removed. Strict mode is still blocking traffic. Click Restore internet before choosing another cloud server.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "The selected cloud server was removed. Strict mode is still blocking traffic. Click Restore internet before choosing another cloud server."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "所选云端节点已被移除。严格模式仍在拦截流量。请先点击「恢复正常网络」，再选择其他云端节点。"}}}},
+    "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Strict mode is still blocking traffic. Click Restore internet to resume normal internet access."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "严格模式仍在拦截流量。请点击「恢复正常网络」以恢复正常网络访问。"}}}},
+    "Strict mode locked the previous network route (for example, your network interface or server changed). Click Restore internet before reconnecting.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Strict mode locked the previous network route (for example, your network interface or server changed). Click Restore internet before reconnecting."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "严格模式锁定了之前的网络路由（例如网络接口或节点已变更）。重新连接前请先点击「恢复正常网络」。"}}}},
+    "Click Restore internet before switching cloud servers in Strict mode.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Click Restore internet before switching cloud servers in Strict mode."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "在严格模式下切换云端节点前，请先点击「恢复正常网络」。"}}}},
+    "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Strict mode is still blocking traffic. Click Restore internet to resume normal internet access.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Strict mode is still blocking traffic. Click Restore internet to resume normal internet access."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "多次重连后受保护 DNS 仍未生效：macOS 仍在使用其他 DNS 服务器解析。严格模式仍在拦截流量。请点击「恢复正常网络」以恢复正常网络访问。"}}}},
+    "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Strict mode is still blocking traffic. Click Restore internet to resume normal internet access, or turn that rule off and retry.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Strict mode is still blocking traffic. Click Restore internet to resume normal internet access, or turn that rule off and retry."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "DNS 冲突：企业 VPN、描述文件或 /etc/resolver 规则将部分域名交给了 Tono 保护之外的 DNS 服务器解析。严格模式仍在拦截流量。请点击「恢复正常网络」以恢复正常网络访问，或关闭该规则后重试。"}}}},
+    "Disconnect before switching servers in Strict mode.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disconnect before switching servers in Strict mode."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "严格模式下请先断开连接，再切换节点。"}}}},
+    "Switch to %@": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Switch to %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "切换到 %@"}}}},
+    "Settings…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Settings…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "设置…"}}}},
+    "Refresh servers": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Refresh servers"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "刷新节点列表"}}}},
+    "Auto-scroll": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Auto-scroll"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "自动滚动"}}}},
+    "Automatically scroll to newest logs": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Automatically scroll to newest logs"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "自动滚动到最新日志"}}}},
+    "Copy line": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy line"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "复制整行"}}}},
+    "Copy message": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy message"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "复制消息"}}}},
+    "Filter this level": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Filter this level"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "筛选此级别"}}}},
+    "Show all levels": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Show all levels"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "显示全部级别"}}}},
+    "Filter connections": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Filter connections"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "筛选连接"}}}},
+    "Close connection": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Close connection"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭连接"}}}},
+    "Copy destination": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy destination"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "复制目标地址"}}}},
+    "Copy domain": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy domain"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "复制域名"}}}},
+    "Copy server name": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy server name"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "复制节点名称"}}}},
+    "Select server": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Select server"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "选择节点"}}}},
+    "Switch to server": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Switch to server"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "切换到此节点"}}}},
+    "Show the runtime logs tab in the sidebar.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Show the runtime logs tab in the sidebar."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "在侧边栏中显示运行日志标签页。"}}}},
+    "Learn more about %@": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Learn more about %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "了解「%@」的详细说明"}}}},
+    "Value is required": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Value is required"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "请输入规则值"}}}},
+    "System DNS: %@ · ": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "System DNS: %@ · "}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "系统 DNS：%@ · "}}}}
   },
   "version": "1.0"
 }

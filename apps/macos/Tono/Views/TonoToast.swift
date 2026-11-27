@@ -30,6 +30,12 @@ final class ToastCenter {
             }
         }
     }
+
+    func dismiss() {
+        dismissTask?.cancel()
+        dismissTask = nil
+        current = nil
+    }
 }
 
 /// Top-center glass capsule hosting the current toast. Mounted once as an
@@ -37,35 +43,50 @@ final class ToastCenter {
 /// VoiceOver announces it.
 struct TonoToastHost: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.seaAccent) private var seaAccent
+    @SeaAppearancePreference private var seaAppearance
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
 
     var body: some View {
+        let opaque = displayPreferences.reduceTransparency || displayPreferences.contrast == .increased
         Group {
             if let toast = ToastCenter.shared.current {
                 HStack(spacing: 8) {
                     Image(systemName: toast.systemImage)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(TonoBrand.accent)
+                        .foregroundStyle(seaAppearance ? seaAccent : TonoBrand.accent)
                     Text(toast.message)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .foregroundStyle(seaAppearance ? SeaTheme.text : .primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(
-                    .white.opacity(colorScheme == .dark ? 0.10 : 0.5),
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule()
-                        .strokeBorder(
-                            .white.opacity(colorScheme == .dark ? 0.14 : 0.6),
-                            lineWidth: 0.5
-                        )
+                .frame(maxWidth: 460)
+                .background {
+                    if opaque {
+                        Capsule()
+                            .fill(seaAppearance || colorScheme == .dark ? SeaTheme.opaquePanel : Color(nsColor: .windowBackgroundColor))
+                    }
                 }
-                .glassEffect(.regular, in: Capsule())
-                .shadow(color: .black.opacity(0.12), radius: 16, y: 7)
+                .overlay {
+                    if displayPreferences.contrast == .increased {
+                        Capsule()
+                            .strokeBorder(
+                                SeaTheme.specularBorder(contrast: displayPreferences.contrast, reduceTransparency: displayPreferences.reduceTransparency),
+                                lineWidth: 1
+                            )
+                    }
+                }
+                .modifier(ToastGlassEffect(enabled: !opaque))
+                .shadow(color: opaque ? .clear : .black.opacity(0.12), radius: 16, y: 7)
+                .contentShape(Capsule())
+                .onTapGesture {
+                    ToastCenter.shared.dismiss()
+                }
                 .padding(.top, 14)
                 .id(toast.id)
                 .transition(
@@ -79,6 +100,23 @@ struct TonoToastHost: View {
             TonoMotion.easeOut(0.25, reduceMotion: reduceMotion),
             value: ToastCenter.shared.current
         )
+        .onChange(of: ToastCenter.shared.current?.id) { _, _ in
+            if let message = ToastCenter.shared.current?.message {
+                AccessibilityNotification.Announcement(message).post()
+            }
+        }
+    }
+}
+
+private struct ToastGlassEffect: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.glassEffect(.regular, in: Capsule())
+        } else {
+            content
+        }
     }
 }
 

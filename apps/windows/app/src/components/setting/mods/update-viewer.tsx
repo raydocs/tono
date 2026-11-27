@@ -1,29 +1,41 @@
-import { alpha, Box, Button, LinearProgress } from '@mui/material'
 import { open as openUrl } from '@tauri-apps/plugin-shell'
 import type { DownloadEvent } from '@tauri-apps/plugin-updater'
 import { useLockFn } from 'ahooks'
-import type { Ref } from 'react'
 import {
   lazy,
   Suspense,
+  useEffect,
+  useEffectEvent,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
   useState,
+  type Ref,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Options as ReactMarkdownOptions } from 'react-markdown'
 
-import { BaseDialog, type DialogRef } from '@/components/base'
+import type { DialogRef } from '@/components/base'
 import { useUpdate } from '@/hooks/use-update'
 import { showNotice } from '@/services/notice-service'
-import { useSetUpdateState, useUpdateState } from '@/services/states'
-import { describeUpdateFailure } from '@/services/update-copy'
+import {
+  setUpdateProgress,
+  useSetUpdateState,
+  useUpdateState,
+} from '@/services/states'
 import {
   cancelUpdateDownload,
   installUpdate,
   UPDATE_DOWNLOAD_CANCELLED,
 } from '@/services/update'
+import { describeUpdateFailure } from '@/services/update-copy'
+import { TONO_MONO_STACK } from '@/tono-ui/theme'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
+import { TonoLogo } from '@/tono-ui/TonoLogo'
+import { version as appVersion } from '@root/package.json'
+
+import './update-viewer.css'
 
 type MarkdownNode = {
   type: string
@@ -37,23 +49,18 @@ type MarkdownNode = {
 const GITHUB_ALERTS = {
   note: {
     labelKey: 'settings.modals.update.alerts.note',
-    color: '#0969da',
   },
   tip: {
     labelKey: 'settings.modals.update.alerts.tip',
-    color: '#1a7f37',
   },
   important: {
     labelKey: 'settings.modals.update.alerts.important',
-    color: '#8250df',
   },
   warning: {
     labelKey: 'settings.modals.update.alerts.warning',
-    color: '#9a6700',
   },
   caution: {
     labelKey: 'settings.modals.update.alerts.caution',
-    color: '#cf222e',
   },
 } as const
 
@@ -61,8 +68,6 @@ type GitHubAlertType = keyof typeof GITHUB_ALERTS
 
 const GITHUB_ALERT_PATTERN =
   /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][\t ]*\n?/i
-const GITHUB_ALERT_CLASS_PATTERN =
-  /markdown-alert-(note|tip|important|warning|caution)/
 
 const LazyReactMarkdown = lazy(async () => {
   const [{ default: ReactMarkdown }, { default: rehypeRaw }] =
@@ -74,18 +79,6 @@ const LazyReactMarkdown = lazy(async () => {
     ),
   }
 })
-
-const getAlertTypeFromClassName = (
-  className: unknown,
-): GitHubAlertType | null => {
-  const value = Array.isArray(className)
-    ? className.join(' ')
-    : typeof className === 'string'
-      ? className
-      : ''
-  const match = value.match(GITHUB_ALERT_CLASS_PATTERN)
-  return match?.[1] as GitHubAlertType | null
-}
 
 const findFirstTextNode = (node: MarkdownNode): MarkdownNode | null => {
   if (node.type === 'text') return node
@@ -140,8 +133,12 @@ const remarkGitHubAlerts = (labels: Record<GitHubAlertType, string>) => {
   return visit
 }
 
+const formatMegabytes = (bytes: number) =>
+  `${(Math.max(0, bytes) / (1024 * 1024)).toFixed(1)} MB`
+
 export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
   const { t } = useTranslation()
+  const titleId = useId()
 
   const [open, setOpen] = useState(false)
   const updateState = useUpdateState()
@@ -164,16 +161,27 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
   const [total, setTotal] = useState(0)
   const downloadedRef = useRef(0)
   const totalRef = useRef(0)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const progress = useMemo(() => {
     if (total <= 0) return 0
-    return Math.min((downloaded / total) * 100, 100)
+    return Math.min(Math.round((downloaded / total) * 100), 100)
   }, [downloaded, total])
 
   useImperativeHandle(ref, () => ({
     open: () => setOpen(true),
     close: () => setOpen(false),
   }))
+
+  useEffect(() => {
+    if (!updateState) {
+      setUpdateProgress(null)
+      return
+    }
+    setUpdateProgress(total > 0 ? progress : null)
+  }, [updateState, total, progress])
+
+  useEffect(() => () => setUpdateProgress(null), [])
 
   const githubAlertLabels = useMemo(
     () =>
@@ -190,19 +198,62 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
     [githubAlertLabels],
   )
 
-  const markdownContent = useMemo(() => {
-    if (!updateInfo?.body) {
-      return t('settings.modals.update.messages.available')
-    }
-    return updateInfo?.body
-  }, [t, updateInfo])
+  const markdownContent = useMemo(
+    () => updateInfo?.body?.trim() ?? '',
+    [updateInfo],
+  )
 
   const breakChangeFlag = useMemo(() => {
     if (!updateInfo?.body) {
       return false
     }
-    return updateInfo?.body.toLowerCase().includes('break change')
+    return updateInfo.body.toLowerCase().includes('break change')
   }, [updateInfo])
+
+  const handleCancel = () => {
+    // Cancel stops a download in flight instead of leaving it running unseen.
+    if (updateState) void cancelUpdateDownload().catch(() => false)
+    setOpen(false)
+  }
+
+  const cancelFromKeyboard = useEffectEvent(handleCancel)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const previous = document.activeElement as HTMLElement | null
+    panelRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        cancelFromKeyboard()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const panel = panelRef.current
+      if (!panel) return
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])',
+      )
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (!first || !last) return
+      if (!panel.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      previous?.focus()
+    }
+  }, [open])
 
   const onUpdate = useLockFn(async () => {
     if (!updateInfo || blocked) return
@@ -266,278 +317,171 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
     }
   })
 
+  if (!open) return null
+
+  const targetVersion = updateInfo?.version ?? ''
+  const releaseUrl = targetVersion
+    ? `https://github.com/raydocs/tono/releases/tag/v${targetVersion}`
+    : 'https://github.com/raydocs/tono/releases'
+
   return (
-    <BaseDialog
-      open={open}
-      title={
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 2,
-            minWidth: 0,
-          }}
-        >
-          <Box
-            component="span"
-            sx={{
-              minWidth: 0,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {t('settings.modals.update.title', {
-              version: updateInfo?.version ?? '',
-            })}
-          </Box>
-          <Button
-            variant="contained"
-            size="small"
-            sx={{ whiteSpace: 'nowrap' }}
-            onClick={() => {
-              openUrl(
-                `https://github.com/raydocs/tono/releases/tag/v${updateInfo?.version}`,
-              )
-            }}
-          >
-            {t('settings.modals.update.actions.goToRelease')}
-          </Button>
-        </Box>
-      }
-      contentSx={{
-        width: { xs: 'calc(100vw - 56px)', sm: 560 },
-        maxWidth: 'calc(100vw - 56px)',
-        height: 'min(64vh, 680px)',
-        display: 'flex',
-        flexDirection: 'column',
-        pb: 1,
-      }}
-      okBtn={t('settings.modals.update.actions.update')}
-      cancelBtn={
-        updateState
-          ? t('shared.actions.cancel')
-          : t('settings.modals.update.actions.later')
-      }
-      disableOk={blocked}
-      loading={updateState}
-      onClose={() => setOpen(false)}
-      onCancel={() => {
-        // Cancel stops a download in flight instead of leaving it running unseen.
-        if (updateState) void cancelUpdateDownload().catch(() => false)
-        setOpen(false)
-      }}
-      onOk={onUpdate}
-    >
-      <Box
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          pr: 1.5,
-          mr: -1,
-          fontSize: 14,
-          lineHeight: 1.65,
-          color: 'text.primary',
-          overflowWrap: 'break-word',
-          '& > :first-child': {
-            mt: 0,
-          },
-          '& > :last-child': {
-            mb: 0,
-          },
-          '& h1': {
-            mt: 0,
-            mb: 1.5,
-            fontSize: 24,
-            lineHeight: 1.25,
-          },
-          '& h2': {
-            mt: 2.25,
-            mb: 1,
-            fontSize: 19,
-            lineHeight: 1.3,
-          },
-          '& h3': {
-            mt: 2,
-            mb: 0.75,
-            fontSize: 16,
-            lineHeight: 1.35,
-          },
-          '& h4, & h5, & h6': {
-            mt: 1.5,
-            mb: 0.75,
-            fontSize: 14,
-            lineHeight: 1.4,
-          },
-          '& p': {
-            my: 1,
-          },
-          '& ul, & ol': {
-            my: 1,
-            pl: 2.75,
-          },
-          '& li': {
-            my: 0.35,
-            pl: 0.25,
-          },
-          '& a': {
-            color: 'primary.main',
-            overflowWrap: 'anywhere',
-          },
-          '& strong': {
-            fontWeight: 700,
-          },
-          '& code': {
-            px: 0.5,
-            py: 0.125,
-            borderRadius: 0.5,
-            bgcolor: 'action.hover',
-            fontSize: '0.92em',
-          },
-          '& pre': {
-            my: 1.5,
-            p: 1.5,
-            overflow: 'auto',
-            borderRadius: 1,
-            bgcolor: 'action.hover',
-          },
-          '& pre code': {
-            p: 0,
-            bgcolor: 'transparent',
-            fontSize: '0.9em',
-          },
-          '& table': {
-            display: 'block',
-            width: '100%',
-            my: 1.5,
-            overflowX: 'auto',
-            borderCollapse: 'collapse',
-          },
-          '& th, & td': {
-            px: 1,
-            py: 0.75,
-            border: '1px solid',
-            borderColor: 'divider',
-            verticalAlign: 'top',
-          },
-          '& th': {
-            bgcolor: 'action.hover',
-            fontWeight: 700,
-          },
-          '& hr': {
-            my: 2,
-            border: 0,
-            borderTop: '1px solid',
-            borderColor: 'divider',
-          },
-          '& img': {
-            maxWidth: '100%',
-            height: 'auto',
-            borderRadius: 1,
-          },
-          '& blockquote:not(.markdown-alert)': {
-            m: '12px 0 18px',
-            pl: 2,
-            color: 'text.secondary',
-            borderLeft: '4px solid',
-            borderColor: 'divider',
-          },
-        }}
+    <div className="tono-update-backdrop">
+      <button
+        type="button"
+        className="tono-update-scrim"
+        tabIndex={-1}
+        aria-hidden="true"
+        onClick={handleCancel}
+      />
+      <div
+        ref={panelRef}
+        className="tono-update-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
       >
-        {open && (
-          <Suspense fallback={<LinearProgress />}>
-            <LazyReactMarkdown
-              remarkPlugins={[remarkGitHubAlertsPlugin]}
-              components={{
-                a: ({ ...props }) => {
-                  const { children } = props
-                  return (
-                    <a {...props} target="_blank" rel="noreferrer">
-                      {children}
-                    </a>
-                  )
-                },
-                blockquote: ({ className, children }) => {
-                  const alertType = getAlertTypeFromClassName(className)
-
-                  if (!alertType) {
-                    return (
-                      <blockquote className={className}>{children}</blockquote>
-                    )
-                  }
-
-                  return (
-                    <Box
-                      component="blockquote"
-                      className={className}
-                      sx={(theme) => {
-                        const color = GITHUB_ALERTS[alertType].color
-                        return {
-                          m: '12px 0 18px',
-                          px: 2,
-                          py: 1,
-                          borderLeft: `4px solid ${color}`,
-                          borderRadius: 1,
-                          bgcolor: alpha(
-                            color,
-                            theme.palette.mode === 'dark' ? 0.16 : 0.08,
-                          ),
-                          '& p': {
-                            my: 0.75,
-                          },
-                          '& .markdown-alert-title': {
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 0.75,
-                            fontWeight: 700,
-                            lineHeight: 1.4,
-                          },
-                        }
-                      }}
-                    >
-                      {children}
-                    </Box>
-                  )
-                },
+        <div className="tono-update-header">
+          <div className="tono-update-identity">
+            <TonoLogo connected={false} size={28} variant="sun" />
+            <div className="tono-update-title-wrap">
+              <h2 id={titleId} className="tono-update-title">
+                {t('settings.modals.update.title', { version: targetVersion })}
+              </h2>
+              <span
+                className="tono-update-version-chip"
+                style={{ fontFamily: TONO_MONO_STACK }}
+              >
+                {targetVersion
+                  ? `v${appVersion} → v${targetVersion}`
+                  : `v${appVersion}`}
+              </span>
+            </div>
+          </div>
+          <div className="tono-update-header-actions">
+            <button
+              type="button"
+              className="tono-update-release-btn"
+              onClick={() => {
+                void Promise.resolve(openUrl(releaseUrl)).catch(() => {})
               }}
             >
-              {markdownContent}
-            </LazyReactMarkdown>
-          </Suspense>
+              <span>{t('settings.modals.update.actions.goToRelease')}</span>
+              <span aria-hidden="true">↗</span>
+            </button>
+            <button
+              type="button"
+              className="tono-update-close-btn"
+              aria-label={t('shared.actions.close')}
+              title={t('shared.actions.close')}
+              onClick={handleCancel}
+            >
+              <TonoIcon name="close" size={14} />
+            </button>
+          </div>
+        </div>
+
+        <div className="tono-update-protection">
+          <TonoIcon name="lock" size={14} />
+          <span>{t('tono.update.protectionNote')}</span>
+        </div>
+
+        {markdownContent ? (
+          <div className="tono-update-notes">
+            <Suspense fallback={<div className="tono-update-notes-loading" />}>
+              <LazyReactMarkdown
+                remarkPlugins={[remarkGitHubAlertsPlugin]}
+                components={{
+                  a: ({ ...props }) => {
+                    const { children } = props
+                    return (
+                      <a {...props} target="_blank" rel="noreferrer">
+                        {children}
+                      </a>
+                    )
+                  },
+                  blockquote: ({ className, children }) => (
+                    <blockquote className={className}>{children}</blockquote>
+                  ),
+                }}
+              >
+                {markdownContent}
+              </LazyReactMarkdown>
+            </Suspense>
+          </div>
+        ) : (
+          <p className="tono-update-summary">
+            {t('settings.modals.update.messages.available')}
+          </p>
         )}
-      </Box>
-      {refusal && (
-        <Box
-          role="alert"
-          sx={{
-            mt: 1,
-            p: 1.5,
-            flexShrink: 0,
-            borderRadius: 1,
-            fontSize: 13,
-            color: 'error.main',
-            bgcolor: (theme) => alpha(theme.palette.error.main, 0.08),
-            overflowWrap: 'anywhere',
-          }}
-        >
-          <p>{refusal.message}</p>
-          {refusal.detail && refusal.detail !== refusal.message && (
-            <details>
-              <summary>{t('tono.update.technicalDetails')}</summary>
-              <pre>{refusal.detail}</pre>
-            </details>
+
+        {refusal && (
+          <div className="tono-update-alert" role="alert">
+            <p>{refusal.message}</p>
+            {refusal.detail && refusal.detail !== refusal.message && (
+              <details className="tono-update-details">
+                <summary>{t('tono.update.technicalDetails')}</summary>
+                <pre>{refusal.detail}</pre>
+              </details>
+            )}
+          </div>
+        )}
+
+        {updateState && (
+          <div className="tono-update-progress">
+            <div className="tono-update-progress-head">
+              <span>{t('tono.update.downloading')}</span>
+              <span
+                className="tono-update-progress-meta"
+                style={{ fontFamily: TONO_MONO_STACK }}
+              >
+                {total > 0
+                  ? `${formatMegabytes(downloaded)} / ${formatMegabytes(total)} · ${progress}%`
+                  : downloaded > 0
+                    ? formatMegabytes(downloaded)
+                    : t('tono.update.preparing')}
+              </span>
+            </div>
+            <div
+              className="tono-update-progress-track"
+              role="progressbar"
+              aria-label={t('tono.update.downloading')}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={total > 0 ? progress : undefined}
+            >
+              <div
+                className="tono-update-progress-fill"
+                data-indeterminate={total <= 0 ? 'true' : undefined}
+                style={total > 0 ? { width: `${progress}%` } : undefined}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="tono-update-footer">
+          <button
+            type="button"
+            className="tono-update-btn-secondary"
+            onClick={handleCancel}
+          >
+            {updateState
+              ? t('shared.actions.cancel')
+              : t('settings.modals.update.actions.later')}
+          </button>
+          {!blocked && (
+            <button
+              type="button"
+              className="tono-update-btn-primary"
+              aria-busy={updateState || undefined}
+              aria-disabled={updateState || undefined}
+              onClick={() => void onUpdate()}
+            >
+              {t('settings.modals.update.actions.update')}
+            </button>
           )}
-        </Box>
-      )}
-      {updateState && (
-        <LinearProgress
-          variant={total > 0 ? 'determinate' : 'indeterminate'}
-          value={progress}
-          sx={{ mt: 1 }}
-        />
-      )}
-    </BaseDialog>
+        </div>
+      </div>
+    </div>
   )
 }

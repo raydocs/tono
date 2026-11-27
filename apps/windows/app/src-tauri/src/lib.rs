@@ -192,6 +192,8 @@ mod app_init {
             tono::commands::terminal::tono_check_terminal_env,
             tono::commands::terminal::tono_clear_terminal_proxy_env,
             crate::core::tray::flyout::tray_flyout_open_dashboard,
+            crate::core::tray::flyout::tray_flyout_open_update,
+            crate::core::tray::flyout::take_pending_update_prompt,
             crate::core::tray::flyout::tray_flyout_quit,
             crate::core::tray::flyout::tray_flyout_set_appearance,
         ]

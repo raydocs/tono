@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
 
@@ -100,4 +106,72 @@ it('keeps the state link named when the narrow bar hides its visible word', () =
       .getByRole('link', { name: 'tono.home.title.idle' })
       .getAttribute('href'),
   ).toBe('/')
+})
+
+it('renders the SeaChrome update pill outside nav without altering the four capsule links', () => {
+  const onOpenUpdate = vi.fn()
+  const { rerender } = render(
+    <MemoryRouter>
+      <SeaChrome
+        appearance
+        login={false}
+        home
+        status={undefined}
+        sidebar={null}
+        controls={null}
+        updateVersion="1.2.3"
+        onOpenUpdate={onOpenUpdate}
+        onDoubleClick={vi.fn()}
+      />
+    </MemoryRouter>,
+  )
+
+  const navigation = screen.getByRole('navigation')
+  expect(within(navigation).getAllByRole('link')).toHaveLength(4)
+
+  const pill = screen.getByRole('button', { name: 'tono.update.pillAvailable' })
+  expect(pill.textContent).toContain('v1.2.3')
+  fireEvent.click(pill)
+  expect(onOpenUpdate).toHaveBeenCalledOnce()
+
+  rerender(
+    <MemoryRouter>
+      <SeaChrome
+        appearance
+        login={false}
+        home
+        status={undefined}
+        sidebar={null}
+        controls={null}
+        updateVersion="1.2.3"
+        updateProgress={42}
+        onOpenUpdate={onOpenUpdate}
+        onDoubleClick={vi.fn()}
+      />
+    </MemoryRouter>,
+  )
+  const downloadingPill = screen.getByRole('button', {
+    name: 'tono.update.pillDownloading',
+  })
+  expect(downloadingPill.textContent).toContain('42%')
+  expect(downloadingPill.getAttribute('data-downloading')).toBe('true')
+
+  rerender(
+    <MemoryRouter>
+      <SeaChrome
+        appearance
+        login
+        home
+        status={undefined}
+        sidebar={null}
+        controls={null}
+        updateVersion="1.2.3"
+        onOpenUpdate={onOpenUpdate}
+        onDoubleClick={vi.fn()}
+      />
+    </MemoryRouter>,
+  )
+  expect(
+    screen.queryByRole('button', { name: 'tono.update.pillAvailable' }),
+  ).toBeNull()
 })
