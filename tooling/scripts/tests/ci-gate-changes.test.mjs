@@ -84,6 +84,7 @@ const SERVICES_PATHS = [
   'tooling/scripts/tests/provision-reality-node.test.rb',
   'tooling/ops/hy2/**',
   'tooling/ops/cn-acceptance/**',
+  'tooling/ops/node-home/**',
   '.github/workflows/services-ci.yml',
   '.github/workflows/desktop-update-sign.yml',
   '.github/workflows/screenshots-nightly.yml',

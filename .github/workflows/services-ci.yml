@@ -85,6 +85,7 @@ on:
       - tooling/ops/hy2/**
       # The mainland acceptance tool's result classification.
       - tooling/ops/cn-acceptance/**
+      - tooling/ops/node-home/**
       - .github/workflows/services-ci.yml
       # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
       - .github/workflows/desktop-update-sign.yml
@@ -300,6 +301,9 @@ jobs:
         # Stubbed node root: a broken install must fail each check, and no
         # credential value may reach the output.
         run: python3 tooling/ops/node-install/test_check_node_install.py
+
+      - name: Node-home Xray capabilities probe
+        run: python3 -m unittest discover -s tooling/ops/node-home -p 'test_*.py'
 
   ops-contract:
     needs: release-duplicate
