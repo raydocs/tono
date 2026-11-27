@@ -1,27 +1,45 @@
 import { useEffect } from 'react'
-import { useNavigate } from 'react-router'
 
 export const SHOW_UPDATE_EVENT = 'tono://show-update'
 export const OPEN_UPDATE_STORAGE_KEY = 'tono-open-update'
 export const OPEN_UPDATE_WINDOW_EVENT = 'tono-show-update'
 
-/** Main window only. The tray asks; this opens Settings and the update dialog. */
+const dispatchOpenUpdate = () => {
+  try {
+    sessionStorage.setItem(OPEN_UPDATE_STORAGE_KEY, '1')
+  } catch {
+    // Ignore storage failures in restricted webviews.
+  }
+  window.dispatchEvent(new Event(OPEN_UPDATE_WINDOW_EVENT))
+}
+
+/** Main window only. The tray asks; this opens the global update dialog. */
 export const UpdatePromptListener = () => {
-  const navigate = useNavigate()
   useEffect(() => {
     let unlisten: (() => void) | undefined
     let cancelled = false
-    void import('@tauri-apps/api/event')
-      .then(({ listen }) =>
-        listen(SHOW_UPDATE_EVENT, () => {
-          sessionStorage.setItem(OPEN_UPDATE_STORAGE_KEY, '1')
-          navigate('/settings')
-          window.dispatchEvent(new Event(OPEN_UPDATE_WINDOW_EVENT))
-        }),
-      )
-      .then((stop) => {
-        if (cancelled) stop()
-        else unlisten = stop
+    void Promise.all([
+      import('@tauri-apps/api/core'),
+      import('@tauri-apps/api/event'),
+    ])
+      .then(async ([{ invoke }, { listen }]) => {
+        const stop = await listen(SHOW_UPDATE_EVENT, () => {
+          void Promise.resolve(invoke('take_pending_update_prompt')).catch(
+            () => false,
+          )
+          dispatchOpenUpdate()
+        })
+        if (cancelled) {
+          stop()
+          return
+        }
+        unlisten = stop
+        const pending = await invoke<boolean>('take_pending_update_prompt').catch(
+          () => false,
+        )
+        if (!cancelled && pending) {
+          dispatchOpenUpdate()
+        }
       })
       .catch(() => {
         // Browser dev has no Tauri event bus.
@@ -30,6 +48,6 @@ export const UpdatePromptListener = () => {
       cancelled = true
       unlisten?.()
     }
-  }, [navigate])
+  }, [])
   return null
 }

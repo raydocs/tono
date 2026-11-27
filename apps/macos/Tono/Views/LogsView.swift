@@ -191,157 +191,182 @@ struct LogsView: View {
     // MARK: - Header
 
     private var headerRow: some View {
-        HStack(alignment: .center) {
-            HStack(spacing: 10) {
-                if seaEnabled {
-                    SeaPageHeading(title: "Logs")
-                    SeaTag(title: "\(appState.logEntries.count) entries")
-                } else {
-                    Text("Logs")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(Color.primary)
-
-                    Text("\(appState.logEntries.count) entries")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                headerTitleAndCount
+                Spacer(minLength: 8)
+                HStack(spacing: 10) {
+                    headerSearchField(flexible: false)
+                    headerActionButtons
                 }
             }
 
-            Spacer()
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 8) {
+                    headerTitleAndCount
+                    Spacer(minLength: 8)
+                    headerActionButtons
+                }
+                headerSearchField(flexible: true)
+                    .frame(maxWidth: 320, alignment: .leading)
+            }
+        }
+    }
 
-            HStack(spacing: 10) {
-                // Search
-                if seaEnabled {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(searchFocused ? SeaTheme.attention : SeaTheme.muted)
-                            .accessibilityHidden(true)
-                        TextField("Filter logs...", text: $searchText)
-                            .textFieldStyle(.plain)
-                            .focused($searchFocused)
-                            .onKeyPress(.escape) {
-                                if !searchText.isEmpty {
-                                    searchText = ""
-                                } else {
-                                    searchFocused = false
-                                }
-                                return .handled
-                            }
+    private var headerTitleAndCount: some View {
+        HStack(spacing: 10) {
+            if seaEnabled {
+                SeaPageHeading(title: "Logs")
+                SeaTag(title: "\(appState.logEntries.count) entries")
+            } else {
+                Text("Logs")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+
+                Text("\(appState.logEntries.count) entries")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                    .lineLimit(1)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func headerSearchField(flexible: Bool) -> some View {
+        if seaEnabled {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(searchFocused ? SeaTheme.attention : SeaTheme.muted)
+                    .accessibilityHidden(true)
+                TextField("Filter logs...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .focused($searchFocused)
+                    .onKeyPress(.escape) {
                         if !searchText.isEmpty {
-                            Button {
-                                searchText = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(SeaTheme.muted)
-                            }
-                            .buttonStyle(.plain)
-                            .pointerStyle(.link)
-                            .accessibilityLabel("Clear search")
-                        }
-                    }
-                    .modifier(SeaFieldSurface(focused: searchFocused, minHeight: 36))
-                    .frame(width: 200)
-                } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    TextField("Filter logs...", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .focused($searchFocused)
-                        .onKeyPress(.escape) {
-                            if !searchText.isEmpty {
-                                searchText = ""
-                            } else {
-                                searchFocused = false
-                            }
-                            return .handled
-                        }
-                    if !searchText.isEmpty {
-                        Button {
                             searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
+                        } else {
+                            searchFocused = false
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear search")
+                        return .handled
                     }
-                }
-                .frame(width: 190)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
-                .overlay(Capsule().strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.5), lineWidth: 0.5))
-                }
-
-                // Auto-scroll toggle
-                Button {
-                    isAutoScrollEnabled.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: isAutoScrollEnabled ? "arrow.down.to.line.circle.fill" : "arrow.down.to.line.circle")
-                            .font(.system(size: 11))
-                        Text("Auto-scroll")
-                            .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(SeaTheme.muted)
                     }
-                    .padding(.horizontal, seaEnabled ? 0 : 12)
-                    .padding(.vertical, seaEnabled ? 0 : 6)
-                    .background(seaEnabled ? .clear : (isAutoScrollEnabled ? TonoBrand.accent.opacity(0.16) : .white.opacity(colorScheme == .dark ? 0.08 : 0.4)), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.5)), lineWidth: 0.5))
-                    .contentShape(Capsule())
+                    .buttonStyle(.plain)
+                    .pointerStyle(.link)
+                    .accessibilityLabel("Clear search")
                 }
-                .modifier(SeaActionStyle(variant: isAutoScrollEnabled ? .quiet : .text, size: .row, legacy: .plain))
-                .fixedSize()
-                .help("Automatically scroll to newest logs")
-
-                // Export logs
-                Button {
-                    exportLogs()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.and.arrow.down")
-                            .font(.system(size: 11))
-                        Text("Export")
-                            .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
-                    }
-                    .padding(.horizontal, seaEnabled ? 0 : 12)
-                    .padding(.vertical, seaEnabled ? 0 : 6)
-                    .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.5)), lineWidth: 0.5))
-                    .contentShape(Capsule())
-                }
-                .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .plain))
-                .fixedSize()
-                .disabled(filteredLogs.isEmpty)
-
-                // Clear
-                Button {
-                    appState.clearLogs()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11))
-                        Text("Clear")
-                            .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
-                    }
-                    .modifier(LogsLegacyForeground(active: !seaEnabled, color: Color(hex: "FF6E52")))
-                    .padding(.horizontal, seaEnabled ? 0 : 12)
-                    .padding(.vertical, seaEnabled ? 0 : 6)
-                    .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color(hex: "FF6E52").opacity(seaEnabled ? 0 : 0.3), lineWidth: 0.5))
-                    .contentShape(Capsule())
-                }
-                .modifier(SeaActionStyle(variant: .danger, size: .row, legacy: .plain))
-                .fixedSize()
-                .disabled(appState.logEntries.isEmpty)
             }
+            .modifier(SeaFieldSurface(focused: searchFocused, minHeight: 36))
+            .frame(maxWidth: flexible ? .infinity : 200)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                TextField("Filter logs...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused($searchFocused)
+                    .onKeyPress(.escape) {
+                        if !searchText.isEmpty {
+                            searchText = ""
+                        } else {
+                            searchFocused = false
+                        }
+                        return .handled
+                    }
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .frame(maxWidth: flexible ? .infinity : 190)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.5), lineWidth: 0.5))
+        }
+    }
+
+    private var headerActionButtons: some View {
+        HStack(spacing: 10) {
+            // Auto-scroll toggle
+            Button {
+                isAutoScrollEnabled.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: isAutoScrollEnabled ? "arrow.down.to.line.circle.fill" : "arrow.down.to.line.circle")
+                        .font(.system(size: 11))
+                    Text("Auto-scroll")
+                        .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
+                }
+                .padding(.horizontal, seaEnabled ? 0 : 12)
+                .padding(.vertical, seaEnabled ? 0 : 6)
+                .background(seaEnabled ? .clear : (isAutoScrollEnabled ? TonoBrand.accent.opacity(0.16) : .white.opacity(colorScheme == .dark ? 0.08 : 0.4)), in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.5)), lineWidth: 0.5))
+                .contentShape(Capsule())
+            }
+            .modifier(SeaActionStyle(variant: isAutoScrollEnabled ? .quiet : .text, size: .row, legacy: .plain))
+            .fixedSize()
+            .help("Automatically scroll to newest logs")
+
+            // Export logs
+            Button {
+                exportLogs()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 11))
+                    Text("Export")
+                        .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
+                }
+                .padding(.horizontal, seaEnabled ? 0 : 12)
+                .padding(.vertical, seaEnabled ? 0 : 6)
+                .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.5)), lineWidth: 0.5))
+                .contentShape(Capsule())
+            }
+            .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .plain))
+            .fixedSize()
+            .disabled(filteredLogs.isEmpty)
+
+            // Clear
+            Button {
+                appState.clearLogs()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                    Text("Clear")
+                        .font(seaEnabled ? nil : .system(size: 12, weight: .medium))
+                }
+                .modifier(LogsLegacyForeground(active: !seaEnabled, color: Color(hex: "FF6E52")))
+                .padding(.horizontal, seaEnabled ? 0 : 12)
+                .padding(.vertical, seaEnabled ? 0 : 6)
+                .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                .overlay(Capsule().strokeBorder(Color(hex: "FF6E52").opacity(seaEnabled ? 0 : 0.3), lineWidth: 0.5))
+                .contentShape(Capsule())
+            }
+            .modifier(SeaActionStyle(variant: .danger, size: .row, legacy: .plain))
+            .fixedSize()
+            .disabled(appState.logEntries.isEmpty)
         }
     }
 

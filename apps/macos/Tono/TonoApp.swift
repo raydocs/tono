@@ -235,17 +235,18 @@ struct TonoApp: App {
                     appState.selectedPage = .settings
                 }
                 .keyboardShortcut(",", modifiers: .command)
-                .disabled(accountSession.state != .ready)
+                .disabled(accountSession.state != .ready || updater.isPanelPresented)
             }
             CommandGroup(after: .sidebar) {
                 Button("Support") {
                     appState.selectedPage = .support
                 }
                 .keyboardShortcut("5", modifiers: .command)
-                .disabled(accountSession.state != .ready)
+                .disabled(accountSession.state != .ready || updater.isPanelPresented)
             }
             CommandMenu("Connection") {
                 Button(appState.isConnected ? String(localized: "Disconnect") : String(localized: "Connect")) {
+                    guard !shouldSuppressConnectionCommands else { return }
                     if appState.isConnected {
                         appState.disconnect(releaseKillSwitch: true)
                     } else {
@@ -254,7 +255,8 @@ struct TonoApp: App {
                 }
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(
-                    accountSession.state != .ready
+                    updater.isPanelPresented
+                        || accountSession.state != .ready
                         || !appState.isTonoReady
                         || appState.isConnecting
                         || appState.isDisconnecting
@@ -264,6 +266,7 @@ struct TonoApp: App {
                 )
 
                 Button(appState.isConnecting ? String(localized: "Cancel connection") : String(localized: "Restore internet")) {
+                    guard !shouldSuppressConnectionCommands else { return }
                     if accountSession.state == .ready {
                         appState.restoreInternet()
                     } else {
@@ -272,7 +275,8 @@ struct TonoApp: App {
                 }
                 .keyboardShortcut(".", modifiers: .command)
                 .disabled(
-                    appState.connectionCoordinator.preemptiveReleaseTask != nil
+                    updater.isPanelPresented
+                        || appState.connectionCoordinator.preemptiveReleaseTask != nil
                         || (!appState.isConnecting
                             && !appState.isProtectionBlocked
                             && !appState.isProtectionUnconfirmed
@@ -283,11 +287,13 @@ struct TonoApp: App {
                 Divider()
 
                 Button("Test current exit") {
+                    guard !shouldSuppressConnectionCommands else { return }
                     Task { await appState.testSelectedExitLatency() }
                 }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(
-                    accountSession.state != .ready
+                    updater.isPanelPresented
+                        || accountSession.state != .ready
                         || !appState.isConnected
                         || appState.isConnecting
                         || appState.isDisconnecting
@@ -295,10 +301,11 @@ struct TonoApp: App {
                 )
 
                 Button("Refresh servers") {
+                    guard !shouldSuppressConnectionCommands else { return }
                     Task { await accountSession.refreshManagedCatalog() }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(accountSession.state != .ready)
+                .disabled(updater.isPanelPresented || accountSession.state != .ready)
             }
         }
 
@@ -321,6 +328,27 @@ struct TonoApp: App {
                 .environment(\.locale, appLocale)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    static func shouldSuppressWindowCommand(
+        updatePanelPresented: Bool,
+        isTextEditing: Bool,
+        hasActiveModalOrSheet: Bool
+    ) -> Bool {
+        updatePanelPresented || isTextEditing || hasActiveModalOrSheet
+    }
+
+    private var shouldSuppressConnectionCommands: Bool {
+        let keyWindow = NSApp.keyWindow
+        let isTextEditing = keyWindow?.firstResponder is NSTextView
+        let hasModalOrSheet = NSApp.modalWindow != nil
+            || keyWindow?.attachedSheet != nil
+            || keyWindow?.isSheet == true
+        return Self.shouldSuppressWindowCommand(
+            updatePanelPresented: updater.isPanelPresented,
+            isTextEditing: isTextEditing,
+            hasActiveModalOrSheet: hasModalOrSheet
+        )
     }
 
     /// Legacy install links are deliberately rejected: cloud catalog state is

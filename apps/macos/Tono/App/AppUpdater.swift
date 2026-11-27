@@ -85,6 +85,9 @@ final class AppUpdater: ObservableObject {
     private var activeDownloadID: UUID?
     private var currentCheckUserInitiated = false
 
+    var currentCheckTask: Task<Void, Never>? { activeCheckTask }
+    var currentInstallTask: Task<Void, Never>? { activeInstallTask }
+
     convenience init(enabled: Bool) {
         self.init(enabled: enabled, operations: .live)
     }
@@ -332,11 +335,19 @@ final class AppUpdater: ObservableObject {
     }
 
     private func startCheck(userInitiated: Bool) {
+        guard enabled, appState != nil else { return }
         guard activeCheckTask == nil else {
             if userInitiated {
                 currentCheckUserInitiated = true
+                phase = .checking
             }
             return
+        }
+        if userInitiated {
+            currentCheckUserInitiated = true
+        }
+        if userInitiated || availableOffer == nil {
+            phase = .checking
         }
         activeCheckTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -347,9 +358,12 @@ final class AppUpdater: ObservableObject {
 
     private func performCheck(userInitiated: Bool) async {
         guard enabled, let appState else { return }
-        currentCheckUserInitiated = userInitiated
+        if userInitiated {
+            currentCheckUserInitiated = true
+        }
+        defer { currentCheckUserInitiated = false }
         let previousCachedOffer = availableOffer
-        if userInitiated || previousCachedOffer == nil {
+        if currentCheckUserInitiated || previousCachedOffer == nil {
             phase = .checking
         }
         do {

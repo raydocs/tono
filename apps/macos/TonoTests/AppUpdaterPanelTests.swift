@@ -94,11 +94,9 @@ final class AppUpdaterPanelTests: XCTestCase {
 
         updater.openOrCheckForUpdates()
         XCTAssertTrue(updater.isPanelPresented)
+        XCTAssertEqual(updater.phase, .checking)
 
-        let deadline = Date().addingTimeInterval(2.0)
-        while updater.phase == .checking && Date() < deadline {
-            await Task.yield()
-        }
+        await updater.currentCheckTask?.value
 
         XCTAssertEqual(discoverCalls, 1)
         XCTAssertEqual(updater.phase, .available(version: "0.0.89", packageSize: 2_097_152))
@@ -165,27 +163,23 @@ final class AppUpdaterPanelTests: XCTestCase {
         defer { updater.cancelAutomaticCheck() }
 
         updater.openOrCheckForUpdates()
-        let offerDeadline = Date().addingTimeInterval(2.0)
-        while updater.phase == .checking && Date() < offerDeadline {
-            await Task.yield()
-        }
+        XCTAssertEqual(updater.phase, .checking)
+        await updater.currentCheckTask?.value
 
         updater.installAvailableUpdate()
         let downloadDeadline = Date().addingTimeInterval(2.0)
         while (!downloadStarted || updater.downloadFraction == nil || updater.downloadFraction == 0)
             && Date() < downloadDeadline {
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
         }
         XCTAssertEqual(updater.downloadFraction, 0.25)
 
+        let installTask = updater.currentInstallTask
         updater.cancelDownload()
+        await installTask?.value
         XCTAssertEqual(updater.phase, .available(version: "0.0.89", packageSize: 1_048_576))
         XCTAssertTrue(updater.showsBanner)
         XCTAssertFalse(installCalled)
-
-        // Also verify a late-completing download cleaned up on cancellation.
-        try? await Task.sleep(for: .milliseconds(40))
-        XCTAssertEqual(updater.phase, .available(version: "0.0.89", packageSize: 1_048_576))
     }
 
     func testRetryablePendingFailureAndDisconnectRetryFlow() async throws {
@@ -229,10 +223,8 @@ final class AppUpdaterPanelTests: XCTestCase {
         defer { updater.cancelAutomaticCheck() }
 
         updater.openOrCheckForUpdates()
-        let deadline = Date().addingTimeInterval(2.0)
-        while updater.phase == .checking && Date() < deadline {
-            await Task.yield()
-        }
+        XCTAssertEqual(updater.phase, .checking)
+        await updater.currentCheckTask?.value
 
         XCTAssertEqual(
             updater.phase,
@@ -246,10 +238,8 @@ final class AppUpdaterPanelTests: XCTestCase {
         XCTAssertTrue(updater.showsBanner)
 
         updater.retryAfterDisconnect()
-        let retryDeadline = Date().addingTimeInterval(2.0)
-        while updater.phase == .checking && Date() < retryDeadline {
-            await Task.yield()
-        }
+        XCTAssertEqual(updater.phase, .checking)
+        await updater.currentCheckTask?.value
 
         XCTAssertEqual(retireCalls, 1)
         XCTAssertEqual(updater.phase, .upToDate)
@@ -293,16 +283,11 @@ final class AppUpdaterPanelTests: XCTestCase {
         defer { updater.cancelAutomaticCheck() }
 
         updater.openOrCheckForUpdates()
-        let offerDeadline = Date().addingTimeInterval(2.0)
-        while updater.phase == .checking && Date() < offerDeadline {
-            await Task.yield()
-        }
+        XCTAssertEqual(updater.phase, .checking)
+        await updater.currentCheckTask?.value
 
         updater.installAvailableUpdate()
-        let failDeadline = Date().addingTimeInterval(2.0)
-        while !isFailedPhase(updater.phase) && Date() < failDeadline {
-            await Task.yield()
-        }
+        await updater.currentInstallTask?.value
 
         XCTAssertEqual(
             updater.phase,
@@ -317,10 +302,7 @@ final class AppUpdaterPanelTests: XCTestCase {
 
         shouldFailDownload = false
         updater.installAvailableUpdate()
-        let installDeadline = Date().addingTimeInterval(2.0)
-        while !terminated && Date() < installDeadline {
-            await Task.yield()
-        }
+        await updater.currentInstallTask?.value
 
         XCTAssertTrue(terminated)
         XCTAssertEqual(installedVersionBytes, offer.bytes)
@@ -328,9 +310,35 @@ final class AppUpdaterPanelTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.path))
     }
 
-    private func isFailedPhase(_ phase: AppUpdater.UpdatePhase) -> Bool {
-        if case .failed = phase { return true }
-        return false
+    func testWindowCommandSuppressionRespectsTextEditingAndSheets() {
+        XCTAssertFalse(
+            TonoApp.shouldSuppressWindowCommand(
+                updatePanelPresented: false,
+                isTextEditing: false,
+                hasActiveModalOrSheet: false
+            )
+        )
+        XCTAssertTrue(
+            TonoApp.shouldSuppressWindowCommand(
+                updatePanelPresented: true,
+                isTextEditing: false,
+                hasActiveModalOrSheet: false
+            )
+        )
+        XCTAssertTrue(
+            TonoApp.shouldSuppressWindowCommand(
+                updatePanelPresented: false,
+                isTextEditing: true,
+                hasActiveModalOrSheet: false
+            )
+        )
+        XCTAssertTrue(
+            TonoApp.shouldSuppressWindowCommand(
+                updatePanelPresented: false,
+                isTextEditing: false,
+                hasActiveModalOrSheet: true
+            )
+        )
     }
 
     func testPackageResponseSinkThrottlesProgressTo64KBAndFinalByte() throws {

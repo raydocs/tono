@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -5,8 +6,8 @@ use anyhow::Result;
 use once_cell::sync::Lazy;
 use tauri::utils::config::Color;
 use tauri::{
-    AppHandle, LogicalSize, Manager as _, PhysicalPosition, Rect, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
+    AppHandle, Emitter as _, LogicalSize, Manager as _, PhysicalPosition, Rect, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
 };
 use tono_logging::{Type, logging, logging_error};
 
@@ -26,6 +27,7 @@ static LAST_ANCHOR: Lazy<Mutex<Option<(Rect, PhysicalPosition<f64>)>>> =
     Lazy::new(|| Mutex::new(None));
 
 static LAST_SHOWN: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+static PENDING_OPEN_UPDATE: AtomicBool = AtomicBool::new(false);
 
 fn mark_shown() {
     if let Ok(mut guard) = LAST_SHOWN.lock() {
@@ -192,6 +194,21 @@ pub async fn tray_flyout_open_dashboard() {
 }
 
 #[tauri::command]
+pub async fn tray_flyout_open_update() {
+    PENDING_OPEN_UPDATE.store(true, Ordering::SeqCst);
+    hide_flyout();
+    let _ = WindowManager::show_main_window().await;
+    if let Some(window) = WindowManager::get_main_window() {
+        logging_error!(Type::Tray, window.emit("tono://show-update", ()));
+    }
+}
+
+#[tauri::command]
+pub fn take_pending_update_prompt() -> bool {
+    PENDING_OPEN_UPDATE.swap(false, Ordering::SeqCst)
+}
+
+#[tauri::command]
 pub async fn tray_flyout_quit() {
     hide_flyout();
     feat::quit_or_resync().await;
@@ -222,11 +239,22 @@ fn flyout_dimensions(enabled: bool) -> (f64, f64) {
 
 #[cfg(test)]
 mod presentation_tests {
-    use super::flyout_dimensions;
+    use std::sync::atomic::Ordering;
+
+    use super::{PENDING_OPEN_UPDATE, flyout_dimensions, take_pending_update_prompt};
 
     #[test]
     fn preview_dimensions_do_not_replace_legacy_dimensions() {
         assert_eq!(flyout_dimensions(true), (320.0, 232.0));
         assert_eq!(flyout_dimensions(false), (280.0, 176.0));
+    }
+
+    #[test]
+    fn pending_update_prompt_is_consumed_once() {
+        PENDING_OPEN_UPDATE.store(false, Ordering::SeqCst);
+        assert!(!take_pending_update_prompt());
+        PENDING_OPEN_UPDATE.store(true, Ordering::SeqCst);
+        assert!(take_pending_update_prompt());
+        assert!(!take_pending_update_prompt());
     }
 }
