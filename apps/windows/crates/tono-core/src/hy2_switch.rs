@@ -402,6 +402,7 @@ mod tests {
             protocol,
             tls_fingerprint: None,
             certificate_public_key_sha256: None,
+            hy2_down_mbps: None,
         }
     }
 

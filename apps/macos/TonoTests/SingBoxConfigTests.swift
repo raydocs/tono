@@ -154,7 +154,8 @@ final class SingBoxConfigTests: XCTestCase {
 
     /// A managed hy2 block read by the production catalog parser, so the
     /// published key name is part of what the test pins.
-    private func catalogHY2(name: String, server: String, spki: String) throws -> ProxyNode {
+    private func catalogHY2(name: String, server: String, spki: String, downMbps: Int? = nil) throws -> ProxyNode {
+        let downLine = downMbps.map { "\n    down-mbps: \($0)" } ?? ""
         let yaml = """
         proxies:
           - name: \(name)
@@ -164,7 +165,7 @@ final class SingBoxConfigTests: XCTestCase {
             password: 11111111-1111-4111-8111-111111111111
             sni: exit.example.com
             fingerprint: \(String(repeating: "ab", count: 32))
-            certificate-public-key-sha256: "\(spki)"
+            certificate-public-key-sha256: "\(spki)"\(downLine)
         """
         return try XCTUnwrap(ConfigParser.parseSubscription(yaml).first)
     }
@@ -356,6 +357,43 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(outbound["keep_alive_period"] as? String, "5s")
         XCTAssertNil(outbound["idle_timeout"])
         XCTAssertNil(outbound["disable_chrome_parrot"])
+        XCTAssertNil(outbound["down_mbps"])
+        XCTAssertNil(outbound["up_mbps"])
+
+        let hy2Brutal = try catalogHY2(name: "Fixture Alpha · hy2", server: values[0].server, spki: spki, downMbps: 100)
+        var brutalValues = try nodes()
+        brutalValues.append(hy2Brutal)
+        let brutalOverlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: hy2Brutal.name)
+        let brutalResult = try ConfigPipeline.buildSingBoxRuntime(overlay: brutalOverlay, nodes: brutalValues, directPlan: nil)
+        let brutalJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: brutalResult.runtimeJSON) as? [String: Any])
+        let brutalOutbounds = try XCTUnwrap(brutalJSON["outbounds"] as? [[String: Any]])
+        let brutalOutbound = try XCTUnwrap(brutalOutbounds.first { $0["tag"] as? String == hy2Brutal.name })
+        XCTAssertEqual(brutalOutbound["down_mbps"] as? Int, 100)
+        XCTAssertNil(brutalOutbound["up_mbps"])
+
+        var low = hy2Brutal
+        low.hy2DownMbps = 9
+        XCTAssertNil(ConfigPipeline.canonicalHy2DownMbps(low.hy2DownMbps))
+        var high = hy2Brutal
+        high.hy2DownMbps = 501
+        XCTAssertNil(ConfigPipeline.canonicalHy2DownMbps(high.hy2DownMbps))
+
+        let leadingZeroYAML = """
+        proxies:
+          - name: Fixture LeadingZero · hy2
+            type: hysteria2
+            server: \(values[0].server)
+            port: 443
+            password: 11111111-1111-4111-8111-111111111111
+            sni: exit.example.com
+            fingerprint: \(String(repeating: "ab", count: 32))
+            certificate-public-key-sha256: "\(spki)"
+            down-mbps: 0100
+        """
+        let leadingZeroNode = try XCTUnwrap(ConfigParser.parseSubscription(leadingZeroYAML).first)
+        XCTAssertNil(leadingZeroNode.hy2DownMbps)
     }
 
     func testProductRuntimePreservesHomeDirectAndRejectsHY2WithoutSPKIPin() throws {

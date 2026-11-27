@@ -240,8 +240,12 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
                     }
                     tls["certificate_sha256"] = json!([encoded_der]);
                 }
-                json!({"type":"hysteria2","tag":node.name,"server":node.server,"server_port":node.port,
-                    "password":node.uuid, "tls":tls})
+                let mut outbound = json!({"type":"hysteria2","tag":node.name,"server":node.server,"server_port":node.port,
+                    "password":node.uuid, "tls":tls});
+                if let Some(down_mbps) = node.hy2_down_mbps {
+                    outbound["down_mbps"] = json!(down_mbps);
+                }
+                outbound
             }
             NodeProtocol::VlessReality => {
                 // Catalog admission allows omission. Match the Mihomo and
@@ -1090,7 +1094,29 @@ mod tests {
         assert!(!selected.runtime_json().contains("idle_timeout"));
         assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
         assert!(!selected.runtime_json().contains("insecure"));
+        assert!(!selected.runtime_json().contains("\"down_mbps\""));
+        assert!(!selected.runtime_json().contains("\"up_mbps\""));
         assert_eq!(selected.unavailable_nodes(), &[2]);
+
+        let mut brutaled = nodes.clone();
+        let gamma_brutal = node::admit_node(&serde_yaml_ng::to_value(json!({"name":"Fixture Delta · hy2","type":"hysteria2",
+            "server":"1.0.0.2","port":8446,"password":"22222222-2222-4222-8222-222222222222","sni":"hy2.example",
+            "fingerprint":pin,"certificate-public-key-sha256":spki,"down-mbps":100})).unwrap()).unwrap();
+        brutaled.push(gamma_brutal);
+        let mut brutal_req = input(&brutaled, &routing);
+        brutal_req.selected = "Fixture Delta · hy2";
+        let brutal_runtime = build_runtime(brutal_req).unwrap();
+        let brutal_doc: Value = serde_json::from_str(brutal_runtime.runtime_json()).unwrap();
+        let outbounds = brutal_doc["outbounds"].as_array().unwrap();
+        let delta = outbounds.iter().find(|o| o["tag"] == "Fixture Delta · hy2").unwrap();
+        assert_eq!(delta["down_mbps"], 100);
+        assert!(delta.get("up_mbps").is_none());
+        let gamma = outbounds.iter().find(|o| o["tag"] == "Fixture Gamma · hy2").unwrap();
+        assert!(gamma.get("down_mbps").is_none());
+        assert!(gamma.get("up_mbps").is_none());
+        let vless = outbounds.iter().find(|o| o["tag"] == "Fixture Alpha").unwrap();
+        assert!(vless.get("down_mbps").is_none());
+        assert!(vless.get("up_mbps").is_none());
         // No Home binding or DIRECT plan: video still uses cloud TCP, while
         // ordinary HY2 UDP remains supported (no unconditional UDP rejection).
         let value: Value = serde_json::from_str(selected.runtime_json()).unwrap();

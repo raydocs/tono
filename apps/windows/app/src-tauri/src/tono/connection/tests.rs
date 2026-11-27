@@ -945,6 +945,7 @@ fn node() -> ValidatedNode {
         protocol: NodeProtocol::VlessReality,
         tls_fingerprint: None,
         certificate_public_key_sha256: None,
+        hy2_down_mbps: None,
     }
 }
 
@@ -964,6 +965,7 @@ fn hy2_node() -> ValidatedNode {
             "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string(),
         ),
         certificate_public_key_sha256: None,
+        hy2_down_mbps: None,
     }
 }
 
