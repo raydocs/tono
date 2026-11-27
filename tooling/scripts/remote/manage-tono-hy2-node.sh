@@ -336,17 +336,24 @@ import json, pathlib, re, sys
 path, ignore_client, up_mbps, down_mbps = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 target = pathlib.Path(path)
 text = target.read_text(encoding="utf-8")
-original = text
+
+BW_RE = re.compile(r"(?m)^bandwidth:[ \t]*(?:#[^\r\n]*)?\r?\n((?:[ \t]+.*(?:\r?\n|$))*)")
+IG_LINE_RE = re.compile(r"(?m)^ignoreClientBandwidth:[ \t]*(true|false)[ \t]*(?:#[^\r\n]*)?\r?$")
+IG_SUB_RE = re.compile(r"(?m)^ignoreClientBandwidth:[ \t]*(?:true|false)[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)")
+
 
 def extract_bw(src):
     up_val, down_val, ig_val = None, None, None
-    bw_matches = list(re.finditer(r"(?m)^bandwidth:\n((?:  .*(?:\n|$))*)", src))
-    if len(bw_matches) > 1:
+    bw_key_count = len(re.findall(r"(?m)^bandwidth[ \t]*:", src))
+    if bw_key_count > 1:
         raise SystemExit("hy2 bandwidth block is not unique")
+    bw_matches = list(BW_RE.finditer(src))
+    if bw_key_count == 1 and not bw_matches:
+        raise SystemExit("hy2 bandwidth block is malformed")
     if bw_matches:
         body = bw_matches[0].group(1)
         for key, replacement in (("up", up_mbps), ("down", down_mbps)):
-            m_any = re.search(rf"(?m)^  {key}:\s*(.+?)\s*$", body)
+            m_any = re.search(rf"(?m)^[ \t]+{key}:\s*(.+?)\s*\r?$", body)
             if not m_any:
                 continue
             m_mbps = re.fullmatch(r"(\d+)\s*mbps", m_any.group(1), re.IGNORECASE)
@@ -358,44 +365,50 @@ def extract_bw(src):
                 up_val = int(m_mbps.group(1))
             else:
                 down_val = int(m_mbps.group(1))
-    ig_keys = re.findall(r"(?m)^ignoreClientBandwidth:", src)
+    ig_keys = re.findall(r"(?m)^ignoreClientBandwidth[ \t]*:", src)
     if len(ig_keys) > 1:
         raise SystemExit("hy2 ignoreClientBandwidth is not unique")
-    ig_m = re.search(r"(?m)^ignoreClientBandwidth:\s*(true|false)\s*$", src)
+    ig_m = IG_LINE_RE.search(src)
     if ig_keys and not ig_m:
         raise SystemExit("hy2 ignoreClientBandwidth is malformed")
     if ig_m:
         ig_val = ig_m.group(1) == "true"
     return up_val, down_val, ig_val
 
+
 cur_up, cur_down, cur_ig = extract_bw(text)
 new_up = int(up_mbps) if up_mbps else cur_up
 new_down = int(down_mbps) if down_mbps else cur_down
+new_ig = (ignore_client == "true") if ignore_client else cur_ig
 
-if up_mbps or down_mbps:
-    if (up_mbps and new_down is None) or (down_mbps and new_up is None):
-        raise SystemExit("bandwidth requires both up and down when creating missing bandwidth block")
-    bw_block = f"bandwidth:\n  up: {new_up} mbps\n  down: {new_down} mbps\n"
-    if re.search(r"(?m)^bandwidth:\n(?:  .*(?:\n|$))*", text):
-        text, n = re.subn(r"(?m)^bandwidth:\n(?:  .*(?:\n|$))*", bw_block, text, count=1)
-        if n != 1:
-            raise SystemExit("hy2 bandwidth block is not unique")
-    elif re.search(r"(?m)^disableUDP:", text):
-        text = re.sub(r"(?m)^disableUDP:", bw_block + "disableUDP:", text, count=1)
-    else:
-        text = text.rstrip("\n") + "\n" + bw_block
+if (up_mbps or down_mbps) and ((up_mbps and new_down is None) or (down_mbps and new_up is None)):
+    raise SystemExit("bandwidth requires both up and down when creating missing bandwidth block")
 
-if ignore_client:
-    ig_line = f"ignoreClientBandwidth: {ignore_client}\n"
-    if re.search(r"(?m)^ignoreClientBandwidth:\s*(?:true|false)\s*$", text):
-        text = re.sub(r"(?m)^ignoreClientBandwidth:\s*(?:true|false)\s*(?:\n|$)", ig_line, text, count=1)
-    elif re.search(r"(?m)^disableUDP:", text):
-        text = re.sub(r"(?m)^disableUDP:", ig_line + "disableUDP:", text, count=1)
-    else:
-        text = text.rstrip("\n") + "\n" + ig_line
+changed = (new_up, new_down, new_ig) != (cur_up, cur_down, cur_ig)
 
-changed = text != original
 if changed:
+    if (up_mbps or down_mbps) and (new_up, new_down) != (cur_up, cur_down):
+        bw_block = f"bandwidth:\n  up: {new_up} mbps\n  down: {new_down} mbps\n"
+        if BW_RE.search(text):
+            text, n = BW_RE.subn(bw_block, text, count=1)
+            if n != 1:
+                raise SystemExit("hy2 bandwidth block is not unique")
+        elif re.search(r"(?m)^disableUDP:", text):
+            text = re.sub(r"(?m)^disableUDP:", bw_block + "disableUDP:", text, count=1)
+        else:
+            text = text.rstrip("\r\n") + "\n" + bw_block
+
+    if ignore_client and new_ig != cur_ig:
+        ig_line = f"ignoreClientBandwidth: {ignore_client}\n"
+        if IG_LINE_RE.search(text):
+            text = IG_SUB_RE.sub(ig_line, text, count=1)
+        elif re.search(r"(?m)^disableUDP:", text):
+            text = re.sub(r"(?m)^disableUDP:", ig_line + "disableUDP:", text, count=1)
+        else:
+            text = text.rstrip("\r\n") + "\n" + ig_line
+
+    if not text.endswith("\n"):
+        text += "\n"
     target.write_text(text, encoding="utf-8")
 
 fin_up, fin_down, fin_ig = extract_bw(text)
@@ -404,12 +417,18 @@ print(json.dumps({
     "ignoreClientBandwidth": fin_ig,
     "upMbps": fin_up,
     "downMbps": fin_down,
+    "previous": {
+        "ignoreClientBandwidth": cur_ig,
+        "upMbps": cur_up,
+        "downMbps": cur_down,
+    },
+    "serverCapAboveClientCatalogMax": bool((fin_up or 0) > 500 or (fin_down or 0) > 500),
 }))
 PY
 }
 
 validate_bandwidth_mbps() {
-  [[ $1 =~ ^[1-9][0-9]*$ ]] && ((10#$1 >= 10 && 10#$1 <= 1000)) ||
+  [[ $1 =~ ^[1-9][0-9]{1,3}$ ]] && ((10#$1 >= 10 && 10#$1 <= 1000)) ||
     fail "invalid bandwidth Mbps (expected integer in 10..1000)"
 }
 
@@ -417,16 +436,76 @@ hy2_listen_port() {
   python3 - "$1" <<'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-m = re.search(r"(?m)^listen:\s*:(\d+)\s*$", text)
+m = re.search(r"(?m)^listen:\s*:(\d+)\s*\r?$", text)
 if not m:
     raise SystemExit(1)
 print(m.group(1))
 PY
 }
 
+hy2_is_active_and_listening() {
+  systemctl is-active --quiet "$SERVICE_NAME" && udp_port_in_use "$1"
+}
+
+wait_hy2_healthy() {
+  local port=${1:-}
+  local settle=${TONO_HY2_SETTLE_SEC:-2}
+  [[ $settle =~ ^[0-9]+$ ]] || return 1
+  local _i ready=false
+  for _i in $(seq 1 50); do
+    if hy2_is_active_and_listening "$port"; then
+      ready=true
+      break
+    fi
+    sleep 0.2
+  done
+  [[ $ready == true ]] || return 1
+  local pid1 restarts1 pid2 restarts2
+  pid1=$(systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || true)
+  restarts1=$(systemctl show "$SERVICE_NAME" -p NRestarts --value 2>/dev/null || true)
+  if ((settle > 0)); then
+    sleep "$settle"
+  fi
+  hy2_is_active_and_listening "$port" || return 1
+  pid2=$(systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || true)
+  restarts2=$(systemctl show "$SERVICE_NAME" -p NRestarts --value 2>/dev/null || true)
+  [[ -n $pid1 && $pid1 != "0" && $pid1 == "$pid2" && $restarts1 == "$restarts2" ]]
+}
+
+restore_bandwidth_backup() {
+  local backup_path=$1 conf_path=$2 port=$3 reason=$4
+  local rollback_ok=true
+  rm -f "${_bw_staged:-}"
+  _bw_staged=""
+  if ! cp -a "$backup_path" "${conf_path}.rollback.tmp" || ! mv -f "${conf_path}.rollback.tmp" "$conf_path"; then
+    rm -f "${conf_path}.rollback.tmp" >/dev/null 2>&1 || true
+    rollback_ok=false
+  else
+    chmod 0640 "$conf_path" || rollback_ok=false
+    if getent group "$SERVICE_USER" >/dev/null 2>&1; then
+      chown "root:$SERVICE_USER" "$conf_path" || rollback_ok=false
+    fi
+    systemctl reset-failed "$SERVICE_NAME" >/dev/null 2>&1 || true
+    if ! systemctl restart "$SERVICE_NAME" >/dev/null 2>&1; then
+      rollback_ok=false
+    elif ! wait_hy2_healthy "$port"; then
+      rollback_ok=false
+    fi
+  fi
+  _bw_backup=""
+  trap - EXIT RETURN
+  if [[ $rollback_ok == true ]]; then
+    rm -f "$backup_path"
+    printf 'Tono hy2 operation failed: %s; restored previous config and verified healthy\n' "$reason" >&2
+    exit 1
+  fi
+  printf 'Tono hy2 operation failed: %s; rollback also failed — backup preserved at %s (manual intervention required)\n' "$reason" "$backup_path" >&2
+  exit 2
+}
+
 set_bandwidth() {
   require_root
-  local ignore_client="" up_mbps="" down_mbps=""
+  local ignore_client="" up_mbps="" down_mbps="" dry_run=0
   while (($# > 0)); do
     case "$1" in
       --ignore-client-bandwidth)
@@ -446,6 +525,10 @@ set_bandwidth() {
         down_mbps=$2
         shift 2
         ;;
+      --dry-run)
+        dry_run=1
+        shift 1
+        ;;
       *)
         fail "unknown set-bandwidth option: $1"
         ;;
@@ -454,7 +537,7 @@ set_bandwidth() {
   [[ -n $ignore_client || -n $up_mbps || -n $down_mbps ]] ||
     fail "set-bandwidth requires at least one of --ignore-client-bandwidth, --up-mbps, or --down-mbps"
 
-  for command_name in chmod chown cp grep mktemp mv python3 seq ss systemctl; do
+  for command_name in chmod chown cp getent grep mktemp mv python3 rm seq sleep ss systemctl; do
     require_command "$command_name"
   done
   xray_is_active || fail "tono-xray must stay running; set-bandwidth does not replace Reality"
@@ -477,18 +560,36 @@ set_bandwidth() {
   cp -a "$conf" "$backup"
   summary=$(patch_hy2_config_bandwidth "$staged" "$ignore_client" "$up_mbps" "$down_mbps") ||
     fail "could not update hy2 bandwidth settings"
+  if [[ $dry_run == "1" ]]; then
+    cleanup_bandwidth_temps
+    trap - EXIT RETURN
+    python3 - "$summary" "$xray_pid" <<'PY'
+import json, sys
+data = json.loads(sys.argv[1])
+data["dryRun"] = True
+data["xrayPid"] = int(sys.argv[2])
+data["xrayUntouched"] = True
+print(json.dumps(data))
+PY
+    return
+  fi
   changed=$(python3 -c 'import json,sys; print("1" if json.loads(sys.argv[1])["changed"] else "0")' "$summary")
   if [[ $changed == "1" ]]; then
     mv -f "$staged" "$conf"
-    chmod 0640 "$conf"
-    if getent group "$SERVICE_USER" >/dev/null; then
-      chown "root:$SERVICE_USER" "$conf"
+    _bw_staged=""
+    if ! chmod 0640 "$conf"; then
+      restore_bandwidth_backup "$backup" "$conf" "$port" "could not set hy2 config permissions"
     fi
-    systemctl restart "$SERVICE_NAME" >/dev/null
-    if ! wait_hy2_active || ! udp_port_in_use "$port"; then
-      mv -f "$backup" "$conf"
-      systemctl restart "$SERVICE_NAME" >/dev/null || true
-      fail "hy2 did not become healthy after bandwidth change; restored previous config"
+    if getent group "$SERVICE_USER" >/dev/null 2>&1; then
+      if ! chown "root:$SERVICE_USER" "$conf"; then
+        restore_bandwidth_backup "$backup" "$conf" "$port" "could not set hy2 config ownership"
+      fi
+    fi
+    if ! systemctl restart "$SERVICE_NAME" >/dev/null 2>&1; then
+      restore_bandwidth_backup "$backup" "$conf" "$port" "systemctl restart failed during bandwidth change"
+    fi
+    if ! wait_hy2_healthy "$port"; then
+      restore_bandwidth_backup "$backup" "$conf" "$port" "hy2 did not become healthy after bandwidth change"
     fi
   fi
   cleanup_bandwidth_temps

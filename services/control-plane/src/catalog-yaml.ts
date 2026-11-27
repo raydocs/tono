@@ -249,10 +249,7 @@ function catalogProxyType(block: string): string {
   return 'vless';
 }
 
-function catalogFieldKeys(
-  block: string,
-  field: 'uuid' | 'password' | typeof HY2_DOWN_MBPS_KEY | typeof HY2_UP_MBPS_KEY,
-): number {
+function catalogFieldKeys(block: string, field: 'uuid' | 'password'): number {
   return [
     ...block.matchAll(new RegExp(String.raw`^\s*(?:-\s*)?${field}\s*:`, 'gm')),
     ...block.matchAll(new RegExp(String.raw`[{,]\s*${field}\s*:`, 'g')),
@@ -325,20 +322,20 @@ function catalogSpkiPinIsAdmissible(block: string): boolean {
  * stays adaptive BBR and `up-mbps` is never admitted).
  */
 function catalogDownMbpsIsAdmissible(block: string): boolean {
-  const mentions = catalogFieldKeys(block, HY2_DOWN_MBPS_KEY);
+  const mentions = block.split(HY2_DOWN_MBPS_KEY).length - 1;
   if (mentions === 0) return true;
   if (mentions !== 1) return false;
   const lines = block.split('\n');
-  const column = lines[0].match(/^ *- +/)?.[0].length;
-  const keyPattern = new RegExp(`^ *${HY2_DOWN_MBPS_KEY}:`);
-  const index = lines.findIndex((line) => keyPattern.test(line));
-  if (column === undefined || index < 1) return false;
+  const column = lines[0]?.match(/^ *- +/)?.[0].length;
+  const index = lines.findIndex((line) => line.includes(HY2_DOWN_MBPS_KEY));
+  const line = index >= 1 ? lines[index] : undefined;
+  if (column === undefined || line === undefined) return false;
   const exact = new RegExp(`^ {${column}}${HY2_DOWN_MBPS_KEY}: +([1-9]\\d{1,2}) *$`);
-  const match = lines[index].match(exact);
+  const match = line.match(exact);
   if (!match) return false;
   const mbps = Number(match[1]);
   if (!Number.isSafeInteger(mbps) || mbps < HY2_DOWN_MBPS_MIN || mbps > HY2_DOWN_MBPS_MAX) return false;
-  const next = lines.slice(index + 1).find((line) => line.trim() !== '' && !/^\s*#/.test(line));
+  const next = lines.slice(index + 1).find((nextLine) => nextLine.trim() !== '' && !/^\s*#/.test(nextLine));
   return next === undefined || (next.match(/^ */)?.[0].length ?? 0) <= column;
 }
 
@@ -441,13 +438,12 @@ export function catalogProxyUsesManagedIdentity(block: string): boolean {
       && !catalogSkipsCertVerify(block)
       && catalogSpkiPinIsAdmissible(block)
       && catalogDownMbpsIsAdmissible(block)
-      && catalogFieldKeys(block, HY2_UP_MBPS_KEY) === 0;
+      && !block.includes(HY2_UP_MBPS_KEY);
   }
   if (type !== 'vless') return false;
   if (name?.endsWith(HY2_NAME_SUFFIX)) return false;
   if (block.includes(HY2_SPKI_PIN_KEY)) return false;
-  if (catalogFieldKeys(block, HY2_DOWN_MBPS_KEY) !== 0) return false;
-  if (catalogFieldKeys(block, HY2_UP_MBPS_KEY) !== 0) return false;
+  if (block.includes(HY2_DOWN_MBPS_KEY) || block.includes(HY2_UP_MBPS_KEY)) return false;
   return catalogFieldIsPlaceholder(block, 'uuid');
 }
 

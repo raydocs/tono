@@ -485,4 +485,34 @@ class PublishManagedCatalogTest < Minitest::Test
     end
     refute_includes(yaml, "skip-cert-verify: true")
   end
+
+  def test_hy2_down_mbps_admission_and_up_mbps_refusal
+    valid_hy2 = <<~YAML
+      proxies:
+        - name: Tokyo · Sakura · hy2
+          type: hysteria2
+          server: 203.0.113.60
+          port: 443
+          password: #{PLACEHOLDER}
+          sni: www.microsoft.com
+          fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db
+          down-mbps: 100
+    YAML
+    code, output, = run_publisher(["--dry-run", source("valid-hy2.yaml", valid_hy2)])
+    assert_equal(0, code, output)
+
+    invalid_cases = {
+      "quoted-down.yaml" => valid_hy2.sub("down-mbps: 100", '"down-mbps": 100'),
+      "out-of-range-down.yaml" => valid_hy2.sub("down-mbps: 100", "down-mbps: 501"),
+      "comment-down.yaml" => valid_hy2.sub("down-mbps: 100", "down-mbps: 100 # hint"),
+      "up-mbps-hy2.yaml" => valid_hy2.sub("down-mbps: 100", "up-mbps: 50"),
+      "quoted-up-hy2.yaml" => valid_hy2.sub("down-mbps: 100", "'up-mbps': 50"),
+      "vless-down.yaml" => NEW_SOURCE + "    down-mbps: 100\n",
+      "vless-up.yaml" => NEW_SOURCE + "    up-mbps: 50\n",
+    }
+    invalid_cases.each do |filename, body|
+      bad_code, bad_out, = run_publisher(["--dry-run", source(filename, body)])
+      assert_equal(1, bad_code, "expected refusal for #{filename}: #{bad_out}")
+    end
+  end
 end

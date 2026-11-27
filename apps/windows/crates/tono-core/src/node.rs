@@ -61,6 +61,8 @@ pub enum NodeRejection {
     BadSpkiPin,
     #[error("hy2 down-mbps must be an integer between 10 and 500")]
     BadDownMbps,
+    #[error("down-mbps is only valid on hysteria2 nodes")]
+    DownMbpsOnVless,
     #[error("hy2 up-mbps is not supported; upload stays adaptive BBR")]
     UnsupportedUpMbps,
     #[error("tls must be enabled")]
@@ -288,21 +290,30 @@ pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRej
     let raw: RawProxy = serde_yaml_ng::from_value(value.clone())
         .map_err(|err| NodeRejection::Malformed(err.to_string()))?;
 
+    let has_raw_key = |key: &str| {
+        value
+            .as_mapping()
+            .is_some_and(|map| map.contains_key(serde_yaml_ng::Value::String(key.to_string())))
+    };
+    if has_raw_key("up-mbps") || raw.up_mbps.is_some() {
+        return Err(NodeRejection::UnsupportedUpMbps);
+    }
+
     let name = raw.name.trim();
     if name.is_empty() || name.len() > 128 || name.chars().any(is_forbidden_scalar_char) {
         return Err(NodeRejection::BadName);
     }
     if raw.kind == "hysteria2" {
+        if has_raw_key("down-mbps") && raw.down_mbps.is_none() {
+            return Err(NodeRejection::BadDownMbps);
+        }
         return admit_hysteria2(raw);
     }
     if raw.kind != "vless" {
         return Err(NodeRejection::NotVless);
     }
-    if raw.up_mbps.is_some() {
-        return Err(NodeRejection::UnsupportedUpMbps);
-    }
-    if raw.down_mbps.is_some() {
-        return Err(NodeRejection::BadDownMbps);
+    if has_raw_key("down-mbps") || raw.down_mbps.is_some() {
+        return Err(NodeRejection::DownMbpsOnVless);
     }
     if raw.tls != Some(true) {
         return Err(NodeRejection::TlsDisabled);
@@ -833,18 +844,21 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
             let emitted = serde_yaml_ng::to_string(&node.to_runtime_mapping()).unwrap();
             assert!(emitted.contains(&format!("down-mbps: {mbps}")), "{emitted}");
         }
-        for bad in ["0", "9", "501", "-10", "100.5", "\"100\"", "true"] {
+        for bad in ["0", "9", "501", "-10", "100.5", "\"100\"", "true", "~"] {
             let yaml = format!("{}\ndown-mbps: {bad}\n", passing_hy2_yaml().trim());
             assert_eq!(admit_yaml(&yaml).unwrap_err(), NodeRejection::BadDownMbps, "bad={bad}");
         }
-        let hy2_up = format!("{}\nup-mbps: 50\n", passing_hy2_yaml().trim());
-        assert_eq!(admit_yaml(&hy2_up).unwrap_err(), NodeRejection::UnsupportedUpMbps);
+        for up in ["50", "~"] {
+            let hy2_up = format!("{}\nup-mbps: {up}\n", passing_hy2_yaml().trim());
+            assert_eq!(admit_yaml(&hy2_up).unwrap_err(), NodeRejection::UnsupportedUpMbps);
+            let vless_up = format!("{}\nup-mbps: {up}\n", passing_yaml_with("type: vless", "type: vless").trim());
+            assert_eq!(admit_yaml(&vless_up).unwrap_err(), NodeRejection::UnsupportedUpMbps);
+        }
 
         let vless_down = format!("{}\ndown-mbps: 100\n", passing_yaml_with("type: vless", "type: vless").trim());
-        assert_eq!(admit_yaml(&vless_down).unwrap_err(), NodeRejection::BadDownMbps);
-
-        let vless_up = format!("{}\nup-mbps: 50\n", passing_yaml_with("type: vless", "type: vless").trim());
-        assert_eq!(admit_yaml(&vless_up).unwrap_err(), NodeRejection::UnsupportedUpMbps);
+        assert_eq!(admit_yaml(&vless_down).unwrap_err(), NodeRejection::DownMbpsOnVless);
+        let vless_down_null = format!("{}\ndown-mbps: ~\n", passing_yaml_with("type: vless", "type: vless").trim());
+        assert_eq!(admit_yaml(&vless_down_null).unwrap_err(), NodeRejection::DownMbpsOnVless);
     }
 
     #[test]

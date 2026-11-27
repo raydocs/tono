@@ -253,6 +253,12 @@ describe('catalog hy2 contract', () => {
     expectInvalidCatalog(catalog(vless(['    down-mbps: 100']), hy2()));
     expectInvalidCatalog(catalog(vless(), hy2(['    up-mbps: 50'])));
     expectInvalidCatalog(catalog(vless(['    up-mbps: 50']), hy2()));
+    expectInvalidCatalog(catalog(vless(), hy2(['    "down-mbps": 9999'])));
+    expectInvalidCatalog(catalog(vless(), hy2(["    'down-mbps': 100"])));
+    expectInvalidCatalog(catalog(vless(), hy2(['    "up-mbps": 50'])));
+    expectInvalidCatalog(catalog(vless(), hy2(["    'up-mbps': 50"])));
+    expectInvalidCatalog(catalog(vless(['    "down-mbps": 100']), hy2()));
+    expectInvalidCatalog(catalog(vless(["    'up-mbps': 50"]), hy2()));
     expectInvalidCatalog(catalog(
       vless(),
       '  - {name: Tokyo · Sakura · hy2, type: hysteria2, server: 203.0.113.60, port: 443, '

@@ -593,6 +593,8 @@ fn put(mapping: &mut Mapping, key: &str, value: Value) {
 /// Hysteria2 still pins the leaf.
 fn proxy_mapping(node: &ValidatedNode) -> Value {
     let mut mapping = node.to_runtime_mapping();
+    // Only `sing-box` consumes `down-mbps`; Mihomo ignores unknown hy2 keys.
+    mapping.remove(&string("down-mbps"));
     if node.protocol == NodeProtocol::VlessReality {
         let key = string("client-fingerprint");
         if !mapping.contains_key(&key) {
@@ -1360,6 +1362,30 @@ reality-opts:
         assert!(
             !build().yaml().contains("skip-cert-verify"),
             "dial defaults must not disable certificate checks"
+        );
+        let mut nodes_with_hy2 = three_nodes();
+        nodes_with_hy2.push(
+            crate::node::admit_node(
+                &serde_yaml_ng::from_str(
+                    r#"
+name: "Tokyo · Sakura · hy2"
+type: hysteria2
+server: 8.8.8.8
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: www.microsoft.com
+fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:84:16:7E:46:C9:8A:D9:FE:D3:DB"
+down-mbps: 100
+"#,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        );
+        let mihomo_hy2 = build_owned_runtime(&nodes_with_hy2, "US Reality 01", "s", None).unwrap();
+        assert!(
+            !mihomo_hy2.yaml().contains("down-mbps"),
+            "Mihomo fallback must strip down-mbps"
         );
         assert_eq!(first[string("flow")].as_str(), Some("xtls-rprx-vision"));
         assert_eq!(first[string("server")].as_str(), Some("8.8.8.8"));

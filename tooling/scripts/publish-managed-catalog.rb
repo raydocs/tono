@@ -13,6 +13,10 @@ CONTROL_PLANE_ORIGIN = "https://api.afk.ccwu.cc"
 KEYCHAIN_SERVICE = "com.raydocs.tono.staging.admin-api-token"
 CLIENT_UUID_PLACEHOLDER = "{{TONO_CLIENT_UUID}}"
 HY2_NAME_SUFFIX = " · hy2"
+HY2_DOWN_MBPS_KEY = "down-mbps"
+HY2_UP_MBPS_KEY = "up-mbps"
+HY2_DOWN_MBPS_MIN = 10
+HY2_DOWN_MBPS_MAX = 500
 CATALOG_ITEM_INDENT = 2
 MAXIMUM_YAML_BYTES = 1024 * 1024
 MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -106,6 +110,28 @@ def catalog_skips_cert_verify?(block)
   raw != "false" && raw != "no" && raw != "off" && raw != "n"
 end
 
+def catalog_down_mbps_admissible?(block)
+  mentions = block.scan(HY2_DOWN_MBPS_KEY).length
+  return true if mentions.zero?
+  return false unless mentions == 1
+
+  lines = block.split("\n")
+  first = lines[0]
+  column = first&.match(/^ *- +/)&.[](0)&.length
+  index = lines.index { |line| line.include?(HY2_DOWN_MBPS_KEY) }
+  line = index && index >= 1 ? lines[index] : nil
+  return false if column.nil? || line.nil?
+
+  match = line.match(/^ {#{column}}#{Regexp.escape(HY2_DOWN_MBPS_KEY)}: +([1-9]\d{1,2}) *$/)
+  return false unless match
+
+  mbps = Integer(match[1], 10)
+  return false unless (HY2_DOWN_MBPS_MIN..HY2_DOWN_MBPS_MAX).cover?(mbps)
+
+  next_line = lines[(index + 1)..]&.find { |l| !l.strip.empty? && !l.match?(/^\s*#/) }
+  next_line.nil? || next_line[/^ */].length <= column
+end
+
 # Same contract as control-plane `catalogProxyUsesManagedIdentity`:
 # vless uses uuid; hysteria2 uses password + fingerprint, never skip-cert-verify.
 def managed_identity_block?(block)
@@ -116,10 +142,14 @@ def managed_identity_block?(block)
     return false unless catalog_field_keys(block, "uuid").zero?
     return catalog_field_is_placeholder?(block, "password") &&
            catalog_has_fingerprint?(block) &&
-           !catalog_skips_cert_verify?(block)
+           !catalog_skips_cert_verify?(block) &&
+           catalog_down_mbps_admissible?(block) &&
+           !block.include?(HY2_UP_MBPS_KEY)
   end
   return false unless type == "vless"
   return false if name&.end_with?(HY2_NAME_SUFFIX)
+  return false if block.include?(HY2_DOWN_MBPS_KEY) || block.include?(HY2_UP_MBPS_KEY)
+
   catalog_field_is_placeholder?(block, "uuid")
 end
 
