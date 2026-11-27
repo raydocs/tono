@@ -202,12 +202,72 @@ class ManageHy2BandwidthTests(unittest.TestCase):
             updated = crlf_cfg.read_text(encoding="utf-8")
             self.assertEqual(1, updated.count("bandwidth:"), updated)
 
-            r_ovf = subprocess.run(
-                ["bash", "-c", f'source <(sed -n "/^fail()/p;/^validate_bandwidth_mbps()/,/^}}/p" "{SCRIPT}"); validate_bandwidth_mbps "18446744073709552616"'],
+            script_src = SCRIPT.read_text(encoding="utf-8")
+            fail_fn = re.search(r"^fail\(\) \{\n.*?\n\}", script_src, re.M | re.S)
+            val_fn = re.search(r"^validate_bandwidth_mbps\(\) \{\n.*?\n\}", script_src, re.M | re.S)
+            assert fail_fn and val_fn
+
+            def run_validate(val: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        f'{fail_fn.group(0)}\n{val_fn.group(0)}\nvalidate_bandwidth_mbps "$1"',
+                        "bash",
+                        val,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+
+            for valid_val in ("10", "100", "1000"):
+                self.assertEqual(0, run_validate(valid_val).returncode, valid_val)
+            self.assertNotEqual(0, run_validate("18446744073709552616").returncode)
+
+            # Inline comments on existing up/down values (with CRLF) allow updating the other side.
+            comment_cfg = pathlib.Path(tmp) / "comment.yaml"
+            comment_cfg.write_bytes(
+                b"listen: :443\r\nbandwidth:\r\n  up: 500 mbps # provider cap\r\n  down: 500 mbps # dl cap\r\nignoreClientBandwidth: false\r\n"
+            )
+            r_cmt = subprocess.run(
+                ["python3", "-c", code, str(comment_cfg), "", "", "200"],
                 capture_output=True,
                 text=True,
             )
-            self.assertNotEqual(0, r_ovf.returncode)
+            self.assertEqual(0, r_cmt.returncode, r_cmt.stderr)
+            out_cmt = json.loads(r_cmt.stdout)
+            self.assertEqual(500, out_cmt["upMbps"])
+            self.assertEqual(200, out_cmt["downMbps"])
+
+            # Duplicate nested up/down keys refuse cleanly on both bw update and ignore-only update.
+            for dup_body, args in (
+                ("listen: :443\nbandwidth:\n  up: 500 mbps\n  up: 300 mbps\n  down: 500 mbps\n", ["", "", "200"]),
+                ("listen: :443\nbandwidth:\n  up: 500 mbps\n  down: 500 mbps\n  down: 400 mbps\nignoreClientBandwidth: false\n", ["true", "", ""]),
+            ):
+                dup_cfg = pathlib.Path(tmp) / "dup_nested.yaml"
+                dup_cfg.write_text(dup_body, encoding="utf-8")
+                r_dup_n = subprocess.run(
+                    ["python3", "-c", code, str(dup_cfg), *args],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(0, r_dup_n.returncode, args)
+
+            # Ignore-only toggle with non-mbps unit reports "unknown" instead of false.
+            raw_unit_cfg = pathlib.Path(tmp) / "raw_unit.yaml"
+            raw_unit_cfg.write_text(
+                "listen: :443\nbandwidth:\n  up: 1 gbps\n  down: 500 mbps\nignoreClientBandwidth: false\n",
+                encoding="utf-8",
+            )
+            r_ig_gbps = subprocess.run(
+                ["python3", "-c", code, str(raw_unit_cfg), "true", "", ""],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, r_ig_gbps.returncode, r_ig_gbps.stderr)
+            out_ig_gbps = json.loads(r_ig_gbps.stdout)
+            self.assertEqual("unknown", out_ig_gbps["serverCapAboveClientCatalogMax"])
+            self.assertEqual({"up": "1 gbps"}, out_ig_gbps["rawUnits"])
 
     def _run_set_bandwidth_harness(self, config_text: str, args: list[str], mode: str = "ok") -> tuple[subprocess.CompletedProcess[str], pathlib.Path, str]:
         with tempfile.TemporaryDirectory() as tmpdir:

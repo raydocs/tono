@@ -594,7 +594,7 @@ fn put(mapping: &mut Mapping, key: &str, value: Value) {
 fn proxy_mapping(node: &ValidatedNode) -> Value {
     let mut mapping = node.to_runtime_mapping();
     // Only `sing-box` consumes `down-mbps`; Mihomo ignores unknown hy2 keys.
-    mapping.remove(&string("down-mbps"));
+    mapping.remove(string("down-mbps"));
     if node.protocol == NodeProtocol::VlessReality {
         let key = string("client-fingerprint");
         if !mapping.contains_key(&key) {

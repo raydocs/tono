@@ -344,6 +344,7 @@ IG_SUB_RE = re.compile(r"(?m)^ignoreClientBandwidth:[ \t]*(?:true|false)[ \t]*(?
 
 def extract_bw(src):
     up_val, down_val, ig_val = None, None, None
+    raw_units = {}
     bw_key_count = len(re.findall(r"(?m)^bandwidth[ \t]*:", src))
     if bw_key_count > 1:
         raise SystemExit("hy2 bandwidth block is not unique")
@@ -353,11 +354,16 @@ def extract_bw(src):
     if bw_matches:
         body = bw_matches[0].group(1)
         for key, replacement in (("up", up_mbps), ("down", down_mbps)):
-            m_any = re.search(rf"(?m)^[ \t]+{key}:\s*(.+?)\s*\r?$", body)
+            key_matches = re.findall(rf"(?m)^[ \t]+{key}[ \t]*:", body)
+            if len(key_matches) > 1:
+                raise SystemExit(f"hy2 bandwidth.{key} is not unique")
+            m_any = re.search(rf"(?m)^[ \t]+{key}[ \t]*:[ \t]*(.*?)[ \t]*\r?$", body)
             if not m_any:
                 continue
-            m_mbps = re.fullmatch(r"(\d+)\s*mbps", m_any.group(1), re.IGNORECASE)
+            val_text = re.sub(r"(?:^|[ \t]+)#.*$", "", m_any.group(1)).strip()
+            m_mbps = re.fullmatch(r"(\d+)\s*mbps", val_text, re.IGNORECASE)
             if not m_mbps:
+                raw_units[key] = val_text
                 if (up_mbps or down_mbps) and not replacement:
                     raise SystemExit("unsupported bandwidth unit in existing config")
                 continue
@@ -373,10 +379,10 @@ def extract_bw(src):
         raise SystemExit("hy2 ignoreClientBandwidth is malformed")
     if ig_m:
         ig_val = ig_m.group(1) == "true"
-    return up_val, down_val, ig_val
+    return up_val, down_val, ig_val, raw_units
 
 
-cur_up, cur_down, cur_ig = extract_bw(text)
+cur_up, cur_down, cur_ig, _cur_raw_units = extract_bw(text)
 new_up = int(up_mbps) if up_mbps else cur_up
 new_down = int(down_mbps) if down_mbps else cur_down
 new_ig = (ignore_client == "true") if ignore_client else cur_ig
@@ -411,8 +417,13 @@ if changed:
         text += "\n"
     target.write_text(text, encoding="utf-8")
 
-fin_up, fin_down, fin_ig = extract_bw(text)
-print(json.dumps({
+fin_up, fin_down, fin_ig, fin_raw_units = extract_bw(text)
+cap_above = (
+    True
+    if ((fin_up or 0) > 500 or (fin_down or 0) > 500)
+    else ("unknown" if fin_raw_units else False)
+)
+payload = {
     "changed": changed,
     "ignoreClientBandwidth": fin_ig,
     "upMbps": fin_up,
@@ -422,8 +433,11 @@ print(json.dumps({
         "upMbps": cur_up,
         "downMbps": cur_down,
     },
-    "serverCapAboveClientCatalogMax": bool((fin_up or 0) > 500 or (fin_down or 0) > 500),
-}))
+    "serverCapAboveClientCatalogMax": cap_above,
+}
+if fin_raw_units:
+    payload["rawUnits"] = fin_raw_units
+print(json.dumps(payload))
 PY
 }
 
