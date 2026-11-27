@@ -1,213 +1,207 @@
 # RFC: Node-Side Residential SOCKS5 Dialing (`u:` / `h:` Dual Identity)
 
-- Status: Proposed (Draft RFC)
+- Status: Proposed (Draft RFC — Revision 2 addressing dual-review feedback)
 - Date: 2026-11-27
 - Authors: Tono Engineering
-- Target components: `services/control-plane`, `services/exit-agent`, `tooling/scripts/remote`, `apps/macos`, `apps/windows`
+- Target components: `services/control-plane`, `services/exit-agent`, `tooling/scripts/remote`, `apps/macos` (`Tono`, `tono-core-helper`), `apps/windows` (`tono-core`, `tono-service`), `TonoKit` (iOS/Android)
 
 ---
 
 ## 1. Problem Statement
 
-Today, residential home egress (`home_exits.kind = 'socks5'`) is dialed directly from the customer's desktop client through an upstream `sing-box` chain (`detour`):
+Today, residential home egress (`home_exits.kind = 'socks5'`) is dialed directly from the customer's client device via a chained `sing-box` outbound:
 
-1. `services/control-plane/src/catalog.ts` (`homeRoutingForUser`, lines 288–294) reads `home_exits.socks5_host`, `socks5_port`, `socks5_username`, and `socks5_password` from D1 and emits `routing.homeSocks5` in plain structured JSON inside the authenticated per-user catalog response.
-2. Desktop clients (`apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift` and `apps/windows/crates/tono-core/src/config.rs`, `HOME_SOCKS5_OUTBOUND_NAME = "Tono-Home-Residential"`) instantiate a client-side `socks` outbound chained with `"detour": "Tono-Exit"`.
-3. Every residential flow (AI domains, home DNS `Tono-AIHome-Home-DNS` in `tooling/scripts/sing-box/ai-home-template.json`, and `three-tier` residential rules) traverses:
-   `Client -> Tono-Exit (VLESS-Reality or HY2) -> Exit VPS -> Client-originated SOCKS5 CONNECT/UDP -> Residential IP`.
+1. `services/control-plane/src/catalog.ts` (`homeRoutingForUser`, lines 288–294) reads `home_exits.socks5_host`, `socks5_port`, `socks5_username`, and `socks5_password` from D1 and emits `routing.homeSocks5` inside the authenticated per-user catalog response, digested into `routingSha256` (`catalog.ts:331–340`).
+2. Desktop clients (`apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift`, `apps/macos/Tono/Core/ThreeTierRoutingContract.swift`, `apps/windows/crates/tono-core/src/config.rs`, `apps/windows/crates/tono-core/src/three_tier.rs`, and `apps/windows/service/src/core/sing_box_runtime.rs`) build `HOME_SOCKS5_OUTBOUND_NAME = "Tono-Home-Residential"` as a `socks` outbound with `"detour": "Tono-Exit"` and `"network": "tcp"`. Mobile (`TonoKit` `Catalog.swift:124–126`) similarly consumes `routing.homeSocks5`.
+3. Every residential flow (AI domains, home DoH `Tono-AIHome-Home-DNS` in `tooling/scripts/sing-box/ai-home-template.json`, and `three-tier` residential rules) traverses:
+   `Client -> Tono-Exit (VLESS-Reality or HY2) -> Exit VPS -> Client-originated SOCKS5 TCP CONNECT -> Residential IP`.
 
-This architecture causes three production pain points:
+This causes three concrete operational and latency issues:
 
-1. **Latency & Handshake Amplification**: Every new TCP connection and DNS lookup pays mainland→overseas round-trips for TLS/QUIC framing *plus* an encapsulated end-to-end SOCKS5 greeting + username/password auth + `CONNECT` exchange driven by the client. Over high-RTT cross-border links, AI streaming/WebSocket reconnects and TLS handshakes stall noticeably compared to dialing the upstream SOCKS5 hop from the nearby US/JP exit VPS (~1–30 ms RTT to the residential gateway).
-2. **Upstream Credential Exposure & Rotation Lockout**: Because `socks5_username` and `socks5_password` are delivered to the client device (`routingSha256` in `services/control-plane/src/catalog.ts:331–340`), any user who was previously bound to a residential line retains usable upstream credentials in their cached catalog. To prevent re-issuance to another customer, `services/control-plane/src/home.ts:340–360` (`assertHomeExitBindable`) sets `socks5_rotation_required_at` (`409 SOCKS5_ROTATION_REQUIRED`), forcing manual upstream password rotation before the IP can be reused.
-3. **Double-Encapsulation Fragility & Protocol Drift**: When a user switches cloud egress to Hysteria 2 or encounters packet loss, tunneling nested client SOCKS5 state machines (`socks5` over tunnel) amplifies tail latency and couples residential egress health to client-side proxy chaining rules (`ThreeTierRoutingContract` in `tooling/scripts/core-helper/main.swift`).
+1. **Latency & Handshake Amplification**: Every residential TCP stream pays cross-border RTTs to establish TLS/QUIC to the exit node *plus* client-driven SOCKS5 greeting, auth, and `CONNECT` round-trips across the overseas link before the TCP handshake to the target host begins. Placing the SOCKS5 dialer on the exit VPS cuts residential setup to ~1–30 ms local VPS→SOCKS5 RTT.
+2. **Upstream Credential Exposure & Rotation Lockout**: Because `socks5_username` and `socks5_password` sit on customer devices, `migrations/0080_home_socks5_rotation_required.sql` (D1 triggers on unbind/rebind/disable) and `services/control-plane/src/home.ts:340–360` (`assertHomeExitBindable`) set `socks5_rotation_required_at`, blocking re-assignment of the residential IP until an operator manually rotates the upstream password.
+3. **Client-Side Coupling & Outbound Chaining Fragility**: Tunneling client-side SOCKS5 state machines over cross-border transports amplifies tail stalls and couples residential egress tightly to client-side `detour` chains inside privileged helper/service validators (`ThreeTierRoutingContract.swift` compiled into `tono-core-helper` via `tooling/scripts/build-core-helper.sh`, and `apps/windows/service/src/core/sing_box_runtime.rs`).
 
 ---
 
 ## 2. Goals & Non-Goals
 
 ### Goals
-- Move the residential SOCKS5 TCP/UDP dialer (`socks` outbound) from customer devices onto Tono exit VPS nodes (`Xray`).
-- Keep client devices zero-credential with respect to `home_exits.socks5_username` / `socks5_password` (the upstream residential secret never leaves the control-plane → exit-node trust boundary).
-- Require zero new client transport protocols and preserve `Tono-Home-Residential` routing contracts (`three-tier`, `ai-home`, `Tono-AIHome-Home-DNS`).
-- Fail closed: traffic presenting a residential identity must **never** fall through to an exit VPS datacenter IP (`direct`) if the residential outbound or routing rule is missing, disabled, or unhealthy.
-- Unify exit metering under `services/exit-agent` without double-counting when traffic switches from client-chained `homeSocks5` to node-side `h:` egress.
-- Support staged rollout with full backward compatibility for existing `0.0.88` desktop clients.
+- Move residential SOCKS5 TCP dialing onto verified exit VPS nodes (`Xray`).
+- Keep `home_exits.socks5_username` and `socks5_password` strictly inside the control-plane → per-node exit-agent boundary (never served to client apps or shared fleet tokens).
+- Require zero new client transport protocols while preserving `three-tier`, `ai-home`, and `Tono-AIHome-Home-DNS` routing guarantees.
+- Guarantee **default-deny fail-closed routing**: `h:` residential traffic must never fall back to datacenter `direct` (`freedom`) or reach residential-provider private IPs regardless of Xray restart, outage, or rule-mutation race.
+- Enforce verified session draining on unbind so two accounts cannot overlap on the same residential IP, enabling safe eventual sunset of manual upstream password rotations (`socks5_rotation_required_at`).
+- Unify exit metering across `u:` and `h:` without double-billing, and gate rollout atomically on capability versioning across D1, `exit-agent`, clients, and privileged helpers/services (including mobile `TonoKit`).
 
 ### Non-Goals
-- Replacing Cloudflare Worker catalog distribution or introducing direct control-plane → VPS inbound push RPCs (exit nodes remain pull-only over TLS using `authenticateExitNode`).
-- Supporting customer-configured custom SOCKS5 addresses from the desktop UI (managed `home_exits` remain control-plane owned).
-- Requiring immediate residential `h:` multiplexing over Hysteria 2 on day one (see Section 5 for the phased HY2 plan).
+- Opening inbound management ports from Cloudflare Workers to VPSes (exit nodes remain pull-only over TLS via `authenticateExitNode`).
+- Allowing customer-supplied arbitrary SOCKS5 hosts from client UIs.
+- Serving residential `h:` tunnels over Hysteria 2 before Hysteria 2 per-user metering and per-user outbound ACL isolation exist (Section 5).
 
 ---
 
-## 3. Target Architecture: Dual-Identity Model (`u:` vs `h:`)
+## 3. Dual-Identity Architecture, Schema, and Client Contracts (`u:` vs `h:`)
 
-Instead of inventing a custom multiplexing header or signaling protocol inside `VLESS`, each exit node runs a **single** Xray VLESS-Reality inbound holding two strictly separated client namespaces for bound accounts:
+### 3.1 Separate Namespaces (`u:` Cloud vs `h:` Residential)
+Each node-home-capable Xray VLESS-Reality inbound serves two isolated credential namespaces:
 
-| Namespace | Purpose | Roster Label (`email` / stats counter) | Credential Source | Xray Routing Target |
+| Namespace | Traffic Class | Xray Email / Counter Label | Identity Store | Xray Routing Target |
 | :--- | :--- | :--- | :--- | :--- |
-| Standard cloud egress | General overseas traffic (`Tono-Exit`) | `u:<user_id>:<device_id>:<gen>` | `exit_credentials` / device exit UUID | Default `direct` outbound (`freedom`) |
-| Residential home egress | Bound residential IP traffic (`Tono-Home-Residential`) | `h:<user_id>:<device_id>:<gen>` | Separate derived or minted residential UUID per `(user, device)` (or per user in `dual` rollout) | Dedicated Xray outbound `home:<home_exit_id>` -> blackhole fallback if unmatched |
+| Cloud egress (`u`) | General overseas (`Tono-Exit`) | `u:<user_id>:<device_id>:<gen>` | Existing `device_exit_credentials` / `exit_credentials` | Static rule -> `direct` (`freedom`) |
+| Home egress (`h`) | Bound residential (`Tono-Home-Residential`) | `h:<user_id>:<device_id>:<gen>` | New `device_home_credentials` table | Dynamic per-line outbound `home:<home_exit_id>:<tag_ver>` (default-deny `home-blackhole`) |
 
-### How Clients Use the Dual Identity
-1. Desktop clients advertise node-side residential capability via `X-Tono-Accept: hy2, node-home` (mirroring the existing `X-Tono-Accept: hy2` gate in `services/control-plane/src/catalog.ts:317–321`).
-2. For capable clients with an active `kind = 'socks5'` binding:
-   - `services/control-plane/src/catalog.ts` **omits** `routing.homeSocks5` (or sets a non-secret directive `routing.homeTunnel = { homeExitId, proxyBaseName, credentialUuid }` / dedicated `home` proxy entry verified by catalog signature/digest).
-   - No `socks5_username` or `socks5_password` is serialized into the client response or hashed client routing document.
-   - The client compiles `Tono-Home-Residential` directly as a **VLESS-Reality** outbound dialing the selected exit node with the user's `h:` UUID, instead of a local `socks` outbound chaining `"detour": "Tono-Exit"`.
-   - `Tono-AIHome-Home-DNS` (`tooling/scripts/sing-box/ai-home-template.json`) keeps `"detour": "Tono-Home-Residential"`, so DNS for AI/residential domains continues flowing strictly through the residential exit.
-3. For legacy clients that do **not** send `node-home` in `X-Tono-Accept`:
-   - During migration, the control plane may either continue serving `homeSocks5` (preserving `0.0.88` compatibility) or enforce a minimum app version before removing client-side `socks5` secrets completely.
+### 3.2 D1 Data Model & Identity Lifecycle
+Introduce explicit D1 schema and state transitions before any implementation starts:
 
----
+1. **`device_home_credentials`**:
+   - Columns: `id` (immutable generation UUID), `user_id`, `device_id`, `home_exit_id`, `client_uuid` (VLESS credential presented on wire), `created_at`, `acknowledged_at`, `retired_at`, `retire_reason`.
+   - Constraint: unique active row (`retired_at IS NULL`) per `(device_id, home_exit_id)` scoped strictly to the user's current `user_home_bindings` row.
+   - Transactional lifecycle: mint/bind inside the same D1 batch/transaction updating `user_home_bindings`; retiring/unbinding sets `retired_at` atomically.
+2. **Per-line delivery mode & plaintext audit flags on `home_exits`**:
+   - `delivery_mode TEXT NOT NULL DEFAULT 'legacy_socks5'` (`'legacy_socks5' | 'node_only'`).
+   - `ever_served_plaintext_at INTEGER` (stamped whenever `routing.homeSocks5` is serialized to any client).
+   - `drain_required_before_rebind_at INTEGER` + per-node drain table `home_exit_drain_acks(home_exit_id, retired_generation, node_id, drained_at)` tracking nodes that actually held an `h:` identity before rebinding (Section 7).
+3. **Assigned node replication (`home_exit_nodes` / active cloud exits)**:
+   - Resolve pinning vs replication explicitly before PR1: each active `home_exits` row is replicated **only** to active, `node-home`-capable VLESS exit nodes explicitly enabled for residential hosting (or geographically matched tier stored on `home_exits`), and `homeOutbounds` delivered to node $N$ contains **only** the `home_exits` rows referenced by `homeIdentities` admitted on $N$.
+   - The client routing response (`routing.homeTunnel`) carries the explicit allowed list of exit node names/base names holding that user's ACKed `h:` identity, matching `selectAcknowledgedExitIdentity` readiness semantics so a user never dials a node lacking their `h:` outbound.
 
-## 4. Exit-Node Reconciliation & Strict Fail-Closed Ordering
+### 3.3 Client & Privileged Contract Versioning (`HelperProtocolVersion` & Windows Service)
+Because `ThreeTierRoutingContract.swift` is compiled into `tono-core-helper` (`tooling/scripts/build-core-helper.sh`) and Windows `tono-service` validates `three_tier` / `ai-home` graphs independently (`apps/windows/service/src/core/sing_box_runtime.rs`), client-side runtime changes **require** privileged contract updates:
 
-### 4.1 Authenticated Control-Plane Pull Contract
-`services/control-plane/src/index.ts:1166–1172` serves `GET /api/v1/home/exit-identities` to exit nodes authenticated via `authenticateExitNode`.
+1. **Privileged Contract Extension**:
+   - Bump `HelperProtocolVersion` (macOS) and release updated Windows `tono-service` admitting a second valid shape for `HOME_SOCKS5_OUTBOUND_NAME` (`"Tono-Home-Residential"`):
+     - Either a `vless` outbound (`network: "tcp"`, TLS/Reality pinned per catalog node, **NO `detour`**, excluded from `Tono-Exit` selector), OR a mirrored `selector` tag `"Tono-Home-Residential"` selecting over per-node `h:` VLESS-Reality outbounds (each `h:` outbound strictly bound to a catalog exit IP, no `detour`, `network: "tcp"`).
+   - **Recommended shape (avoids selector desync)**: Emit one hidden `vless` outbound `"Tono-Home-<ExitBase>"` per `homeTunnel.exitBaseNames` + selector `"Tono-Home-Residential"` defaulting to the currently selected cloud node's base name (when ready) and synced on every `Tono-Exit` switch without requiring full helper teardown/recompile, OR recompile `Tono-Home-Residential` on every active-exit switch. Both satisfy **zero `detour`** so residential bytes never double-traverse `Tono-Exit` `u:` accounting.
+   - **Phase A Trade-Off on TCP-throttled (`hy2` auto-switch) events**: When `u:` falls back from VLESS to ` · hy2`, `Tono-Home-Residential` remains on VLESS-Reality TCP on healthy nodes (or fails over within the `homeTunnel` exit selector to a non-throttled exit node). PR4 explicitly benchmarks a TCP-throttled network scenario to confirm cloud HY2 + residential VLESS stability.
+2. **Strict Capability Gate (App + Core + Privileged Helper/Service)**:
+   - Apps advertise `X-Tono-Accept: ..., node-home` **ONLY** when the running app binary *and* installed privileged `tono-core-helper` / `tono-service` both report `node-home` support. An app with an older helper/service NEVER sends `node-home` and stays on legacy `homeSocks5` (until `node_only` sunset).
+   - Control plane serves `routing.homeTunnel` **ONLY** when BOTH the request advertises `node-home` AND at least one served exit node has ACKed the device's `h:` generation (`node-home` readiness ACK in D1).
 
-We extend the roster payload (gated by node capability/protocol version or as an additive field in v2):
-```json
-{
-  "nodeId": "...",
-  "observedAt": 1795777566,
-  "roster": [
-    {
-      "userId": "usr_...",
-      "deviceId": "dev_...",
-      "clientUUID": "...",
-      "kind": "u"
-    },
-    {
-      "userId": "usr_...",
-      "deviceId": "dev_...",
-      "clientUUID": "...",
-      "kind": "h",
-      "homeExitId": "hex_..."
-    }
-  ],
-  "homeOutbounds": [
-    {
-      "homeExitId": "hex_...",
-      "status": "active",
-      "protocol": "socks",
-      "host": "198.51.100.10",
-      "port": 1080,
-      "username": "...",
-      "password": "..."
-    }
-  ]
-}
-```
-Security boundaries:
-- Upstream residential credentials in `homeOutbounds` are sent **only** to active `exit_nodes` whose roster references them (or all active assigned exit nodes for the bound shard), never to desktop/admin public catalog endpoints.
-- Any persisted roster cache (`roster_cache_path` in `services/exit-agent/reconcile_and_report.py:838`) holding `homeOutbounds` must keep strict service ownership and `0600` permissions, matching existing node token and state guarantees.
-
-### 4.2 Xray `26.3.27` Outbound & Routing Synchronization
-`tooling/scripts/remote/exit_metering_config.py` currently enables `HandlerService` and `StatsService` inside Xray's `api.services`.
-Adding `RoutingService` alongside `HandlerService` exposes Xray's documented dynamic rule APIs (`adr` / `adrules` and `rmr` / `rmrules`), while `HandlerService` provides `ado` (`AddOutbound`) and `rmo` (`RemoveOutbound`).
-
-**Critical engineering verification required before PR #3 implementation**:
-On Xray `26.3.27`, verify via integration test whether `xray api adr` reliably *prepends* (or orders by rule priority ahead of the default `direct` catch-all/final outbound) when modifying live routing rules without restarting `tono-xray`:
-- **Option A (Live gRPC `HandlerService` + `RoutingService`)**: Zero connection drop for `u:` and `h:` peers during bind/unbind changes, provided rule insertion precedence ahead of `direct` is deterministic and verifiable via Xray query/probe.
-- **Option B (Versioned template reload / local Xray SOCKS-mux helper if `RoutingService` lacks atomic priority ordering)**: Atomic config write + reload ONLY on `homeOutbounds` topology change (rare — binds/unbinds are low frequency compared to `u:`/`h:` client roster churn, which continues using zero-restart `adu`/`rmu`). If `RoutingService` cannot guarantee rule order before `direct` after Xray restart or live mutation, Option B + startup static rules guarantees fail-closed routing.
-
-Regardless of Option A or B, Xray routing rules **must** enforce:
-1. Per-line rule matched on full credential label (or unambiguous user list):
-   `{ "type": "field", "user": ["h:..."], "outboundTag": "home:<home_exit_id>" }`
-2. **Fail-closed safety net** immediately after per-line `h:` rules and before any default `direct` fallback:
-   Any traffic whose inbound client `email` starts with `h:` (matched via explicit enumerated active `h:` labels on every round, or regex/domain-less blackhole rule if supported and verified on `26.3.27`) that misses its `home:<home_exit_id>` rule **must** route to a `blackhole` outbound (`"tag": "home-blackhole"`), **never** to VPS `direct`.
-
-### 4.3 Mandatory Add/Remove Ordering (No Window for Leak or Ghost Traffic)
-`services/exit-agent/reconcile_and_report.py` must strictly order operations on every reconcile cycle:
-
-**Provisioning / Rebinding a residential user (`h:` identity):**
-1. Validate `homeOutbound.status == 'active'` and host/port/credential well-formedness.
-2. Ensure `outboundTag = "home:<home_exit_id>"` exists in Xray (`ado` if missing; if updated host/port/creds, rotate under new tag e.g. `home:<id>:<digest8>` before draining old tag).
-3. Ensure routing rule `{ "user": [h_label], "outboundTag": outbound_tag }` is installed **and verified active**.
-4. **Only after (2) and (3) succeed**, call `adu` to install the `h:` inbound client credential.
-   - If step (2) or (3) fails, refuse installing that `h:` client (and remove it if already installed), surfacing an error in `reconcile_and_report.py` without breaking healthy `u:` clients or healthy other `h:` users.
-
-**Unbinding / Suspending / Rotating (`home_exits.status != 'active'` or user removed):**
-1. **First**, call `rmu` to remove the `h:` inbound client from VLESS (immediately terminating new dials; for stuck connections follow Decision 140 bounded restart escalation if removal fails repeatedly).
-2. **Second**, remove the `user -> home:<id>` routing rule (routing any residual matched label to `home-blackhole` first if draining).
-3. **Last**, call `rmo` once zero active `h:` users reference `home:<home_exit_id>`.
-
-### 4.4 DNS Handling on the Exit Node
-When a client connects to the exit node presenting its `h:` UUID, the destination inside the VLESS payload is either:
-- An IP address (e.g., resolved via `Tono-AIHome-Home-DNS` DoH tunneling over `Tono-Home-Residential`), or
-- A domain name (SOCKS5 `ATYP = 0x03` remote domain resolution).
-
-Wait: if a domain destination arrives at Xray and Xray triggers its VPS-local `Freedom`/system DNS before dialing the `socks` outbound, the residential ISP could see requests originating directly rather than letting the residential SOCKS5 proxy resolve DNS, or VPS DNS could leak/differ geographically!
-Xray's `socks` outbound passes domain addresses (`address` preserved) directly in the SOCKS5 `CONNECT` header when `routing.domainStrategy = "AsIs"` (and we must assert Xray does not pre-resolve `h:` targets locally to IPs before dialing `home:<home_exit_id>`). Additionally, `Tono-AIHome-Home-DNS` continues routing DoH queries through `Tono-Home-Residential` -> `home:<home_exit_id>` -> residential IP.
+### 3.4 Versioned Catalog Routing Digest (`routingSha256` v2)
+Currently `routingSha256` (`services/control-plane/src/catalog.ts:331–340`) hashes a fixed 3-field recipe (`homeProxy`, `defaultProxy`, `homeSocks5`), and macOS (`Tono`), Windows (`apps/windows/crates/tono-core/src/catalog.rs:212–229`), and iOS reject any mismatch with `InvalidResponse`:
+- Legacy clients (without `node-home`) continue receiving v1 `routingSha256` over the existing 3-field recipe.
+- `node-home`-capable clients receive `routingDigestVersion: 2` and `routingSha256` covering `homeProxy`, `defaultProxy`, `homeSocks5`, AND canonical serialized `homeTunnel` (`homeExitId`, `clientUuid`, sorted `exitBaseNames`), ensuring `h:` credential rotations immediately invalidate client caches without breaking legacy `routing_digest` verification.
 
 ---
 
-## 5. Compatibility with Hysteria 2 (`tono-hy2`)
+## 4. Exit-Node Reconciliation, Default-Deny Topology, and Outage Bounds
 
-`tooling/scripts/remote/manage-tono-hy2-node.sh` deploys `tono-hy2` alongside `tono-xray` with:
-- Localhost auth microservice `tono-hy2-auth` on `127.0.0.1:18765/auth` (`ALLOW = Path("/opt/tono-hy2/auth-allow.sha256")`), returning `{"ok": true, "id": digest[:12]}`.
-- `services/exit-agent/reconcile_and_report.py:1636` (`sync_hy2_roster`) writing SHA-256 hashes of `roster[i]["clientUUID"]`.
+### 4.1 Scoped Pull Payload (`homeIdentities` & `homeOutbounds` Separation)
+Current `GET /api/v1/home/exit-identities` (`services/control-plane/src/exit-identity-roster.ts:25–50`) returns `{ nodeId, observedAt, retireSharedLegacy, sourceUsageWatermarks, identities }`.
 
-If an `h:` identity were naively synced into `/opt/tono-hy2/auth-allow.sha256` without separate Hysteria 2 ACL routing, Hysteria 2 would exit directly from the VPS datacenter IP — **an immediate datacenter-IP leak**.
+Older exit agents ignore unknown JSON fields inside `identities` rows (`services/exit-agent/reconcile_and_report.py:598–680`) and prefix every identity with `u:` (`client_label`, `:350–358`), while `/api/v1/ops-ingest/node-clients` reuses the roster helper and `authenticateExitNode(req, e, true)` accepts the shared `HOME_AGENT_TOKEN` when `exit_credential_rollout` is `'dual'`.
 
-### Design Decision: Two-Phase HY2 Strategy
-1. **Phase A (Initial Ship — Recommended)**:
-   - `/opt/tono-hy2/auth-allow.sha256` and `tono-hy2` admit **only** `kind = 'u'` identities (enforced in `sync_hy2_roster`).
-   - `Tono-Home-Residential` (`kind = 'h'`) dials **VLESS-Reality (`Xray`)** on the same exit node.
-   - **Why this is the right trade-off**:
-     - Residential AI/home flows are interactive HTTP/TLS/WebSocket streams where Xray `xtls-rprx-vision` latency is optimal once the node-to-SOCKS5 hop is adjacent.
-     - Many upstream residential SOCKS5 proxies do not reliably support SOCKS5 UDP ASSOCIATE or drop high-rate QUIC datagrams; terminating QUIC/HY2 from client→VPS and forcing UDP or TCP through residential SOCKS5 does not help residential traffic unless the outbound itself is clean TCP/UDP, whereas Xray VLESS-Vision maps TCP 1:1 cleanly to residential SOCKS5 TCP `CONNECT`.
-     - Zero change to `tono-hy2` binary/systemd config or Brutal/BBR tuning.
-2. **Phase B (Future Optional — HY2 for `h:` if ever needed)**:
-   - Only pursue if users on extreme TCP-throttled networks need Hysteria 2 for `Tono-Home-Residential`.
-   - Implementation: `tono-hy2-auth` returns `id: "h:<home_exit_id>:<digest12>"` (for `h:` tokens) vs `"u:<digest12>"`, paired with Hysteria 2 server `outbounds` (one `socks5` outbound per `home_exit_id`, synced cleanly + safe `acl` user-match routing). Because Hysteria 2 lacks an incremental gRPC `AddOutbound` API and requires config reload for new outbounds, Phase A avoids unnecessary HY2 churn while giving 100% of the node-side SOCKS5 latency/security benefit immediately.
+To close **every** legacy misinterpretation and credential-exposure vector:
+1. **Separate Top-Level Keys**: Never embed `h:` rows in `identities` or `exitCredentialRoster`. Publish residential assignments solely under new top-level keys `homeIdentities` and `homeOutbounds`. Legacy `parse_roster` and `/api/v1/ops-ingest/node-clients` never inspect these keys and cannot mis-install `h:` UUIDs into `u:` or `sync_hy2_roster`.
+2. **Strict Server-Side Scoping & Token Gate**:
+   - Require `exit_credential_rollout.phase === 'device_only'` before enabling `node-home` globally.
+   - `homeIdentities` and `homeOutbounds` are populated **ONLY** when `authenticateExitNode` verifies a **per-node token with non-null `nodeId`** AND the node has declared `node-home` + verified `xrayVersion` capability (NEVER populated on `HOME_AGENT_TOKEN` or ops collector routes).
+   - `homeOutbounds` includes **ONLY** `status = 'active'` residential lines bound to accounts in that node's own `homeIdentities`.
+   - Every response carrying `homeOutbounds` is audit-logged (`node_id`, `observed_at`, bound `home_exit_ids`). Temporary `ado` JSON files written by `exit-agent` live exclusively inside a root/service-owned `0700` staging directory with `0600` file permissions and `try/finally` unlinking.
+3. **Cache Isolation & Fail-Closed Outage TTL**:
+   - Bump `ROSTER_CACHE_VERSION` (`reconcile_and_report.py`).
+   - While cloud `u:` identities retain the existing outage recovery cache, **`h:` residential credentials MUST fail closed during extended control-plane outages or Xray restarts**:
+     - Cached `homeIdentities` carry a short signed/monotonic lease (`MAX_HOME_OUTAGE_LEASE_SEC`, e.g., `<= 300s` / 5 missed cadences). Once expired or if `homeOutbounds` cannot be verified, `exit-agent` executes local `h:` withdrawal (`rmu` all `h:` -> `rmr` -> `rmo`) rather than leaving potentially unbound customers active for 24h (`reconcile_and_report.py:1824–1878`).
+     - On `tono-xray` restart, **zero `h:` identities** may be reinstalled unless outbound + rule installation and `TestRoute` verification succeed in the same pass.
+
+### 4.2 Default-Deny Xray Topology & Rule Ordering (Verified Pre-PR1 on `26.3.27` & `v26.11.9`)
+Current nodes (`manage-tono-reality-node.sh`, `exit_metering_config.py`) run with `"outbounds": [{"protocol": "freedom"}]` as default outbound and only the API routing rule; moreover, Xray's `ReloadRules` appends or replaces the rule list rather than prepending ahead of a fallback rule.
+
+Therefore, `home:` safety **must not depend on `AddRule` insertion precedence**. `exit_metering_config.py` converts node-home nodes to a **default-deny Xray topology**:
+
+1. **First Outbound = `blackhole`** (Xray's default outbound when no rule matches):
+   - Index `0`: `{ "tag": "home-blackhole", "protocol": "blackhole" }`
+   - Explicit cloud outbound: `{ "tag": "direct", "protocol": "freedom" }`
+2. **Static `config.json` Startup Rules (evaluated in order)**:
+   - Rule #1: `{ "type": "field", "inboundTag": ["api"], "outboundTag": "api" }`
+   - Rule #2: `{ "type": "field", "user": ["regexp:^u:", "shared-legacy"], "outboundTag": "direct" }` (explicitly matches only `u:` and legacy cloud traffic — verified in Xray `UserMatcher`!).
+   - Rule #3 (Private-IP / SSRF Guard for SOCKS5): `{ "type": "field", "user": ["regexp:^h:"], "ip": ["geoip:private"], "outboundTag": "home-blackhole" }` — prevents `h:` clients from reaching residential-provider LAN or VPS loopback literals via the `socks` outbound (Xray's built-in Freedom private-IP block does not cover `socks`).
+3. **Dynamic Runtime Objects (NEVER written to static `config.json`)**:
+   - `exit-agent` manages ONLY `h:` users (`adu`/`rmu`), per-line `socks` outbounds (`ado`/`rmo`, tag `home:<home_exit_id>:<cred_digest8>`), and explicit user->outbound rules (`adr`/`rmr`: `{ "type": "field", "user": ["h:..."], "outboundTag": "home:<home_exit_id>:<cred_digest8>" }`) appended after static Rules #1–#3.
+   - Any `h:` client whose dynamic rule or outbound fails to install, crashes, or is removed falls through Rule #2 (doesn't match `^u:`) straight to **Index 0 outbound `home-blackhole`** — zero window to leak VPS `direct` IP even if Xray restarts or rules clear.
+4. **Why Option B ("template reload") is rejected**: Reloading `config.json` in Xray restarts the `systemd` process, dropping all dynamically added `u:` and `h:` clients for 30–90 seconds (`Decision 140`) and storing residential SOCKS5 credentials on disk. Option A (`HandlerService` + `RoutingService`) is mandatory.
+5. **Mandatory PR0 Verification Gate (Before PR1)**:
+   - Because fleet nodes currently run both `Xray 26.3.27` (rolled-back nodes) and `Xray v26.11.9` (`provision-tono-node.py:13`, `provision-reality-node.rb:16`), run a live integration harness against **both versions** before PR1 merges verifying:
+     - `HandlerService` (`ado`, `rmo`) and `RoutingService` (`adr`, `rmr`, `TestRoute` or equivalent query);
+     - Static `user: ["regexp:^u:", "shared-legacy"]` match behavior;
+     - Closed-connection semantics when a matched `outboundTag` is absent vs Index 0 `home-blackhole` fallback;
+     - `exit-agent` refuses `node-home` capability advertisement on any unverified `xray version`.
+
+### 4.3 Mandatory Add/Remove Execution Order & Post-Reconcile `TestRoute`
+Every reconcile round executes strictly in order:
+1. Validate every referenced `homeOutbound` (`status == 'active'`, public IPv4/valid host, port `1..65535`, non-empty username/password).
+2. Add missing dynamic `home:<home_exit_id>:<digest8>` `socks` outbound via `ado`.
+3. Add/update dynamic rule `{ "user": [h_label], "outboundTag": "home:<home_exit_id>:<digest8>" }` via `adr`.
+4. Call `RoutingService` `TestRoute` simulating inbound user `h_label` -> **assert matched outbound equals `home:<home_exit_id>:<digest8>`** (and private IP routes to `home-blackhole`).
+5. **Only if steps (2)–(4) pass**, call `adu` to admit `h_label` (otherwise refuse `h_label` and remove it via `rmu` if previously installed).
+6. On unbind/revocation/expiry:
+   - **First** `rmu` the `h:` inbound client;
+   - **Second** `rmr` its routing rule;
+   - **Last** `rmo` `home:<id>:<digest8>` once zero active `h:` clients target that tag (and execute unbind drain ACK if retired — Section 7).
+
+### 4.4 Enforced DNS Integrity
+- `exit_metering_config.py` enforces `"routing": { "domainStrategy": "AsIs" }` and disables traffic sniffing overrides on `node-home` inbounds (refusing config validation if violated).
+- Domain destinations delivered over VLESS pass verbatim as hostnames into the Xray `socks` outbound `CONNECT` request (SOCKS5 `ATYP = 0x03`), while `Tono-AIHome-Home-DNS` continues forwarding DNS-over-HTTPS queries through `Tono-Home-Residential` -> `home:<home_exit_id>`.
+- **PR4 Acceptance Gate**: Packet capture (`tcpdump -i any udp port 53 or tcp port 53`) on the canary exit VPS during AI domain fetches confirms **zero** DNS queries leave the VPS resolver/NIC directly.
 
 ---
 
-## 6. Unified Metering & Anti-Double-Billing
+## 5. Hysteria 2 (`tono-hy2`) Compatibility
 
-Currently (`services/exit-agent/reconcile_and_report.py:350–373`):
-- `client_label` emits `u:<user_id>:<device_id>:<generation>`.
-- `attributed_user(label)` parses `u:` labels into `user_id` for `StatsService` counter collection and monotonic reporting (`usage_report_sources`, `adopt_source_watermarks`).
-
-With node-side `h:` identities:
-1. `client_label(..., kind="h")` emits `h:<user_id>:<device_id>:<generation>`.
-2. `attributed_user(label)` is extended to accept both `u:` and `h:` prefixes and map both to `user_id` (while ignoring `shared-legacy` and unknown prefixes).
-3. **Why double-billing never occurs**:
-   - Capable clients configure `Tono-Home-Residential` directly to the exit node's `h:` identity (**not** detoured via `Tono-Exit` `u:`). Thus residential bytes increment **only** `user>>>h:...>>>traffic>>>uplink|downlink`, while cloud bytes increment **only** `user>>>u:...>>>traffic>>>uplink|downlink`.
-   - `lifetime_totals` tracks per-label counters independently per counter label, and `aggregate_user_totals` sums both `u:` and `h:` counters per `user_id` before delta/watermark reporting.
-   - Because each `u:` and `h:` counter name is distinct, Xray restart/rotation preserves per-label monotonic watermarks identically.
-4. **Optional Phase-2 home-line analytics**: Because `u:` and `h:` labels stay separate inside `StatsService`, `exit-agent` can later report an optional breakdown `{ cloudBytes, homeBytes }` alongside total `usageBytes` without changing client protocols.
+- **Phase A (This RFC)**:
+  - `sync_hy2_roster` (`services/exit-agent/reconcile_and_report.py:1636–1660`) **strictly rejects any `h:` row** at parser boundary and populates `/opt/tono-hy2/auth-allow.sha256` exclusively from validated `kind == 'u'` entries in `identities` (with unit tests over mixed `u`/`h` payloads).
+  - Residential `Tono-Home-Residential` (`h:`) remains strictly VLESS-Reality TCP on `Xray`, avoiding any datacenter leak through `tono-hy2`.
+- **Phase B (Future Optional Only)**:
+  - Only considered if severe carrier TCP throttling affects AI domains, and strictly **blocked on first landing per-identity HY2 metering** (currently HY2 is unmetered) plus per-identity `tono-hy2-auth` user tags paired with static/synced HY2 outbound ACL isolation.
 
 ---
 
-## 7. Security & Operational Lifecycle (`socks5_rotation_required_at` Retirement)
+## 6. Unified Metering, Atomic Cutover, and Safe Agent Rollback
 
-### Threat Model Improvements
-- **No secret leakage to endpoints**: Compromise of a customer laptop, local `sing-box` `config.json`, or memory/cache dump only reveals an ephemeral revocable `h:` UUID, never `socks5_host:port:username:password`.
-- **Instant revocation without upstream password change**: Unbinding user A in D1 (`user_home_bindings` delete/update) removes A's `h:` UUID from the next `GET /api/v1/home/exit-identities` roster. `exit-agent` calls `rmu` within one cadence (<= 60s), cutting off A's access to the residential IP while the upstream SOCKS5 password remains unchanged. User B can immediately be bound to that same `home_exits` row with a fresh `h:` UUID.
-- **Sunset of `socks5_rotation_required_at`**:
-  - While legacy client-side `homeSocks5` clients are still allowed to connect, `assertHomeExitBindable` (`services/control-plane/src/home.ts:340–360`) **must remain enforced** for any line previously served via plaintext `homeSocks5`.
-  - Once minimum supported client version forces `X-Tono-Accept: node-home` (and plaintext `homeSocks5` emission is removed from `catalog.ts`), newly created/bound lines never mark `socks5_rotation_required_at`, eliminating manual residential password rotations on user churn.
+1. **Identity & Parser Atomicity**:
+   - Extend `client_label`, `attributed_user`, `reconcile` inventory/removal filtering (preventing `reconcile` from ignoring `h:` as "hand-added"), and `aggregate_user_totals` in `services/exit-agent/reconcile_and_report.py` **in the exact same PR (PR2)**, gated behind explicit agent capability registration in D1.
+   - Control plane never issues `h:` credentials until the serving exit node's `exit-agent` reports `meteringProtocolVersion >= 3` (`u:` + `h:` capable).
+2. **Anti-Double-Billing Invariant**:
+   - Capable clients remove `"detour": "Tono-Exit"` on `Tono-Home-Residential`. Cloud destinations traverse `Tono-Exit` (`u:`), incrementing `user>>>u:...`; residential destinations traverse `Tono-Home-Residential` (`h:`), incrementing `user>>>h:...`. Zero flow touches both identities.
+3. **Watermark Recovery Caveat on Future Breakdown**:
+   - Note that `adopt_source_watermarks` (`reconcile_and_report.py:1371–1411`) assigns a source-level recovery watermark to the first label in sorted order, and `"h:"` sorts before `"u:"`. Total user billing (`u: + h:`) stays exact under `adopt_source_watermarks`, whereas any future separate `{ cloudBytes, homeBytes }` split **must** track distinct `usage_report_sources` buckets per identity namespace.
+4. **Safe PR2 Rollback**:
+   - Because older `exit-agent` releases ignore non-`u:` labels as "hand-added" (`reconcile_and_report.py:101`), simply downgrading the agent binary would strand active `h:` clients unrevoked and unmetered!
+   - **Mandatory Rollback Protocol**: Control plane exposes a node/fleet kill-switch (`withdrawHome = true`) / agent supports `--withdraw-home` mode that executes `rmu(h:*) -> rmr(h:*) -> rmo(home:*)`, OR operator restarts `tono-xray` (clearing dynamic `h:` state, since static `config.json` holds zero `h:` clients), **before** downgrading the `exit-agent` binary.
 
 ---
 
-## 8. Client Compatibility & Staged Migration Plan
+## 7. Session Drain on Unbind & `socks5_rotation_required_at` Sunset
 
-| Stage | Scope | Backward Compatibility / Rollback |
+### 7.1 Closing the Persistent-Session Overlap Gap
+Removing an Xray client via `rmu` blocks **new** VLESS handshakes, but active TCP/HTTP2/WebSocket/SSE streams stay open until idle/closed. Decision 140's bounded restart only runs after repeated failed `rmu`s for `u:` identities. If user A is unbound at $t_0$ and user B is bound at $t_0 + 5\text{ s}$, A's open browser/Claude SSE tabs would still share B's residential IP.
+
+**Verified Drain Protocol (replaces manual upstream password changes once plaintext ceases)**:
+1. When user A is unbound/disabled on a `node_only` line, A's `h:` UUID is marked `retired` in `device_home_credentials`, and `home_exits` advances `outbound_generation` (`home:<id>:<new_digest>`).
+2. Nodes currently holding A's `h:` identity stop admitting new handshakes via `rmu` and drain existing streams tied to A's outbound tag:
+   - Either isolate each tenant binding onto a dedicated ephemeral outbound tag (`home:<id>:<binding_gen>`) whose outbound instance is explicitly torn down (`rmo` cancels Xray outbound connections / drain helper or scoped worker reload when sessions persist past a short grace window, verified in PR0 on both Xray `26.3.27` and `v26.11.9`), OR execute coordinated `tono-xray` reload where no other long-lived sessions are impacted;
+   - Record per-node `home_exit_drain_acks` once zero active sessions/conntrack entries remain on A's tag.
+3. Rebinding `home_exit_id` to user B (`assertHomeExitBindable` + D1 rebind checks) waits until **all holding nodes ACK drain** (measured and tuned from PR4 real session lifetime telemetry).
+
+### 7.2 Sunset of Plaintext `homeSocks5` & `migrations/0080` Triggers
+1. Throughout PR1–PR4 migration, D1 triggers (`migrations/0080_home_socks5_rotation_required.sql`) stay active for any line with `delivery_mode = 'legacy_socks5'` OR `ever_served_plaintext_at IS NOT NULL`.
+2. Any line kept in `legacy_socks5` still forbids un-rotated rebinding, and `node-home` downgrade attacks (client omitting `X-Tono-Accept: node-home` header) cannot fetch plaintext once an operator flips the line to `delivery_mode = 'node_only'`.
+3. Once desktop (`macOS`/`Windows` + helpers/services) **and mobile (`iOS`/`Android` `TonoKit`, which drops `hy2AcceptHeaderForClient` for HY2 today via `services/control-plane/src/client-identity.ts:69–72` but reads `routing.homeSocks5`)** have migrated:
+   - Rotate upstream residential passwords once for every line with `ever_served_plaintext_at IS NOT NULL` and clear `ever_served_plaintext_at` after upgrading to `delivery_mode = 'node_only'`;
+   - Land a reviewed migration (verified with `tooling/scripts/check-migrations-additive.mjs`) updating the `0080` D1 triggers so `node_only` lines require node drain ACKs instead of `socks5_rotation_required_at`;
+   - Sunset legacy clients with clear fail-closed `503` (`CLIENT_UPGRADE_REQUIRED` / `CATALOG_UNAVAILABLE`) rather than quietly dropping home routing (`catalog.ts:283–285`).
+
+---
+
+## 8. Staged Implementation Roadmap
+
+| Stage | Scope | Entry Gate / Verification |
 | :--- | :--- | :--- |
-| **PR 1: Control-Plane + DB Schema (`h:` identity & pull API)** | Add `h:` credential issuance / ack / revocation alongside `u:` in D1 + `catalog.ts` / `index.ts`; return `kind: "u" \| "h"` and `homeOutbounds` to exit-agent only when requested; keep legacy `homeSocks5` untouched for current clients. | Zero client impact; roll back by reverting Worker deploy / feature flag. |
-| **PR 2: Exit-Agent Reconciliation (`reconcile_and_report.py` + metering)** | Extend `exit_metering_config.py` (`RoutingService` or template reload verified on Xray `26.3.27`), implement strict add/remove ordering (`outbound` -> `rule` -> `h:` client, reverse on revoke), fail-closed `home-blackhole` guard, exclude `h:` from `sync_hy2_roster`, extend `attributed_user` for `h:`. | Canary on 1 VPS (`Los Angeles · Mesa`) with test account; roll back cleanly by restarting `exit-agent` prior version (removes dynamically added `h:` users while `u:` stays untouched). |
-| **PR 3: Desktop Clients (macOS & Windows `node-home` capability)** | Send `X-Tono-Accept: hy2, node-home`; update `ConfigPipeline+SingBoxProduct.swift`, Windows `tono-core/src/config.rs` + `sing_box/runtime.rs`, and `ThreeTierRoutingContract` / `ownedRuntimeConfigIsSafe` in `core-helper` so `Tono-Home-Residential` builds a VLESS outbound using the `h:` credential when `routing.homeTunnel` is returned (keeping fallback support if `routing.homeSocks5` is returned). | Clients still understand legacy `homeSocks5` if server toggles capability off; canary via user allowlist or header flag. |
-| **PR 4: Canary & Latency / Leak Verification** | Verify end-to-end RTT improvement, exit-node IP verification (`whoami`/exit check through `Tono-AIHome-Home-DNS` and AI domains -> residential IP, cloud domains -> VPS IP), simulated `homeOutbounds` failure -> `h:` traffic fails closed (`blackhole`, zero VPS IP leak), and zero double-counting in D1 `usage_bytes`. | Feature flag rollback immediately returns clients to legacy `homeSocks5`. |
-| **PR 5: Legacy Deprecation & `socks5_rotation_required_at` Sunset** | Enforce minimum client version, stop emitting plaintext `routing.homeSocks5`, stop setting `socks5_rotation_required_at` for `node-home`-only lines, update `ops-panel` line management UI copy. | Clean steady state; all residential credentials remain strictly control-plane + exit-node internal. |
-
----
-
-## 9. Open Questions for Sign-Off Before PR #1
-
-1. **Xray `26.3.27` `RoutingService` rule ordering**: Should `exit-agent` use `RoutingService` (`adr`/`rmr`) for live dynamic rules, or manage residential outbounds/rules in a drop-in/rewritten config snippet on topology changes? (Needs 15-minute verification against `xray 26.3.27` CLI on canary VM before PR #2.)
-2. **Exit node pinning vs any-active-node `h:` replication**: Should `h:` credentials + `homeOutbounds` be pushed to **all** active VLESS exit nodes (so switching from `Los Angeles · Mesa` to `San Jose · CloudSilk` seamlessly keeps `Tono-Home-Residential` working on the user's chosen geographic hop), or only to a designated subset of nodes geographically close to each residential ISP? (Pushing only the bound `homeOutbounds` used by active accounts on that node keeps the outbound table small even fleet-wide.)
-3. **Residential bandwidth quota accounting**: Should `h:` traffic count 1:1 against existing `users.usage_bytes`, or also emit a separate per-home-line counter (`GET /api/v1/ops/home-lines/{id}/usage`) in `services/home-agent` / `services/exit-agent`?
+| **PR 0: Xray `26.3.27` & `v26.11.9` Capabilities Probe** | Non-prod verification script proving `ado`/`rmo`, `adr`/`rmr`, `TestRoute`, `user: ["regexp:^u:"]`, Index 0 `home-blackhole`, `rmo` stream cancellation semantics, and `domainStrategy: "AsIs"` on **both** Xray versions. | Required **before** PR 1 finalizes D1/RPC schema. |
+| **PR 1: Control Plane & D1 Schema** | Add `device_home_credentials`, `home_exit_drain_acks`, `delivery_mode` / `ever_served_plaintext_at`, `homeIdentities` & scoped `homeOutbounds` top-level response fields (per-node token + `device_only` only), versioned `routingSha256` v2, node capability + Xray-version gating. | Legacy `homeSocks5` stays default; Vitest + D1 additive/idempotent migration checks. |
+| **PR 2: Exit Agent & `exit_metering_config.py`** | Default-deny `home-blackhole` + `^u:` + `geoip:private` static config transform, strict add/TestRoute/remove ordering, fail-closed outage lease for `h:`, HY2 `kind == 'u'` isolation test, unified `u:`/`h:` metering & `--withdraw-home` safe rollback. | Agent tests + live canary rehearsal on `Los Angeles · Mesa` with test account. |
+| **PR 3: Desktop Apps + Helper/Service Contracts** | Bump `HelperProtocolVersion` (`ThreeTierRoutingContract.swift`) + Windows `tono-service` (`three_tier.rs`, `sing_box_runtime.rs`) admitting no-`detour` `Tono-Home-Residential` VLESS/selector + `routingSha256` v2; advertise `node-home` only when helper/service agrees. | Hosted `ci-gate` (`macos` privileged/unit tests, `windows` `service` tests). |
+| **PR 3b: Mobile (`TonoKit` iOS/Android)** | Support `homeTunnel` VLESS outbound + `routingSha256` v2 + `node-home` header on iOS & Android prior to any plaintext deprecation. | `TonoKit` test suite. |
+| **PR 4: Canary & Full E2E Proof** | Verify on canary node + test clients: RTT drop vs chained `socks5`, zero VPS DNS leaks (`tcpdump`), forced outbound/rule fault -> `home-blackhole` closed fail, cloud-to-HY2 + AI-VLESS concurrency & TCP-throttled run, real session drain lifetimes, zero D1 double-billing. | All canary metrics green before broad `delivery_mode = 'node_only'` rollout. |
+| **PR 5: Plaintext Sunset & Trigger Migration** | Enforce minimum client versions (`503` on obsolete legacy clients), migrate `node_only` lines (one upstream rotation if `ever_served_plaintext_at` set), update `0080` D1 triggers to drain-ACK enforcement, remove client-side `socks5` secrets. | Clean steady state with zero residential secrets on client devices. |
