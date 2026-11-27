@@ -269,6 +269,9 @@ jobs:
       - name: Node restart verification fixtures
         run: python3 tooling/scripts/remote/test_node_verification.py
 
+      - name: Hysteria2 node control fixtures
+        run: python3 tooling/scripts/tests/test_manage_tono_hy2_node.py
+
       - name: Node self-registration agent
         # Reports only running Tono services and never sends its token anywhere
         # but a bare HTTPS origin.

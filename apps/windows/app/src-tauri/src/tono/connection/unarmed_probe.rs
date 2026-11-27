@@ -553,6 +553,7 @@ mod tests {
             protocol: tono_core::node::NodeProtocol::VlessReality,
             tls_fingerprint: None,
             certificate_public_key_sha256: None,
+            hy2_down_mbps: None,
         };
         let state = Arc::new(TonoState::for_test());
         {

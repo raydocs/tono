@@ -213,6 +213,7 @@ nonisolated extension ConfigPipeline {
         if let flow = value.flow, flow != "xtls-rprx-vision" {
             throw TonoInjectionError.unsafeNode(node.name)
         }
+        value.hy2DownMbps = nil
         return value
     }
 
@@ -252,10 +253,16 @@ nonisolated extension ConfigPipeline {
             throw TonoInjectionError.unsafeNode(node.name)
         }
         value.tlsFingerprint = fingerprint
-        // Optional sing-box pin. Invalid is treated as absent: the node stays
-        // admitted for the DER path and unavailable to sing-box.
+        // Optional sing-box pin and downstream Brutal hint. Invalid is treated
+        // as absent: the node stays admitted cleanly and falls back to BBR.
         value.certificatePublicKeySHA256 = canonicalSPKIPin(node.certificatePublicKeySHA256)
+        value.hy2DownMbps = canonicalHy2DownMbps(node.hy2DownMbps)
         return value
+    }
+
+    static func canonicalHy2DownMbps(_ raw: Int?) -> Int? {
+        guard let raw, (10...500).contains(raw) else { return nil }
+        return raw
     }
 
     /// Standard base64 of exactly 32 bytes, in canonical form, or nil.

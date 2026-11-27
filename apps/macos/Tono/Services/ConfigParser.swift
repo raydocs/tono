@@ -441,6 +441,12 @@ nonisolated struct ConfigParser {
             // hy2 `fingerprint` is the leaf-cert SHA-256 pin, not uTLS.
             node.tlsFingerprint = dict["fingerprint"]
             node.certificatePublicKeySHA256 = dict["certificate-public-key-sha256"]
+            if let raw = dict["down-mbps"]?.trimmingCharacters(in: .whitespaces),
+               !raw.isEmpty,
+               !raw.hasPrefix("0"),
+               raw.allSatisfy({ $0.isASCII && $0.isNumber }) {
+                node.hy2DownMbps = Int(raw)
+            }
             node.clientFingerprint = dict["client-fingerprint"]
         } else {
             node.clientFingerprint = dict["client-fingerprint"] ?? dict["fingerprint"]
@@ -461,7 +467,7 @@ nonisolated struct ConfigParser {
         let knownKeys = ["name", "type", "server", "port", "password", "uuid", "cipher",
                          "udp", "sni", "skip-cert-verify", "network", "ws-opts",
                          "grpc-opts", "reality-opts", "ws-path", "ws-headers",
-                         "alpn", "fingerprint", "certificate-public-key-sha256",
+                         "alpn", "fingerprint", "certificate-public-key-sha256", "down-mbps",
                          "client-fingerprint", "tls", "servername", "flow",
                          "up", "down", "obfs", "obfs-password", "auth", "auth-str",
                          "ca", "ca-str", "recv-window-conn", "recv-window",

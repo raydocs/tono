@@ -119,6 +119,9 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     /// Standard base64 SHA-256 of the hy2 leaf's SubjectPublicKeyInfo, published
     /// beside `tlsFingerprint` for sing-box. Never derived from the DER pin.
     var certificatePublicKeySHA256: String?
+    /// Optional per-node Hysteria2 downstream Brutal bandwidth hint (10..500 Mbps).
+    /// Absent keeps QUIC + BBR; upload always stays BBR (`up_mbps` is never emitted).
+    var hy2DownMbps: Int?
     var realityPublicKey: String?
     var realityShortId: String?
 
@@ -232,6 +235,7 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
             && realityShortId == other.realityShortId
             && tlsFingerprint == other.tlsFingerprint
             && certificatePublicKeySHA256 == other.certificatePublicKeySHA256
+            && hy2DownMbps == other.hy2DownMbps
             && flow == other.flow
             && network == other.network
     }
@@ -244,7 +248,7 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
         case id, flag, name, type, server, port, relay, latency, isActive, subscriptionId
         case username, password, uuid, cipher, udp
         case sni, skipCertVerify, network, wsPath, wsHost, grpcServiceName, tls, alterId
-        case flow, clientFingerprint, tlsFingerprint, certificatePublicKeySHA256, realityPublicKey, realityShortId
+        case flow, clientFingerprint, tlsFingerprint, certificatePublicKeySHA256, hy2DownMbps, realityPublicKey, realityShortId
     }
 }
 

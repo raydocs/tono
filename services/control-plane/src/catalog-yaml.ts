@@ -249,7 +249,10 @@ function catalogProxyType(block: string): string {
   return 'vless';
 }
 
-function catalogFieldKeys(block: string, field: 'uuid' | 'password'): number {
+function catalogFieldKeys(
+  block: string,
+  field: 'uuid' | 'password' | typeof HY2_DOWN_MBPS_KEY | typeof HY2_UP_MBPS_KEY,
+): number {
   return [
     ...block.matchAll(new RegExp(String.raw`^\s*(?:-\s*)?${field}\s*:`, 'gm')),
     ...block.matchAll(new RegExp(String.raw`[{,]\s*${field}\s*:`, 'g')),
@@ -286,6 +289,10 @@ function catalogHasFingerprint(block: string): boolean {
 const HY2_SPKI_PIN_KEY = 'certificate-public-key-sha256';
 // 32 bytes: 42 free characters, a 43rd whose low two bits are zero, one pad.
 const SPKI_PIN_BASE64 = '[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=';
+const HY2_DOWN_MBPS_KEY = 'down-mbps';
+const HY2_UP_MBPS_KEY = 'up-mbps';
+const HY2_DOWN_MBPS_MIN = 10;
+const HY2_DOWN_MBPS_MAX = 500;
 
 /**
  * Only the one form macOS `ConfigParser` reads as this node's pin: a direct
@@ -307,6 +314,30 @@ function catalogSpkiPinIsAdmissible(block: string): boolean {
   );
   if (!exact.test(lines[index])) return false;
   // A deeper line after a plain value continues it for a YAML parser.
+  const next = lines.slice(index + 1).find((line) => line.trim() !== '' && !/^\s*#/.test(line));
+  return next === undefined || (next.match(/^ */)?.[0].length ?? 0) <= column;
+}
+
+/**
+ * Optional per-node Hysteria2 downstream Brutal bandwidth hint (10..500 Mbps).
+ * Block-style key at the list item's field column with a bare integer so
+ * macOS `ConfigParser` and Windows `admit_node` agree on the value (upload
+ * stays adaptive BBR and `up-mbps` is never admitted).
+ */
+function catalogDownMbpsIsAdmissible(block: string): boolean {
+  const mentions = catalogFieldKeys(block, HY2_DOWN_MBPS_KEY);
+  if (mentions === 0) return true;
+  if (mentions !== 1) return false;
+  const lines = block.split('\n');
+  const column = lines[0].match(/^ *- +/)?.[0].length;
+  const keyPattern = new RegExp(`^ *${HY2_DOWN_MBPS_KEY}:`);
+  const index = lines.findIndex((line) => keyPattern.test(line));
+  if (column === undefined || index < 1) return false;
+  const exact = new RegExp(`^ {${column}}${HY2_DOWN_MBPS_KEY}: +([1-9]\\d{1,2}) *$`);
+  const match = lines[index].match(exact);
+  if (!match) return false;
+  const mbps = Number(match[1]);
+  if (!Number.isSafeInteger(mbps) || mbps < HY2_DOWN_MBPS_MIN || mbps > HY2_DOWN_MBPS_MAX) return false;
   const next = lines.slice(index + 1).find((line) => line.trim() !== '' && !/^\s*#/.test(line));
   return next === undefined || (next.match(/^ */)?.[0].length ?? 0) <= column;
 }
@@ -408,11 +439,15 @@ export function catalogProxyUsesManagedIdentity(block: string): boolean {
     return catalogFieldIsPlaceholder(block, 'password')
       && catalogHasFingerprint(block)
       && !catalogSkipsCertVerify(block)
-      && catalogSpkiPinIsAdmissible(block);
+      && catalogSpkiPinIsAdmissible(block)
+      && catalogDownMbpsIsAdmissible(block)
+      && catalogFieldKeys(block, HY2_UP_MBPS_KEY) === 0;
   }
   if (type !== 'vless') return false;
   if (name?.endsWith(HY2_NAME_SUFFIX)) return false;
   if (block.includes(HY2_SPKI_PIN_KEY)) return false;
+  if (catalogFieldKeys(block, HY2_DOWN_MBPS_KEY) !== 0) return false;
+  if (catalogFieldKeys(block, HY2_UP_MBPS_KEY) !== 0) return false;
   return catalogFieldIsPlaceholder(block, 'uuid');
 }
 

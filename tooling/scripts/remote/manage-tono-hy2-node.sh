@@ -324,6 +324,187 @@ pathlib.Path(path).write_text(replaced)
 PY
 }
 
+patch_hy2_config_bandwidth() {
+  local path=${1:-}
+  local ignore_client=${2:-}
+  local up_mbps=${3:-}
+  local down_mbps=${4:-}
+  [[ -n $path && -f $path && ! -L $path ]] || fail "hy2 config is missing"
+  python3 - "$path" "$ignore_client" "$up_mbps" "$down_mbps" <<'PY'
+import json, pathlib, re, sys
+
+path, ignore_client, up_mbps, down_mbps = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+target = pathlib.Path(path)
+text = target.read_text(encoding="utf-8")
+original = text
+
+def extract_bw(src):
+    up_val, down_val, ig_val = None, None, None
+    bw_matches = list(re.finditer(r"(?m)^bandwidth:\n((?:  .*(?:\n|$))*)", src))
+    if len(bw_matches) > 1:
+        raise SystemExit("hy2 bandwidth block is not unique")
+    if bw_matches:
+        body = bw_matches[0].group(1)
+        for key, replacement in (("up", up_mbps), ("down", down_mbps)):
+            m_any = re.search(rf"(?m)^  {key}:\s*(.+?)\s*$", body)
+            if not m_any:
+                continue
+            m_mbps = re.fullmatch(r"(\d+)\s*mbps", m_any.group(1), re.IGNORECASE)
+            if not m_mbps:
+                if (up_mbps or down_mbps) and not replacement:
+                    raise SystemExit("unsupported bandwidth unit in existing config")
+                continue
+            if key == "up":
+                up_val = int(m_mbps.group(1))
+            else:
+                down_val = int(m_mbps.group(1))
+    ig_keys = re.findall(r"(?m)^ignoreClientBandwidth:", src)
+    if len(ig_keys) > 1:
+        raise SystemExit("hy2 ignoreClientBandwidth is not unique")
+    ig_m = re.search(r"(?m)^ignoreClientBandwidth:\s*(true|false)\s*$", src)
+    if ig_keys and not ig_m:
+        raise SystemExit("hy2 ignoreClientBandwidth is malformed")
+    if ig_m:
+        ig_val = ig_m.group(1) == "true"
+    return up_val, down_val, ig_val
+
+cur_up, cur_down, cur_ig = extract_bw(text)
+new_up = int(up_mbps) if up_mbps else cur_up
+new_down = int(down_mbps) if down_mbps else cur_down
+
+if up_mbps or down_mbps:
+    if (up_mbps and new_down is None) or (down_mbps and new_up is None):
+        raise SystemExit("bandwidth requires both up and down when creating missing bandwidth block")
+    bw_block = f"bandwidth:\n  up: {new_up} mbps\n  down: {new_down} mbps\n"
+    if re.search(r"(?m)^bandwidth:\n(?:  .*(?:\n|$))*", text):
+        text, n = re.subn(r"(?m)^bandwidth:\n(?:  .*(?:\n|$))*", bw_block, text, count=1)
+        if n != 1:
+            raise SystemExit("hy2 bandwidth block is not unique")
+    elif re.search(r"(?m)^disableUDP:", text):
+        text = re.sub(r"(?m)^disableUDP:", bw_block + "disableUDP:", text, count=1)
+    else:
+        text = text.rstrip("\n") + "\n" + bw_block
+
+if ignore_client:
+    ig_line = f"ignoreClientBandwidth: {ignore_client}\n"
+    if re.search(r"(?m)^ignoreClientBandwidth:\s*(?:true|false)\s*$", text):
+        text = re.sub(r"(?m)^ignoreClientBandwidth:\s*(?:true|false)\s*(?:\n|$)", ig_line, text, count=1)
+    elif re.search(r"(?m)^disableUDP:", text):
+        text = re.sub(r"(?m)^disableUDP:", ig_line + "disableUDP:", text, count=1)
+    else:
+        text = text.rstrip("\n") + "\n" + ig_line
+
+changed = text != original
+if changed:
+    target.write_text(text, encoding="utf-8")
+
+fin_up, fin_down, fin_ig = extract_bw(text)
+print(json.dumps({
+    "changed": changed,
+    "ignoreClientBandwidth": fin_ig,
+    "upMbps": fin_up,
+    "downMbps": fin_down,
+}))
+PY
+}
+
+validate_bandwidth_mbps() {
+  [[ $1 =~ ^[1-9][0-9]*$ ]] && ((10#$1 >= 10 && 10#$1 <= 1000)) ||
+    fail "invalid bandwidth Mbps (expected integer in 10..1000)"
+}
+
+hy2_listen_port() {
+  python3 - "$1" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+m = re.search(r"(?m)^listen:\s*:(\d+)\s*$", text)
+if not m:
+    raise SystemExit(1)
+print(m.group(1))
+PY
+}
+
+set_bandwidth() {
+  require_root
+  local ignore_client="" up_mbps="" down_mbps=""
+  while (($# > 0)); do
+    case "$1" in
+      --ignore-client-bandwidth)
+        [[ ${2:-} == "true" || ${2:-} == "false" ]] || fail "expected true or false for --ignore-client-bandwidth"
+        ignore_client=$2
+        shift 2
+        ;;
+      --up-mbps)
+        [[ $# -ge 2 ]] || fail "missing value for --up-mbps"
+        validate_bandwidth_mbps "$2"
+        up_mbps=$2
+        shift 2
+        ;;
+      --down-mbps)
+        [[ $# -ge 2 ]] || fail "missing value for --down-mbps"
+        validate_bandwidth_mbps "$2"
+        down_mbps=$2
+        shift 2
+        ;;
+      *)
+        fail "unknown set-bandwidth option: $1"
+        ;;
+    esac
+  done
+  [[ -n $ignore_client || -n $up_mbps || -n $down_mbps ]] ||
+    fail "set-bandwidth requires at least one of --ignore-client-bandwidth, --up-mbps, or --down-mbps"
+
+  for command_name in chmod chown cp grep mktemp mv python3 seq ss systemctl; do
+    require_command "$command_name"
+  done
+  xray_is_active || fail "tono-xray must stay running; set-bandwidth does not replace Reality"
+  hy2_is_installed || fail "tono-hy2 is not installed"
+  local conf port xray_pid
+  conf=$(hy2_config_path) || fail "tono-hy2 config is missing"
+  port=$(hy2_listen_port "$conf") || fail "could not determine hy2 listen port"
+  xray_pid=$(systemctl show "$XRAY_SERVICE" -p MainPID --value)
+
+  local staged backup summary changed
+  staged=$(mktemp "${conf}.bw.XXXXXX")
+  backup=$(mktemp "${conf}.bak.XXXXXX")
+  _bw_staged=$staged
+  _bw_backup=$backup
+  cleanup_bandwidth_temps() {
+    rm -f "${_bw_staged:-}" "${_bw_backup:-}"
+  }
+  trap cleanup_bandwidth_temps EXIT RETURN
+  cp -a "$conf" "$staged"
+  cp -a "$conf" "$backup"
+  summary=$(patch_hy2_config_bandwidth "$staged" "$ignore_client" "$up_mbps" "$down_mbps") ||
+    fail "could not update hy2 bandwidth settings"
+  changed=$(python3 -c 'import json,sys; print("1" if json.loads(sys.argv[1])["changed"] else "0")' "$summary")
+  if [[ $changed == "1" ]]; then
+    mv -f "$staged" "$conf"
+    chmod 0640 "$conf"
+    if getent group "$SERVICE_USER" >/dev/null; then
+      chown "root:$SERVICE_USER" "$conf"
+    fi
+    systemctl restart "$SERVICE_NAME" >/dev/null
+    if ! wait_hy2_active || ! udp_port_in_use "$port"; then
+      mv -f "$backup" "$conf"
+      systemctl restart "$SERVICE_NAME" >/dev/null || true
+      fail "hy2 did not become healthy after bandwidth change; restored previous config"
+    fi
+  fi
+  cleanup_bandwidth_temps
+  trap - EXIT RETURN
+  local xray_pid_after
+  xray_pid_after=$(systemctl show "$XRAY_SERVICE" -p MainPID --value)
+  [[ $xray_pid_after == "$xray_pid" ]] || fail "tono-xray pid changed during hy2 set-bandwidth"
+  python3 - "$summary" "$xray_pid_after" <<'PY'
+import json, sys
+data = json.loads(sys.argv[1])
+data["xrayPid"] = int(sys.argv[2])
+data["xrayUntouched"] = True
+print(json.dumps(data))
+PY
+}
+
 sync_identities() {
   require_root
   local dry_run=${1:-}
@@ -638,5 +819,6 @@ case "$mode" in
   rollback) rollback_deployment "$@" ;;
   sync-identities) sync_identities apply "$@" ;;
   sync-identities-dry-run) sync_identities dry-run "$@" ;;
-  *) fail "expected preflight, apply, rollback, sync-identities, or sync-identities-dry-run" ;;
+  set-bandwidth) set_bandwidth "$@" ;;
+  *) fail "expected preflight, apply, rollback, sync-identities, sync-identities-dry-run, or set-bandwidth" ;;
 esac

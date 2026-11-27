@@ -1046,6 +1046,7 @@ mod lifecycle_tests {
                 protocol: tono_core::node::NodeProtocol::VlessReality,
                 tls_fingerprint: None,
                 certificate_public_key_sha256: None,
+                hy2_down_mbps: None,
             }];
             inner.routing = Some(tono_core::CatalogRouting {
                 home_socks5: Some(tono_core::CatalogHomeSocks5 {
@@ -1406,6 +1407,7 @@ mod lifecycle_tests {
                 protocol: tono_core::node::NodeProtocol::VlessReality,
                 tls_fingerprint: None,
                 certificate_public_key_sha256: None,
+                hy2_down_mbps: None,
             }];
             inner.routing = Some(tono_core::CatalogRouting {
                 home_socks5: Some(tono_core::CatalogHomeSocks5 {

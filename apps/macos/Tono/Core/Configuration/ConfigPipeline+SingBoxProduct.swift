@@ -162,7 +162,7 @@ nonisolated extension ConfigPipeline {
                 // 5s stays under quic-go's half-of-30s cap. Do not set
                 // idle_timeout: Chrome parrot forces 30s and a shorter idle
                 // drops the session sooner. Do not disable the parrot.
-                let outbound: [String: Any] = [
+                var outbound: [String: Any] = [
                     "type": "hysteria2",
                     "tag": node.name,
                     "server": node.server,
@@ -175,6 +175,9 @@ nonisolated extension ConfigPipeline {
                         "certificate_public_key_sha256": [pin],
                     ],
                 ]
+                if let downMbps = canonicalHy2DownMbps(node.hy2DownMbps) {
+                    outbound["down_mbps"] = downMbps
+                }
                 return outbound
             default:
                 throw SingBoxError.unsupportedTransport

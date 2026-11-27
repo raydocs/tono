@@ -59,6 +59,10 @@ pub enum NodeRejection {
     BadFingerprint,
     #[error("hy2 certificate-public-key-sha256 must be standard base64 of 32 bytes")]
     BadSpkiPin,
+    #[error("hy2 down-mbps must be an integer between 10 and 500")]
+    BadDownMbps,
+    #[error("hy2 up-mbps is not supported; upload stays adaptive BBR")]
+    UnsupportedUpMbps,
     #[error("tls must be enabled")]
     TlsDisabled,
     #[error("uuid is missing or not a valid UUID")]
@@ -84,6 +88,10 @@ pub enum NodeRejection {
     #[error("node name is duplicated or reserved: {0}")]
     DuplicateOrReservedName(String),
 }
+
+/// Lowest and highest optional per-node Hysteria2 downstream Brutal hint (Mbps).
+pub const HY2_DOWN_MBPS_MIN: u16 = 10;
+pub const HY2_DOWN_MBPS_MAX: u16 = 500;
 
 /// Which transport the catalog admitted. Hy2 is the same node identity as
 /// the VLESS block (` · hy2` suffix); it is not a second account.
@@ -117,6 +125,9 @@ pub struct ValidatedNode {
     /// sing-box SPKI pin, standard base64 of 32 bytes. Never derived from
     /// [`Self::tls_fingerprint`]. Absent is allowed on the mihomo path.
     pub certificate_public_key_sha256: Option<String>,
+    /// Optional per-node Hysteria2 downstream Brutal bandwidth hint (10..=500 Mbps).
+    /// Absent keeps QUIC + BBR; upload stays BBR (`up_mbps` is never emitted).
+    pub hy2_down_mbps: Option<u16>,
 }
 
 impl ValidatedNode {
@@ -156,6 +167,9 @@ impl ValidatedNode {
                         "certificate-public-key-sha256",
                         Value::String(spki.clone()),
                     );
+                }
+                if let Some(down_mbps) = self.hy2_down_mbps {
+                    put("down-mbps", Value::Number(serde_yaml_ng::Number::from(down_mbps)));
                 }
             }
             NodeProtocol::VlessReality => {
@@ -252,6 +266,12 @@ struct RawProxy {
     /// Present only on a hysteria2 block that published an SPKI pin.
     #[serde(default, rename = "certificate-public-key-sha256")]
     certificate_public_key_sha256: Option<String>,
+    /// Optional per-node Hysteria2 downstream Brutal bandwidth hint (10..=500 Mbps).
+    #[serde(default, rename = "down-mbps")]
+    down_mbps: Option<serde_yaml_ng::Value>,
+    /// Rejected on all nodes: client upload must remain adaptive BBR.
+    #[serde(default, rename = "up-mbps")]
+    up_mbps: Option<serde_yaml_ng::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -277,6 +297,12 @@ pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRej
     }
     if raw.kind != "vless" {
         return Err(NodeRejection::NotVless);
+    }
+    if raw.up_mbps.is_some() {
+        return Err(NodeRejection::UnsupportedUpMbps);
+    }
+    if raw.down_mbps.is_some() {
+        return Err(NodeRejection::BadDownMbps);
     }
     if raw.tls != Some(true) {
         return Err(NodeRejection::TlsDisabled);
@@ -379,6 +405,7 @@ pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRej
         protocol: NodeProtocol::VlessReality,
         tls_fingerprint: None,
         certificate_public_key_sha256: None,
+        hy2_down_mbps: None,
     })
 }
 
@@ -457,6 +484,19 @@ fn admit_hysteria2(raw: RawProxy) -> Result<ValidatedNode, NodeRejection> {
     if !is_public_ipv4(server) {
         return Err(NodeRejection::ServerNotPublicIpv4);
     }
+    let hy2_down_mbps = match raw.down_mbps {
+        None => None,
+        Some(value) => {
+            let mbps = value.as_u64().ok_or(NodeRejection::BadDownMbps)?;
+            if !(u64::from(HY2_DOWN_MBPS_MIN)..=u64::from(HY2_DOWN_MBPS_MAX)).contains(&mbps) {
+                return Err(NodeRejection::BadDownMbps);
+            }
+            Some(mbps as u16)
+        }
+    };
+    if raw.up_mbps.is_some() {
+        return Err(NodeRejection::UnsupportedUpMbps);
+    }
     Ok(ValidatedNode {
         name: name.to_string(),
         server,
@@ -470,6 +510,7 @@ fn admit_hysteria2(raw: RawProxy) -> Result<ValidatedNode, NodeRejection> {
         protocol: NodeProtocol::Hysteria2,
         tls_fingerprint: Some(fingerprint),
         certificate_public_key_sha256,
+        hy2_down_mbps,
     })
 }
 
@@ -773,9 +814,37 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
         );
         assert_eq!(admit_yaml(&rejected).unwrap_err(), NodeRejection::BadSpkiPin);
         let node = admit_yaml(passing_hy2_yaml()).unwrap();
+        assert_eq!(node.protocol, NodeProtocol::Hysteria2);
         assert!(node.certificate_public_key_sha256.is_none());
+        assert!(node.hy2_down_mbps.is_none());
         let yaml = serde_yaml_ng::to_string(&node.to_runtime_mapping()).unwrap();
+        assert!(!yaml.contains("down-mbps"));
         assert!(!yaml.contains("certificate-public-key-sha256"));
+    }
+
+    #[test]
+    fn validates_optional_bounded_hy2_down_mbps_and_round_trips() {
+        for mbps in [10_u16, 100, 500] {
+            let yaml = format!("{}\ndown-mbps: {mbps}\n", passing_hy2_yaml().trim());
+            let node = admit_yaml(&yaml).unwrap();
+            assert_eq!(node.hy2_down_mbps, Some(mbps));
+            let round_trip = admit_node(&serde_yaml_ng::Value::Mapping(node.to_runtime_mapping())).unwrap();
+            assert_eq!(round_trip, node);
+            let emitted = serde_yaml_ng::to_string(&node.to_runtime_mapping()).unwrap();
+            assert!(emitted.contains(&format!("down-mbps: {mbps}")), "{emitted}");
+        }
+        for bad in ["0", "9", "501", "-10", "100.5", "\"100\"", "true"] {
+            let yaml = format!("{}\ndown-mbps: {bad}\n", passing_hy2_yaml().trim());
+            assert_eq!(admit_yaml(&yaml).unwrap_err(), NodeRejection::BadDownMbps, "bad={bad}");
+        }
+        let hy2_up = format!("{}\nup-mbps: 50\n", passing_hy2_yaml().trim());
+        assert_eq!(admit_yaml(&hy2_up).unwrap_err(), NodeRejection::UnsupportedUpMbps);
+
+        let vless_down = format!("{}\ndown-mbps: 100\n", passing_yaml_with("type: vless", "type: vless").trim());
+        assert_eq!(admit_yaml(&vless_down).unwrap_err(), NodeRejection::BadDownMbps);
+
+        let vless_up = format!("{}\nup-mbps: 50\n", passing_yaml_with("type: vless", "type: vless").trim());
+        assert_eq!(admit_yaml(&vless_up).unwrap_err(), NodeRejection::UnsupportedUpMbps);
     }
 
     #[test]
