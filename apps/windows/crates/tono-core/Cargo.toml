@@ -24,4 +24,4 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # unsafe code; nix provides the safe getuid() wrapper used by the unix
 # catalog-cache safety check (catalog.rs).
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", default-features = false, features = ["user"] }
+nix = { version = "0.32", default-features = false, features = ["user"] }
