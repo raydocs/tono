@@ -512,7 +512,7 @@ fn exhausted_tun_failure_uses_the_independent_proxy_cross_check() {
     let tun = "all real TUN probes timed out".to_string();
     let isolated = classify_exhausted_data_plane(Ok(()), tun.clone(), Ok(()));
     assert!(isolated.starts_with(TUN_DATA_PLANE_BROKEN_PREFIX));
-    assert!(isolated.contains("node and Mihomo proxy egress passed"));
+    assert!(isolated.contains("node and loopback proxy egress passed"));
 
     let advisory_degraded = classify_exhausted_data_plane(Err("delay probe 504".to_string()), tun.clone(), Ok(()));
     assert!(advisory_degraded.starts_with(TUN_DATA_PLANE_BROKEN_PREFIX));
@@ -599,6 +599,85 @@ fn unverified_wfp_lock_carries_the_service_error_instead_of_a_tun_verdict() {
     assert!(!last.contains("TONO_TUN_DATA_PLANE_BROKEN"), "{last}");
     assert!(last.contains("live=false"), "{last}");
     assert!(last.contains("FwpmTransactionCommit0 returned 0x80320017"), "{last}");
+}
+
+#[test]
+fn owned_graph_dns_anti_leak_failure_is_not_reclassified_as_tun_broken() {
+    use super::classify_exhausted_data_plane;
+    use super::probes::{FAKE_IP_VERIFICATION_FAILED_PREFIX, fake_ip_verification_error};
+
+    let dns_error = fake_ip_verification_error(
+        "Claude anti-leak check failed: claude.ai resolved to non-protected IPv4 [104.18.32.47] via Windows DNS Client",
+    );
+    let kept = classify_exhausted_data_plane(Ok(()), dns_error.clone(), Ok(()));
+    assert!(kept.starts_with("TONO_CONNECT_DNS:"), "{kept}");
+    assert!(kept.contains(FAKE_IP_VERIFICATION_FAILED_PREFIX), "{kept}");
+    assert!(kept.contains("; loopback proxy: passed"), "{kept}");
+    assert!(!kept.contains("TONO_TUN_DATA_PLANE_BROKEN"), "{kept}");
+    assert!(!kept.contains("TONO_NODE_OR_CORE_UNREACHABLE"), "{kept}");
+
+    let with_timeout_proxy = classify_exhausted_data_plane(
+        Err("delay probe answered 504".to_string()),
+        dns_error,
+        Err("proxy CONNECT timeout".to_string()),
+    );
+    assert!(with_timeout_proxy.starts_with("TONO_CONNECT_DNS:"), "{with_timeout_proxy}");
+    assert!(
+        with_timeout_proxy.contains("; loopback proxy: proxy CONNECT timeout"),
+        "{with_timeout_proxy}"
+    );
+    assert_eq!(
+        tono_core::stamp_connect_failure(&with_timeout_proxy),
+        with_timeout_proxy
+    );
+
+    let unreachable = classify_exhausted_data_plane(
+        Err("delay probe answered 503 Service Unavailable".to_string()),
+        "all 2 independent protected TUN probes failed: Google (tcp): error sending request -> os error 10054".to_string(),
+        Err("loopback failed -> os error 10054".to_string()),
+    );
+    assert!(unreachable.starts_with("TONO_NODE_OR_CORE_UNREACHABLE:"), "{unreachable}");
+    assert!(unreachable.ends_with("[CORE_EXIT_UNREACHABLE]"), "{unreachable}");
+}
+
+#[tokio::test]
+async fn stale_generation_advisory_delay_does_not_pollute_newer_session() {
+    use super::failure::StageFailure;
+    use super::probes::record_verified_advisory_delay;
+
+    let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+    {
+        let mut inner = state.lock().await;
+        inner.connect_generation = 1;
+        inner.selected_node = Some("Los Angeles · Mesa".to_string());
+    }
+
+    let ok = record_verified_advisory_delay(&state, 1, Some("Los Angeles · Mesa"), 180).await;
+    assert!(ok.is_ok(), "matching generation should record advisory delay");
+    {
+        let inner = state.lock().await;
+        assert_eq!(inner.last_exit_delay_ms, Some(180));
+        assert_eq!(inner.last_exit_delay_node.as_deref(), Some("Los Angeles · Mesa"));
+    }
+
+    // Disconnect/reconnect increments generation even before or after node switches.
+    {
+        let mut inner = state.lock().await;
+        inner.connect_generation = 2;
+    }
+    let stale_same_node = record_verified_advisory_delay(&state, 1, Some("Los Angeles · Mesa"), 999).await;
+    assert!(matches!(stale_same_node, Err(StageFailure::Stale)));
+
+    {
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Tokyo · Neon".to_string());
+    }
+    let stale_switched = record_verified_advisory_delay(&state, 1, Some("Los Angeles · Mesa"), 999).await;
+    assert!(matches!(stale_switched, Err(StageFailure::Stale)));
+
+    let inner = state.lock().await;
+    assert_eq!(inner.last_exit_delay_ms, Some(180));
+    assert_eq!(inner.last_exit_delay_node.as_deref(), Some("Los Angeles · Mesa"));
 }
 
 #[test]

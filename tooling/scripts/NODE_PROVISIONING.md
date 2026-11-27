@@ -31,7 +31,7 @@ py scripts\provision-tono-node.py apply --inventory C:\Private\inventory.json --
 ## Stages and approvals
 
 `plan` is the default and invokes only remote read-only preflight; it never downloads
-Xray. `apply` downloads the official pinned Xray v26.11.9 asset locally, verifies its
+Xray. `apply` downloads the official pinned Xray v26.3.27 asset locally, verifies its
 exact architecture checksum, extracts and strictly uploads it for fresh mode, then
 creates a unique transaction and verifies after restart. `verify` checks the recorded
 transaction. `rollback` restores its immutable backup. Desired-state changes are not

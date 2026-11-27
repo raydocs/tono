@@ -385,43 +385,18 @@ pub(super) async fn run_stages(
     }
 
     // §6.8 + §6.9: checkingExit → verifyingTraffic, as one retryable verification group (C3).
-    let mut kill_status = if session_mode.uses_owned_graph() {
-        set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
-        set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
-        let status = super::probes::verify_locked_for_mode(session_mode)
-            .await
-            .map_err(StageFailure::error)?;
-        let label = if session_mode.is_ai_home() {
-            "AI Home protected fake-IP/TLS verification"
-        } else {
-            "three-tier protected fake-IP/TLS verification"
-        };
-        transaction
-            .wait(label, super::probes::verify_three_tier_data_plane())
-            .await?
-            .map_err(StageFailure::error)?;
-        super::probes::spawn_deferred_exit_delay_probe(
-            state,
-            app,
-            &secret,
-            controller_port,
-            generation,
-        )
-        .await;
-        status
-    } else {
-        verify_post_lock(
-            state,
-            app,
-            &secret,
-            controller_port,
-            mixed_port,
-            generation,
-            started,
-            transaction,
-        )
-        .await?
-    };
+    let mut kill_status = verify_post_lock(
+        state,
+        app,
+        session_mode,
+        &secret,
+        controller_port,
+        mixed_port,
+        generation,
+        started,
+        transaction,
+    )
+    .await?;
 
     // The durable logical-session latch is committed only after every existing check and a
     // final generation guard. A failure remains an ordinary connect failure.
