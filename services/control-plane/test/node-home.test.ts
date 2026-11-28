@@ -367,12 +367,18 @@ describe('node-home PR 1 control plane & routing digest v2', () => {
     const generation = pulled.homeIdentities[0].bindingGeneration as string;
     const hUuid = pulled.homeIdentities[0].clientUUID as string;
 
-    // Backdate created_at strictly below ack timestamp to avoid same-second integer flake.
+    // Backdate created_at & assignment timestamp strictly below ack timestamp to avoid same-second flake.
     await e.DB.prepare(
       'UPDATE device_home_credentials SET created_at = ? WHERE home_exit_id = ?',
     ).bind(t - 5, homeId).run();
+    await e.DB.prepare(
+      'UPDATE home_exit_nodes SET created_at = ? WHERE home_exit_id = ?',
+    ).bind(t - 5, homeId).run();
     expect((await api('home/roster-ack', json({
       observedAt: t,
+      meteringProtocolVersion: 3,
+      nodeHomeCapable: true,
+      nodeHomeXrayVersion: '26.3.27',
       homeObservedAt: t + 1,
     }, EXIT_NODE_TOKENS['exit-a']))).status).toBe(200);
 
@@ -414,10 +420,12 @@ describe('node-home PR 1 control plane & routing digest v2', () => {
     expect(drainingBind.status).toBe(409);
     expect(((await drainingBind.json()) as any).error.code).toBe('HOME_EXIT_DRAINING');
 
-    // exit-a acknowledges drain for retired generation -> drained_at stamped,
+    // exit-a acknowledges drain for retired generation -> drained_at stamped even when withdrawing capability,
     // yet 0080 rotation remains required per PR 0 empirical gate (rmo does not cancel open TCP streams).
     expect((await api('home/roster-ack', json({
       observedAt: t + 2,
+      meteringProtocolVersion: 3,
+      nodeHomeCapable: false,
       drainedGenerations: [{ homeExitId: homeId, retiredGeneration: generation }],
     }, EXIT_NODE_TOKENS['exit-a']))).status).toBe(200);
 
@@ -471,6 +479,123 @@ describe('node-home PR 1 control plane & routing digest v2', () => {
     ).bind(homeId).first<any>();
     expect(after).toEqual({ drain_required_generation: null, socks5_rotation_required_at: null });
 
+    // Patching only notes while drain_required_generation is set and socks5_rotation_required_at is NULL
+    // MUST preserve drain_required_generation.
+    await e.DB.prepare(
+      `UPDATE home_exits SET drain_required_generation = 'gen-preserve-1', socks5_rotation_required_at = NULL WHERE id = ?`,
+    ).bind(homeId).run();
+    const notesPatch = await api(`ops/home-exits/${homeId}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+      },
+      body: JSON.stringify({ notes: 'metadata-only update' }),
+    });
+    expect(notesPatch.status).toBe(200);
+    const preserved = await e.DB.prepare(
+      'SELECT drain_required_generation FROM home_exits WHERE id = ?',
+    ).bind(homeId).first<any>();
+    expect(preserved?.drain_required_generation).toBe('gen-preserve-1');
+
     expect(nextSequence()).toBeGreaterThan(0);
+  });
+
+  it('clears node_home_capable on legacy rollback roster-ack, rejects homeObservedAt without capability, and gates newly assigned nodes', async () => {
+    await setupDeviceOnlyCatalog();
+    const owner = await createAccount('node-home-rollback');
+    await advanceRolloutToDeviceOnly();
+    const e = env as unknown as Env;
+
+    const home = await admin('home-exits', {
+      proxyName: 'Home Rollback Fence',
+      displayName: '家宽 Rollback',
+      kind: 'socks5',
+      socks5Host: '198.51.100.130',
+      socks5Port: 41080,
+      socks5Username: 'rb_u',
+      socks5Password: 'rb_p',
+    });
+    expect(home.status).toBe(201);
+    const homeId = String(((await home.json()) as any).homeExit.id);
+    await setHomeExitDeliveryMode(e, homeId, 'node_only');
+    await assignHomeExitToNode(e, homeId, 'exit-a');
+    expect((await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+
+    const t = Math.floor(Date.now() / 1000);
+    // Mint h: credential via initial 503 fetch.
+    expect((await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}`, 'x-tono-accept': 'node-home' },
+    })).status).toBe(503);
+
+    // Reject homeObservedAt when nodeHomeCapable is absent or false.
+    expect((await api('home/roster-ack', json({
+      observedAt: t,
+      homeObservedAt: t + 1,
+    }, EXIT_NODE_TOKENS['exit-a']))).status).toBe(400);
+    expect((await api('home/roster-ack', json({
+      observedAt: t,
+      meteringProtocolVersion: 3,
+      nodeHomeCapable: false,
+      homeObservedAt: t + 1,
+    }, EXIT_NODE_TOKENS['exit-a']))).status).toBe(400);
+
+    // Make both exit-a and exit-b node-home capable at t + 1.
+    await e.DB.prepare('UPDATE device_home_credentials SET created_at = ? WHERE home_exit_id = ?').bind(t - 5, homeId).run();
+    await e.DB.prepare('UPDATE home_exit_nodes SET created_at = ? WHERE home_exit_id = ?').bind(t - 5, homeId).run();
+    for (const nodeKey of ['exit-a', 'exit-b'] as const) {
+      expect((await api('home/metering-ack', json({ meteringProtocolVersion: 2, observedAt: t }, EXIT_NODE_TOKENS[nodeKey]))).status).toBe(200);
+      expect((await api('home/roster-ack', json({
+        observedAt: t,
+        meteringProtocolVersion: 3,
+        nodeHomeCapable: true,
+        nodeHomeXrayVersion: '26.3.27',
+        homeObservedAt: t + 1,
+      }, EXIT_NODE_TOKENS[nodeKey]))).status).toBe(200);
+    }
+
+    // Now assign exit-b AFTER its last_home_roster_at (t + 1) by giving home_exit_nodes.created_at = t + 5.
+    await assignHomeExitToNode(e, homeId, 'exit-b');
+    await e.DB.prepare(
+      'UPDATE home_exit_nodes SET created_at = ? WHERE home_exit_id = ? AND exit_node_id = ?',
+    ).bind(t + 5, homeId, 'exit-b').run();
+
+    // Only exit-a appears in homeTunnel.exitBaseNames until exit-b ACKs homeObservedAt > t + 5.
+    const catBeforeBAck = await (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}`, 'x-tono-accept': 'node-home' },
+    })).json() as any;
+    expect(catBeforeBAck.routing.homeTunnel.exitBaseNames).toEqual(['Los Angeles · Mesa']);
+
+    expect((await api('home/roster-ack', json({
+      observedAt: t + 6,
+      meteringProtocolVersion: 3,
+      nodeHomeCapable: true,
+      nodeHomeXrayVersion: '26.3.27',
+      homeObservedAt: t + 6,
+    }, EXIT_NODE_TOKENS['exit-b']))).status).toBe(200);
+    const catBothReady = await (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}`, 'x-tono-accept': 'node-home' },
+    })).json() as any;
+    expect(catBothReady.routing.homeTunnel.exitBaseNames).toEqual(['Los Angeles · Mesa', 'San Jose · CloudSilk']);
+
+    // Simulate rolling exit-a & exit-b agents back to legacy v2 (posting { observedAt } without nodeHomeCapable).
+    for (const nodeKey of ['exit-a', 'exit-b'] as const) {
+      expect((await api('home/roster-ack', json({ observedAt: t + 10 }, EXIT_NODE_TOKENS[nodeKey]))).status).toBe(200);
+    }
+    const rowA = await e.DB.prepare(
+      'SELECT node_home_capable, node_home_metering_version FROM exit_nodes WHERE id = ?',
+    ).bind('exit-a').first<any>();
+    expect(rowA).toEqual({ node_home_capable: 0, node_home_metering_version: 0 });
+
+    const rolledBackRosterA = await (await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-a']}` },
+    })).json() as any;
+    expect(rolledBackRosterA).not.toHaveProperty('homeOutbounds');
+    expect(rolledBackRosterA).not.toHaveProperty('homeIdentities');
+
+    // With both assigned nodes rolled back to v2, client fetch fails closed with 503.
+    expect((await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}`, 'x-tono-accept': 'node-home' },
+    })).status).toBe(503);
   });
 });

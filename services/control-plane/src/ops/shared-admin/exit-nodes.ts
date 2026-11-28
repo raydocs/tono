@@ -127,6 +127,10 @@ export async function exitNodesResource(
              WHEN status = 'disabled' AND ? = 'active' THEN 0
              ELSE last_roster_at
            END,
+           node_home_capable = CASE
+             WHEN status = 'disabled' AND ? = 'active' THEN 0
+             ELSE node_home_capable
+           END,
            last_home_roster_at = CASE
              WHEN status = 'disabled' AND ? = 'active' THEN 0
              ELSE last_home_roster_at
@@ -138,7 +142,7 @@ export async function exitNodesResource(
            status = ?,
            updated_at = ?
        WHERE id = ?`,
-    ).bind(status, status, status, status, t, mt[1]).run();
+    ).bind(status, status, status, status, status, t, mt[1]).run();
     if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Exit node not found');
     await writeOpsAudit(e, actorEmail, 'exit-node.update', 'exit_node', mt[1], `status ${status}`);
     return Response.json({ id: mt[1], status, updatedAt: t });

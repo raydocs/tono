@@ -285,7 +285,8 @@ export async function selectAcknowledgedHomeExitBases(
   const rows = await e.DB.prepare(
     `SELECT exit_nodes.name, exit_nodes.status, exit_nodes.node_home_capable,
             exit_nodes.node_home_metering_version, exit_nodes.node_home_xray_version,
-            exit_nodes.last_home_roster_at
+            exit_nodes.last_home_roster_at,
+            home_exit_nodes.created_at AS assigned_at
      FROM home_exit_nodes
      JOIN exit_nodes ON exit_nodes.id = home_exit_nodes.exit_node_id
      WHERE home_exit_nodes.home_exit_id = ?`,
@@ -298,7 +299,8 @@ export async function selectAcknowledgedHomeExitBases(
     if (Number(row.node_home_metering_version ?? 0) < NODE_HOME_METERING_VERSION_MIN) continue;
     if (!VERIFIED_NODE_HOME_XRAY_VERSIONS.has(String(row.node_home_xray_version ?? ''))) continue;
     const lastHomeAt = Number(row.last_home_roster_at ?? 0);
-    if (!Number.isSafeInteger(lastHomeAt) || lastHomeAt <= credCreatedAt) continue;
+    const requiredAfter = Math.max(credCreatedAt, Number(row.assigned_at ?? 0));
+    if (!Number.isSafeInteger(lastHomeAt) || lastHomeAt <= requiredAfter) continue;
     if (timestamp - lastHomeAt >= rosterFreshSec) continue;
     const base = catalogBaseName(String(row.name));
     if (keptVlessBases.has(base)) readyBases.add(base);
@@ -475,7 +477,8 @@ export async function handleHomeRosterAck(req: Request, e: Env): Promise<Respons
     meteringVersion = b.meteringProtocolVersion;
   }
 
-  let nodeHomeCapableInt: 0 | 1 | null = null;
+  let nodeHomeCapableInt: 0 | 1 = 0;
+  const storedMeteringVersion = meteringVersion ?? 0;
   let verifiedXrayVersion: string | null = null;
   if (b.nodeHomeCapable !== undefined) {
     if (typeof b.nodeHomeCapable !== 'boolean') {
@@ -497,8 +500,11 @@ export async function handleHomeRosterAck(req: Request, e: Env): Promise<Respons
       }
       nodeHomeCapableInt = 1;
       verifiedXrayVersion = b.nodeHomeXrayVersion;
-    } else {
-      nodeHomeCapableInt = 0;
+    } else if (b.nodeHomeXrayVersion !== undefined) {
+      if (typeof b.nodeHomeXrayVersion !== 'string' || b.nodeHomeXrayVersion.length > 64) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid nodeHomeXrayVersion');
+      }
+      verifiedXrayVersion = b.nodeHomeXrayVersion;
     }
   } else if (b.nodeHomeXrayVersion !== undefined) {
     if (typeof b.nodeHomeXrayVersion !== 'string' || b.nodeHomeXrayVersion.length > 64) {
@@ -509,6 +515,9 @@ export async function handleHomeRosterAck(req: Request, e: Env): Promise<Respons
 
   let homeObservedAt: number | null = null;
   if (b.homeObservedAt !== undefined) {
+    if (nodeHomeCapableInt !== 1) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'homeObservedAt requires nodeHomeCapable: true');
+    }
     if (
       typeof b.homeObservedAt !== 'number'
       || !Number.isSafeInteger(b.homeObservedAt)
@@ -525,12 +534,9 @@ export async function handleHomeRosterAck(req: Request, e: Env): Promise<Respons
     e.DB.prepare(
       `UPDATE exit_nodes
        SET last_roster_at = MAX(last_roster_at, ?),
-           node_home_capable = COALESCE(?, node_home_capable),
-           node_home_metering_version = CASE
-             WHEN ? IS NOT NULL THEN MAX(node_home_metering_version, ?)
-             ELSE node_home_metering_version
-           END,
-           node_home_xray_version = COALESCE(?, node_home_xray_version),
+           node_home_capable = ?,
+           node_home_metering_version = ?,
+           node_home_xray_version = ?,
            last_home_roster_at = CASE
              WHEN ? IS NOT NULL THEN MAX(last_home_roster_at, ?)
              ELSE last_home_roster_at
@@ -540,8 +546,7 @@ export async function handleHomeRosterAck(req: Request, e: Env): Promise<Respons
     ).bind(
       b.observedAt,
       nodeHomeCapableInt,
-      meteringVersion,
-      meteringVersion,
+      storedMeteringVersion,
       verifiedXrayVersion,
       homeObservedAt,
       homeObservedAt,
