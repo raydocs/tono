@@ -1,4 +1,5 @@
 import type { Env, Row } from './env';
+import { loadScopedHomeRosterForNode } from './node-home';
 
 // The exit agent recovers a lost local ledger from this field. It is the
 // authenticated node's own `usage_report_sources.last_total_bytes`, not the
@@ -10,6 +11,7 @@ export async function exitIdentityRosterResponse(
   nodeId: string | undefined,
   observedAt: number,
   roster: { retireSharedLegacy: boolean; rows: Row[] },
+  includeHomeRoster = false,
 ): Promise<Response> {
   const watermarks = new Map<string, number>();
   if (nodeId) {
@@ -22,6 +24,9 @@ export async function exitIdentityRosterResponse(
       watermarks.set(String(row.user_id), Number(row.last_total_bytes));
     }
   }
+  const homeRoster = includeHomeRoster && nodeId
+    ? await loadScopedHomeRosterForNode(e, nodeId, observedAt, watermarks)
+    : null;
   return Response.json({
     // New agents verify this before touching Xray or billing state. Existing
     // node source IDs are accounting identities and cannot be renamed without
@@ -47,5 +52,9 @@ export async function exitIdentityRosterResponse(
         ...(nodeId ? { sourceUsageBytes: watermarks.get(userId) ?? 0 } : {}),
       };
     }),
+    ...(homeRoster ? {
+      homeIdentities: homeRoster.homeIdentities,
+      homeOutbounds: homeRoster.homeOutbounds,
+    } : {}),
   });
 }

@@ -20,7 +20,7 @@ export const error = (e: unknown) => {
     ...(x.extra ?? {}),
   }, {
     status: x.status,
-    ...(x.status === 429 && Number.isSafeInteger(x.extra?.retryAfterSeconds)
+    ...((x.status === 429 || x.status === 503) && Number.isSafeInteger(x.extra?.retryAfterSeconds)
       ? { headers: { 'Retry-After': String(x.extra!.retryAfterSeconds) } } : {}),
   });
 };

@@ -46,6 +46,8 @@ import {
 import {
   publicManagedCatalog,
 } from './catalog';
+import { requestAcceptsNodeHome } from './catalog-yaml';
+import { handleHomeMeteringAck, handleHomeRosterAck } from './node-home';
 import {
   publicTrafficPolicy,
 } from './traffic-policy';
@@ -59,7 +61,6 @@ import {
 import { V1_USAGE_REPORT_NOT_SUPERSEDED } from './retention';
 import {
   sharedAdministrativeResource,
-  USAGE_METERING_NODE_READY_SECONDS,
   publicAction,
   publicDevice,
   type SharedAdminDeps,
@@ -430,9 +431,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
     const a = await auth(req, e);
     ctx.waitUntil(recordClient(e, req, a.deviceId)); // best effort; off the poll's latency
+    const rawAccept = req.headers.get('X-Tono-Accept');
     return Response.json(await publicManagedCatalog(e, {
       userId: a.userId, deviceId: a.deviceId, filterHomeExits: true,
-      hy2AcceptHeader: hy2AcceptHeaderForClient(clientIdentity(req)?.platform, req.headers.get('X-Tono-Accept')),
+      hy2AcceptHeader: hy2AcceptHeaderForClient(clientIdentity(req)?.platform, rawAccept),
+      acceptNodeHome: requestAcceptsNodeHome(rawAccept),
     }));
   }
 
@@ -1168,57 +1171,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     await recordExitAgentAsn(e, req, node?.name ?? null);
     const t = now();
     const roster = await exitCredentialRoster(e, t);
-    return exitIdentityRosterResponse(e, node?.id, t, roster);
+    return exitIdentityRosterResponse(e, node?.id, t, roster, Boolean(node));
   }
 
-  if (p === '/api/v1/home/roster-ack' && m === 'POST') {
-    const node = await authenticateExitNode(req, e);
-    await recordExitAgentAsn(e, req, node?.name ?? null);
-    const b = await body(req, 4 * 1024);
-    rejectUnexpectedKeys(b, ['observedAt', 'meteringProtocolVersion']);
-    const t = now();
-    if (
-      !Number.isSafeInteger(b.observedAt) ||
-      b.observedAt < 0 ||
-      b.observedAt > t + 300
-    ) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid roster observedAt');
-    }
-    await e.DB.prepare(
-      `UPDATE exit_nodes
-       SET last_roster_at = MAX(last_roster_at, ?), updated_at = ?
-       WHERE id = ? AND status = 'active'`,
-    ).bind(b.observedAt, t, node!.id).run();
-    return Response.json({ nodeId: node!.id, observedAt: b.observedAt });
-  }
-
-  if (p === '/api/v1/home/metering-ack' && m === 'POST') {
-    const node = await authenticateExitNode(req, e);
-    await recordExitAgentAsn(e, req, node?.name ?? null);
-    const b = await body(req, 4 * 1024);
-    rejectUnexpectedKeys(b, ['meteringProtocolVersion', 'observedAt']);
-    const t = now();
-    if (
-      b.meteringProtocolVersion !== 2 ||
-      !Number.isSafeInteger(b.observedAt) ||
-      b.observedAt > t ||
-      b.observedAt <= t - USAGE_METERING_NODE_READY_SECONDS
-    ) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid metering acknowledgement');
-    }
-    await e.DB.prepare(
-      `UPDATE exit_nodes
-       SET metering_protocol_version = 2,
-           metering_last_seen_at = ?
-       WHERE id = ? AND status = 'active'
-         AND metering_last_seen_at < ?`,
-    ).bind(b.observedAt, node!.id, b.observedAt).run();
-    return Response.json({
-      nodeId: node!.id,
-      meteringProtocolVersion: 2,
-      observedAt: b.observedAt,
-    });
-  }
+  if (p === '/api/v1/home/roster-ack' && m === 'POST') return handleHomeRosterAck(req, e);
+  if (p === '/api/v1/home/metering-ack' && m === 'POST') return handleHomeMeteringAck(req, e);
 
   // Same handler for the home agent and the collector. The collector is what
   // has SSH to all sixteen nodes and therefore what reads the per-user byte

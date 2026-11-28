@@ -340,6 +340,7 @@ export async function insertSocks5HomeExit(
 export async function assertHomeExitBindable(e: Env, userId: string, homeExitId: string) {
   const row = await e.DB.prepare(
     `SELECT home_exits.kind, home_exits.proxy_name, home_exits.socks5_rotation_required_at,
+            home_exits.drain_required_generation,
             (SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?) AS current_home_exit_id
      FROM home_exits WHERE home_exits.id = ?`,
   ).bind(userId, homeExitId).first<Row>();
@@ -348,14 +349,29 @@ export async function assertHomeExitBindable(e: Env, userId: string, homeExitId:
   if (
     row
     && String(row.kind ?? 'catalog') === 'socks5'
-    && row.socks5_rotation_required_at != null
     && String(row.current_home_exit_id ?? '') !== homeExitId
   ) {
-    throw new ApiError(
-      409,
-      'SOCKS5_ROTATION_REQUIRED',
-      'This home line was issued to a user who no longer holds it; change the upstream password and store the new one before binding it again',
-    );
+    if (row.drain_required_generation != null) {
+      const pendingDrain = await e.DB.prepare(
+        `SELECT 1 FROM home_exit_drain_acks
+         WHERE home_exit_id = ? AND retired_generation = ? AND drained_at IS NULL
+         LIMIT 1`,
+      ).bind(homeExitId, String(row.drain_required_generation)).first<Row>();
+      if (pendingDrain) {
+        throw new ApiError(
+          409,
+          'HOME_EXIT_DRAINING',
+          'This home line is still draining on one or more exit nodes',
+        );
+      }
+    }
+    if (row.socks5_rotation_required_at != null) {
+      throw new ApiError(
+        409,
+        'SOCKS5_ROTATION_REQUIRED',
+        'This home line was issued to a user who no longer holds it; change the upstream password and store the new one before binding it again',
+      );
+    }
   }
 }
 

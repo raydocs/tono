@@ -1,0 +1,97 @@
+{
+  "version": 2,
+  "vectors": [
+    {
+      "name": "absent_routing",
+      "routing": null,
+      "preimage": "v2\n\n\n\n\n\n\n",
+      "sha256": "za3ddOVLQnwodcZEMSzcxcHOoIPBS8VYhcbTs7OaVK8"
+    },
+    {
+      "name": "empty_home_tunnel",
+      "routing": {
+        "defaultProxy": "Tokyo · Neon"
+      },
+      "preimage": "v2\n\nTokyo · Neon\n\n\n\n\n",
+      "sha256": "YKeBGgVmdITLn8_CapF6b1x5fpOxk_BaEJGxDJkyHqU"
+    },
+    {
+      "name": "legacy_socks5_only",
+      "routing": {
+        "defaultProxy": "Los Angeles · Mesa",
+        "homeSocks5": {
+          "host": "198.51.100.42",
+          "port": 1080,
+          "username": "res_user_1",
+          "password": "res_pass_1"
+        }
+      },
+      "preimage": "v2\n\nLos Angeles · Mesa\n198.51.100.42\n1080\nres_user_1\nres_pass_1\n",
+      "sha256": "7nEwq5pWpA40mvPm8JS5cYjQLxZJZeyd5jVLAjBLGs4"
+    },
+    {
+      "name": "sorted_multi_node_non_ascii_utf8",
+      "routing": {
+        "defaultProxy": "Los Angeles · Mesa",
+        "homeTunnel": {
+          "homeExitId": "home-exit-001",
+          "clientUuid": "11111111-2222-4333-8444-555555555555",
+          "exitBaseNames": [
+            "Tokyo · Neon",
+            "Los Angeles · Mesa",
+            "San Jose · CloudSilk",
+            "Los Angeles · Mesa"
+          ]
+        }
+      },
+      "preimage": "v2\n\nLos Angeles · Mesa\n\n\n\n\nhome-exit-001\u001f11111111-2222-4333-8444-555555555555\u001fLos Angeles · Mesa,San Jose · CloudSilk,Tokyo · Neon",
+      "sha256": "hq9vqEDBIPoLo0pJ6caYLABV6d1xH-n4lGljZImA2N0"
+    },
+    {
+      "name": "empty_exit_base_names",
+      "routing": {
+        "homeTunnel": {
+          "homeExitId": "home-exit-empty",
+          "clientUuid": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "exitBaseNames": []
+        }
+      },
+      "preimage": "v2\n\n\n\n\n\n\nhome-exit-empty\u001faaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\u001f",
+      "sha256": "v4OMpxy8cYV89GQ891itSAbtBRTGf06nINzZ9GxXUiI"
+    },
+    {
+      "name": "rotated_client_uuid",
+      "routing": {
+        "defaultProxy": "Los Angeles · Mesa",
+        "homeTunnel": {
+          "homeExitId": "home-exit-001",
+          "clientUuid": "99999999-8888-4777-8666-555555555555",
+          "exitBaseNames": [
+            "Los Angeles · Mesa",
+            "San Jose · CloudSilk",
+            "Tokyo · Neon"
+          ]
+        }
+      },
+      "preimage": "v2\n\nLos Angeles · Mesa\n\n\n\n\nhome-exit-001\u001f99999999-8888-4777-8666-555555555555\u001fLos Angeles · Mesa,San Jose · CloudSilk,Tokyo · Neon",
+      "sha256": "gt1RzqKlecsSVb8ZP4OvBGXMYVhcL8oaXAYZU2BQ0Ik"
+    },
+    {
+      "name": "mixed_home_proxy_and_home_tunnel",
+      "routing": {
+        "homeProxy": "Home Legacy",
+        "defaultProxy": "San Jose · CloudSilk",
+        "homeTunnel": {
+          "homeExitId": "home-exit-mix",
+          "clientUuid": "12345678-1234-4123-8123-1234567890ab",
+          "exitBaseNames": [
+            "San Jose · CloudSilk",
+            "Los Angeles · Mesa"
+          ]
+        }
+      },
+      "preimage": "v2\nHome Legacy\nSan Jose · CloudSilk\n\n\n\n\nhome-exit-mix\u001f12345678-1234-4123-8123-1234567890ab\u001fLos Angeles · Mesa,San Jose · CloudSilk",
+      "sha256": "cfbJwY3JsF48Zkxnw3jzWDV36F2f-8FMKduYO66WK6Q"
+    }
+  ]
+}

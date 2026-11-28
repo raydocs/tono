@@ -180,7 +180,7 @@ export async function homeExitsResource(
       if (home.socks5_rotation_required_at != null && parsed.password !== String(home.socks5_password)) {
         // The pasted line carries a new upstream password: that is the rotation.
         await e.DB.prepare(
-          'UPDATE home_exits SET socks5_password = ?, socks5_rotation_required_at = NULL, updated_at = ? WHERE id = ?',
+          'UPDATE home_exits SET socks5_password = ?, socks5_rotation_required_at = NULL, drain_required_generation = NULL, updated_at = ? WHERE id = ?',
         ).bind(parsed.password, now(), home.id).run();
         home = (await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(home.id).first<Row>())!;
       }
@@ -336,6 +336,7 @@ export async function homeExitsResource(
          SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
              socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
              socks5_rotation_required_at = ?,
+             drain_required_generation = CASE WHEN ? IS NULL THEN NULL ELSE drain_required_generation END,
              status = ?, notes = ?, updated_at = ?
          WHERE id = ? AND (? != 'retired' OR NOT EXISTS (
            SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id
@@ -350,7 +351,7 @@ export async function homeExitsResource(
       ).bind(
         proxyName, displayName, egressIpv4, kind,
         socks5Host, socks5Port, socks5Username, socks5Password,
-        rotationRequiredAt,
+        rotationRequiredAt, rotationRequiredAt,
         status, notes, t, mt[1], status, takesCatalogName ? 1 : 0, proxyName,
       ).run();
       if (!updated.meta.changes) {

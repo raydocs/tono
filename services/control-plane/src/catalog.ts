@@ -13,6 +13,15 @@ import {
 } from './catalog-yaml';
 import { ApiError } from './errors';
 import { hy2AutoSwitchForUser } from './hy2-auto-switch';
+import {
+  type CatalogHomeTunnel,
+  hasAssignedHomeExitNodes,
+  mintOrLoadDeviceHomeCredential,
+  routingSha256V2,
+  selectAcknowledgedHomeExitBases,
+} from './node-home';
+
+export type { CatalogHomeTunnel };
 
 // Home-exit and binding writes change a user's served catalog (filtered node
 // set) and its routing directive without touching the raw catalog YAML. The
@@ -250,6 +259,7 @@ export type CatalogRouting = {
   // Full upstream credentials appear only here — inside the bound user's
   // own catalog. The ops/admin plaintext catalogs never carry them.
   homeSocks5?: { host: string; port: number; username: string; password: string };
+  homeTunnel?: CatalogHomeTunnel;
 };
 
 export async function homeRoutingForUser(e: Env, userId: string) {
@@ -267,7 +277,8 @@ export async function homeRoutingForUser(e: Env, userId: string) {
   }
   const restricted = new Set(proxyNames);
   const binding = await e.DB.prepare(
-    `SELECT home_exits.proxy_name, home_exits.kind, home_exits.status AS home_status,
+    `SELECT home_exits.id AS home_exit_id, home_exits.proxy_name, home_exits.kind,
+            home_exits.status AS home_status, home_exits.delivery_mode,
             home_exits.socks5_host, home_exits.socks5_port,
             home_exits.socks5_username, home_exits.socks5_password,
             user_home_bindings.default_proxy_name
@@ -277,6 +288,9 @@ export async function homeRoutingForUser(e: Env, userId: string) {
   ).bind(userId).first<Row>();
   const allowed = new Set<string>();
   let routing: CatalogRouting | undefined;
+  let homeExit:
+    | { id: string; kind: string; deliveryMode: 'legacy_socks5' | 'node_only' }
+    | undefined;
   if (binding) {
     // A disabled/missing assigned exit is not an explicit unbind. Returning
     // an otherwise healthy cloud-only catalog would silently change identity.
@@ -284,8 +298,14 @@ export async function homeRoutingForUser(e: Env, userId: string) {
       throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Assigned home exit is unavailable');
     }
     allowed.add(String(binding.proxy_name));
+    const kind = String(binding.kind ?? 'catalog');
+    homeExit = {
+      id: String(binding.home_exit_id),
+      kind,
+      deliveryMode: binding.delivery_mode === 'node_only' ? 'node_only' : 'legacy_socks5',
+    };
     const directives: CatalogRouting = {};
-    if (String(binding.kind ?? 'catalog') === 'socks5') {
+    if (kind === 'socks5') {
       directives.homeSocks5 = {
         host: String(binding.socks5_host),
         port: Number(binding.socks5_port),
@@ -300,7 +320,7 @@ export async function homeRoutingForUser(e: Env, userId: string) {
     }
     routing = directives;
   }
-  return { routing, restricted, allowed };
+  return { routing, restricted, allowed, homeExit };
 }
 
 async function userMaySeeHy2Catalog(e: Env, userId: string): Promise<boolean> {
@@ -363,7 +383,13 @@ export function routingWithoutOmittedProxies(
   const next: CatalogRouting = { ...routing };
   if (next.homeProxy && !keep.has(catalogBaseName(next.homeProxy))) delete next.homeProxy;
   if (next.defaultProxy && !keep.has(catalogBaseName(next.defaultProxy))) delete next.defaultProxy;
-  if (!next.homeProxy && !next.defaultProxy && !next.homeSocks5) return undefined;
+  if (next.homeTunnel) {
+    next.homeTunnel = {
+      ...next.homeTunnel,
+      exitBaseNames: next.homeTunnel.exitBaseNames.filter((base) => keep.has(base)),
+    };
+  }
+  if (!next.homeProxy && !next.defaultProxy && !next.homeSocks5 && !next.homeTunnel) return undefined;
   return next;
 }
 
@@ -375,6 +401,7 @@ export async function publicManagedCatalog(
     filterHomeExits?: boolean;
     acceptHy2?: boolean;
     hy2AcceptHeader?: string | null;
+    acceptNodeHome?: boolean;
   },
 ) {
   const row = await e.DB.prepare(
@@ -404,11 +431,23 @@ export async function publicManagedCatalog(
   let served = yaml;
   let routing: CatalogRouting | undefined;
   let homeNames = new Set<string>();
+  let homeExit:
+    | { id: string; kind: string; deliveryMode: 'legacy_socks5' | 'node_only' }
+    | undefined;
   const routedUserId = options?.filterHomeExits ? options.userId : undefined;
   if (routedUserId) {
     const home = await homeRoutingForUser(e, routedUserId);
     routing = home.routing;
     homeNames = home.restricted;
+    homeExit = home.homeExit;
+    if (homeExit?.kind === 'socks5' && homeExit.deliveryMode === 'node_only' && !options?.acceptNodeHome) {
+      throw new ApiError(
+        503,
+        'CATALOG_UNAVAILABLE',
+        'This residential home line requires a node-home capable client',
+        { retryAfterSeconds: 60 },
+      );
+    }
     if (home.restricted.size > 0) {
       served = filterCatalogYamlForUser(served, home.restricted, home.allowed);
     }
@@ -437,6 +476,7 @@ export async function publicManagedCatalog(
   const servedItems = options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)
     ? splitManagedCatalogProxies(served).items
     : [];
+  let selectedKeep: Set<string> | undefined;
   if (options?.userId && servedItems.length > 0) {
     const servedNodes = new Set<string>();
     const servedHomes: Array<{ node: string; name: string }> = [];
@@ -449,6 +489,7 @@ export async function publicManagedCatalog(
       const selected = await selectAcknowledgedExitIdentity(
         e, options.userId, options.deviceId, [...servedNodes], servedHomes,
       );
+      selectedKeep = selected.keep;
       served = retainCatalogProxies(served, selected.keep);
       routing = routingWithoutOmittedProxies(routing, selected.keep);
       if (
@@ -463,12 +504,79 @@ export async function publicManagedCatalog(
       served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
     }
   }
+  if (routedUserId && homeExit?.kind === 'socks5') {
+    const phase = await exitCredentialRolloutPhase(e);
+    const wantsNodeHome = homeExit.deliveryMode === 'node_only'
+      || (
+        Boolean(options?.acceptNodeHome)
+        && Boolean(options?.deviceId)
+        && phase === 'device_only'
+        && await hasAssignedHomeExitNodes(e, homeExit.id)
+      );
+    if (wantsNodeHome) {
+      if (routing?.homeSocks5) {
+        const nextRouting = { ...routing };
+        delete nextRouting.homeSocks5;
+        routing = nextRouting;
+      }
+      if (!options?.deviceId || phase !== 'device_only') {
+        throw new ApiError(
+          503,
+          'CATALOG_UNAVAILABLE',
+          'Residential home tunnel requires device-only rollout',
+          { retryAfterSeconds: 30 },
+        );
+      }
+      if (!selectedKeep || selectedKeep.size === 0) {
+        throw new ApiError(
+          503,
+          'CATALOG_UNAVAILABLE',
+          'No ready exit nodes are available for residential home tunnel',
+          { retryAfterSeconds: 15 },
+        );
+      }
+      const vlessBases = new Set(
+        splitManagedCatalogProxies(served).items
+          .filter((item) => !item.name.endsWith(HY2_NAME_SUFFIX))
+          .map((item) => catalogBaseName(item.name)),
+      );
+      const cred = await mintOrLoadDeviceHomeCredential(e, routedUserId, options.deviceId, homeExit.id);
+      const exitBaseNames = await selectAcknowledgedHomeExitBases(
+        e, homeExit.id, cred.createdAt, vlessBases, now(), ROSTER_FRESH_SEC,
+      );
+      if (exitBaseNames.length === 0) {
+        throw new ApiError(
+          503,
+          'CATALOG_UNAVAILABLE',
+          'Residential home tunnel is waiting for an exit node acknowledgement',
+          { retryAfterSeconds: 15 },
+        );
+      }
+      routing = {
+        ...(routing ?? {}),
+        homeTunnel: {
+          homeExitId: homeExit.id,
+          clientUuid: cred.clientUuid,
+          exitBaseNames,
+        },
+      };
+    } else if (routing?.homeSocks5) {
+      await e.DB.prepare(
+        'UPDATE home_exits SET ever_served_plaintext_at = COALESCE(ever_served_plaintext_at, ?) WHERE id = ?',
+      ).bind(now(), homeExit.id).run();
+    }
+  }
+  const routingDigest = routedUserId
+    ? (options?.acceptNodeHome
+      ? { routingDigestVersion: 2 as const, routingSha256: await routingSha256V2(routing) }
+      : { routingSha256: await routingSha256(routing) })
+    : {};
   return {
     revision,
     yaml: served,
     sha256: served === yaml ? digest : await sha256(served),
     updatedAt,
-    ...(routedUserId ? { routingSha256: await routingSha256(routing) } : {}),
+    ...routingDigest,
     ...(routing ? { routing } : {}),
     ...(hy2AutoSwitch === undefined ? {} : { hy2AutoSwitch }),
   };
