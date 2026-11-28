@@ -155,5 +155,68 @@ class RefusesWhatItCannotEdit(unittest.TestCase):
             module.with_metering({"inbounds": []})
 
 
+class NodeHomeStaticTopology(unittest.TestCase):
+    def test_node_home_enforces_routing_service_blackhole_asis_and_cidr_order(self) -> None:
+        original = deployed_shape()
+        original["inbounds"][0]["settings"]["clients"][0]["email"] = "user-42"
+        original["routing"] = {
+            "rules": [{"type": "field", "network": "tcp,udp", "outboundTag": "direct"}]
+        }
+        updated = module.with_node_home(original)
+        self.assertEqual(
+            set(updated["api"]["services"]),
+            {"HandlerService", "RoutingService", "StatsService"},
+        )
+        self.assertEqual(updated["outbounds"][0]["protocol"], "freedom")
+        self.assertEqual(updated["outbounds"][0]["tag"], "direct")
+        self.assertEqual(
+            updated["outbounds"][1],
+            {"tag": "home-blackhole", "protocol": "blackhole"},
+        )
+        self.assertEqual(updated["routing"]["domainStrategy"], "AsIs")
+        self.assertEqual(updated["inbounds"][0]["sniffing"], {"enabled": False})
+        self.assertEqual(
+            updated["inbounds"][0]["settings"]["clients"][0]["email"],
+            "user-42",
+        )
+        self.assertNotIn("geoip:", json.dumps(updated))
+        rule_tags = [rule.get("ruleTag") for rule in updated["routing"]["rules"]]
+        self.assertEqual(
+            rule_tags[:3],
+            ["tono-api-rule", "tono-home-private-cidrs", "tono-home-catchall"],
+        )
+        self.assertEqual(updated["routing"]["rules"][1]["ip"], list(module.PRIVATE_HOME_CIDRS))
+        self.assertEqual(updated["routing"]["rules"][1]["user"], ["regexp:^h:"])
+        self.assertEqual(updated["routing"]["rules"][2]["user"], ["regexp:^h:"])
+        self.assertEqual(updated["routing"]["rules"][3]["outboundTag"], "direct")
+
+    def test_node_home_is_idempotent_across_metered_and_reapplied_configs(self) -> None:
+        metered = module.with_metering(deployed_shape())
+        self.assertTrue(module.needs_changes(metered, node_home=True))
+        self.assertFalse(module.needs_changes(metered, node_home=False))
+        once = module.with_node_home(metered)
+        self.assertFalse(module.needs_changes(once, node_home=True))
+        twice = module.with_node_home(once)
+        self.assertEqual(
+            json.dumps(once, sort_keys=True),
+            json.dumps(twice, sort_keys=True),
+        )
+        tags = [rule.get("ruleTag") for rule in twice["routing"]["rules"]]
+        self.assertEqual(tags.count("tono-api-rule"), 1)
+        self.assertEqual(tags.count("tono-home-private-cidrs"), 1)
+        self.assertEqual(tags.count("tono-home-catchall"), 1)
+
+    def test_node_home_refuses_non_freedom_primary_outbound_or_mismatched_blackhole(self) -> None:
+        bad_primary = deployed_shape()
+        bad_primary["outbounds"] = [{"protocol": "blackhole"}]
+        with self.assertRaises(module.Unsupported):
+            module.with_node_home(bad_primary)
+
+        bad_tag = deployed_shape()
+        bad_tag["outbounds"].append({"tag": "home-blackhole", "protocol": "freedom"})
+        with self.assertRaises(module.Unsupported):
+            module.with_node_home(bad_tag)
+
+
 if __name__ == "__main__":
     unittest.main()

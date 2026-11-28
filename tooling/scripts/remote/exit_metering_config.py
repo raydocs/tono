@@ -24,6 +24,7 @@ installed xray accepts.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import sys
@@ -40,6 +41,26 @@ API_PORT = 10085
 # bill.
 LEGACY_CLIENT_EMAIL = "shared-legacy"
 
+DIRECT_OUTBOUND_TAG = "direct"
+HOME_BLACKHOLE_TAG = "home-blackhole"
+ROUTING_SERVICE = "RoutingService"
+API_RULE_TAG = "tono-api-rule"
+HOME_PRIVATE_CIDRS_RULE_TAG = "tono-home-private-cidrs"
+HOME_CATCHALL_RULE_TAG = "tono-home-catchall"
+# Explicit literal CIDRs instead of `geoip:private` because provisioned exit
+# nodes intentionally omit geoip.dat / geosite.dat.
+PRIVATE_HOME_CIDRS: tuple[str, ...] = (
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "100.64.0.0/10",
+    "fc00::/7",
+    "fe80::/10",
+    "::1/128",
+)
+
 
 class Unsupported(RuntimeError):
     """The configuration is not the shape this knows how to edit."""
@@ -52,13 +73,14 @@ def _vless_inbounds(config: dict) -> list[dict]:
     ]
 
 
-def needs_changes(config: dict) -> bool:
+def needs_changes(config: dict, *, node_home: bool = False) -> bool:
     """Whether applying would change anything.
 
     Consulted before a restart is spent, so it must consider every part of the
     edit rather than just the most obvious one.
     """
-    return json.dumps(with_metering(config), sort_keys=True) != json.dumps(
+    transformed = with_node_home(config) if node_home else with_metering(config)
+    return json.dumps(transformed, sort_keys=True) != json.dumps(
         config, sort_keys=True
     )
 
@@ -147,7 +169,87 @@ def with_metering(config: dict) -> dict:
     return result
 
 
-def main() -> None:
+def with_node_home(config: dict) -> dict:
+    """Add fail-closed node-side residential (`^h:`) routing & blackhole guards.
+
+    Extends `with_metering` additively while keeping index-0 `freedom` intact
+    for existing `u:`, `shared-legacy`, static, and hand-added clients.
+    """
+    result = with_metering(config)
+
+    services = result["api"]["services"]
+    if ROUTING_SERVICE not in services:
+        services.append(ROUTING_SERVICE)
+
+    outbounds = result.get("outbounds")
+    if not isinstance(outbounds, list) or not outbounds or not isinstance(outbounds[0], dict):
+        raise Unsupported("configuration has no primary freedom outbound at index 0")
+    if outbounds[0].get("protocol") != "freedom":
+        raise Unsupported("configuration outbounds[0] must use protocol freedom")
+    outbounds[0].setdefault("tag", DIRECT_OUTBOUND_TAG)
+
+    existing_blackhole = [
+        outbound for outbound in outbounds
+        if isinstance(outbound, dict) and outbound.get("tag") == HOME_BLACKHOLE_TAG
+    ]
+    if existing_blackhole:
+        if any(outbound.get("protocol") != "blackhole" for outbound in existing_blackhole):
+            raise Unsupported("existing home-blackhole outbound does not use protocol blackhole")
+    else:
+        outbounds.append({"tag": HOME_BLACKHOLE_TAG, "protocol": "blackhole"})
+
+    for inbound in _vless_inbounds(result):
+        inbound["sniffing"] = {"enabled": False}
+
+    routing = result["routing"]
+    routing["domainStrategy"] = "AsIs"
+
+    head_tags = {API_RULE_TAG, HOME_PRIVATE_CIDRS_RULE_TAG, HOME_CATCHALL_RULE_TAG}
+    other_rules = [
+        rule for rule in routing.get("rules", [])
+        if not (
+            isinstance(rule, dict)
+            and (
+                rule.get("ruleTag") in head_tags
+                or (rule.get("outboundTag") == API_TAG and API_INBOUND_TAG in (rule.get("inboundTag") or []))
+                or (rule.get("outboundTag") == HOME_BLACKHOLE_TAG and rule.get("user") == ["regexp:^h:"])
+            )
+        )
+    ]
+    routing["rules"] = [
+        {
+            "type": "field",
+            "ruleTag": API_RULE_TAG,
+            "inboundTag": [API_INBOUND_TAG],
+            "outboundTag": API_TAG,
+        },
+        {
+            "type": "field",
+            "ruleTag": HOME_PRIVATE_CIDRS_RULE_TAG,
+            "user": ["regexp:^h:"],
+            "ip": list(PRIVATE_HOME_CIDRS),
+            "outboundTag": HOME_BLACKHOLE_TAG,
+        },
+        {
+            "type": "field",
+            "ruleTag": HOME_CATCHALL_RULE_TAG,
+            "user": ["regexp:^h:"],
+            "outboundTag": HOME_BLACKHOLE_TAG,
+        },
+        *other_rules,
+    ]
+    return result
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--node-home",
+        action="store_true",
+        help="also enforce RoutingService, AsIs DNS, and ^h: home-blackhole static guards",
+    )
+    args = parser.parse_args(argv)
+
     raw = sys.stdin.read()
     try:
         config = json.loads(raw)
@@ -155,7 +257,7 @@ def main() -> None:
         print(f"configuration is not JSON: {error}", file=sys.stderr)
         raise SystemExit(2)
     try:
-        updated = with_metering(config)
+        updated = with_node_home(config) if args.node_home else with_metering(config)
     except Unsupported as error:
         print(f"refusing: {error}", file=sys.stderr)
         raise SystemExit(2)

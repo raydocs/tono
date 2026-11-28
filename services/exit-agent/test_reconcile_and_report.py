@@ -3107,5 +3107,618 @@ class ApiHelpParsing(unittest.TestCase):
             self.assertIn("shared-legacy", removed_labels)
 
 
+class NodeHomeSupport(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.state_path = self.root / "state.json"
+        self.config_path = self.root / "config.json"
+        self._write_node_home_config()
+
+    def _write_node_home_config(self) -> None:
+        self.config_path.write_text(
+            json.dumps({
+                "inbounds": [
+                    {
+                        "tag": "tono-vless",
+                        "protocol": "vless",
+                        "settings": {
+                            "decryption": "none",
+                            "clients": [{"email": "shared-legacy", "id": "11111111-1111-4111-8111-111111111111"}],
+                        },
+                        "sniffing": {"enabled": False},
+                    },
+                    {"tag": "tono-api", "protocol": "dokodemo-door"},
+                ],
+                "outbounds": [
+                    {"tag": "direct", "protocol": "freedom"},
+                    {"tag": "home-blackhole", "protocol": "blackhole"},
+                ],
+                "api": {"tag": "api", "services": ["HandlerService", "RoutingService", "StatsService"]},
+                "routing": {
+                    "domainStrategy": "AsIs",
+                    "rules": [
+                        {"type": "field", "ruleTag": "tono-api-rule", "inboundTag": ["tono-api"], "outboundTag": "api"},
+                        {
+                            "type": "field",
+                            "ruleTag": "tono-home-private-cidrs",
+                            "user": ["regexp:^h:"],
+                            "ip": list(agent.PRIVATE_HOME_CIDRS),
+                            "outboundTag": "home-blackhole",
+                        },
+                        {"type": "field", "ruleTag": "tono-home-catchall", "user": ["regexp:^h:"], "outboundTag": "home-blackhole"},
+                    ],
+                },
+            }),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _all_commands() -> dict[str, str]:
+        return {
+            "add_user": "adu",
+            "remove_user": "rmu",
+            "list_users": "inbounduser",
+            "stats_query": "statsquery",
+            "add_outbound": "ado",
+            "remove_outbound": "rmo",
+            "list_outbounds": "lso",
+            "add_rules": "adrules",
+            "list_rules": "lsrules",
+        }
+
+    def test_h_namespace_attribution_unifies_totals_and_reconciles_stale_h(self) -> None:
+        u_lbl = agent.client_label("usr_1", "dev_1", "11111111-1111-4111-8111-111111111111")
+        h_lbl = agent.home_client_label("usr_1", "dev_1", "22222222-2222-4222-8222-222222222222")
+        self.assertTrue(h_lbl.startswith("h:usr_1:dev_1:"))
+        self.assertEqual(agent.attributed_user(u_lbl), "usr_1")
+        self.assertEqual(agent.attributed_user(h_lbl), "usr_1")
+        self.assertTrue(agent.is_managed_label(u_lbl))
+        self.assertTrue(agent.is_managed_label(h_lbl))
+        self.assertFalse(agent.is_managed_label("ops-hand-added"))
+        self.assertEqual(agent.aggregate_user_totals({u_lbl: 400, h_lbl: 650}), {"usr_1": 1050})
+
+        calls: list[list[str]] = []
+
+        def fake_run(_binary, arguments):
+            calls.append(arguments)
+            if arguments[1] == "rmu":
+                return agent.subprocess.CompletedProcess(arguments, 0, "Removed 1 user(s) in total.", "")
+            return agent.subprocess.CompletedProcess(arguments, 0, "Added 1 user(s) in total.", "")
+
+        with patch.object(agent, "run_xray", side_effect=fake_run):
+            added, removed, installed = agent.reconcile(
+                Path("/unused"),
+                {"add_user": "adu", "remove_user": "rmu"},
+                "127.0.0.1:10085",
+                "tono-vless",
+                [],
+                {"h:stale:dev1:gen0", "ops-manual"},
+                None,
+            )
+        self.assertEqual((added, removed), (0, 1))
+        self.assertEqual(installed, set())
+        self.assertEqual(calls, [["api", "rmu", "--server=127.0.0.1:10085", "-tag=tono-vless", "h:stale:dev1:gen0"]])
+
+        # list_home_outbounds never leaks raw lso JSON/secrets on parse errors
+        bad_lso = agent.subprocess.CompletedProcess([], 0, '{"password":"leak_value"', "")
+        with patch.object(agent, "run_xray", return_value=bad_lso):
+            with self.assertRaises(agent.Refusal) as exc:
+                agent.list_home_outbounds(Path("/xray"), {"list_outbounds": "lso"}, "127.0.0.1:10085")
+        self.assertNotIn("leak_value", str(exc.exception))
+
+    def test_parse_roster_validates_home_identities_outbounds_and_redacts_secrets(self) -> None:
+        base_payload = {
+            "nodeId": "exit-node-a",
+            "observedAt": 100,
+            "identities": [{"userId": "u1", "deviceId": "d1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
+            "homeIdentities": [{
+                "userId": "u1",
+                "deviceId": "d1",
+                "clientUUID": "22222222-2222-4222-8222-222222222222",
+                "homeExitId": "he_1",
+                "bindingGeneration": "gen_1",
+            }],
+            "homeOutbounds": [{
+                "homeExitId": "he_1",
+                "bindingGeneration": "gen_1",
+                "host": "198.51.100.10",
+                "port": 1080,
+                "username": "resi_user",
+                "password": "resi_secret_value",
+            }],
+        }
+        parsed = agent.parse_roster(base_payload)
+        self.assertEqual(parsed[:3], ("exit-node-a", 100, base_payload["identities"]))
+        self.assertEqual(len(parsed.home_identities), 1)
+        self.assertEqual(len(parsed.home_outbounds), 1)
+
+        # Must provide homeIdentities & homeOutbounds together.
+        missing_pair = json.loads(json.dumps(base_payload))
+        del missing_pair["homeOutbounds"]
+        with self.assertRaisesRegex(agent.Refusal, "together"):
+            agent.parse_roster(missing_pair)
+
+        # Cross-namespace UUID collision refused.
+        uuid_collision = json.loads(json.dumps(base_payload))
+        uuid_collision["homeIdentities"][0]["clientUUID"] = uuid_collision["identities"][0]["clientUUID"]
+        with self.assertRaisesRegex(agent.Refusal, "repeats an identity"):
+            agent.parse_roster(uuid_collision)
+
+        # Home identity referencing unknown outbound refused.
+        orphan_home = json.loads(json.dumps(base_payload))
+        orphan_home["homeIdentities"][0]["bindingGeneration"] = "other_gen"
+        with self.assertRaisesRegex(agent.Refusal, "missing outbound"):
+            agent.parse_roster(orphan_home)
+
+        # Bad host/port/secret refused cleanly without leaking secrets.
+        bad_port = json.loads(json.dumps(base_payload))
+        bad_port["homeOutbounds"][0]["port"] = 70000
+        with self.assertRaises(agent.Refusal) as exc:
+            agent.parse_roster(bad_port)
+        self.assertNotIn("resi_secret_value", str(exc.exception))
+
+        empty_secret = json.loads(json.dumps(base_payload))
+        empty_secret["homeOutbounds"][0]["password"] = ""
+        with self.assertRaisesRegex(agent.Refusal, "password"):
+            agent.parse_roster(empty_secret)
+
+    def test_sync_hy2_roster_refuses_residential_entries(self) -> None:
+        allow_path = self.root / "auth-allow.sha256"
+        allow_path.write_text("# header\n", encoding="utf-8")
+        allow_path.chmod(0o640)
+        with patch.object(agent, "HY2_AUTH_ALLOWLIST", allow_path):
+            with self.assertRaisesRegex(agent.Refusal, "never receive residential"):
+                agent.sync_hy2_roster([{
+                    "userId": "u1",
+                    "clientUUID": "22222222-2222-4222-8222-222222222222",
+                    "homeExitId": "he_1",
+                    "bindingGeneration": "gen_1",
+                }])
+
+    def test_capability_detection_checks_commands_version_and_static_topology(self) -> None:
+        cmds = self._all_commands()
+        with patch.object(agent, "xray_version", return_value="26.3.27"):
+            ok, ver, reason = agent.detect_node_home_capability(Path("/xray"), self.config_path, cmds, "tono-vless")
+            self.assertEqual((ok, ver, reason), (True, "26.3.27", None))
+        with patch.object(agent, "xray_version", return_value="26.99.0"):
+            ok, ver, _ = agent.detect_node_home_capability(Path("/xray"), self.config_path, cmds, "tono-vless")
+            self.assertFalse(ok)
+            self.assertEqual(ver, "26.99.0")
+        bad_cfg = self.root / "bad-config.json"
+        bad_cfg.write_text(json.dumps({"inbounds": [], "outbounds": []}), encoding="utf-8")
+        with patch.object(agent, "xray_version", return_value="26.11.9"):
+            ok, _, _ = agent.detect_node_home_capability(Path("/xray"), bad_cfg, cmds, "tono-vless")
+            self.assertFalse(ok)
+
+    def test_strict_add_remove_order_testroute_failure_and_drain_acks(self) -> None:
+        u_uuid = "11111111-1111-4111-8111-111111111111"
+        h_uuid = "22222222-2222-4222-8222-222222222222"
+        h_lbl = agent.home_client_label("usr_1", "dev_1", h_uuid)
+        state = {"totals": {}, "counterBaseline": {}, "pendingReports": [], "sourceId": "node-home-a"}
+        self.state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        live_clients: set[str] = set()
+        live_outbounds: list[dict] = []
+        live_rules: list[dict] = [
+            {"ruleTag": "tono-api-rule", "tag": "api"},
+            {"ruleTag": "tono-home-private-cidrs", "tag": "home-blackhole"},
+            {"ruleTag": "tono-home-catchall", "tag": "home-blackhole"},
+        ]
+        events: list[str] = []
+        ack_payloads: list[dict] = []
+        fail_testroute = False
+        fail_ack = False
+
+        def fake_run(_binary, arguments):
+            cmd = arguments[0] if arguments and arguments[0] == "version" else arguments[1]
+            if cmd == "version":
+                return agent.subprocess.CompletedProcess(arguments, 0, "Xray 26.3.27 (Xray) commit", "")
+            if cmd == "inbounduser":
+                return agent.subprocess.CompletedProcess(
+                    arguments, 0, json.dumps({"users": [{"email": lbl} for lbl in sorted(live_clients)]}), "",
+                )
+            if cmd == "lso":
+                return agent.subprocess.CompletedProcess(arguments, 0, json.dumps({"outbounds": live_outbounds}), "")
+            if cmd == "ado":
+                doc = json.loads(Path(arguments[-1]).read_text())
+                ob = doc["outbounds"][0]
+                srv = ob["settings"]["servers"][0]
+                usr = srv["users"][0]
+                # Check staging dir/file modes while staged file exists!
+                staged_file = Path(arguments[-1])
+                self.assertEqual(staged_file.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(staged_file.parent.stat().st_mode & 0o777, 0o700)
+                events.append(f"ado:{ob['tag']}")
+                live_outbounds[:] = [o for o in live_outbounds if o["tag"] != ob["tag"]]
+                live_outbounds.append({
+                    "tag": ob["tag"],
+                    "proxySettings": {
+                        "server": {
+                            "address": srv["address"],
+                            "port": srv["port"],
+                            "user": {"account": {"username": usr["user"], "password": usr["pass"]}},
+                        }
+                    },
+                })
+                return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+            if cmd == "adrules":
+                doc = json.loads(Path(arguments[-1]).read_text())
+                live_rules[:] = [{"ruleTag": r["ruleTag"], "tag": r["outboundTag"]} for r in doc["routing"]["rules"]]
+                events.append("adrules:" + ",".join(r["ruleTag"] for r in live_rules))
+                return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+            if cmd == "lsrules":
+                return agent.subprocess.CompletedProcess(arguments, 0, json.dumps({"rules": live_rules}), "")
+            if cmd == "adu":
+                client = json.loads(Path(arguments[-1]).read_text())["inbounds"][0]["settings"]["clients"][0]
+                live_clients.add(client["email"])
+                events.append(f"adu:{client['email']}")
+                return agent.subprocess.CompletedProcess(arguments, 0, "Added 1 user(s) in total.", "")
+            if cmd == "rmu":
+                lbl = arguments[-1]
+                live_clients.discard(lbl)
+                events.append(f"rmu:{lbl}")
+                return agent.subprocess.CompletedProcess(arguments, 0, "Removed 1 user(s) in total.", "")
+            if cmd == "rmo":
+                ob_tag = arguments[-1]
+                live_outbounds[:] = [o for o in live_outbounds if o["tag"] != ob_tag]
+                events.append(f"rmo:{ob_tag}")
+                return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+            if cmd == "statsquery":
+                return agent.subprocess.CompletedProcess(arguments, 0, json.dumps({"stat": []}), "")
+            raise AssertionError(arguments)
+
+        def fake_testroute(_address, *, inbound_tag_name, user, target_domain="", target_ip="", target_port=443):
+            if fail_testroute:
+                return {"outbound_tag": "direct"}
+            if user == "h:unbound-probe:0:0" or target_ip in ("127.0.0.1", "10.0.0.1"):
+                return {"outbound_tag": "home-blackhole"}
+            events.append(f"testroute:{user}")
+            return {"outbound_tag": "home:he1:gen1"}
+
+        def capture_ack(_base, _token, observed_at, **kwargs):
+            if fail_ack:
+                raise agent.Refusal("roster ack failed: 503")
+            ack_payloads.append({"observedAt": observed_at, **kwargs})
+
+        round_payloads = [
+            # Round 1: homeOutbounds absent -> registers nodeHomeCapable without homeObservedAt
+            agent.ParsedRoster("node-home-a", 1000, [{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": u_uuid}], False, None),
+            # Round 2: succeeds TestRoute -> ado -> adrules -> testroute -> adu
+            agent.ParsedRoster(
+                "node-home-a", 1001, [{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": u_uuid}], False, None,
+                home_identities=[{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": h_uuid, "homeExitId": "he1", "bindingGeneration": "gen1"}],
+                home_outbounds=[{"homeExitId": "he1", "bindingGeneration": "gen1", "host": "198.51.100.1", "port": 1080, "username": "u", "password": "secret_p"}],
+            ),
+            # Round 3: unbind fails ack -> rmu -> adrules -> rmo, but pendingDrainAcks survives!
+            agent.ParsedRoster(
+                "node-home-a", 1002, [{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": u_uuid}], False, None,
+                home_identities=[], home_outbounds=[],
+            ),
+            # Round 4: ack succeeds -> drainedGenerations delivered and cleared!
+            agent.ParsedRoster(
+                "node-home-a", 1003, [{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": u_uuid}], False, None,
+                home_identities=[], home_outbounds=[],
+            ),
+        ]
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-tok",
+                 "TONO_SOURCE_ID": "node-home-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "xray_config_path", return_value=self.config_path), \
+             patch.object(agent, "require_commands", return_value=self._all_commands()), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "fetch_roster", side_effect=round_payloads), \
+             patch.object(agent, "run_xray", side_effect=fake_run), \
+             patch.object(agent, "grpc_test_route", side_effect=fake_testroute), \
+             patch.object(agent, "acknowledge_roster", side_effect=capture_ack), \
+             patch.object(agent, "acknowledge_metering"):
+            # Round 1
+            agent.run_once(self.state_path)
+            self.assertEqual(ack_payloads[-1]["node_home_capable"], True)
+            self.assertEqual(ack_payloads[-1]["metering_protocol_version"], 3)
+            self.assertIsNone(ack_payloads[-1]["home_observed_at"])
+
+            # Round 2: ado -> adrules -> testroute -> adu order verified + no homeOutbounds in roster cache!
+            events.clear()
+            fail_testroute = False
+            agent.run_once(self.state_path)
+            idx_ado = events.index("ado:home:he1:gen1")
+            idx_adr = next(i for i, e in enumerate(events) if e.startswith("adrules:"))
+            idx_tr = events.index(f"testroute:{h_lbl}")
+            idx_adu = events.index(f"adu:{h_lbl}")
+            self.assertLess(idx_ado, idx_adr)
+            self.assertLess(idx_adr, idx_tr)
+            self.assertLess(idx_tr, idx_adu)
+            self.assertEqual(ack_payloads[-1]["home_observed_at"], 1001)
+
+            cache_raw = agent.roster_cache_path(self.state_path).read_text(encoding="utf-8")
+            self.assertNotIn("homeOutbounds", cache_raw)
+            self.assertNotIn("secret_p", cache_raw)
+            self.assertEqual(json.loads(cache_raw)["version"], 2)
+            # Staging dir has zero leftover files!
+            self.assertEqual(list((self.root / ".xray-staging").iterdir()), [])
+
+            # Round 3: Unbind with failing ack -> strict rmu -> adrules -> rmo order & pendingDrainAcks kept
+            events.clear()
+            fail_ack = True
+            with self.assertRaisesRegex(agent.Refusal, "roster ack failed"):
+                agent.run_once(self.state_path)
+            idx_rmu = events.index(f"rmu:{h_lbl}")
+            idx_adr3 = next(i for i, e in enumerate(events) if e.startswith("adrules:"))
+            idx_rmo = events.index("rmo:home:he1:gen1")
+            self.assertLess(idx_rmu, idx_adr3)
+            self.assertLess(idx_adr3, idx_rmo)
+            saved_after_fail = json.loads(self.state_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                saved_after_fail["pendingDrainAcks"],
+                [{"homeExitId": "he1", "retiredGeneration": "gen1"}],
+            )
+
+            # Round 4: Retry delivers pendingDrainAcks & clears state cleanly
+            fail_ack = False
+            agent.run_once(self.state_path)
+            self.assertEqual(
+                ack_payloads[-1]["drained_generations"],
+                [{"homeExitId": "he1", "retiredGeneration": "gen1"}],
+            )
+            saved_after_ack = json.loads(self.state_path.read_text(encoding="utf-8"))
+            self.assertNotIn("pendingDrainAcks", saved_after_ack)
+
+            # Separate isolated TestRoute failure check: adu MUST NOT be called, rules reset fail-closed.
+            fail_testroute = True
+            events.clear()
+            with patch.object(
+                agent,
+                "fetch_roster",
+                return_value=agent.ParsedRoster(
+                    "node-home-a", 1004, [], False, None,
+                    home_identities=[{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": h_uuid, "homeExitId": "he2", "bindingGeneration": "gen2"}],
+                    home_outbounds=[{"homeExitId": "he2", "bindingGeneration": "gen2", "host": "198.51.100.2", "port": 1080, "username": "u2", "password": "p2"}],
+                ),
+            ):
+                with self.assertRaisesRegex(agent.Refusal, "TestRoute"):
+                    agent.run_once(self.state_path)
+            self.assertNotIn(h_lbl, live_clients)
+            self.assertFalse(any(e == f"adu:{h_lbl}" for e in events))
+            self.assertEqual(
+                [r["ruleTag"] for r in live_rules],
+                ["tono-api-rule", "tono-home-private-cidrs", "tono-home-catchall"],
+            )
+
+    def test_outage_lease_preserves_inside_300s_and_tears_down_after_expiry_or_restart(self) -> None:
+        u_uuid = "11111111-1111-4111-8111-111111111111"
+        h_uuid = "22222222-2222-4222-8222-222222222222"
+        u_lbl = agent.client_label("usr_1", "dev_1", u_uuid)
+        h_lbl = agent.home_client_label("usr_1", "dev_1", h_uuid)
+        cache_path = agent.roster_cache_path(self.state_path)
+        self.state_path.write_text(json.dumps({
+            "totals": {},
+            "counterBaseline": {},
+            "pendingReports": [],
+            "sourceId": "node-home-a",
+            "installedClients": [u_lbl, h_lbl],
+            "activeHomeGenerations": [{"homeExitId": "he1", "bindingGeneration": "gen1"}],
+        }), encoding="utf-8")
+
+        live_clients = {u_lbl, h_lbl}
+        live_outbounds = [{
+            "tag": "home:he1:gen1",
+            "proxySettings": {"server": {"address": "198.51.100.1", "port": 1080, "user": {"account": {"username": "u", "password": "p"}}}},
+        }]
+        live_rules: list[dict] = []
+        rmo_calls: list[str] = []
+
+        def fake_run(_binary, arguments):
+            cmd = arguments[0] if arguments and arguments[0] == "version" else arguments[1]
+            if cmd == "version":
+                return agent.subprocess.CompletedProcess(arguments, 0, "Xray 26.3.27", "")
+            if cmd == "inbounduser":
+                return agent.subprocess.CompletedProcess(
+                    arguments, 0, json.dumps({"users": [{"email": lbl} for lbl in sorted(live_clients)]}), "",
+                )
+            if cmd == "lso":
+                return agent.subprocess.CompletedProcess(arguments, 0, json.dumps({"outbounds": live_outbounds}), "")
+            if cmd == "adrules":
+                doc = json.loads(Path(arguments[-1]).read_text())
+                live_rules[:] = doc["routing"]["rules"]
+                return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+            if cmd == "rmu":
+                live_clients.discard(arguments[-1])
+                return agent.subprocess.CompletedProcess(arguments, 0, "Removed 1 user(s) in total.", "")
+            if cmd == "rmo":
+                ob_tag = arguments[-1]
+                rmo_calls.append(ob_tag)
+                live_outbounds[:] = [o for o in live_outbounds if o["tag"] != ob_tag]
+                return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+            if cmd == "statsquery":
+                return agent.subprocess.CompletedProcess(arguments, 0, json.dumps({"stat": []}), "")
+            return agent.subprocess.CompletedProcess(arguments, 0, "Added 1 user(s) in total.", "")
+
+        # Cache rejection check: v1 or file with homeOutbounds is rejected.
+        cache_path.write_text(json.dumps({
+            "version": 1, "savedAt": 1000, "nodeId": "node-home-a", "observedAt": 1000, "identities": [],
+        }), encoding="utf-8")
+        cache_path.chmod(0o600)
+        with patch.object(agent.time, "time", return_value=1010):
+            with self.assertRaisesRegex(agent.Refusal, "version"):
+                agent.load_roster_cache(cache_path, "node-home-a")
+
+        with patch.object(agent.time, "time", return_value=1000):
+            agent.save_roster_cache(
+                cache_path,
+                "node-home-a",
+                1000,
+                [{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": u_uuid}],
+                False,
+                home_identities=[{
+                    "userId": "usr_1", "deviceId": "dev_1", "clientUUID": h_uuid,
+                    "homeExitId": "he1", "bindingGeneration": "gen1",
+                }],
+                start_marker="boot:1",
+            )
+
+        with patch.dict(agent.os.environ, {"TONO_SOURCE_ID": "node-home-a"}, clear=True), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "xray_config_path", return_value=self.config_path), \
+             patch.object(agent, "require_commands", return_value=self._all_commands()), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "run_xray", side_effect=fake_run), \
+             patch.object(agent.time, "time", return_value=1100):
+            with self.assertRaises(agent.Unreachable):
+                agent.run_outage_round(
+                    self.state_path, "node-home-a", Path("/xray"), self._all_commands(),
+                    "127.0.0.1:10085", "tono-vless", None, urllib.error.URLError("down"),
+                )
+        # Inside <= 300s & same Xray startMarker -> live h: preserved!
+        self.assertIn(h_lbl, live_clients)
+        self.assertEqual(rmo_calls, [])
+
+        # > 300s expiry tears down h:, rules, and rmo(home:he1:gen1), keeping u: intact!
+        with patch.dict(agent.os.environ, {"TONO_SOURCE_ID": "node-home-a"}, clear=True), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "xray_config_path", return_value=self.config_path), \
+             patch.object(agent, "require_commands", return_value=self._all_commands()), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "run_xray", side_effect=fake_run), \
+             patch.object(agent.time, "time", return_value=1400):
+            with self.assertRaises(agent.Unreachable):
+                agent.run_outage_round(
+                    self.state_path, "node-home-a", Path("/xray"), self._all_commands(),
+                    "127.0.0.1:10085", "tono-vless", None, urllib.error.URLError("down"),
+                )
+        self.assertIn(u_lbl, live_clients)
+        self.assertNotIn(h_lbl, live_clients)
+        self.assertEqual(rmo_calls, ["home:he1:gen1"])
+        self.assertEqual([r["ruleTag"] for r in live_rules], ["tono-api-rule", "tono-home-private-cidrs", "tono-home-catchall"])
+        saved = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["pendingDrainAcks"], [{"homeExitId": "he1", "retiredGeneration": "gen1"}])
+        self.assertEqual(saved["activeHomeGenerations"], [])
+
+        # Xray restart inside <= 300s (boot:1 -> boot:2) also tears down h: immediately!
+        live_clients.add(h_lbl)
+        rmo_calls.clear()
+        with patch.dict(agent.os.environ, {"TONO_SOURCE_ID": "node-home-a"}, clear=True), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "xray_config_path", return_value=self.config_path), \
+             patch.object(agent, "require_commands", return_value=self._all_commands()), \
+             patch.object(agent, "xray_start_marker", return_value="boot:2"), \
+             patch.object(agent, "run_xray", side_effect=fake_run), \
+             patch.object(agent.time, "time", return_value=1100):
+            with self.assertRaises(agent.Unreachable):
+                agent.run_outage_round(
+                    self.state_path, "node-home-a", Path("/xray"), self._all_commands(),
+                    "127.0.0.1:10085", "tono-vless", None, urllib.error.URLError("down"),
+                )
+        self.assertNotIn(h_lbl, live_clients)
+        self.assertIn(u_lbl, live_clients)
+
+    def test_failed_h_rmu_withholds_rmo_and_drain_ack(self) -> None:
+        h_uuid = "22222222-2222-4222-8222-222222222222"
+        h_lbl = agent.home_client_label("usr_1", "dev_1", h_uuid)
+        live_outbounds = {"home:he1:gen1": {"host": "198.51.100.1", "port": 1080, "username": "u", "password": "p"}}
+        rmo_calls: list[str] = []
+
+        def fake_rmu(_bin, _cmd, _addr, _tag, lbl):
+            if lbl == h_lbl:
+                return agent.subprocess.CompletedProcess([], 0, "rpc error: Failed\nRemoved 0 user(s) in total.", "")
+            return agent.subprocess.CompletedProcess([], 0, "Removed 1 user(s) in total.", "")
+
+        with patch.object(agent, "remove_inbound_user", side_effect=fake_rmu), \
+             patch.object(agent, "list_home_outbounds", return_value=live_outbounds), \
+             patch.object(agent, "replace_routing_rules"), \
+             patch.object(agent, "verify_node_home_rules_and_routes"), \
+             patch.object(agent, "remove_home_outbound", side_effect=lambda *_a: rmo_calls.append(_a[-1])):
+            with self.assertRaises(agent.PartialReconcile) as exc:
+                agent._sync_node_home_round(
+                    Path("/xray"),
+                    self._all_commands(),
+                    "127.0.0.1:10085",
+                    "tono-vless",
+                    self.root,
+                    [],
+                    {h_lbl},
+                    {h_lbl},
+                    False,
+                    [],
+                    [],
+                    [{"homeExitId": "he1", "bindingGeneration": "gen1"}],
+                )
+        self.assertEqual(rmo_calls, [])
+        self.assertEqual(getattr(exc.exception, "drained_generations", []), [])
+
+    def test_withdraw_home_removes_only_home_and_sends_false_capability(self) -> None:
+        u_lbl = agent.client_label("usr_1", "dev_1", "11111111-1111-4111-8111-111111111111")
+        h_lbl = agent.home_client_label("usr_1", "dev_1", "22222222-2222-4222-8222-222222222222")
+        self.state_path.write_text(json.dumps({
+            "totals": {},
+            "counterBaseline": {},
+            "pendingReports": [],
+            "sourceId": "node-home-a",
+            "installedClients": [u_lbl, h_lbl],
+            "activeHomeGenerations": [{"homeExitId": "he1", "bindingGeneration": "gen1"}],
+        }), encoding="utf-8")
+        cache_path = agent.roster_cache_path(self.state_path)
+        cache_path.write_text(json.dumps({
+            "version": 2,
+            "savedAt": 1000,
+            "nodeId": "node-home-a",
+            "observedAt": 1000,
+            "identities": [],
+            "homeIdentities": [{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": "22222222-2222-4222-8222-222222222222", "homeExitId": "he1", "bindingGeneration": "gen1"}],
+            "homeLease": {"savedAt": 1000, "expiresAt": 1300, "startMarker": "boot:1"},
+        }), encoding="utf-8")
+        cache_path.chmod(0o600)
+
+        live_clients = {u_lbl, h_lbl, "shared-legacy"}
+        live_outbounds = [{"tag": "home:he1:gen1", "proxySettings": {"server": {"address": "198.51.100.1", "port": 1080, "user": {"account": {"username": "u", "password": "p"}}}}}]
+        acks: list[dict] = []
+
+        def fake_run(_binary, arguments):
+            cmd = arguments[1]
+            if cmd == "inbounduser":
+                return agent.subprocess.CompletedProcess(arguments, 0, json.dumps({"users": [{"email": c} for c in sorted(live_clients)]}), "")
+            if cmd == "rmu":
+                live_clients.discard(arguments[-1])
+                return agent.subprocess.CompletedProcess(arguments, 0, "Removed 1 user(s) in total.", "")
+            if cmd == "lso":
+                return agent.subprocess.CompletedProcess(arguments, 0, json.dumps({"outbounds": live_outbounds}), "")
+            if cmd == "adrules":
+                return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+            if cmd == "rmo":
+                live_outbounds[:] = [o for o in live_outbounds if o["tag"] != arguments[-1]]
+                return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+            raise AssertionError(arguments)
+
+        def capture_ack(_base, _token, observed_at, **kwargs):
+            acks.append({"observedAt": observed_at, **kwargs})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_API_BASE": "https://control.example",
+                 "TONO_HOME_AGENT_TOKEN": "node-tok",
+                 "TONO_AGENT_STATE": str(self.state_path),
+             }, clear=True), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "xray_config_path", return_value=self.config_path), \
+             patch.object(agent, "require_commands", return_value=self._all_commands()), \
+             patch.object(agent, "run_xray", side_effect=fake_run), \
+             patch.object(agent, "acknowledge_roster", side_effect=capture_ack):
+            agent.main(withdraw_home=True)
+
+        self.assertEqual(live_clients, {u_lbl, "shared-legacy"})
+        self.assertEqual(live_outbounds, [])
+        self.assertEqual(len(acks), 1)
+        self.assertEqual(acks[0]["node_home_capable"], False)
+        self.assertEqual(acks[0]["metering_protocol_version"], 3)
+        self.assertEqual(acks[0]["drained_generations"], [{"homeExitId": "he1", "retiredGeneration": "gen1"}])
+        cache_doc = json.loads(cache_path.read_text(encoding="utf-8"))
+        self.assertNotIn("homeIdentities", cache_doc)
+        self.assertNotIn("homeLease", cache_doc)
+
+
 if __name__ == "__main__":
     unittest.main()

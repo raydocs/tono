@@ -51,11 +51,13 @@ import errno
 import fcntl
 import hashlib
 import http.client
+import ipaddress
 import json
 import os
 import re
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -65,6 +67,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Any
 
 MAX_REPORTS_PER_REQUEST = 500
 MAX_USERS_PER_REQUEST = 100
@@ -89,16 +92,54 @@ STATE_MODE = 0o600
 # plane. Past this the node restores nothing: a day-old list is too likely to
 # name accounts that have since been revoked, expired or run out of quota.
 ROSTER_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60
-ROSTER_CACHE_VERSION = 1
+MAX_HOME_OUTAGE_LEASE_SECONDS = 300
+ROSTER_CACHE_VERSION = 2
 HY2_AUTH_ALLOWLIST = Path("/opt/tono-hy2/auth-allow.sha256")
 HY2_ROSTER_MARKER = "# tono-exit-agent roster v1"
 # Label written by enable-tono-exit-metering.sh for the credential every
 # current client still holds. Removing it would drop the fleet.
 LEGACY_CLIENT_EMAIL = "shared-legacy"
-# Managed labels use this prefix. Legacy clients are `u:<userId>`; device
-# credentials append device ID and credential UUID so a rotated UUID cannot be
-# mistaken for the still-installed previous generation.
+# Managed labels use these prefixes: `u:` for cloud egress, `h:` for
+# node-dialed residential egress. Device credentials append device ID and
+# credential digest so rotated generations never share a baseline or collision.
 CLIENT_LABEL_PREFIX = "u:"
+HOME_LABEL_PREFIX = "h:"
+HOME_OUTBOUND_PREFIX = "home:"
+API_TAG = "api"
+API_INBOUND_TAG = "tono-api"
+DIRECT_OUTBOUND_TAG = "direct"
+HOME_BLACKHOLE_TAG = "home-blackhole"
+API_RULE_TAG = "tono-api-rule"
+HOME_PRIVATE_CIDRS_RULE_TAG = "tono-home-private-cidrs"
+HOME_CATCHALL_RULE_TAG = "tono-home-catchall"
+ROUTING_SERVICE = "RoutingService"
+VERIFIED_NODE_HOME_XRAY_VERSIONS = frozenset({"26.3.27", "26.11.9"})
+NODE_HOME_METERING_PROTOCOL_VERSION = 3
+MAX_DRAINED_GENERATIONS_PER_ACK = 200
+HOME_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
+UUID_PATTERN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+PRIVATE_HOME_CIDRS: tuple[str, ...] = (
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "100.64.0.0/10",
+    "fc00::/7",
+    "fe80::/10",
+    "::1/128",
+)
+REQUIRED_NODE_HOME_COMMANDS = (
+    "add_user",
+    "remove_user",
+    "list_users",
+    "stats_query",
+    "add_outbound",
+    "remove_outbound",
+    "list_outbounds",
+    "add_rules",
+    "list_rules",
+)
 # Opt-in stuck-revocation restart (TONO_RESTART_XRAY_ON_STUCK_REVOCATION=1).
 STUCK_REVOCATION_ROUNDS = 3
 XRAY_RESTART_INTERVAL_SECONDS = 60 * 60
@@ -347,15 +388,43 @@ def configured_source() -> str:
     return source
 
 
+def is_managed_label(label: str) -> bool:
+    """Whether `label` belongs to either managed exit-agent namespace (`u:` or `h:`)."""
+    return label.startswith(CLIENT_LABEL_PREFIX) or label.startswith(HOME_LABEL_PREFIX)
+
+
 def client_label(user_id: str, device_id: str | None = None,
-                 client_uuid: str | None = None) -> str:
+                 client_uuid: str | None = None,
+                 *, prefix: str = CLIENT_LABEL_PREFIX) -> str:
     """The credential-generation label a client is installed and counted under."""
     if device_id:
         if not client_uuid:
             raise Refusal("a device-scoped client label requires its credential UUID")
         generation = hashlib.sha256(client_uuid.encode("ascii")).hexdigest()
-        return f"{CLIENT_LABEL_PREFIX}{user_id}:{device_id}:{generation}"
-    return f"{CLIENT_LABEL_PREFIX}{user_id}"
+        return f"{prefix}{user_id}:{device_id}:{generation}"
+    return f"{prefix}{user_id}"
+
+
+def home_client_label(user_id: str, device_id: str, client_uuid: str) -> str:
+    """The `h:` residential credential-generation label."""
+    return client_label(user_id, device_id, client_uuid, prefix=HOME_LABEL_PREFIX)
+
+
+def home_outbound_tag(home_exit_id: str, binding_generation: str) -> str:
+    """Per-tenant Xray outbound tag isolating residential streams for drain & teardown."""
+    return f"{HOME_OUTBOUND_PREFIX}{home_exit_id}:{binding_generation}"
+
+
+def parse_home_outbound_tag(tag: str) -> tuple[str, str] | None:
+    if not tag.startswith(HOME_OUTBOUND_PREFIX):
+        return None
+    rest = tag[len(HOME_OUTBOUND_PREFIX):]
+    if ":" not in rest:
+        return None
+    home_exit_id, binding_generation = rest.split(":", 1)
+    if HOME_ID_PATTERN.fullmatch(home_exit_id) and HOME_ID_PATTERN.fullmatch(binding_generation):
+        return home_exit_id, binding_generation
+    return None
 
 
 def attributed_user(label: str) -> str | None:
@@ -363,13 +432,14 @@ def attributed_user(label: str) -> str | None:
 
     `shared-legacy` and anything added by hand carry traffic that belongs to no
     single account; reporting it against one would bill the wrong customer.
-    Supports device-scoped credential-generation labels:
-    `u:<user_id>:<device_id>:<credential_digest>`.
+    Supports both cloud (`u:<user_id>[:<device_id>:<digest>]`) and residential
+    (`h:<user_id>:<device_id>:<digest>`) namespaces without double-billing.
     """
-    if not label.startswith(CLIENT_LABEL_PREFIX):
-        return None
-    raw = label[len(CLIENT_LABEL_PREFIX):]
-    return raw.split(":")[0] or None
+    for prefix in (CLIENT_LABEL_PREFIX, HOME_LABEL_PREFIX):
+        if label.startswith(prefix):
+            raw = label[len(prefix):]
+            return raw.split(":")[0] or None
+    return None
 
 
 def run_xray(binary: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
@@ -523,7 +593,10 @@ def supported_api_commands(binary: Path) -> set[str]:
     text = f"{result.stdout}\n{result.stderr}"
     # Help is tab-indented on current Xray builds (`\tadu  Add users…`).
     # Requiring two spaces missed every command except accidental matches.
-    return set(re.findall(r"^\s+([a-z][a-z0-9]+)\s+", text, re.MULTILINE))
+    cmds = set(re.findall(r"^\s+([a-z][a-z0-9]+)\s+", text, re.MULTILINE))
+    # Usage banner (`\txray api <command>`) matches the indented token pattern.
+    cmds.discard("xray")
+    return cmds
 
 
 def require_commands(binary: Path) -> dict[str, str]:
@@ -537,8 +610,17 @@ def require_commands(binary: Path) -> dict[str, str]:
     # builds do not have it — so it is looked up and lived without rather than
     # required, and its absence makes this agent remove nothing. Counters are
     # required for metering, which refuses after enforcement when they are
-    # missing; their absence must not hold back a revocation.
-    optional = {"list_users": ("inbounduser", "iu"), "stats_query": ("statsquery", "stats")}
+    # missing; their absence must not hold back a revocation. Node-home commands
+    # are discovered optionally so un-migrated exits and older tests continue.
+    optional = {
+        "list_users": ("inbounduser", "iu"),
+        "stats_query": ("statsquery", "stats"),
+        "add_outbound": ("ado",),
+        "remove_outbound": ("rmo",),
+        "list_outbounds": ("lso",),
+        "add_rules": ("adrules",),
+        "list_rules": ("lsrules",),
+    }
     resolved: dict[str, str] = {}
     missing: list[str] = []
     for role, candidates in wanted.items():
@@ -562,6 +644,595 @@ def require_commands(binary: Path) -> dict[str, str]:
                 resolved[role] = candidate
                 break
     return resolved
+
+
+def node_home_commands_present(commands: dict[str, str]) -> bool:
+    return all(role in commands for role in REQUIRED_NODE_HOME_COMMANDS)
+
+
+def xray_version(binary: Path) -> str | None:
+    """Parse Xray semantic version from `xray version` output, or None if unreadable."""
+    try:
+        result = run_xray(binary, ["version"])
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    for line in (result.stdout or "").splitlines():
+        match = re.match(r"^Xray\s+([0-9]+(?:\.[0-9]+)+)\b", line.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
+def config_has_node_home_topology(config_path: Path, tag: str) -> tuple[bool, str | None]:
+    """Verify static `config.json` enforces RoutingService, AsIs, blackhole & ^h: guards."""
+    try:
+        document = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return False, f"cannot inspect {config_path}: {error}"
+    if not isinstance(document, dict):
+        return False, f"{config_path} root is not a JSON object"
+    services = ((document.get("api") or {}) if isinstance(document.get("api"), dict) else {}).get("services")
+    if not isinstance(services, list) or ROUTING_SERVICE not in services:
+        return False, f"{config_path} api.services lacks {ROUTING_SERVICE}"
+    outbounds = document.get("outbounds")
+    if not isinstance(outbounds, list) or not outbounds or not isinstance(outbounds[0], dict):
+        return False, f"{config_path} lacks primary freedom outbound at index 0"
+    if outbounds[0].get("protocol") != "freedom":
+        return False, f"{config_path} outbounds[0] is not freedom"
+    if not any(
+        isinstance(outbound, dict)
+        and outbound.get("tag") == HOME_BLACKHOLE_TAG
+        and outbound.get("protocol") == "blackhole"
+        for outbound in outbounds
+    ):
+        return False, f"{config_path} lacks {HOME_BLACKHOLE_TAG} blackhole outbound"
+    routing = document.get("routing")
+    if not isinstance(routing, dict) or routing.get("domainStrategy") != "AsIs":
+        return False, f"{config_path} routing.domainStrategy must be AsIs"
+    vless_inbounds = [
+        inbound for inbound in (document.get("inbounds") or [])
+        if isinstance(inbound, dict) and inbound.get("protocol") == "vless"
+    ]
+    matching = [inbound for inbound in vless_inbounds if inbound.get("tag") == tag] or vless_inbounds
+    if not matching:
+        return False, f"{config_path} has no vless inbound"
+    for inbound in matching:
+        sniffing = inbound.get("sniffing")
+        if not isinstance(sniffing, dict) or sniffing.get("enabled") is not False:
+            return False, f"{config_path} vless inbound must disable sniffing"
+    rules = routing.get("rules")
+    if not isinstance(rules, list) or len(rules) < 3:
+        return False, f"{config_path} lacks static fail-closed ^h: routing rules"
+    r0, r1, r2 = rules[0], rules[1], rules[2]
+    if not (isinstance(r0, dict) and r0.get("outboundTag") == API_TAG and API_INBOUND_TAG in (r0.get("inboundTag") or [])):
+        return False, f"{config_path} rule 0 must route {API_INBOUND_TAG} -> {API_TAG}"
+    if not (
+        isinstance(r1, dict)
+        and r1.get("outboundTag") == HOME_BLACKHOLE_TAG
+        and r1.get("user") == ["regexp:^h:"]
+        and isinstance(r1.get("ip"), list)
+        and set(PRIVATE_HOME_CIDRS).issubset(set(r1["ip"]))
+    ):
+        return False, f"{config_path} rule 1 must block literal private CIDRs for ^h:"
+    if not (
+        isinstance(r2, dict)
+        and r2.get("outboundTag") == HOME_BLACKHOLE_TAG
+        and r2.get("user") == ["regexp:^h:"]
+        and "ip" not in r2
+        and "domain" not in r2
+    ):
+        return False, f"{config_path} rule 2 must catch-all ^h: -> {HOME_BLACKHOLE_TAG}"
+    return True, None
+
+
+def detect_node_home_capability(
+    binary: Path, config_path: Path, commands: dict[str, str], tag: str,
+) -> tuple[bool, str | None, str | None]:
+    """Return `(capable, detected_xray_version, reason_if_incapable)`."""
+    if not node_home_commands_present(commands):
+        return False, None, "xray lacks required node-home API subcommands"
+    ver = xray_version(binary)
+    if ver is None or ver not in VERIFIED_NODE_HOME_XRAY_VERSIONS:
+        return False, ver, f"unverified Xray version {ver!r}"
+    topo_ok, reason = config_has_node_home_topology(config_path, tag)
+    if not topo_ok:
+        return False, ver, reason
+    return True, ver, None
+
+
+@contextmanager
+def staged_json_file(state_dir: Path, prefix: str, document: dict):
+    """Write a transient `0600` JSON file inside a private `0700` staging directory."""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir = state_dir / ".xray-staging"
+    created = False
+    try:
+        staging_dir.mkdir(mode=0o700)
+        created = True
+    except FileExistsError:
+        pass
+    info = staging_dir.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        raise Refusal("node-home staging directory is not service-owned")
+    if created or (info.st_mode & 0o077):
+        os.chmod(staging_dir, 0o700)
+    descriptor, temp_path = tempfile.mkstemp(prefix=prefix, suffix=".json", dir=staging_dir)
+    path_obj = Path(temp_path)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), STATE_MODE)
+            json.dump(document, handle, sort_keys=False)
+            handle.flush()
+        yield path_obj
+    finally:
+        try:
+            path_obj.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
+def parse_loopback_address(address: str) -> tuple[str, int]:
+    """Parse `host:port` and restrict direct RPC sockets strictly to loopback."""
+    host_str, sep, port_str = address.rpartition(":")
+    if not sep or not host_str or not port_str.isdigit():
+        raise Refusal(f"invalid Xray API address {address!r}")
+    port = int(port_str)
+    if not 1 <= port <= 65535:
+        raise Refusal(f"invalid Xray API port {port}")
+    clean_host = host_str.strip()
+    if clean_host.startswith("[") and clean_host.endswith("]"):
+        clean_host = clean_host[1:-1]
+    if clean_host != "localhost":
+        try:
+            if not ipaddress.ip_address(clean_host).is_loopback:
+                raise Refusal("Xray API address must be loopback")
+        except ValueError as error:
+            raise Refusal("Xray API address must be loopback") from error
+    return clean_host, port
+
+
+def _pb_varint(value: int) -> bytes:
+    out = bytearray()
+    while value >= 0x80:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def _pb_bytes(field_no: int, value: bytes) -> bytes:
+    return _pb_varint((field_no << 3) | 2) + _pb_varint(len(value)) + value
+
+
+def _pb_str(field_no: int, value: str) -> bytes:
+    return _pb_bytes(field_no, value.encode("utf-8"))
+
+
+def _pb_int(field_no: int, value: int) -> bytes:
+    return _pb_varint((field_no << 3) | 0) + _pb_varint(value)
+
+
+def _encode_test_route_request(
+    *, inbound_tag_name: str, user: str, target_domain: str = "",
+    target_ip: str = "", target_port: int = 443,
+) -> bytes:
+    ctx = bytearray()
+    if inbound_tag_name:
+        ctx += _pb_str(1, inbound_tag_name)
+    ctx += _pb_int(2, 2)  # TCP
+    if target_ip:
+        ctx += _pb_bytes(4, ipaddress.ip_address(target_ip).packed)
+    if target_port:
+        ctx += _pb_int(6, target_port)
+    if target_domain:
+        ctx += _pb_str(7, target_domain)
+    if user:
+        ctx += _pb_str(9, user)
+    req = bytearray()
+    req += _pb_bytes(1, bytes(ctx))
+    req += _pb_str(2, "outbound")
+    return bytes(req)
+
+
+def _decode_routing_context(data: bytes) -> dict[str, Any]:
+    idx = 0
+    decoded: dict[str, Any] = {}
+    while idx < len(data):
+        tag_val = 0
+        shift = 0
+        while True:
+            byte = data[idx]
+            idx += 1
+            tag_val |= (byte & 0x7F) << shift
+            if not (byte & 0x80):
+                break
+            shift += 7
+        field_no, wire_type = tag_val >> 3, tag_val & 7
+        if wire_type == 0:
+            val = 0
+            shift = 0
+            while True:
+                byte = data[idx]
+                idx += 1
+                val |= (byte & 0x7F) << shift
+                if not (byte & 0x80):
+                    break
+                shift += 7
+            decoded[f"f{field_no}"] = val
+        elif wire_type == 2:
+            length = 0
+            shift = 0
+            while True:
+                byte = data[idx]
+                idx += 1
+                length |= (byte & 0x7F) << shift
+                if not (byte & 0x80):
+                    break
+                shift += 7
+            payload = data[idx : idx + length]
+            idx += length
+            if field_no == 12:
+                decoded["outbound_tag"] = payload.decode("utf-8", "replace")
+            elif field_no == 11:
+                decoded.setdefault("outbound_group_tags", []).append(payload.decode("utf-8", "replace"))
+        else:
+            raise ValueError(f"unsupported protobuf wire type {wire_type}")
+    return decoded
+
+
+def grpc_test_route(
+    address: str, *, inbound_tag_name: str, user: str,
+    target_domain: str = "", target_ip: str = "", target_port: int = 443,
+) -> dict[str, Any]:
+    """Query `/xray.app.router.command.RoutingService/TestRoute` over stdlib h2c."""
+    host, port = parse_loopback_address(address)
+    body = _encode_test_route_request(
+        inbound_tag_name=inbound_tag_name,
+        user=user,
+        target_domain=target_domain,
+        target_ip=target_ip,
+        target_port=target_port,
+    )
+    frame_payload = b"\x00" + struct.pack(">I", len(body)) + body
+
+    def h2_frame(ftype: int, flags: int, sid: int, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))[1:]
+            + bytes([ftype, flags])
+            + struct.pack(">I", sid & 0x7FFFFFFF)
+            + payload
+        )
+
+    def enc_int(val: int, prefix_bits: int, mask: int) -> bytes:
+        max_v = (1 << prefix_bits) - 1
+        if val < max_v:
+            return bytes([mask | val])
+        out = bytearray([mask | max_v])
+        val -= max_v
+        while val >= 128:
+            out.append((val & 0x7F) | 0x80)
+            val >>= 7
+        out.append(val)
+        return bytes(out)
+
+    def enc_str(val: bytes) -> bytes:
+        return enc_int(len(val), 7, 0x00) + val
+
+    authority = f"{host}:{port}".encode("ascii")
+    headers = bytearray([0x83, 0x86])  # :method POST, :scheme http
+    headers += enc_int(4, 4, 0x00) + enc_str(b"/xray.app.router.command.RoutingService/TestRoute")
+    headers += enc_int(1, 4, 0x00) + enc_str(authority)
+    headers += enc_int(31, 4, 0x00) + enc_str(b"application/grpc")
+    headers += b"\x00" + enc_str(b"te") + enc_str(b"trailers")
+
+    with socket.create_connection((host, port), timeout=3.0) as sock:
+        sock.settimeout(3.0)
+        sock.sendall(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        sock.sendall(h2_frame(0x04, 0x00, 0, b""))
+        sock.sendall(h2_frame(0x01, 0x04, 1, bytes(headers)))
+        sock.sendall(h2_frame(0x00, 0x01, 1, frame_payload))
+        data_bytes = bytearray()
+        buf = b""
+        done = False
+        saw_headers = False
+        while not done:
+            while len(buf) < 9:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    done = True
+                    break
+                buf += chunk
+            if len(buf) < 9:
+                break
+            length = int.from_bytes(buf[:3], "big")
+            ftype, flags = buf[3], buf[4]
+            sid = int.from_bytes(buf[5:9], "big") & 0x7FFFFFFF
+            while len(buf) < 9 + length:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    done = True
+                    break
+                buf += chunk
+            if len(buf) < 9 + length:
+                break
+            payload = buf[9 : 9 + length]
+            buf = buf[9 + length :]
+            if ftype == 0x04 and (flags & 0x01) == 0:
+                sock.sendall(h2_frame(0x04, 0x01, 0, b""))
+            elif ftype == 0x01 and sid == 1:
+                saw_headers = True
+                if flags & 0x01:
+                    done = True
+            elif ftype == 0x00 and sid == 1:
+                data_bytes += payload
+            elif ftype in (0x03, 0x07):
+                done = True
+        raw = bytes(data_bytes)
+        if len(raw) >= 5:
+            msg_len = struct.unpack(">I", raw[1:5])[0]
+            decoded = _decode_routing_context(raw[5 : 5 + msg_len])
+            decoded["grpc_ok"] = True
+            return decoded
+        return {"grpc_ok": saw_headers, "outbound_tag": ""}
+
+
+def list_home_outbounds(binary: Path, commands: dict[str, str], address: str) -> dict[str, dict[str, Any]]:
+    """Inspect active `home:*` SOCKS outbounds in Xray without ever logging secrets."""
+    cmd = commands.get("list_outbounds")
+    if not cmd:
+        raise Refusal("listing outbounds failed: lso command unavailable")
+    try:
+        result = run_xray(binary, ["api", cmd, f"--server={address}"])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Refusal(f"listing outbounds failed: {type(error).__name__}") from error
+    if result.returncode != 0:
+        raise Refusal(f"listing outbounds failed: xray exited {result.returncode}")
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except ValueError as error:
+        # Never embed raw lso stdout in errors because it contains SOCKS5 passwords.
+        raise Refusal("listing outbounds returned invalid JSON") from error
+    items = payload.get("outbounds") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        raise Refusal("listing outbounds returned unexpected shape")
+    outbounds: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        if not isinstance(tag, str) or not tag.startswith(HOME_OUTBOUND_PREFIX):
+            continue
+        proxy = item.get("proxySettings")
+        server: dict[str, Any] = {}
+        if isinstance(proxy, dict):
+            if isinstance(proxy.get("server"), dict):
+                server = proxy["server"]
+            elif isinstance(proxy.get("servers"), list) and proxy["servers"] and isinstance(proxy["servers"][0], dict):
+                server = proxy["servers"][0]
+        user_obj = server.get("user") if isinstance(server.get("user"), dict) else {}
+        account = user_obj.get("account") if isinstance(user_obj.get("account"), dict) else {}
+        outbounds[tag] = {
+            "host": server.get("address"),
+            "port": server.get("port"),
+            "username": account.get("username"),
+            "password": account.get("password"),
+        }
+    return outbounds
+
+
+def remove_home_outbound(binary: Path, commands: dict[str, str], address: str, tag: str) -> None:
+    cmd = commands.get("remove_outbound")
+    if not cmd:
+        raise Refusal("removing outbound failed: rmo command unavailable")
+    try:
+        result = run_xray(binary, ["api", cmd, f"--server={address}", tag])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Refusal(f"removing outbound {tag} failed: {type(error).__name__}") from error
+    if result.returncode != 0:
+        raise Refusal(f"removing outbound {tag} failed: {api_error(result)}")
+
+
+def _outbound_matches_spec(existing: dict[str, Any], spec: dict[str, Any]) -> bool:
+    return (
+        existing.get("host") == spec["host"]
+        and existing.get("port") == spec["port"]
+        and existing.get("username") == spec["username"]
+        and existing.get("password") == spec["password"]
+    )
+
+
+def ensure_home_outbound(
+    binary: Path, commands: dict[str, str], address: str, state_dir: Path,
+    outbound: dict[str, Any], live_outbounds: dict[str, dict[str, Any]],
+) -> None:
+    """Install one per-tenant SOCKS outbound via `ado` inside `0700`/`0600` staging."""
+    tag = home_outbound_tag(outbound["homeExitId"], outbound["bindingGeneration"])
+    if tag in live_outbounds:
+        if _outbound_matches_spec(live_outbounds[tag], outbound):
+            return
+        remove_home_outbound(binary, commands, address, tag)
+        live_outbounds.pop(tag, None)
+    cmd = commands.get("add_outbound")
+    if not cmd:
+        raise Refusal("adding outbound failed: ado command unavailable")
+    snippet = {
+        "outbounds": [{
+            "tag": tag,
+            "protocol": "socks",
+            "settings": {
+                "servers": [{
+                    "address": outbound["host"],
+                    "port": outbound["port"],
+                    "users": [{
+                        "user": outbound["username"],
+                        "pass": outbound["password"],
+                    }],
+                }],
+            },
+        }],
+    }
+    try:
+        with staged_json_file(state_dir, "tono-ado-", snippet) as json_path:
+            result = run_xray(binary, ["api", cmd, f"--server={address}", str(json_path)])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Refusal(f"adding outbound {tag} failed: {type(error).__name__}") from error
+    if result.returncode != 0:
+        msg = api_error(result)
+        if "existing tag found" in msg:
+            refreshed = list_home_outbounds(binary, commands, address)
+            if tag in refreshed and _outbound_matches_spec(refreshed[tag], outbound):
+                live_outbounds[tag] = refreshed[tag]
+                return
+        # Never embed raw command stderr if it could carry config snippets.
+        raise Refusal(f"adding outbound {tag} failed (exit {result.returncode})")
+    live_outbounds[tag] = {
+        "host": outbound["host"],
+        "port": outbound["port"],
+        "username": outbound["username"],
+        "password": outbound["password"],
+    }
+
+
+def home_rule_tag(outbound_tag: str) -> str:
+    pair = parse_home_outbound_tag(outbound_tag)
+    if pair is None:
+        raise Refusal(f"invalid home outbound tag {outbound_tag!r}")
+    return f"tono-home-{pair[0]}-{pair[1]}"
+
+
+def build_node_home_rules(outbound_to_users: dict[str, list[str]]) -> list[dict[str, Any]]:
+    """Build exact replace-all Xray routing rules preserving fail-closed guards."""
+    rules: list[dict[str, Any]] = [
+        {
+            "type": "field",
+            "ruleTag": API_RULE_TAG,
+            "inboundTag": [API_INBOUND_TAG],
+            "outboundTag": API_TAG,
+        },
+        {
+            "type": "field",
+            "ruleTag": HOME_PRIVATE_CIDRS_RULE_TAG,
+            "user": ["regexp:^h:"],
+            "ip": list(PRIVATE_HOME_CIDRS),
+            "outboundTag": HOME_BLACKHOLE_TAG,
+        },
+    ]
+    for outbound_tag in sorted(outbound_to_users):
+        users = sorted(set(outbound_to_users[outbound_tag]))
+        if not users:
+            continue
+        rules.append({
+            "type": "field",
+            "ruleTag": home_rule_tag(outbound_tag),
+            "user": users,
+            "outboundTag": outbound_tag,
+        })
+    rules.append({
+        "type": "field",
+        "ruleTag": HOME_CATCHALL_RULE_TAG,
+        "user": ["regexp:^h:"],
+        "outboundTag": HOME_BLACKHOLE_TAG,
+    })
+    return rules
+
+
+def replace_routing_rules(
+    binary: Path, commands: dict[str, str], address: str, state_dir: Path,
+    rules: list[dict[str, Any]],
+) -> None:
+    """Atomically replace the entire Xray routing table (`adrules` without `-append`)."""
+    cmd = commands.get("add_rules")
+    if not cmd:
+        raise Refusal("replacing routing rules failed: adrules command unavailable")
+    document = {"routing": {"rules": rules}}
+    try:
+        with staged_json_file(state_dir, "tono-adrules-", document) as json_path:
+            result = run_xray(binary, ["api", cmd, f"--server={address}", str(json_path)])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Refusal(f"replacing routing rules failed: {type(error).__name__}") from error
+    if result.returncode != 0:
+        raise Refusal(f"replacing routing rules failed: {api_error(result)}")
+
+
+def list_routing_rules(binary: Path, commands: dict[str, str], address: str) -> list[dict[str, Any]]:
+    cmd = commands.get("list_rules")
+    if not cmd:
+        raise Refusal("listing routing rules failed: lsrules command unavailable")
+    try:
+        result = run_xray(binary, ["api", cmd, f"--server={address}"])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Refusal(f"listing routing rules failed: {type(error).__name__}") from error
+    if result.returncode != 0:
+        raise Refusal(f"listing routing rules failed: {api_error(result)}")
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except ValueError as error:
+        raise Refusal("listing routing rules returned invalid JSON") from error
+    rules = payload.get("rules") if isinstance(payload, dict) else None
+    if not isinstance(rules, list):
+        raise Refusal("listing routing rules returned unexpected shape")
+    return [rule for rule in rules if isinstance(rule, dict)]
+
+
+def verify_node_home_rules_and_routes(
+    binary: Path, commands: dict[str, str], address: str, tag: str,
+    rules: list[dict[str, Any]], outbound_to_users: dict[str, list[str]],
+) -> None:
+    """Confirm `lsrules` order matches AND `TestRoute` proves private-CIDR & tenant isolation."""
+    observed = list_routing_rules(binary, commands, address)
+    expected_pairs = [(r["ruleTag"], r["outboundTag"]) for r in rules]
+    observed_pairs = [(r.get("ruleTag"), r.get("tag")) for r in observed]
+    if observed_pairs != expected_pairs:
+        raise Refusal(
+            f"routing rules verification mismatch: expected {expected_pairs}, got {observed_pairs}"
+        )
+    try:
+        unbound = grpc_test_route(
+            address,
+            inbound_tag_name=tag,
+            user="h:unbound-probe:0:0",
+            target_domain="canary-home.invalid",
+            target_port=443,
+        )
+        if unbound.get("outbound_tag") != HOME_BLACKHOLE_TAG:
+            raise Refusal(
+                f"unbound h: TestRoute expected {HOME_BLACKHOLE_TAG}, got {unbound.get('outbound_tag')!r}"
+            )
+        sample_user = next(
+            (users[0] for users in outbound_to_users.values() if users),
+            "h:unbound-probe:0:0",
+        )
+        for private_ip in ("127.0.0.1", "10.0.0.1"):
+            priv = grpc_test_route(
+                address,
+                inbound_tag_name=tag,
+                user=sample_user,
+                target_ip=private_ip,
+                target_port=80,
+            )
+            if priv.get("outbound_tag") != HOME_BLACKHOLE_TAG:
+                raise Refusal(
+                    f"private IP {private_ip} TestRoute expected {HOME_BLACKHOLE_TAG}, got {priv.get('outbound_tag')!r}"
+                )
+        for outbound_tag in sorted(outbound_to_users):
+            for h_label in sorted(set(outbound_to_users[outbound_tag])):
+                routed = grpc_test_route(
+                    address,
+                    inbound_tag_name=tag,
+                    user=h_label,
+                    target_domain="canary-home.invalid",
+                    target_port=443,
+                )
+                if routed.get("outbound_tag") != outbound_tag:
+                    raise Refusal(
+                        f"TestRoute for {h_label} expected {outbound_tag}, got {routed.get('outbound_tag')!r}"
+                    )
+    except (OSError, ValueError, struct.error) as error:
+        raise Refusal(f"TestRoute RPC verification failed: {type(error).__name__}: {error}") from error
 
 
 def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict], bool, dict[str, int] | None]:
@@ -595,7 +1266,144 @@ def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict], bool, dic
     return parse_roster(payload)
 
 
-def parse_roster(payload: dict) -> tuple[str, int, list[dict], bool, dict[str, int] | None]:
+class ParsedRoster(tuple):
+    """5-tuple `(node_id, observed_at, roster, retire_shared_legacy, watermarks)`
+    with optional scoped `home_identities`, `home_outbounds`, and cached `home_lease`."""
+
+    home_identities: list[dict] | None
+    home_outbounds: list[dict] | None
+    home_lease: dict | None
+
+    def __new__(
+        cls,
+        node_id: str,
+        observed_at: int,
+        roster: list[dict],
+        retire_shared_legacy: bool,
+        watermarks: dict[str, int] | None,
+        *,
+        home_identities: list[dict] | None = None,
+        home_outbounds: list[dict] | None = None,
+        home_lease: dict | None = None,
+    ):
+        obj = super().__new__(
+            cls, (node_id, observed_at, roster, retire_shared_legacy, watermarks),
+        )
+        obj.home_identities = home_identities
+        obj.home_outbounds = home_outbounds
+        obj.home_lease = home_lease
+        return obj
+
+
+def _validate_home_outbounds(entries: Any) -> tuple[list[dict], dict[tuple[str, str], dict]]:
+    if not isinstance(entries, list):
+        raise Refusal("roster homeOutbounds is not a list")
+    outbounds: list[dict] = []
+    by_pair: dict[tuple[str, str], dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise Refusal("roster homeOutbounds entry is not an object")
+        home_exit_id = entry.get("homeExitId")
+        binding_gen = entry.get("bindingGeneration")
+        host = entry.get("host")
+        port = entry.get("port")
+        username = entry.get("username")
+        password = entry.get("password")
+        if not isinstance(home_exit_id, str) or not HOME_ID_PATTERN.fullmatch(home_exit_id):
+            raise Refusal("roster homeOutbounds entry has an invalid homeExitId")
+        if not isinstance(binding_gen, str) or not HOME_ID_PATTERN.fullmatch(binding_gen):
+            raise Refusal("roster homeOutbounds entry has an invalid bindingGeneration")
+        if (
+            not isinstance(host, str)
+            or not 1 <= len(host) <= 253
+            or "/" in host
+            or any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in host)
+        ):
+            raise Refusal(f"roster homeOutbounds entry {home_exit_id} has an invalid host")
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise Refusal(f"roster homeOutbounds entry {home_exit_id} has an invalid port")
+        if not isinstance(username, str) or not 1 <= len(username) <= 255:
+            raise Refusal(f"roster homeOutbounds entry {home_exit_id} has an empty or invalid username")
+        if not isinstance(password, str) or not 1 <= len(password) <= 255:
+            raise Refusal(f"roster homeOutbounds entry {home_exit_id} has an empty or invalid password")
+        pair = (home_exit_id, binding_gen)
+        if pair in by_pair:
+            raise Refusal("roster homeOutbounds repeats a binding generation")
+        normalized = {
+            "homeExitId": home_exit_id,
+            "bindingGeneration": binding_gen,
+            "host": host,
+            "port": port,
+            "username": username,
+            "password": password,
+        }
+        outbounds.append(normalized)
+        by_pair[pair] = normalized
+    return outbounds, by_pair
+
+
+def _validate_home_identities(
+    entries: Any,
+    seen_uuids: set[str],
+    outbound_by_pair: dict[tuple[str, str], dict] | None,
+    watermarks: dict[str, int] | None,
+    u_watermarks_by_user: dict[str, int],
+) -> list[dict]:
+    if not isinstance(entries, list):
+        raise Refusal("roster homeIdentities is not a list")
+    home_roster: list[dict] = []
+    seen_labels: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise Refusal("home roster entry is not an object")
+        user_id = entry.get("userId")
+        device_id = entry.get("deviceId")
+        client_uuid = entry.get("clientUUID")
+        home_exit_id = entry.get("homeExitId")
+        binding_gen = entry.get("bindingGeneration")
+        if not isinstance(user_id, str) or not 1 <= len(user_id) <= 100:
+            raise Refusal("home roster entry has an invalid userId")
+        if not isinstance(device_id, str) or not 1 <= len(device_id) <= 100:
+            raise Refusal("home roster entry has an invalid deviceId")
+        if not isinstance(client_uuid, str) or not UUID_PATTERN.fullmatch(client_uuid):
+            raise Refusal("home roster entry has an invalid clientUUID")
+        if client_uuid in seen_uuids:
+            raise Refusal("roster repeats an identity across cloud and residential entries")
+        seen_uuids.add(client_uuid)
+        if not isinstance(home_exit_id, str) or not HOME_ID_PATTERN.fullmatch(home_exit_id):
+            raise Refusal("home roster entry has an invalid homeExitId")
+        if not isinstance(binding_gen, str) or not HOME_ID_PATTERN.fullmatch(binding_gen):
+            raise Refusal("home roster entry has an invalid bindingGeneration")
+        if outbound_by_pair is not None and (home_exit_id, binding_gen) not in outbound_by_pair:
+            raise Refusal(f"home roster entry references missing outbound {home_exit_id}:{binding_gen}")
+        label = home_client_label(user_id, device_id, client_uuid)
+        if label in seen_labels:
+            raise Refusal("home roster repeats a client label")
+        seen_labels.add(label)
+        parsed: dict[str, Any] = {
+            "userId": user_id,
+            "deviceId": device_id,
+            "clientUUID": client_uuid,
+            "homeExitId": home_exit_id,
+            "bindingGeneration": binding_gen,
+        }
+        if "sourceUsageBytes" in entry:
+            wm = entry.get("sourceUsageBytes")
+            if isinstance(wm, bool) or not isinstance(wm, int) or not 0 <= wm <= MAX_SAFE_INTEGER:
+                raise Refusal("home roster entry has an invalid sourceUsageBytes")
+            if watermarks is not None and wm != watermarks.get(user_id, 0):
+                raise Refusal("roster sourceUsageWatermarks disagrees with a home identity")
+            if user_id in u_watermarks_by_user and u_watermarks_by_user[user_id] != wm:
+                raise Refusal("roster sourceUsageBytes disagrees between cloud and home entries")
+            u_watermarks_by_user[user_id] = wm
+            parsed["sourceUsageBytes"] = wm
+        home_roster.append(parsed)
+    return home_roster
+
+
+def parse_roster(
+    payload: dict, *, allow_cached_home_lease: bool = False,
+) -> ParsedRoster:
     """Validate a roster document, fresh from the control plane or its saved copy."""
     node_id = payload.get("nodeId")
     observed_at = payload.get("observedAt")
@@ -619,9 +1427,7 @@ def parse_roster(payload: dict) -> tuple[str, int, list[dict], bool, dict[str, i
         client_uuid = entry.get("clientUUID")
         if not isinstance(user_id, str) or not 1 <= len(user_id) <= 100:
             raise Refusal("roster entry has an invalid userId")
-        if not isinstance(client_uuid, str) or not re.fullmatch(
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", client_uuid
-        ):
+        if not isinstance(client_uuid, str) or not UUID_PATTERN.fullmatch(client_uuid):
             raise Refusal("roster entry has an invalid clientUUID")
         device_id = entry.get("deviceId")
         if device_id is not None and (not isinstance(device_id, str) or not 1 <= len(device_id) <= 100):
@@ -641,17 +1447,18 @@ def parse_roster(payload: dict) -> tuple[str, int, list[dict], bool, dict[str, i
                 raise Refusal("roster entry has an invalid sourceUsageBytes")
             parsed["sourceUsageBytes"] = watermark
         roster.append(parsed)
+    u_watermarks_by_user: dict[str, int] = {}
     if roster and any("sourceUsageBytes" in entry for entry in roster):
         if any("sourceUsageBytes" not in entry for entry in roster):
             raise Refusal("roster sourceUsageBytes is present on only some identities")
-        by_user: dict[str, int] = {}
         for entry in roster:
-            previous = by_user.get(entry["userId"])
+            previous = u_watermarks_by_user.get(entry["userId"])
             watermark = entry["sourceUsageBytes"]
             if previous is not None and previous != watermark:
                 raise Refusal("roster sourceUsageBytes disagrees for one account")
-            by_user[entry["userId"]] = watermark
-    if len({entry["clientUUID"] for entry in roster}) != len(roster):
+            u_watermarks_by_user[entry["userId"]] = watermark
+    seen_uuids = {entry["clientUUID"] for entry in roster}
+    if len(seen_uuids) != len(roster):
         raise Refusal("roster repeats an identity, which would merge two accounts' counters")
     watermarks: dict[str, int] | None = None
     if "sourceUsageWatermarks" in payload:
@@ -675,11 +1482,61 @@ def parse_roster(payload: dict) -> tuple[str, int, list[dict], bool, dict[str, i
             if ("sourceUsageBytes" in entry
                     and entry["sourceUsageBytes"] != watermarks.get(entry["userId"], 0)):
                 raise Refusal("roster sourceUsageWatermarks disagrees with an identity")
-    return node_id, observed_at, roster, retire_shared_legacy, watermarks
+
+    if allow_cached_home_lease and "homeOutbounds" in payload:
+        raise Refusal("the saved roster must not store outbound credentials")
+    if not allow_cached_home_lease and (("homeIdentities" in payload) != ("homeOutbounds" in payload)):
+        raise Refusal("roster response must include both homeIdentities and homeOutbounds together")
+
+    home_outbounds: list[dict] | None = None
+    outbound_by_pair: dict[tuple[str, str], dict] | None = None
+    if "homeOutbounds" in payload:
+        home_outbounds, outbound_by_pair = _validate_home_outbounds(payload["homeOutbounds"])
+
+    home_identities: list[dict] | None = None
+    if "homeIdentities" in payload:
+        home_identities = _validate_home_identities(
+            payload["homeIdentities"],
+            seen_uuids,
+            outbound_by_pair,
+            watermarks,
+            u_watermarks_by_user,
+        )
+
+    return ParsedRoster(
+        node_id,
+        observed_at,
+        roster,
+        retire_shared_legacy,
+        watermarks,
+        home_identities=home_identities,
+        home_outbounds=home_outbounds,
+    )
 
 
-def acknowledge_roster(base: str, token: str, observed_at: int) -> None:
-    body = json.dumps({"observedAt": observed_at}).encode("utf-8")
+def acknowledge_roster(
+    base: str,
+    token: str,
+    observed_at: int,
+    *,
+    metering_protocol_version: int | None = None,
+    node_home_capable: bool | None = None,
+    node_home_xray_version: str | None = None,
+    home_observed_at: int | None = None,
+    drained_generations: list[dict[str, str]] | None = None,
+) -> None:
+    payload: dict[str, Any] = {"observedAt": observed_at}
+    if metering_protocol_version is not None:
+        payload["meteringProtocolVersion"] = metering_protocol_version
+    if node_home_capable is not None:
+        payload["nodeHomeCapable"] = node_home_capable
+    if node_home_xray_version is not None:
+        payload["nodeHomeXrayVersion"] = node_home_xray_version
+    if home_observed_at is not None:
+        payload["homeObservedAt"] = home_observed_at
+    if drained_generations:
+        payload["drainedGenerations"] = drained_generations[:MAX_DRAINED_GENERATIONS_PER_ACK]
+    body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         f"{base}/api/v1/home/roster-ack",
         data=body,
@@ -755,12 +1612,27 @@ def load_state(path: Path) -> dict:
     # not corruption — it is the case that has to remove nothing.
     for key, kind in (("installedClients", list), ("sourceId", str), ("startMarker", str),
                       ("lastReportObservedAt", int), ("stuckRemovals", dict),
-                      ("xrayRestartAt", int), ("xrayRestartsUnconverged", int)):
+                      ("xrayRestartAt", int), ("xrayRestartsUnconverged", int),
+                      ("activeHomeGenerations", list), ("pendingDrainAcks", list)):
         if key in state and not isinstance(state[key], kind):
             raise Refusal(f"state file is corrupt: {key}")
     # Used as a set of labels before revocation; a non-string entry would crash it.
     if not all(isinstance(label, str) for label in state.get("installedClients", [])):
         raise Refusal("state file is corrupt: installedClients")
+    for item in state.get("activeHomeGenerations", []):
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("homeExitId"), str)
+            or not isinstance(item.get("bindingGeneration"), str)
+        ):
+            raise Refusal("state file is corrupt: activeHomeGenerations")
+    for item in state.get("pendingDrainAcks", []):
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("homeExitId"), str)
+            or not isinstance(item.get("retiredGeneration"), str)
+        ):
+            raise Refusal("state file is corrupt: pendingDrainAcks")
     last_report_at = state.get("lastReportObservedAt")
     if (
         isinstance(last_report_at, bool)
@@ -828,7 +1700,7 @@ def persist_installed_inventory(path: Path, state: dict | None,
     labels = sorted(
         label for label in installed
         if isinstance(label, str)
-        and (label == LEGACY_CLIENT_EMAIL or label.startswith(CLIENT_LABEL_PREFIX))
+        and (label == LEGACY_CLIENT_EMAIL or is_managed_label(label))
     )
     if state.get("installedClients") == labels:
         return
@@ -923,19 +1795,44 @@ def fetch_roster_or_discard_cache(base: str, token: str, cache: Path):
         raise
 
 
+class CachedRoster(tuple):
+    """3-tuple `(roster, retire_shared_legacy, age)` plus optional `home_identities` & `home_lease`."""
+
+    home_identities: list[dict] | None
+    home_lease: dict | None
+
+    def __new__(
+        cls,
+        roster: list[dict[str, str]],
+        retire_shared_legacy: bool,
+        age: int,
+        *,
+        home_identities: list[dict] | None = None,
+        home_lease: dict | None = None,
+    ):
+        obj = super().__new__(cls, (roster, retire_shared_legacy, age))
+        obj.home_identities = home_identities
+        obj.home_lease = home_lease
+        return obj
+
+
 def save_roster_cache(path: Path, node_id: str, observed_at: int,
                       roster: list[dict[str, str]], retire_shared_legacy: bool,
-                      watermarks: dict[str, int] | None = None) -> str | None:
+                      watermarks: dict[str, int] | None = None,
+                      *, home_identities: list[dict] | None = None,
+                      start_marker: str | None = None) -> str | None:
     """Keep the roster just verified, for an Xray restart during an outage.
 
     The copy holds client credentials, so it is owner-only from creation and
-    replaced atomically. If it cannot be written, the previous copy is removed:
-    an older list may still name an account this roster has revoked. Returns an
-    error only when even that removal failed.
+    replaced atomically. Plaintext residential SOCKS5 credentials (`homeOutbounds`)
+    are NEVER persisted here; residential `homeIdentities` carry only a short
+    fail-closed lease bound to the current Xray process generation. If writing
+    fails, the previous copy is removed: an older list may still name a revoked account.
     """
-    document = {
+    saved_at = int(time.time())
+    document: dict[str, Any] = {
         "version": ROSTER_CACHE_VERSION,
-        "savedAt": int(time.time()),
+        "savedAt": saved_at,
         "nodeId": node_id,
         "observedAt": observed_at,
         "retireSharedLegacy": retire_shared_legacy,
@@ -946,6 +1843,23 @@ def save_roster_cache(path: Path, node_id: str, observed_at: int,
             {"userId": user_id, "sourceUsageBytes": total}
             for user_id, total in watermarks.items()
         ]
+    if home_identities:
+        # Store non-secret h: identities under a short outage lease; never write homeOutbounds.
+        document["homeIdentities"] = [
+            {
+                "userId": entry["userId"],
+                "deviceId": entry["deviceId"],
+                "clientUUID": entry["clientUUID"],
+                "homeExitId": entry["homeExitId"],
+                "bindingGeneration": entry["bindingGeneration"],
+            }
+            for entry in home_identities
+        ]
+        document["homeLease"] = {
+            "savedAt": saved_at,
+            "expiresAt": saved_at + MAX_HOME_OUTAGE_LEASE_SECONDS,
+            "startMarker": start_marker,
+        }
     temporary: str | None = None
     try:
         descriptor, temporary = tempfile.mkstemp(prefix=".roster-", dir=path.parent)
@@ -972,7 +1886,7 @@ def save_roster_cache(path: Path, node_id: str, observed_at: int,
                 pass
 
 
-def load_roster_cache(path: Path, source: str) -> tuple[list[dict[str, str]], bool, int]:
+def load_roster_cache(path: Path, source: str) -> CachedRoster:
     """The last verified roster and its age, or a Refusal saying why not."""
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
@@ -998,10 +1912,20 @@ def load_roster_cache(path: Path, source: str) -> tuple[list[dict[str, str]], bo
     # A clock that moved backwards gives no usable age either.
     if not 0 <= age <= ROSTER_CACHE_MAX_AGE_SECONDS:
         raise Refusal(f"the saved roster is {age}s old, outside 0-{ROSTER_CACHE_MAX_AGE_SECONDS}s")
-    node_id, _, roster, retire_shared_legacy, _ = parse_roster(document)
+    parsed = parse_roster(document, allow_cached_home_lease=True)
+    node_id, _, roster, retire_shared_legacy, _ = parsed
     if node_id != source:
         raise Refusal("the saved roster belongs to another exit node")
-    return roster, retire_shared_legacy, age
+    home_lease = document.get("homeLease")
+    if home_lease is not None and not isinstance(home_lease, dict):
+        raise Refusal("the saved roster has an invalid homeLease")
+    return CachedRoster(
+        roster,
+        retire_shared_legacy,
+        age,
+        home_identities=parsed.home_identities,
+        home_lease=home_lease,
+    )
 
 
 @contextmanager
@@ -1164,7 +2088,10 @@ def installed_clients(binary: Path, commands: dict[str, str], address: str,
 def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
               roster: list[dict[str, str]], listed: set[str] | None,
               recorded: set[str] | None,
-              retire_shared_legacy: bool = False) -> tuple[int, int, set[str] | None]:
+              retire_shared_legacy: bool = False,
+              *,
+              home_roster: list[dict] | None = None,
+              preserve_home_labels: set[str] | None = None) -> tuple[int, int, set[str] | None]:
     """Add the accounts the roster names, remove the ones it does not.
 
     `listed` is what the inbound actually holds and `recorded` is what this agent
@@ -1178,7 +2105,9 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     this agent recorded installing, and never off counters. When neither is
     known, nothing is removed — except shared-legacy under an explicit
     retirement, which lives in the static config and so may be back after a
-    restart even though no inventory still names it.
+    restart even though no inventory still names it. Both `u:` and `h:` managed
+    namespaces are revoked symmetrically; `preserve_home_labels` keeps already
+    live `h:` clients only during a bounded valid outage lease.
     """
     removed = 0
     failures: list[str] = []
@@ -1210,13 +2139,14 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         client_label(entry["userId"], entry.get("deviceId"), entry["clientUUID"]): entry["clientUUID"]
         for entry in roster
     }
+    if home_roster:
+        for entry in home_roster:
+            wanted[home_client_label(entry["userId"], entry["deviceId"], entry["clientUUID"])] = entry["clientUUID"]
+    keep_existing = set(wanted) | (preserve_home_labels or set())
     # A verified empty roster is the enforcement result after the final active
     # account expires, is disabled, or reaches quota. It must remove this
-    # agent's `u:` clients or those accounts keep connecting forever. When both
-    # the live listing and our durable record are unknown, retain the original
-    # fail-safe and remove nothing; the shared legacy identity is outside the
-    # namespace in either case.
-    if not wanted and listed is None and recorded is None:
+    # agent's `u:` and `h:` clients or those accounts keep connecting forever.
+    if not keep_existing and listed is None and recorded is None:
         if failures:
             raise PartialReconcile("; ".join(failures))
         # A confirmed shared-legacy removal above still counts.
@@ -1224,19 +2154,18 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     installed = listed if listed is not None else recorded
     known_installed = None if installed is None else {
         label for label in installed
-        if label == LEGACY_CLIENT_EMAIL or label.startswith(CLIENT_LABEL_PREFIX)
+        if label == LEGACY_CLIENT_EMAIL or is_managed_label(label)
     }
     if installed is None:
         print("this exit cannot say which clients it holds; removed nothing")
     else:
-        for label in sorted(installed - set(wanted)):
-            # Only this agent's own namespace is a candidate, except when explicitly
-            # retiring the shared-legacy client. Hand-added entries belong to somebody
-            # else and are never touched.
+        for label in sorted(installed - keep_existing):
+            # Only this agent's own namespaces (`u:`, `h:`) are candidates,
+            # except when explicitly retiring the shared-legacy client.
             if label == LEGACY_CLIENT_EMAIL:
                 if not retire_shared_legacy:
                     continue
-            elif not label.startswith(CLIENT_LABEL_PREFIX):
+            elif not is_managed_label(label):
                 continue
             try:
                 result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
@@ -1514,6 +2443,250 @@ def deliver_queue(base: str, token: str, path: Path, state: dict) -> tuple[int, 
     return delivered, dropped
 
 
+class ReconcileResult(tuple):
+    """5-tuple `(added, removed, installed, counters, settled_marker)` carrying
+    reconciled node-home generations and drained generations."""
+
+    active_home_generations: list[dict[str, str]]
+    drained_generations: list[dict[str, str]]
+
+    def __new__(
+        cls,
+        added: int,
+        removed: int,
+        installed: set[str] | None,
+        counters: dict[str, int],
+        settled_marker: str | None,
+        *,
+        active_home_generations: list[dict[str, str]] | None = None,
+        drained_generations: list[dict[str, str]] | None = None,
+    ):
+        obj = super().__new__(cls, (added, removed, installed, counters, settled_marker))
+        obj.active_home_generations = active_home_generations or []
+        obj.drained_generations = drained_generations or []
+        return obj
+
+
+def _merge_drain_acks(
+    existing: list[dict[str, str]] | None,
+    newly_drained: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict[str, str]] = []
+    for item in [*(existing or []), *newly_drained]:
+        if not isinstance(item, dict):
+            continue
+        hid = item.get("homeExitId")
+        gen = item.get("retiredGeneration")
+        if isinstance(hid, str) and isinstance(gen, str) and (hid, gen) not in seen:
+            seen.add((hid, gen))
+            merged.append({"homeExitId": hid, "retiredGeneration": gen})
+    return merged
+
+
+def _remove_home_labels_subset(
+    binary: Path, commands: dict[str, str], address: str, tag: str,
+    labels: list[str], known_installed: set[str] | None,
+) -> tuple[int, list[str], set[str]]:
+    removed = 0
+    failures: list[str] = []
+    failed_labels: set[str] = set()
+    for label in labels:
+        try:
+            result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            failures.append(f"removing {label} failed: {type(error).__name__}")
+            failed_labels.add(label)
+            continue
+        if not removal_succeeded(result, label, commands["remove_user"]):
+            failures.append(f"removing {label} failed: {api_error(result)}")
+            failed_labels.add(label)
+            continue
+        if known_installed is not None:
+            known_installed.discard(label)
+        removed += 1
+    return removed, failures, failed_labels
+
+
+def _drain_unused_home_outbounds(
+    binary: Path, commands: dict[str, str], address: str,
+    live_outbounds: dict[str, dict[str, Any]],
+    still_needed_tags: set[str],
+    previous_generations: list[dict[str, str]] | None,
+) -> tuple[list[dict[str, str]], list[str]]:
+    candidate_tags = set(live_outbounds)
+    for item in previous_generations or []:
+        if isinstance(item, dict):
+            hid = item.get("homeExitId")
+            gen = item.get("bindingGeneration")
+            if isinstance(hid, str) and isinstance(gen, str):
+                candidate_tags.add(home_outbound_tag(hid, gen))
+    removable = sorted(candidate_tags - still_needed_tags)
+    if not removable:
+        return [], []
+    failures: list[str] = []
+    for ob_tag in removable:
+        try:
+            remove_home_outbound(binary, commands, address, ob_tag)
+        except Refusal as error:
+            failures.append(str(error))
+    try:
+        remaining = list_home_outbounds(binary, commands, address)
+    except Refusal as error:
+        failures.append(str(error))
+        remaining = live_outbounds
+    drained: list[dict[str, str]] = []
+    for ob_tag in removable:
+        if ob_tag in remaining:
+            continue
+        pair = parse_home_outbound_tag(ob_tag)
+        if pair is not None:
+            drained.append({"homeExitId": pair[0], "retiredGeneration": pair[1]})
+    return drained, failures
+
+
+def _sync_node_home_round(
+    binary: Path,
+    commands: dict[str, str],
+    address: str,
+    tag: str,
+    state_dir: Path,
+    roster: list[dict[str, str]],
+    listed: set[str] | None,
+    recorded: set[str] | None,
+    retire_shared_legacy: bool,
+    home_identities: list[dict],
+    home_outbounds: list[dict],
+    previous_generations: list[dict[str, str]] | None,
+) -> tuple[int, int, set[str] | None, list[dict[str, str]], list[dict[str, str]]]:
+    """Execute strict RFC §4.3 add/remove ordering for `h:` identities and `home:*` outbounds."""
+    outbound_specs = {
+        home_outbound_tag(item["homeExitId"], item["bindingGeneration"]): item
+        for item in home_outbounds
+    }
+    desired_home_by_label: dict[str, dict] = {}
+    for entry in home_identities:
+        lbl = home_client_label(entry["userId"], entry["deviceId"], entry["clientUUID"])
+        desired_home_by_label[lbl] = entry
+
+    known_set = listed if listed is not None else recorded
+    known_installed = None if known_set is None else {
+        lbl for lbl in known_set if lbl == LEGACY_CLIENT_EMAIL or is_managed_label(lbl)
+    }
+
+    # Step 1 (Remove): rmu stale h: labels BEFORE replacing rules or rmo.
+    stale_h = sorted(
+        lbl for lbl in (known_set or set())
+        if lbl.startswith(HOME_LABEL_PREFIX) and lbl not in desired_home_by_label
+    )
+    pre_removed, failures, failed_removals = _remove_home_labels_subset(
+        binary, commands, address, tag, stale_h, known_installed,
+    )
+
+    # Step 2 (Add): ensure missing home:* outbounds via ado in 0700/0600 staging.
+    live_outbounds = list_home_outbounds(binary, commands, address)
+    failed_outbound_tags: set[str] = set()
+    for ob_tag in sorted(outbound_specs):
+        try:
+            ensure_home_outbound(binary, commands, address, state_dir, outbound_specs[ob_tag], live_outbounds)
+        except Refusal as error:
+            failures.append(str(error))
+            failed_outbound_tags.add(ob_tag)
+
+    admissible_home: list[dict] = []
+    admissible_tags: set[str] = set()
+    outbound_to_users: dict[str, list[str]] = {}
+    for lbl, entry in sorted(desired_home_by_label.items()):
+        ob_tag = home_outbound_tag(entry["homeExitId"], entry["bindingGeneration"])
+        if ob_tag in failed_outbound_tags or ob_tag not in live_outbounds:
+            continue
+        admissible_home.append(entry)
+        outbound_to_users.setdefault(ob_tag, []).append(lbl)
+        admissible_tags.add(ob_tag)
+
+    # Step 3 & 4 (Add / Remove step 2): atomic full-table adrules replace-all + TestRoute verify.
+    rules = build_node_home_rules(outbound_to_users)
+    routes_verified = False
+    try:
+        replace_routing_rules(binary, commands, address, state_dir, rules)
+        verify_node_home_rules_and_routes(binary, commands, address, tag, rules, outbound_to_users)
+        routes_verified = True
+    except Refusal as error:
+        failures.append(str(error))
+
+    if not routes_verified:
+        # Fail closed: force 3-rule static blackhole list if possible and do NOT admit any h: identities.
+        try:
+            replace_routing_rules(
+                binary, commands, address, state_dir, build_node_home_rules({}),
+            )
+        except Refusal as error:
+            failures.append(str(error))
+        admissible_home = []
+        admissible_tags = set()
+
+    # Step 5 (Add): reconcile u: + route-verified h: identities via adu/rmu.
+    reconcile_err: PartialReconcile | None = None
+    added = 0
+    rec_removed = 0
+    try:
+        added, rec_removed, installed_after = reconcile(
+            binary,
+            commands,
+            address,
+            tag,
+            roster,
+            listed - (set(stale_h) - failed_removals) if listed is not None else None,
+            known_installed,
+            retire_shared_legacy=retire_shared_legacy,
+            home_roster=admissible_home,
+        )
+    except PartialReconcile as partial:
+        reconcile_err = partial
+        installed_after = refusal_installed(partial)
+        failed_removals |= getattr(partial, "failed_removals", set())
+        failures.append(str(partial))
+
+    # Step 6 (Remove step 3): rmo orphan home:* outbounds once zero active h: clients reference them.
+    # If any h: removal failed, withhold rmo and drain ACK for previous generations conservatively.
+    still_needed_tags = set(admissible_tags)
+    has_failed_home_removal = any(lbl.startswith(HOME_LABEL_PREFIX) for lbl in failed_removals)
+    if has_failed_home_removal:
+        for item in previous_generations or []:
+            hid = item.get("homeExitId")
+            gen = item.get("bindingGeneration")
+            if isinstance(hid, str) and isinstance(gen, str):
+                still_needed_tags.add(home_outbound_tag(hid, gen))
+    live_outbounds_now = list_home_outbounds(binary, commands, address)
+    if not routes_verified or listed is None:
+        drained, drain_failures = [], []
+        if has_failed_home_removal or not routes_verified:
+            for item in previous_generations or []:
+                hid = item.get("homeExitId")
+                gen = item.get("bindingGeneration")
+                if isinstance(hid, str) and isinstance(gen, str):
+                    still_needed_tags.add(home_outbound_tag(hid, gen))
+    else:
+        drained, drain_failures = _drain_unused_home_outbounds(
+            binary, commands, address, live_outbounds_now, still_needed_tags, previous_generations,
+        )
+        failures.extend(drain_failures)
+
+    active_gens = [
+        {"homeExitId": item["homeExitId"], "bindingGeneration": item["bindingGeneration"]}
+        for ob_tag, item in sorted(outbound_specs.items())
+        if ob_tag in still_needed_tags and ob_tag in live_outbounds_now
+    ]
+
+    if failures:
+        combined = attach_installed(PartialReconcile("; ".join(failures)), installed_after)
+        combined.failed_removals = failed_removals | (getattr(reconcile_err, "failed_removals", set()))
+        combined.active_home_generations = active_gens
+        combined.drained_generations = drained
+        raise combined
+    return added, pre_removed + rec_removed, installed_after, active_gens, drained
+
+
 def reconcile_and_read_stable(
     binary: Path,
     commands: dict[str, str],
@@ -1522,7 +2695,14 @@ def reconcile_and_read_stable(
     roster: list[dict[str, str]] | None,
     recorded: set[str] | None,
     retire_shared_legacy: bool = False,
-) -> tuple[int, int, set[str] | None, dict[str, int], str | None]:
+    *,
+    home_identities: list[dict] | None = None,
+    home_outbounds: list[dict] | None = None,
+    preserve_home_labels: set[str] | None = None,
+    node_home_capable: bool = False,
+    state_dir: Path | None = None,
+    previous_home_generations: list[dict[str, str]] | None = None,
+) -> ReconcileResult:
     """Reconcile and read counters from one Xray process generation.
 
     A restart after the first marker can drop every API-installed client and
@@ -1535,31 +2715,65 @@ def reconcile_and_read_stable(
     """
     for attempt in range(2):
         marker_before = xray_start_marker(binary)
+        active_gens: list[dict[str, str]] = []
+        drained_gens: list[dict[str, str]] = []
         if roster is None:
             added, removed, installed = 0, 0, None
+        elif node_home_capable and home_outbounds is not None:
+            listed = installed_clients(binary, commands, address, tag)
+            resolved_dir = state_dir or state_path().parent
+            added, removed, installed, active_gens, drained_gens = _sync_node_home_round(
+                binary,
+                commands,
+                address,
+                tag,
+                resolved_dir,
+                roster,
+                listed,
+                recorded,
+                retire_shared_legacy,
+                home_identities or [],
+                home_outbounds,
+                previous_home_generations,
+            )
         else:
             listed = installed_clients(binary, commands, address, tag)
-            added, removed, installed = reconcile(
-                binary, commands, address, tag, roster, listed, recorded,
-                retire_shared_legacy=retire_shared_legacy,
-            )
+            if preserve_home_labels:
+                added, removed, installed = reconcile(
+                    binary, commands, address, tag, roster, listed, recorded,
+                    retire_shared_legacy=retire_shared_legacy,
+                    preserve_home_labels=preserve_home_labels,
+                )
+            else:
+                added, removed, installed = reconcile(
+                    binary, commands, address, tag, roster, listed, recorded,
+                    retire_shared_legacy=retire_shared_legacy,
+                )
         if "stats_query" not in commands:
-            raise attach_installed(
+            err = attach_installed(
                 Refusal(
                     "clients were reconciled, but this xray offers no stats command "
                     "(tried statsquery, stats); usage cannot be metered"
                 ),
                 installed,
             )
+            err.active_home_generations = active_gens
+            err.drained_generations = drained_gens
+            raise err
         try:
             counters = read_counters(binary, commands["stats_query"], address)
         except (Refusal, OSError, subprocess.TimeoutExpired) as error:
             if isinstance(error, Refusal):
                 attach_installed(error, installed)
+                error.active_home_generations = active_gens
+                error.drained_generations = drained_gens
                 raise
-            raise attach_installed(
+            err = attach_installed(
                 Refusal(f"reading counters failed: {type(error).__name__}"), installed,
-            ) from error
+            )
+            err.active_home_generations = active_gens
+            err.drained_generations = drained_gens
+            raise err from error
         marker_after = xray_start_marker(binary)
         if marker_before and marker_after and marker_before != marker_after:
             if attempt == 0:
@@ -1569,7 +2783,15 @@ def reconcile_and_read_stable(
         # The marker after the counter read is the only one known to still
         # describe that reading. If it is unavailable, forget the old marker so
         # a later process is not compared with stale evidence and folded twice.
-        return added, removed, installed, counters, marker_after
+        return ReconcileResult(
+            added,
+            removed,
+            installed,
+            counters,
+            marker_after,
+            active_home_generations=active_gens,
+            drained_generations=drained_gens,
+        )
     raise AssertionError("bounded xray reconciliation loop did not return")
 
 
@@ -1641,6 +2863,15 @@ def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
     Empty is a valid revocation result, not permission to retain static users.
     Caller holds agent_run_lock and has verified the roster's node identity.
     """
+    for entry in roster:
+        if (
+            not isinstance(entry, dict)
+            or "homeExitId" in entry
+            or "bindingGeneration" in entry
+            or entry.get("kind") == "home"
+            or entry.get("namespace") == "h"
+        ):
+            raise Refusal("hy2 roster must never receive residential home identities")
     path = HY2_AUTH_ALLOWLIST
     try:
         directory = path.parent.lstat()
@@ -1686,7 +2917,8 @@ def sync_hy2_roster(roster: list[dict[str, str]]) -> bool:
 
 
 def withdraw_disabled_node(binary: Path, commands: dict[str, str], address: str, tag: str,
-                           recorded: set[str] | None) -> tuple[int, set[str] | None]:
+                           recorded: set[str] | None,
+                           *, state_dir: Path | None = None) -> tuple[int, set[str] | None]:
     """Fail closed after the control plane says this node is disabled or retired.
 
     The roster it last served still names every account, including ones revoked,
@@ -1716,6 +2948,26 @@ def withdraw_disabled_node(binary: Path, commands: dict[str, str], address: str,
     except Refusal as error:
         failures.append(str(error))
         removed, remaining = 0, None
+    if node_home_commands_present(commands):
+        resolved_dir = state_dir or state_path().parent
+        try:
+            live_outbounds = list_home_outbounds(binary, commands, address)
+        except Refusal as error:
+            live_outbounds = {}
+            if config_has_node_home_topology(xray_config_path(), tag)[0]:
+                failures.append(str(error))
+        if live_outbounds or config_has_node_home_topology(xray_config_path(), tag)[0]:
+            try:
+                replace_routing_rules(
+                    binary, commands, address, resolved_dir, build_node_home_rules({}),
+                )
+            except Refusal as error:
+                failures.append(str(error))
+            for ob_tag in sorted(live_outbounds):
+                try:
+                    remove_home_outbound(binary, commands, address, ob_tag)
+                except Refusal as error:
+                    failures.append(str(error))
     if failures:
         raise Refusal("disabled exit node could not withdraw every client: " + "; ".join(failures))
     return removed, remaining if inventory is not None else None
@@ -1821,6 +3073,65 @@ def refuse_keeping_usage(error: Exception, path: Path, state: dict, installed: s
     raise error
 
 
+def _evaluate_home_outage_lease(
+    binary: Path, commands: dict[str, str], address: str, tag: str,
+    cached_home: list[dict] | None, home_lease: dict | None,
+) -> tuple[bool, set[str], bool]:
+    """Check whether cached `h:` identities remain inside their bounded outage lease."""
+    if not node_home_commands_present(commands):
+        return False, set(), False
+    capable, _, _ = detect_node_home_capability(binary, xray_config_path(), commands, tag)
+    if not cached_home:
+        return capable, set(), capable
+    current_marker = xray_start_marker(binary)
+    now_sec = int(time.time())
+    saved_at = home_lease.get("savedAt") if isinstance(home_lease, dict) else None
+    expires_at = home_lease.get("expiresAt") if isinstance(home_lease, dict) else None
+    lease_marker = home_lease.get("startMarker") if isinstance(home_lease, dict) else None
+    lease_valid = bool(
+        capable
+        and isinstance(saved_at, int) and not isinstance(saved_at, bool)
+        and isinstance(expires_at, int) and not isinstance(expires_at, bool)
+        and saved_at <= now_sec <= min(expires_at, saved_at + MAX_HOME_OUTAGE_LEASE_SECONDS)
+        and isinstance(lease_marker, str) and lease_marker
+        and current_marker == lease_marker
+    )
+    if not lease_valid:
+        return capable, set(), True
+    try:
+        live_outbounds = list_home_outbounds(binary, commands, address)
+    except Refusal:
+        return capable, set(), True
+    preserved = {
+        home_client_label(entry["userId"], entry["deviceId"], entry["clientUUID"])
+        for entry in cached_home
+        if home_outbound_tag(entry["homeExitId"], entry["bindingGeneration"]) in live_outbounds
+    }
+    return capable, preserved, False
+
+
+def _teardown_home_rules_and_outbounds(
+    binary: Path, commands: dict[str, str], address: str, state_dir: Path,
+    previous_generations: list[dict[str, str]] | None,
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Fail-closed cleanup of dynamic rules & `home:*` outbounds after `h:` removal."""
+    failures: list[str] = []
+    try:
+        replace_routing_rules(binary, commands, address, state_dir, build_node_home_rules({}))
+    except Refusal as error:
+        failures.append(str(error))
+    try:
+        live_outbounds = list_home_outbounds(binary, commands, address)
+    except Refusal as error:
+        failures.append(str(error))
+        return [], failures
+    drained, drain_failures = _drain_unused_home_outbounds(
+        binary, commands, address, live_outbounds, set(), previous_generations,
+    )
+    failures.extend(drain_failures)
+    return drained, failures
+
+
 def run_outage_round(path: Path, configured: str, binary: Path,
                      commands: dict[str, str], address: str, tag: str,
                      override: bool | None, failure: BaseException) -> None:
@@ -1828,15 +3139,12 @@ def run_outage_round(path: Path, configured: str, binary: Path,
 
     Xray loses every API-added client when it restarts, so without this a
     restart during an outage locks out every account on the node until the
-    control plane returns. The saved roster is the newest one this node
-    fetched (saved before it was enforced), so it names no account a fetched
-    roster had already removed. A copy older than a day, or one that is
-    missing or unreadable, restores nothing.
+    control plane returns. Cloud `u:` identities retain the 24h outage cache;
+    residential `h:` identities enforce a bounded 300s lease tied to the live
+    Xray process and fail closed immediately upon expiry or Xray restart.
 
     Counters are folded either way, so a restart cannot forgive the usage
-    before it. Reports need the control plane's roster clock, so the growth is
-    kept in the durable totals and reported by the next round that reaches it.
-    Nothing is acknowledged, and the round always exits non-zero.
+    before it. Nothing is acknowledged, and the round always exits non-zero.
     """
     # As in a reachable round, the roster is applied before any metering-side
     # check: a damaged state file must not decide which clients are installed.
@@ -1846,21 +3154,53 @@ def run_outage_round(path: Path, configured: str, binary: Path,
     except (Refusal, ValueError, OSError) as error:
         state, state_error = None, error
     ledger_missing = take_ledger_missing(state) if state is not None else False
+    cached_home: list[dict] | None = None
+    home_lease: dict | None = None
     try:
-        roster, server_retire, age = load_roster_cache(roster_cache_path(path), configured)
+        cached = load_roster_cache(roster_cache_path(path), configured)
+        roster, server_retire, age = cached
+        cached_home = getattr(cached, "home_identities", None)
+        home_lease = getattr(cached, "home_lease", None)
     except Refusal as refusal:
         roster, server_retire, age, unusable = None, False, 0, refusal
     retire_shared_legacy = server_retire if override is None else override
     remembered = state.get("installedClients") if state else None
+    recorded_set = set(remembered) if isinstance(remembered, list) else None
+    node_home_tools, preserve_home_labels, should_teardown_home = _evaluate_home_outage_lease(
+        binary, commands, address, tag, cached_home, home_lease,
+    )
     try:
-        added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
-            binary, commands, address, tag, roster,
-            set(remembered) if isinstance(remembered, list) else None,
-            retire_shared_legacy=retire_shared_legacy,
-        )
+        if preserve_home_labels and roster is not None:
+            result = reconcile_and_read_stable(
+                binary, commands, address, tag, roster, recorded_set,
+                retire_shared_legacy=retire_shared_legacy,
+                preserve_home_labels=preserve_home_labels,
+            )
+        else:
+            result = reconcile_and_read_stable(
+                binary, commands, address, tag, roster, recorded_set,
+                retire_shared_legacy=retire_shared_legacy,
+            )
+        added, removed, installed, counters, settled_marker = result
     except Refusal as error:
         persist_installed_inventory(path, state, refusal_installed(error))
         raise
+    home_teardown_note = ""
+    if should_teardown_home and node_home_commands_present(commands):
+        previous_gens = state.get("activeHomeGenerations") if isinstance(state, dict) else None
+        if node_home_tools or previous_gens:
+            drained, teardown_failures = _teardown_home_rules_and_outbounds(
+                binary, commands, address, path.parent, previous_gens,
+            )
+            if state is not None:
+                if not teardown_failures:
+                    state["activeHomeGenerations"] = []
+                if drained:
+                    state["pendingDrainAcks"] = _merge_drain_acks(
+                        state.get("pendingDrainAcks"), drained,
+                    )
+            if teardown_failures:
+                home_teardown_note = f"; home outage teardown incomplete: {'; '.join(teardown_failures)}"
     if state is None:
         raise Refusal(
             f"control plane unreachable ({failure}); the state file is unusable: {state_error}"
@@ -1871,11 +3211,11 @@ def run_outage_round(path: Path, configured: str, binary: Path,
     if roster is None:
         raise Refusal(
             f"control plane unreachable ({failure}) and {unusable}; restored no clients."
-            " Usage is kept locally"
+            " Usage is kept locally" + home_teardown_note
         ) from failure
     raise Unreachable(
         f"control plane unreachable ({failure}); applied the roster verified {age}s ago"
-        f" (+{added} -{removed}). Usage is kept locally"
+        f" (+{added} -{removed}). Usage is kept locally" + home_teardown_note
     ) from failure
 
 
@@ -1981,9 +3321,10 @@ def run_once(path: Path) -> None:
     override = retire_override(os.environ.get("TONO_RETIRE_SHARED_LEGACY", ""))
     cache = roster_cache_path(path)
     try:
-        node_id, observed_at, roster, server_retire_shared_legacy, watermarks = fetch_roster_or_discard_cache(
-            base, token, cache,
-        )
+        fetched = fetch_roster_or_discard_cache(base, token, cache)
+        node_id, observed_at, roster, server_retire_shared_legacy, watermarks = fetched
+        home_identities = getattr(fetched, "home_identities", None)
+        home_outbounds = getattr(fetched, "home_outbounds", None)
     except NodeDisabled as disabled:
         # The control plane has spoken: the saved roster must not outlive the
         # node, or a later outage round would reinstall it on a disabled node.
@@ -2004,9 +3345,11 @@ def run_once(path: Path) -> None:
         remembered = state.get("installedClients") if state else None
         withdrawal_error: Refusal | None = None
         try:
+            withdraw_kwargs = {"state_dir": path.parent} if node_home_commands_present(commands) else {}
             removed, remaining = withdraw_disabled_node(
                 binary, commands, address, tag,
                 set(remembered) if isinstance(remembered, list) else None,
+                **withdraw_kwargs,
             )
         except Refusal as refusal:
             withdrawal_error, removed, remaining = refusal, 0, None
@@ -2063,11 +3406,33 @@ def run_once(path: Path) -> None:
         raise Refusal(
             f"authenticated exit node {node_id!r} does not match source {configured!r}"
         )
+    node_home_capable = False
+    detected_xray_ver: str | None = None
+    home_capability_reason: str | None = None
+    if node_home_commands_present(commands):
+        node_home_capable, detected_xray_ver, home_capability_reason = detect_node_home_capability(
+            binary, xray_config_path(), commands, tag,
+        )
+    home_capability_error: Refusal | None = None
+    if (home_identities or home_outbounds) and not node_home_capable:
+        home_capability_error = Refusal(
+            f"control plane delivered home identities, but node is not node-home capable: "
+            f"{home_capability_reason or 'unverified node-home configuration'}"
+        )
     # Saved before anything is enforced, so the copy never trails a revocation
-    # this round has already seen.
-    cache_error = save_roster_cache(
-        cache, node_id, observed_at, roster, server_retire_shared_legacy, watermarks,
-    )
+    # this round has already seen. Never persist homeOutbounds to disk.
+    pre_home_marker: str | None = None
+    if node_home_capable and home_identities:
+        pre_home_marker = xray_start_marker(binary)
+        cache_error = save_roster_cache(
+            cache, node_id, observed_at, roster, server_retire_shared_legacy, watermarks,
+            home_identities=home_identities,
+            start_marker=pre_home_marker,
+        )
+    else:
+        cache_error = save_roster_cache(
+            cache, node_id, observed_at, roster, server_retire_shared_legacy, watermarks,
+        )
     # Revocation runs before every metering check below. A damaged state file,
     # a source mismatch or a queued report ahead of the clock must not keep a
     # revoked, expired or over-quota account connected; the round still refuses
@@ -2079,6 +3444,7 @@ def run_once(path: Path) -> None:
         state, state_error = None, error
     ledger_missing = take_ledger_missing(state) if state is not None else False
     remembered = state.get("installedClients") if state else None
+    previous_home_gens = state.get("activeHomeGenerations") if state else None
     # An explicit environment value wins in both directions so an operator can
     # stop an automatic retirement. An unset value follows the control plane.
     retire_shared_legacy = server_retire_shared_legacy if override is None else override
@@ -2094,14 +3460,39 @@ def run_once(path: Path) -> None:
         # A filesystem failure (lstat, unlink of the temporary allowlist) is a hy2 failure
         # too; it must not skip the Xray revocation and counter read below.
         hy2_error = Refusal(f"hy2 roster not published: {error}")
+    active_home_gens: list[dict[str, str]] = list(previous_home_gens or [])
+    drained_now: list[dict[str, str]] = []
     try:
-        added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
-            binary, commands, address, tag, roster,
-            set(remembered) if isinstance(remembered, list) else None,
-            retire_shared_legacy=retire_shared_legacy,
-        )
+        if node_home_capable:
+            res = reconcile_and_read_stable(
+                binary, commands, address, tag, roster,
+                set(remembered) if isinstance(remembered, list) else None,
+                retire_shared_legacy=retire_shared_legacy,
+                home_identities=home_identities or [],
+                home_outbounds=home_outbounds if home_outbounds is not None else [],
+                node_home_capable=True,
+                state_dir=path.parent,
+                previous_home_generations=previous_home_gens,
+            )
+            active_home_gens = list(getattr(res, "active_home_generations", []))
+            drained_now = list(getattr(res, "drained_generations", []))
+        else:
+            res = reconcile_and_read_stable(
+                binary, commands, address, tag, roster,
+                set(remembered) if isinstance(remembered, list) else None,
+                retire_shared_legacy=retire_shared_legacy,
+            )
+        added, removed, installed, counters, settled_marker = res
     except Refusal as error:
         persist_installed_inventory(path, state, refusal_installed(error))
+        if hasattr(error, "active_home_generations") and state is not None:
+            state["activeHomeGenerations"] = list(getattr(error, "active_home_generations", []))
+        if hasattr(error, "drained_generations") and state is not None:
+            drained_partial = list(getattr(error, "drained_generations", []))
+            if drained_partial:
+                state["pendingDrainAcks"] = _merge_drain_acks(
+                    state.get("pendingDrainAcks"), drained_partial,
+                )
         if hy2_error is not None:
             raise Refusal(f"{hy2_error}; {error}") from error
         if not isinstance(error, PartialReconcile) or state is None:
@@ -2120,6 +3511,13 @@ def run_once(path: Path) -> None:
         added, removed, installed = 0, 0, refusal_installed(error)
     else:
         reconcile_error = None
+        if node_home_capable and home_identities and settled_marker != pre_home_marker and not cache_error:
+            # Xray restarted during reconcile; bind the outage lease to the new generation.
+            cache_error = save_roster_cache(
+                cache, node_id, observed_at, roster, server_retire_shared_legacy, watermarks,
+                home_identities=home_identities,
+                start_marker=settled_marker,
+            )
     persist_error: Refusal | None = None
     if retire_shared_legacy:
         # Checked every round: a hand edit or reprovision can put it back.
@@ -2198,17 +3596,56 @@ def run_once(path: Path) -> None:
         # Keep the reconciled inventory even if the ACK fails, or a newly installed
         # client revoked before the next poll would never be a removal candidate.
         state["installedClients"] = sorted(installed)
-        save_state(path, {**durable_state, "installedClients": state["installedClients"]})
+        durable_state["installedClients"] = state["installedClients"]
+    if node_home_capable:
+        state["activeHomeGenerations"] = active_home_gens
+        durable_state["activeHomeGenerations"] = active_home_gens
+        if drained_now:
+            merged_drains = _merge_drain_acks(state.get("pendingDrainAcks"), drained_now)
+            state["pendingDrainAcks"] = merged_drains
+            durable_state["pendingDrainAcks"] = merged_drains
+    if installed is not None or node_home_capable:
+        save_state(path, durable_state)
     # Only a complete reconciliation is readiness evidence. A failed ACK keeps
     # the reported totals and the queue as they were, so the roster and any
     # queued usage are retried next round; the counter reading is folded into
     # the lifetime totals so an Xray restart before then cannot forgive it.
-    if reconcile_error is None:
+    ack_ok = reconcile_error is None and home_capability_error is None
+    if ack_ok:
+        pending_drains = state.get("pendingDrainAcks") or []
+        sent_batch = pending_drains[:MAX_DRAINED_GENERATIONS_PER_ACK]
         try:
-            acknowledge_roster(base, token, observed_at)
+            if node_home_capable:
+                acknowledge_roster(
+                    base,
+                    token,
+                    observed_at,
+                    metering_protocol_version=NODE_HOME_METERING_PROTOCOL_VERSION,
+                    node_home_capable=True,
+                    node_home_xray_version=detected_xray_ver,
+                    home_observed_at=(observed_at if home_outbounds is not None else None),
+                    drained_generations=(sent_batch or None),
+                )
+            elif sent_batch:
+                acknowledge_roster(
+                    base,
+                    token,
+                    observed_at,
+                    node_home_capable=False,
+                    drained_generations=sent_batch,
+                )
+            else:
+                acknowledge_roster(base, token, observed_at)
         except Refusal as ack_error:
             refuse_keeping_usage(ack_error, path, state, installed, counters, settled_marker,
                                  ledger_missing=ledger_missing)
+        if sent_batch:
+            remaining_drains = pending_drains[len(sent_batch):]
+            if remaining_drains:
+                state["pendingDrainAcks"] = remaining_drains
+            else:
+                state.pop("pendingDrainAcks", None)
+            save_state(path, state)
 
     # A batch the server accepted but that was never acknowledged here goes out
     # before newly measured usage: the figure is cumulative per source, so
@@ -2302,7 +3739,7 @@ def run_once(path: Path) -> None:
         previous_stuck = {}
     state["stuckRemovals"] = {
         label: (rounds if isinstance(rounds := previous_stuck.get(label), int) else 0) + 1
-        for label in sorted(stuck) if label.startswith(CLIENT_LABEL_PREFIX)
+        for label in sorted(stuck) if is_managed_label(label)
     }
     if not state["stuckRemovals"]:
         state.pop("stuckRemovals")
@@ -2316,12 +3753,12 @@ def run_once(path: Path) -> None:
     # The metering ACK is readiness evidence for the whole node, so a round
     # whose reconciliation was incomplete reports usage but never sends it.
     if not state["pendingReports"]:
-        if reconcile_error is None:
+        if ack_ok:
             acknowledge_metering(base, token, observed_at)
         print("no new usage to report")
     else:
         delivered, dropped = deliver_queue(base, token, path, state)
-        if reconcile_error is None:
+        if ack_ok:
             acknowledge_metering(base, token, observed_at)
         print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
     if reconcile_error is not None:
@@ -2333,15 +3770,142 @@ def run_once(path: Path) -> None:
         if note:
             raise Refusal(f"{reconcile_error}; {note}") from reconcile_error
         raise reconcile_error
+    if home_capability_error is not None:
+        raise home_capability_error
     if persist_error is not None:
         raise persist_error
 
 
-def main(*, hy2_roster_only: bool = False) -> None:
+def _strip_home_from_roster_cache(cache_path: Path) -> None:
+    try:
+        raw = cache_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise Refusal(f"cannot read roster cache during home withdrawal: {error}") from error
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        discard_roster_cache(cache_path)
+        return
+    if not isinstance(doc, dict):
+        discard_roster_cache(cache_path)
+        return
+    if "homeIdentities" not in doc and "homeLease" not in doc and "homeOutbounds" not in doc:
+        return
+    doc.pop("homeIdentities", None)
+    doc.pop("homeLease", None)
+    doc.pop("homeOutbounds", None)
+    temporary: str | None = None
+    try:
+        descriptor, temporary = tempfile.mkstemp(prefix=".roster-", dir=cache_path.parent)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchmod(output.fileno(), STATE_MODE)
+            json.dump(doc, output, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, cache_path)
+        temporary = None
+    except OSError as error:
+        raise Refusal(f"cannot strip residential identities from roster cache: {error}") from error
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def run_withdraw_home_once(path: Path) -> None:
+    """Safely withdraw all `h:` identities, routes, and `home:*` outbounds while keeping `u:` live."""
+    binary = xray_binary()
+    address = api_address()
+    tag = inbound_tag()
+    commands = require_commands(binary)
+
+    try:
+        state = load_state(path)
+    except (Refusal, ValueError, OSError):
+        state = {"totals": {}, "counterBaseline": {}, "pendingReports": []}
+    take_ledger_missing(state)
+    remembered = set(state.get("installedClients", [])) if isinstance(state.get("installedClients"), list) else set()
+    listed = installed_clients(binary, commands, address, tag)
+    known = set(listed if listed is not None else remembered)
+    h_labels = sorted(lbl for lbl in known if lbl.startswith(HOME_LABEL_PREFIX))
+
+    # Step 1: rmu all h: labels without disturbing u: or shared-legacy.
+    _, failures, failed_h = _remove_home_labels_subset(
+        binary, commands, address, tag, h_labels, known if listed is not None or remembered else None,
+    )
+
+    # Step 2: push fail-closed 3-rule static routing table if add_rules/RoutingService is present.
+    previous_gens = state.get("activeHomeGenerations") if isinstance(state.get("activeHomeGenerations"), list) else []
+    drained: list[dict[str, str]] = []
+    if node_home_commands_present(commands):
+        live_outbounds: dict[str, dict[str, Any]] = {}
+        lso_ok = False
+        try:
+            live_outbounds = list_home_outbounds(binary, commands, address)
+            lso_ok = True
+        except Refusal as error:
+            if previous_gens or config_has_node_home_topology(xray_config_path(), tag)[0]:
+                failures.append(str(error))
+        if lso_ok or previous_gens or config_has_node_home_topology(xray_config_path(), tag)[0]:
+            try:
+                replace_routing_rules(binary, commands, address, path.parent, build_node_home_rules({}))
+            except Refusal as error:
+                failures.append(str(error))
+            if lso_ok and not failed_h:
+                drained, drain_failures = _drain_unused_home_outbounds(
+                    binary, commands, address, live_outbounds, set(), previous_gens,
+                )
+                failures.extend(drain_failures)
+
+    # Update state & strip cached homeIdentities before raising or ACKing.
+    kept_installed = sorted((known - set(h_labels)) | failed_h)
+    state["installedClients"] = kept_installed
+    if not failed_h and not failures:
+        state["activeHomeGenerations"] = []
+    if drained:
+        state["pendingDrainAcks"] = _merge_drain_acks(state.get("pendingDrainAcks"), drained)
+    save_state(path, state)
+    _strip_home_from_roster_cache(roster_cache_path(path))
+
+    if failures:
+        raise Refusal("home withdrawal incomplete: " + "; ".join(failures))
+
+    has_base = bool(os.environ.get("TONO_API_BASE", "").strip())
+    has_token = bool(os.environ.get("TONO_HOME_AGENT_TOKEN", "").strip())
+    if has_base and has_token:
+        pending_drains = state.get("pendingDrainAcks") or []
+        sent_batch = pending_drains[:MAX_DRAINED_GENERATIONS_PER_ACK]
+        acknowledge_roster(
+            api_base(),
+            env("TONO_HOME_AGENT_TOKEN"),
+            int(time.time()),
+            metering_protocol_version=NODE_HOME_METERING_PROTOCOL_VERSION,
+            node_home_capable=False,
+            drained_generations=(sent_batch or None),
+        )
+        if sent_batch:
+            remaining_drains = pending_drains[len(sent_batch):]
+            if remaining_drains:
+                state["pendingDrainAcks"] = remaining_drains
+            else:
+                state.pop("pendingDrainAcks", None)
+            save_state(path, state)
+    print(f"withdrew {len(h_labels)} home client(s) and {len(drained)} outbound generation(s); cloud u: untouched")
+
+
+def main(*, hy2_roster_only: bool = False, withdraw_home: bool = False) -> None:
+    if hy2_roster_only and withdraw_home:
+        raise Refusal("--hy2-roster-only and --withdraw-home cannot be combined")
     path = state_path()
     with agent_run_lock(path):
         if hy2_roster_only:
             run_hy2_roster_once()
+        elif withdraw_home:
+            run_withdraw_home_once(path)
         else:
             run_once(path)
 
@@ -2350,9 +3914,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hy2-roster-only", action="store_true",
                         help="sync installed hy2 auth only; no Xray changes, usage, or node-wide ACK")
+    parser.add_argument("--withdraw-home", action="store_true",
+                        help="tear down h: clients, rules, and home:* outbounds while keeping u: live")
     args = parser.parse_args()
     try:
-        main(hy2_roster_only=args.hy2_roster_only)
+        main(hy2_roster_only=args.hy2_roster_only, withdraw_home=args.withdraw_home)
     except Refusal as refusal:
         print(f"refusing: {refusal}", file=sys.stderr)
         raise SystemExit(1)
