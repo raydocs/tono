@@ -567,6 +567,14 @@ export function requestAcceptsHy2Catalog(header: string | null | undefined): boo
     .some((part) => part.trim().toLowerCase() === 'hy2');
 }
 
+/** Node-home capable clients send `node-home` in `X-Tono-Accept` when both app and privileged core agree. */
+export function requestAcceptsNodeHome(header: string | null | undefined): boolean {
+  if (!header) return false;
+  return header
+    .split(',')
+    .some((part) => part.trim().toLowerCase() === 'node-home');
+}
+
 function placeholderCount(yaml: string): number {
   return yaml.split(CLIENT_UUID_PLACEHOLDER).length - 1;
 }
