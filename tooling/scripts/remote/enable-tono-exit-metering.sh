@@ -29,6 +29,21 @@ fail() {
   exit 1
 }
 
+NODE_HOME_ARG=""
+NODE_HOME_PY="False"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --node-home)
+      NODE_HOME_ARG="--node-home"
+      NODE_HOME_PY="True"
+      shift
+      ;;
+    *)
+      fail "unknown argument: $1"
+      ;;
+  esac
+done
+
 [ "$(id -u)" = 0 ] || fail "must run as root: it replaces a root-owned configuration and restarts a service"
 [ -f "$CONFIG" ] || fail "no deployed configuration at $CONFIG"
 [ -x "$XRAY" ] || fail "no xray binary at $XRAY"
@@ -58,8 +73,9 @@ import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("config", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-raise SystemExit(0 if module.needs_changes(json.load(sys.stdin)) else 3)
-' "$TRANSFORM" < "$CONFIG"
+node_home = sys.argv[2] == "True"
+raise SystemExit(0 if module.needs_changes(json.load(sys.stdin), node_home=node_home) else 3)
+' "$TRANSFORM" "$NODE_HOME_PY" < "$CONFIG"
 probe=$?
 set -e
 case "$probe" in
@@ -73,8 +89,13 @@ case "$probe" in
     ;;
 esac
 
-python3 "$TRANSFORM" < "$CONFIG" > "$work/config.json" \
-  || fail "the configuration could not be edited"
+if [ -n "$NODE_HOME_ARG" ]; then
+  python3 "$TRANSFORM" "$NODE_HOME_ARG" < "$CONFIG" > "$work/config.json" \
+    || fail "the configuration could not be edited"
+else
+  python3 "$TRANSFORM" < "$CONFIG" > "$work/config.json" \
+    || fail "the configuration could not be edited"
+fi
 
 # The installed xray decides whether this is acceptable, not the editor. Checked
 # before the running configuration is touched.
