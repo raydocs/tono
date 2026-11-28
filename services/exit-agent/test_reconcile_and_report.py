@@ -3651,6 +3651,69 @@ class NodeHomeSupport(unittest.TestCase):
         self.assertEqual(rmo_calls, [])
         self.assertEqual(getattr(exc.exception, "drained_generations", []), [])
 
+    def test_run_once_partial_reconcile_preserves_home_generations_and_drain_acks(self) -> None:
+        u_uuid = "11111111-1111-4111-8111-111111111111"
+        u_lbl = agent.client_label("usr_1", "dev_1", u_uuid)
+        h_uuid = "22222222-2222-4222-8222-222222222222"
+        h_lbl = agent.home_client_label("usr_1", "dev_1", h_uuid)
+        self.state_path.write_text(json.dumps({
+            "totals": {},
+            "counterBaseline": {},
+            "pendingReports": [],
+            "sourceId": "node-home-a",
+            "installedClients": [u_lbl],
+            "activeHomeGenerations": [{"homeExitId": "he1", "bindingGeneration": "gen1"}],
+        }), encoding="utf-8")
+
+        partial_err = agent.attach_installed(
+            agent.PartialReconcile("u: client rejected after partial home sync"),
+            {h_lbl},
+        )
+        partial_err.active_home_generations = [{"homeExitId": "he2", "bindingGeneration": "gen2"}]
+        partial_err.drained_generations = [{"homeExitId": "he1", "retiredGeneration": "gen1"}]
+        reconcile_calls = 0
+
+        def fake_reconcile(*_args, **_kwargs):
+            nonlocal reconcile_calls
+            reconcile_calls += 1
+            if reconcile_calls == 1:
+                raise partial_err
+            return 0, 0, {h_lbl}, {}, "boot:1"
+
+        roster = agent.ParsedRoster(
+            "node-home-a", 1005, [{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": u_uuid}], False, None,
+            home_identities=[{"userId": "usr_1", "deviceId": "dev_1", "clientUUID": h_uuid, "homeExitId": "he2", "bindingGeneration": "gen2"}],
+            home_outbounds=[{"homeExitId": "he2", "bindingGeneration": "gen2", "host": "198.51.100.2", "port": 1080, "username": "u2", "password": "p2"}],
+        )
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-tok",
+                 "TONO_SOURCE_ID": "node-home-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "xray_config_path", return_value=self.config_path), \
+             patch.object(agent, "require_commands", return_value=self._all_commands()), \
+             patch.object(agent, "detect_node_home_capability", return_value=(True, "26.3.27", None)), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "fetch_roster", return_value=roster), \
+             patch.object(agent, "sync_hy2_roster"), \
+             patch.object(agent, "reconcile_and_read_stable", side_effect=fake_reconcile), \
+             patch.object(agent, "acknowledge_metering"):
+            with self.assertRaises(agent.PartialReconcile):
+                agent.run_once(self.state_path)
+
+        saved = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            saved["activeHomeGenerations"],
+            [{"homeExitId": "he2", "bindingGeneration": "gen2"}],
+        )
+        self.assertEqual(
+            saved["pendingDrainAcks"],
+            [{"homeExitId": "he1", "retiredGeneration": "gen1"}],
+        )
+        self.assertEqual(saved["installedClients"], [h_lbl])
+
     def test_withdraw_home_removes_only_home_and_sends_false_capability(self) -> None:
         u_lbl = agent.client_label("usr_1", "dev_1", "11111111-1111-4111-8111-111111111111")
         h_lbl = agent.home_client_label("usr_1", "dev_1", "22222222-2222-4222-8222-222222222222")
@@ -3674,7 +3737,7 @@ class NodeHomeSupport(unittest.TestCase):
         }), encoding="utf-8")
         cache_path.chmod(0o600)
 
-        live_clients = {u_lbl, h_lbl, "shared-legacy"}
+        live_clients = {u_lbl, h_lbl, "shared-legacy", "ops-manual"}
         live_outbounds = [{"tag": "home:he1:gen1", "proxySettings": {"server": {"address": "198.51.100.1", "port": 1080, "user": {"account": {"username": "u", "password": "p"}}}}}]
         acks: list[dict] = []
 
@@ -3709,7 +3772,9 @@ class NodeHomeSupport(unittest.TestCase):
              patch.object(agent, "acknowledge_roster", side_effect=capture_ack):
             agent.main(withdraw_home=True)
 
-        self.assertEqual(live_clients, {u_lbl, "shared-legacy"})
+        self.assertEqual(live_clients, {u_lbl, "shared-legacy", "ops-manual"})
+        saved_state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved_state["installedClients"], sorted([u_lbl, "shared-legacy"]))
         self.assertEqual(live_outbounds, [])
         self.assertEqual(len(acks), 1)
         self.assertEqual(acks[0]["node_home_capable"], False)

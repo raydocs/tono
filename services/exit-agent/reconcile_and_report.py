@@ -3484,15 +3484,31 @@ def run_once(path: Path) -> None:
             )
         added, removed, installed, counters, settled_marker = res
     except Refusal as error:
-        persist_installed_inventory(path, state, refusal_installed(error))
-        if hasattr(error, "active_home_generations") and state is not None:
-            state["activeHomeGenerations"] = list(getattr(error, "active_home_generations", []))
-        if hasattr(error, "drained_generations") and state is not None:
-            drained_partial = list(getattr(error, "drained_generations", []))
-            if drained_partial:
-                state["pendingDrainAcks"] = _merge_drain_acks(
-                    state.get("pendingDrainAcks"), drained_partial,
+        home_state_changed = False
+        if hasattr(error, "active_home_generations"):
+            active_home_gens = list(getattr(error, "active_home_generations", []))
+            if state is not None and state.get("activeHomeGenerations") != active_home_gens:
+                state["activeHomeGenerations"] = active_home_gens
+                home_state_changed = True
+        if hasattr(error, "drained_generations"):
+            drained_now = list(getattr(error, "drained_generations", []))
+            if state is not None and drained_now:
+                merged_drains = _merge_drain_acks(state.get("pendingDrainAcks"), drained_now)
+                if state.get("pendingDrainAcks") != merged_drains:
+                    state["pendingDrainAcks"] = merged_drains
+                    home_state_changed = True
+        refusal_inv = refusal_installed(error)
+        if home_state_changed and state is not None:
+            to_save = dict(state)
+            if isinstance(refusal_inv, set):
+                to_save["installedClients"] = sorted(
+                    label for label in refusal_inv
+                    if isinstance(label, str)
+                    and (label == LEGACY_CLIENT_EMAIL or is_managed_label(label))
                 )
+            save_state(path, to_save)
+        else:
+            persist_installed_inventory(path, state, refusal_inv)
         if hy2_error is not None:
             raise Refusal(f"{hy2_error}; {error}") from error
         if not isinstance(error, PartialReconcile) or state is None:
@@ -3862,7 +3878,10 @@ def run_withdraw_home_once(path: Path) -> None:
                 failures.extend(drain_failures)
 
     # Update state & strip cached homeIdentities before raising or ACKing.
-    kept_installed = sorted((known - set(h_labels)) | failed_h)
+    kept_installed = sorted(
+        lbl for lbl in ((known - set(h_labels)) | failed_h)
+        if isinstance(lbl, str) and (lbl == LEGACY_CLIENT_EMAIL or is_managed_label(lbl))
+    )
     state["installedClients"] = kept_installed
     if not failed_h and not failures:
         state["activeHomeGenerations"] = []
